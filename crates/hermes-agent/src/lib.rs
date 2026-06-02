@@ -6,6 +6,7 @@
 
 pub mod agent_loop;
 pub mod api_message_oracle;
+pub mod api_messages;
 pub mod conversation_loop;
 pub mod api_bridge;
 pub mod auxiliary_builder;

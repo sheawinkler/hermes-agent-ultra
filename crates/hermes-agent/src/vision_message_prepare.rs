@@ -27,22 +27,24 @@ pub fn strip_images_for_non_vision_model(messages: &[Message], model: &str) -> V
     if model_supports_vision(model) {
         return messages.to_vec();
     }
-    messages
-        .iter()
-        .map(|msg| {
-            let mut m = msg.clone();
-            if matches!(m.role, MessageRole::User | MessageRole::Tool) {
-                if let Some(content) = m.content.as_deref() {
-                    if content.contains("data:image") || content.contains("\"type\":\"image") {
-                        m.content = Some(
-                            "[Image content removed: active model does not support vision. \
-                             Describe the image in text or switch to a vision-capable model.]"
-                                .to_string(),
-                        );
-                    }
-                }
-            }
-            m
-        })
-        .collect()
+    let mut out = messages.to_vec();
+    strip_images_for_non_vision_model_in_place(&mut out);
+    out
+}
+
+/// In-place variant — avoids a second full vector allocation.
+pub fn strip_images_for_non_vision_model_in_place(messages: &mut [Message]) {
+    const PLACEHOLDER: &str = "[Image content removed: active model does not support vision. \
+         Describe the image in text or switch to a vision-capable model.]";
+    for msg in messages.iter_mut() {
+        if !matches!(msg.role, MessageRole::User | MessageRole::Tool) {
+            continue;
+        }
+        let Some(content) = msg.content.as_deref() else {
+            continue;
+        };
+        if content.contains("data:image") || content.contains("\"type\":\"image") {
+            msg.content = Some(PLACEHOLDER.to_string());
+        }
+    }
 }

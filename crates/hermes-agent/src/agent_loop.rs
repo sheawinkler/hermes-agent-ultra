@@ -45,7 +45,7 @@ use crate::credential_pool::CredentialPool;
 use crate::fallback::TurnFallbackState;
 use crate::interrupt::InterruptController;
 use crate::lsp_context::{LspContextConfig, build_lsp_context_note};
-use crate::memory_manager::{MemoryManager, build_memory_context_block};
+use crate::memory_manager::MemoryManager;
 use crate::plugins::{HookResult, HookType, PluginManager};
 use crate::provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
 use crate::providers_extra::{
@@ -2238,6 +2238,8 @@ pub struct AgentLoop {
     context_compressor: Arc<tokio::sync::Mutex<ContextCompressor>>,
     /// Reused SQLite persistence handle for this agent (Python `SessionDB._conn` parity).
     shared_session_persistence: std::sync::OnceLock<Arc<SessionPersistence>>,
+    /// Per-turn cache of assembled API messages (LLM retry fast path).
+    turn_api_messages_cache: Mutex<Option<(crate::api_messages::ApiMessagesCacheKey, Arc<[Message]>)>>,
 }
 
 /// Async tool execution hook (gateway: `hermes_tools::ToolRegistry::dispatch_async`).
@@ -2676,6 +2678,7 @@ impl AgentLoop {
             turn_ext_prefetch_cache: Arc::new(Mutex::new(String::new())),
             context_compressor,
             shared_session_persistence: std::sync::OnceLock::new(),
+            turn_api_messages_cache: Mutex::new(None),
         }
     }
 
@@ -2697,12 +2700,129 @@ impl AgentLoop {
         if let Ok(mut guard) = self.turn_ext_prefetch_cache.lock() {
             *guard = prefetch;
         }
+        self.invalidate_turn_api_messages_cache();
+    }
+
+    pub(crate) fn invalidate_turn_api_messages_cache(&self) {
+        if let Ok(mut guard) = self.turn_api_messages_cache.lock() {
+            *guard = None;
+        }
+    }
+
+    fn api_messages_cache_key(&self, ctx: &ContextManager) -> crate::api_messages::ApiMessagesCacheKey {
+        let prefetch = self
+            .turn_ext_prefetch_cache
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        let cfg = self.config();
+        crate::api_messages::ApiMessagesCacheKey {
+            message_count: ctx.len(),
+            total_chars: ctx.total_chars(),
+            prefetch_len: prefetch.len(),
+            prefetch_hash: crate::api_messages::hash_str(&prefetch),
+            ephemeral_len: cfg
+                .ephemeral_system_prompt
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::len)
+                .unwrap_or(0),
+            model_hash: crate::api_messages::hash_str(&self.active_model()),
+            use_prompt_caching: cfg.use_prompt_caching,
+            use_native_cache_layout: cfg.use_native_cache_layout,
+            cache_ttl_hash: crate::api_messages::hash_str(&cfg.cache_ttl),
+        }
+    }
+
+    fn prepare_ctx_for_api_call(&self, ctx: &mut ContextManager) {
+        let cfg = self.config();
+        let provider = cfg.provider.as_deref().unwrap_or("");
+        let base_url = self
+            .resolve_runtime_base_url(provider, None)
+            .unwrap_or_default();
+        let api_mode = Self::api_mode_as_hook_str(&cfg.api_mode);
+        self.refresh_prompt_cache_policy(provider, &base_url, api_mode);
+        self.pending_steer
+            .drain_pre_api_into_messages(ctx.get_messages_mut());
+        self.interest_sync_user_messages(ctx.get_messages());
+    }
+
+    pub(crate) fn build_turn_api_messages(&self, ctx: &mut ContextManager) -> Arc<[Message]> {
+        self.prepare_ctx_for_api_call(ctx);
+        let key = self.api_messages_cache_key(ctx);
+        if let Ok(guard) = self.turn_api_messages_cache.lock() {
+            if let Some((cached_key, arc)) = guard.as_ref() {
+                if *cached_key == key {
+                    return Arc::clone(arc);
+                }
+            }
+        }
+
+        let cfg = self.config();
+        let prefetch = self
+            .turn_ext_prefetch_cache
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        let ephemeral = cfg
+            .ephemeral_system_prompt
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let messages = crate::api_messages::assemble_api_messages_from_ctx(
+            ctx.get_messages(),
+            &prefetch,
+            ephemeral,
+            self.active_model().as_str(),
+            cfg.cache_ttl.as_str(),
+            cfg.use_prompt_caching,
+            cfg.use_native_cache_layout,
+        );
+        let arc: Arc<[Message]> = messages.into();
+
+        if let Ok(mut guard) = self.turn_api_messages_cache.lock() {
+            *guard = Some((key, Arc::clone(&arc)));
+        }
+        arc
+    }
+
+    pub(crate) fn build_api_messages_legacy(&self, ctx: &mut ContextManager) -> Vec<Message> {
+        self.prepare_ctx_for_api_call(ctx);
+        let mut messages = ctx.get_messages().to_vec();
+        let prefetch = self
+            .turn_ext_prefetch_cache
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        crate::api_messages::apply_prefetch_to_last_user(&mut messages, &prefetch);
+        if let Some(ephemeral) = self
+            .config()
+            .ephemeral_system_prompt
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            messages.push(Message::system(ephemeral));
+        }
+        let cfg = self.config();
+        if !messages.is_empty() && cfg.use_prompt_caching {
+            crate::prompt_caching::apply_anthropic_cache_control_in_place(
+                &mut messages,
+                cfg.cache_ttl.as_str(),
+                cfg.use_native_cache_layout,
+            );
+        }
+        crate::vision_message_prepare::strip_images_for_non_vision_model(
+            &messages,
+            self.active_model().as_str(),
+        )
     }
 
     /// Golden harness entry for `messages_for_api_call` (zero-copy migration oracle).
     #[doc(hidden)]
     pub fn oracle_messages_for_api_call(&self, ctx: &mut ContextManager) -> Vec<Message> {
-        self.messages_for_api_call(ctx)
+        self.build_api_messages_legacy(ctx)
     }
 
     #[doc(hidden)]
@@ -2710,7 +2830,7 @@ impl AgentLoop {
         &self,
         ctx: &mut ContextManager,
     ) -> Vec<Message> {
-        self.candidate_messages_for_api_call(ctx)
+        self.build_turn_api_messages(ctx).to_vec()
     }
 
     /// Set turn-scoped memory prefetch injected at API-call time (test harness only).
@@ -2848,6 +2968,7 @@ impl AgentLoop {
             turn_ext_prefetch_cache: Arc::new(Mutex::new(String::new())),
             context_compressor,
             shared_session_persistence: std::sync::OnceLock::new(),
+            turn_api_messages_cache: Mutex::new(None),
         }
     }
 
@@ -4583,55 +4704,11 @@ impl AgentLoop {
     }
 
     fn messages_for_api_call(&self, ctx: &mut ContextManager) -> Vec<Message> {
-        let cfg = self.config();
-        let provider = cfg.provider.as_deref().unwrap_or("");
-        let base_url = self
-            .resolve_runtime_base_url(provider, None)
-            .unwrap_or_default();
-        let api_mode = Self::api_mode_as_hook_str(&cfg.api_mode);
-        self.refresh_prompt_cache_policy(provider, &base_url, api_mode);
-
-        self.pending_steer
-            .drain_pre_api_into_messages(ctx.get_messages_mut());
-        self.interest_sync_user_messages(ctx.get_messages());
-        let mut messages = ctx.get_messages().to_vec();
-
-        let prefetch = self
-            .turn_ext_prefetch_cache
-            .lock()
-            .map(|g| g.clone())
-            .unwrap_or_default();
-        if !prefetch.is_empty() {
-            if let Some(idx) = messages.iter().rposition(|m| m.role == MessageRole::User) {
-                let fenced = build_memory_context_block(&prefetch);
-                if !fenced.is_empty() {
-                    if let Some(msg) = messages.get_mut(idx) {
-                        let base = msg.content.clone().unwrap_or_default();
-                        msg.content = Some(format!("{base}\n\n{fenced}"));
-                    }
-                }
-            }
-        }
-
-        if let Some(ephemeral) = self
-            .config()
-            .ephemeral_system_prompt
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            messages.push(Message::system(ephemeral));
-        }
-        self.apply_prompt_cache_markers(&mut messages);
-        crate::vision_message_prepare::strip_images_for_non_vision_model(
-            &messages,
-            self.active_model().as_str(),
-        )
+        self.build_turn_api_messages(ctx).to_vec()
     }
 
-    /// Candidate API message builder for zero-copy migration (must match [`Self::messages_for_api_call`]).
     fn candidate_messages_for_api_call(&self, ctx: &mut ContextManager) -> Vec<Message> {
-        self.messages_for_api_call(ctx)
+        self.build_turn_api_messages(ctx).to_vec()
     }
 
     fn apply_prompt_cache_markers(&self, messages: &mut Vec<Message>) {
@@ -4762,6 +4839,7 @@ impl AgentLoop {
         Self::patch_leading_system_message(&mut final_messages, &new_system);
         ctx.replace_messages(final_messages.clone());
         self.reset_interest_sync_cursor();
+        self.invalidate_turn_api_messages_cache();
 
         let new_session_id = Self::new_compression_session_id();
         if let Ok(mut cfg) = self.config_runtime.write() {
@@ -5310,7 +5388,7 @@ impl AgentLoop {
         let mut has_retried_429_same_cred = false;
 
         for attempt in 0..=effective_max_retries {
-            let api_messages = self.messages_for_api_call(ctx);
+            let api_messages = self.build_turn_api_messages(ctx);
             self.interrupt.check_interrupt()?;
             *api_call_count = api_call_count.saturating_add(1);
             let hook_api_mode = route
@@ -5765,7 +5843,7 @@ impl AgentLoop {
         api_call_count: &mut u32,
         mut stream_scrubber: Option<&mut crate::stream_scrubber::ThinkBlockScrubber>,
     ) -> Result<StreamCollectOutcome, AgentError> {
-        let api_messages = self.messages_for_api_call(ctx);
+        let api_messages = self.build_turn_api_messages(ctx);
         let (_, active_model_name) = self.extract_provider_and_model(active_model);
         let (active_provider, _) = self.extract_provider_and_model(active_model);
         let default_api_mode = self.primary_runtime_snapshot().api_mode.clone();
