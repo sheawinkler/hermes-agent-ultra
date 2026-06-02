@@ -77,7 +77,7 @@ jobs:
       - name: Build release binary
         env:
           AWS_LC_SYS_CMAKE_BUILDER: "1"
-          TMPDIR: /tmp
+          XDG_CACHE_HOME: /tmp/cross-cache
         run: cross build --release --target ${{ matrix.target }} -p hermes-cli
       - name: Package artifact (tar.gz)
         if: "!contains(matrix.artifact, '.zip')"
