@@ -2197,6 +2197,8 @@ pub struct AgentLoop {
     turn_ext_prefetch_cache: Arc<Mutex<String>>,
     /// Python `agent.context_compressor.ContextCompressor` (LLM summary + boundary alignment).
     context_compressor: Arc<tokio::sync::Mutex<ContextCompressor>>,
+    /// Reused SQLite persistence handle for this agent (Python `SessionDB._conn` parity).
+    shared_session_persistence: std::sync::OnceLock<Arc<SessionPersistence>>,
 }
 
 /// Async tool execution hook (gateway: `hermes_tools::ToolRegistry::dispatch_async`).
@@ -2633,6 +2635,7 @@ impl AgentLoop {
             cached_system_prompt: Arc::new(Mutex::new(None)),
             turn_ext_prefetch_cache: Arc::new(Mutex::new(String::new())),
             context_compressor,
+            shared_session_persistence: std::sync::OnceLock::new(),
         }
     }
 
@@ -2656,13 +2659,20 @@ impl AgentLoop {
         }
     }
 
-    fn session_persistence(&self) -> Option<SessionPersistence> {
-        self.config()
-            .hermes_home
-            .as_deref()
-            .map(str::trim)
-            .filter(|h| !h.is_empty())
-            .map(|home| SessionPersistence::new(Path::new(home)))
+    pub(crate) fn session_persistence(&self) -> Option<Arc<SessionPersistence>> {
+        let home = self.config().hermes_home.clone()?;
+        let home = home.trim().to_string();
+        if home.is_empty() {
+            return None;
+        }
+        Some(
+            self.shared_session_persistence
+                .get_or_init({
+                    let home = home.clone();
+                    move || Arc::new(SessionPersistence::new(Path::new(&home)))
+                })
+                .clone(),
+        )
     }
 
     fn compression_lock_holder(&self) -> String {
@@ -2776,6 +2786,7 @@ impl AgentLoop {
             cached_system_prompt: Arc::new(Mutex::new(None)),
             turn_ext_prefetch_cache: Arc::new(Mutex::new(String::new())),
             context_compressor,
+            shared_session_persistence: std::sync::OnceLock::new(),
         }
     }
 

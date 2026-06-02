@@ -4,14 +4,13 @@
 //! **C–D segment**: delegated to [`AgentLoop::run_prepared`] / [`AgentLoop::run_stream_prepared`].
 //! **E segment** (`finalize_turn`): turn-level hooks, `ConversationResult` assembly, optional persist.
 
-use std::path::Path;
 
 use hermes_core::{AgentError, AgentResult, Message, MessageRole, StreamChunk, ToolSchema};
 
 use crate::agent_loop::AgentLoop;
 use crate::plugins::{HookResult, HookType};
 use crate::python_alignment::{sanitize_surrogates, strip_system_messages_from_history};
-use crate::session_persistence::{leading_system_prompt_for_persist, SessionPersistence};
+use crate::session_persistence::leading_system_prompt_for_persist;
 
 /// Inputs for one `run_conversation` call (Python `run_conversation` kwargs).
 pub struct RunConversationParams {
@@ -270,13 +269,9 @@ impl AgentLoop {
         if sid.trim().is_empty() {
             return;
         }
-        let Some(ref home) = cfg.hermes_home else {
+        let Some(sp) = self.session_persistence() else {
             return;
         };
-        if home.trim().is_empty() {
-            return;
-        }
-        let sp = SessionPersistence::new(Path::new(home));
         // Transcript: user/assistant/tool only — system belongs in `sessions.system_prompt`.
         let transcript = strip_system_messages_from_history(messages);
         let sys = leading_system_prompt_for_persist(messages);

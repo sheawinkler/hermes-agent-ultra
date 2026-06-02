@@ -7,6 +7,7 @@
 //! and `_save_trajectory` methods.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::{Duration as ChronoDuration, Utc};
 use hermes_core::{AgentError, Message, MessageRole};
@@ -64,6 +65,8 @@ pub struct SessionPersistence {
     sessions_dir: PathBuf,
     /// Directory for trajectory files.
     trajectories_dir: PathBuf,
+    /// Reused WAL connection (Python `SessionDB._conn` parity).
+    conn: OnceLock<Arc<Mutex<rusqlite::Connection>>>,
 }
 
 /// Result of one startup auto-maintenance pass.
@@ -83,6 +86,32 @@ impl SessionPersistence {
             db_path: home.join("sessions.db"),
             sessions_dir: home.join("sessions"),
             trajectories_dir: home.join("trajectories"),
+            conn: OnceLock::new(),
+        }
+    }
+
+    /// Return the process-wide reused connection for this persistence root.
+    pub(crate) fn shared_connection(
+        &self,
+    ) -> Result<Arc<Mutex<rusqlite::Connection>>, AgentError> {
+        if let Some(conn) = self.conn.get() {
+            return Ok(conn.clone());
+        }
+        if let Some(parent) = self.db_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                AgentError::Io(format!("Failed to create db directory: {e}"))
+            })?;
+        }
+        let conn = rusqlite::Connection::open(&self.db_path).map_err(|e| {
+            AgentError::Io(format!("Failed to open sessions db: {e}"))
+        })?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .map_err(|e| AgentError::Io(format!("Failed to configure sessions db: {e}")))?;
+        Self::init_schema(&conn)?;
+        let arc = Arc::new(Mutex::new(conn));
+        match self.conn.set(arc.clone()) {
+            Ok(()) => Ok(arc),
+            Err(_) => Ok(self.conn.get().expect("sessions db conn").clone()),
         }
     }
 
@@ -114,14 +143,11 @@ impl SessionPersistence {
 
     /// Ensure the SQLite database and tables exist.
     pub fn ensure_db(&self) -> Result<(), AgentError> {
-        if let Some(parent) = self.db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| AgentError::Io(format!("Failed to create db directory: {e}")))?;
-        }
+        let _ = self.shared_connection()?;
+        Ok(())
+    }
 
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
-
+    fn init_schema(conn: &rusqlite::Connection) -> Result<(), AgentError> {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -179,8 +205,8 @@ impl SessionPersistence {
         )
         .map_err(|e| AgentError::Io(format!("Failed to create tables: {e}")))?;
 
-        self.ensure_fts_triggers(&conn)?;
-        self.maybe_rebuild_fts_index(&conn)?;
+        Self::ensure_fts_triggers(conn)?;
+        Self::maybe_rebuild_fts_index(conn)?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS gateway_session_index (
@@ -211,7 +237,7 @@ impl SessionPersistence {
     }
 
     /// FTS5 external-content triggers for DELETE/UPDATE (SQLite docs).
-    fn ensure_fts_triggers(&self, conn: &rusqlite::Connection) -> Result<(), AgentError> {
+    fn ensure_fts_triggers(conn: &rusqlite::Connection) -> Result<(), AgentError> {
         conn.execute_batch(
             "CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
                 INSERT INTO messages_fts(messages_fts, rowid, content, session_id, role)
@@ -230,7 +256,7 @@ impl SessionPersistence {
     }
 
     /// One-time rebuild so legacy rows stay searchable after adding DELETE triggers.
-    fn maybe_rebuild_fts_index(&self, conn: &rusqlite::Connection) -> Result<(), AgentError> {
+    fn maybe_rebuild_fts_index(conn: &rusqlite::Connection) -> Result<(), AgentError> {
         const META_KEY: &str = "fts_external_triggers_v1";
         let done: bool = conn
             .query_row(
@@ -256,8 +282,10 @@ impl SessionPersistence {
     /// Read a metadata key from `state_meta`.
     pub fn get_meta(&self, key: &str) -> Result<Option<String>, AgentError> {
         self.ensure_db()?;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         let mut stmt = conn
             .prepare("SELECT value FROM state_meta WHERE key = ?1")
             .map_err(|e| AgentError::Io(format!("Failed to prepare meta query: {e}")))?;
@@ -271,8 +299,10 @@ impl SessionPersistence {
     /// Upsert a metadata key in `state_meta`.
     pub fn set_meta(&self, key: &str, value: &str) -> Result<(), AgentError> {
         self.ensure_db()?;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         conn.execute(
             "INSERT INTO state_meta (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -285,8 +315,10 @@ impl SessionPersistence {
     /// Reclaim free pages in `sessions.db` after large prune operations.
     pub fn vacuum(&self) -> Result<(), AgentError> {
         self.ensure_db()?;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         conn.execute_batch("VACUUM")
             .map_err(|e| AgentError::Io(format!("Failed to VACUUM sessions db: {e}")))?;
         Ok(())
@@ -298,8 +330,10 @@ impl SessionPersistence {
     pub fn prune_sessions(&self, older_than_days: u32) -> Result<u64, AgentError> {
         self.ensure_db()?;
         let cutoff = (Utc::now() - ChronoDuration::days(older_than_days as i64)).to_rfc3339();
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
 
         let mut session_ids: Vec<String> = Vec::new();
         {
@@ -435,8 +469,10 @@ impl SessionPersistence {
     ) -> Result<(), AgentError> {
         self.ensure_db()?;
 
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
 
         let now = Utc::now().to_rfc3339();
 
@@ -485,8 +521,10 @@ impl SessionPersistence {
         cursor: &mut SessionFlushCursor,
     ) -> Result<(), AgentError> {
         self.ensure_db()?;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| AgentError::Io(format!("Failed to open replace transaction: {e}")))?;
@@ -638,8 +676,10 @@ impl SessionPersistence {
     /// Return the current rotated session_id UUID for a gateway session_key, if one was set by `/new`.
     pub fn get_indexed_session_id(&self, session_key: &str) -> Result<Option<String>, AgentError> {
         self.ensure_db()?;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         let mut stmt = conn
             .prepare("SELECT session_id FROM gateway_session_index WHERE session_key = ?1")
             .map_err(|e| AgentError::Io(format!("Failed to prepare index query: {e}")))?;
@@ -653,8 +693,10 @@ impl SessionPersistence {
     /// Persist the mapping session_key → session_id (called on `/new` / session reset).
     pub fn upsert_session_index(&self, session_key: &str, session_id: &str) -> Result<(), AgentError> {
         self.ensure_db()?;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         conn.execute(
             "INSERT INTO gateway_session_index (session_key, session_id)
              VALUES (?1, ?2)
@@ -672,8 +714,10 @@ impl SessionPersistence {
         system_prompt: &str,
     ) -> Result<(), AgentError> {
         self.ensure_db()?;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         conn.execute(
             "UPDATE sessions SET system_prompt = ?1 WHERE id = ?2",
             rusqlite::params![system_prompt, session_id],
@@ -692,8 +736,10 @@ impl SessionPersistence {
         system_prompt: &str,
     ) -> Result<(), AgentError> {
         self.ensure_db()?;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO sessions (id, model, platform, created_at, updated_at, title, message_count, system_prompt)
@@ -730,8 +776,10 @@ impl SessionPersistence {
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
         let expires_at = now + ttl_seconds;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| AgentError::Io(format!("Failed to open lock transaction: {e}")))?;
@@ -764,8 +812,10 @@ impl SessionPersistence {
             return Ok(());
         }
         self.ensure_db()?;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         conn.execute(
             "DELETE FROM compression_locks WHERE session_id = ?1 AND holder = ?2",
             rusqlite::params![session_id, holder],
@@ -784,8 +834,10 @@ impl SessionPersistence {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         match conn.query_row(
             "SELECT holder FROM compression_locks WHERE session_id = ?1 AND expires_at >= ?2",
             rusqlite::params![session_id, now],
@@ -800,8 +852,10 @@ impl SessionPersistence {
     /// Load persisted full system prompt for prefix-cache continuity (Python `sessions.system_prompt`).
     pub fn get_system_prompt(&self, session_id: &str) -> Result<Option<String>, AgentError> {
         self.ensure_db()?;
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
         let mut stmt = conn
             .prepare("SELECT system_prompt FROM sessions WHERE id = ?1")
             .map_err(|e| AgentError::Io(format!("Failed to prepare query: {e}")))?;
@@ -816,8 +870,10 @@ impl SessionPersistence {
 
     /// Load a previous session from SQLite.
     pub fn load_session(&self, session_id: &str) -> Result<Vec<Message>, AgentError> {
-        let conn = rusqlite::Connection::open(&self.db_path)
-            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let conn_arc = self.shared_connection()?;
+        let conn = conn_arc
+            .lock()
+            .map_err(|_| AgentError::Io("sessions db lock poisoned".into()))?;
 
         let mut stmt = conn
             .prepare(
@@ -1209,5 +1265,14 @@ mod tests {
         let result = sp.maybe_auto_prune_and_vacuum(90, 24, false);
         assert!(!result.skipped);
         assert_eq!(result.pruned, 1);
+    }
+
+    #[test]
+    fn shared_connection_is_reused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let c1 = sp.shared_connection().unwrap();
+        let c2 = sp.shared_connection().unwrap();
+        assert!(Arc::ptr_eq(&c1, &c2));
     }
 }
