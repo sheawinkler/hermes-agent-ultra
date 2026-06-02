@@ -28,7 +28,9 @@ pub trait VideoBackend: Send + Sync {
 pub struct VideoGenerateRequest {
     pub prompt: String,
     pub model: Option<String>,
+    pub model_explicit: bool,
     pub image_url: Option<String>,
+    pub reference_image_urls: Vec<String>,
     pub duration: Option<u32>,
     pub aspect_ratio: String,
     pub resolution: String,
@@ -76,6 +78,22 @@ fn optional_string(params: &Value, key: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn optional_string_list(params: &Value, key: &str) -> Vec<String> {
+    params
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn optional_u32(params: &Value, key: &str) -> Option<u32> {
     params.get(key).and_then(|v| {
         v.as_u64()
@@ -102,10 +120,18 @@ impl ToolHandler for VideoGenerateHandler {
             .filter(|s| !s.is_empty())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'prompt' parameter".into()))?;
 
+        let mut reference_image_urls = optional_string_list(&params, "reference_image_urls");
+        if reference_image_urls.is_empty() {
+            reference_image_urls = optional_string_list(&params, "reference_images");
+        }
+
+        let model = optional_string(&params, "model");
         let request = VideoGenerateRequest {
             prompt: prompt.to_string(),
-            model: optional_string(&params, "model"),
+            model_explicit: model.is_some(),
+            model,
             image_url: optional_string(&params, "image_url"),
+            reference_image_urls,
             duration: optional_u32(&params, "duration"),
             aspect_ratio: optional_string(&params, "aspect_ratio")
                 .unwrap_or_else(|| "16:9".to_string()),
@@ -132,8 +158,8 @@ impl ToolHandler for VideoGenerateHandler {
             "model".into(),
             json!({
                 "type": "string",
-                "description": "FAL model family to use.",
-                "enum": ["ltx-2.3", "pixverse-v6", "veo3.1", "seedance-2.0", "kling-v3-4k", "happy-horse"],
+                "description": "Provider model/family to use. FAL families are used by default; xAI models are honored when the video backend is configured for xAI.",
+                "enum": ["ltx-2.3", "pixverse-v6", "veo3.1", "seedance-2.0", "kling-v3-4k", "happy-horse", "grok-imagine-video", "grok-imagine-video-1.5-preview", "grok-imagine-video-1.5-2026-05-30"],
                 "default": "pixverse-v6"
             }),
         );
@@ -142,6 +168,14 @@ impl ToolHandler for VideoGenerateHandler {
             json!({
                 "type": "string",
                 "description": "Optional starting image URL for image-to-video generation."
+            }),
+        );
+        props.insert(
+            "reference_image_urls".into(),
+            json!({
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional reference image URLs or local paths for providers that support reference-guided generation."
             }),
         );
         props.insert(
@@ -298,10 +332,12 @@ mod tests {
     impl VideoGenerateBackend for MockVideoGenerateBackend {
         async fn generate_video(&self, request: VideoGenerateRequest) -> Result<String, ToolError> {
             Ok(format!(
-                "{}|{}|{}|{}|{}",
+                "{}|{}|{}|{}|{}|{}|{}",
                 request.prompt,
                 request.model.unwrap_or_default(),
+                request.model_explicit,
                 request.image_url.unwrap_or_default(),
+                request.reference_image_urls.join(","),
                 request.duration.unwrap_or_default(),
                 request.aspect_ratio
             ))
@@ -345,6 +381,7 @@ mod tests {
                 "prompt": " cinematic city ",
                 "model": "veo3.1",
                 "image_url": " https://example.com/start.png ",
+                "reference_image_urls": [" https://example.com/ref.png ", "", 123],
                 "duration": "8",
                 "aspect_ratio": "9:16"
             }))
@@ -352,7 +389,23 @@ mod tests {
             .expect("execute");
         assert_eq!(
             out,
-            "cinematic city|veo3.1|https://example.com/start.png|8|9:16"
+            "cinematic city|veo3.1|true|https://example.com/start.png|https://example.com/ref.png|8|9:16"
+        );
+    }
+
+    #[tokio::test]
+    async fn generate_execute_accepts_reference_images_alias() {
+        let handler = VideoGenerateHandler::new(Arc::new(MockVideoGenerateBackend));
+        let out = handler
+            .execute(json!({
+                "prompt": "city",
+                "reference_images": ["https://example.com/a.png", " https://example.com/b.png "]
+            }))
+            .await
+            .expect("execute");
+        assert_eq!(
+            out,
+            "city||false||https://example.com/a.png,https://example.com/b.png|0|16:9"
         );
     }
 

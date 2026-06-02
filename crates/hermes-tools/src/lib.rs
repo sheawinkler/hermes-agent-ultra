@@ -119,7 +119,9 @@ pub use backends::spotify::{SpotifyRuntimeCredentials, SpotifyWebApiBackend};
 pub use backends::todo::FileTodoBackend;
 pub use backends::tts::MultiTtsBackend;
 pub use backends::video::VisionFrameSamplingVideoBackend;
-pub use backends::video_gen::FalVideoGenBackend;
+pub use backends::video_gen::{
+    FalVideoGenBackend, VideoGenBackend, XaiVideoCredentials, XaiVideoGenBackend,
+};
 pub use backends::vision::OpenAiVisionBackend;
 pub use backends::web::{
     crawl_backend_from_env_or_fallback, extract_backend_from_env_or_fallback,

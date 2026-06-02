@@ -221,13 +221,26 @@ impl ToolHandler for DashboardControlHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
+    use hermes_config::managed_gateway::test_lock;
+    use std::path::Path;
 
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env lock poisoned")
+    struct HermesHomeScope(Option<String>);
+
+    impl HermesHomeScope {
+        fn set(path: &Path) -> Self {
+            let original = std::env::var("HERMES_HOME").ok();
+            std::env::set_var("HERMES_HOME", path);
+            Self(original)
+        }
+    }
+
+    impl Drop for HermesHomeScope {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var("HERMES_HOME", value),
+                None => std::env::remove_var("HERMES_HOME"),
+            }
+        }
     }
 
     fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -240,9 +253,9 @@ mod tests {
 
     #[test]
     fn enable_status_disable_roundtrip() {
-        let _guard = env_lock();
+        let _guard = test_lock::lock();
         let temp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", temp.path());
+        let _home = HermesHomeScope::set(temp.path());
 
         block_on(async {
             let handler = DashboardControlHandler;
@@ -274,9 +287,9 @@ mod tests {
 
     #[test]
     fn rejects_non_local_without_insecure() {
-        let _guard = env_lock();
+        let _guard = test_lock::lock();
         let temp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", temp.path());
+        let _home = HermesHomeScope::set(temp.path());
 
         let handler = DashboardControlHandler;
         let err =

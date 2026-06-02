@@ -614,7 +614,7 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "plugins/video_gen/xai/__init__.py",
-      "rationale": "Local xAI video generation wording intentionally refers to the SuperGrok subscription credential path while preserving shared xAI credential resolution behavior.",
+      "rationale": "xAI video generation behavior is now covered by the Rust-native video_generate tool and XaiVideoGenBackend, including provider selection, shared env/auth-store credential resolution, modality-specific model defaults, reference image validation, local image data URI conversion, and xAI submit/poll contracts; the Python plugin remains reference-only compatibility material.",
       "ticket": 304
     },
     {

@@ -223,6 +223,28 @@ mod tests {
 
     static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let original = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     fn reset() {
         SESSION_PASSTHROUGH
             .lock()
@@ -254,6 +276,7 @@ mod tests {
 
     #[test]
     fn config_passthrough_is_loaded_from_hermes_home() {
+        let _global_env = hermes_config::managed_gateway::test_lock::lock();
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset();
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -262,7 +285,7 @@ mod tests {
             "terminal:\n  env_passthrough:\n    - MY_CUSTOM_KEY\n    - '  ANOTHER_TOKEN  '\n",
         )
         .expect("write config");
-        std::env::set_var("HERMES_HOME", tmp.path());
+        let _home = EnvVarGuard::set("HERMES_HOME", tmp.path());
         reset_config_passthrough_cache_for_tests();
 
         assert!(is_env_passthrough("MY_CUSTOM_KEY"));
@@ -278,7 +301,6 @@ mod tests {
             "ANOTHER_TOKEN MY_CUSTOM_KEY SKILL_KEY"
         );
 
-        std::env::remove_var("HERMES_HOME");
         reset();
     }
 }
