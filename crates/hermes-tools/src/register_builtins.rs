@@ -874,4 +874,34 @@ mod tests {
         assert!(names.contains(&"process".to_string()));
         assert!(names.contains(&"execute_code".to_string()));
     }
+
+    #[test]
+    fn browser_tool_surface_exposes_current_commands_without_legacy_close() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let home = tempfile::tempdir().expect("temp home");
+        let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
+        let names = registered_names();
+
+        for expected in [
+            "browser_navigate",
+            "browser_snapshot",
+            "browser_click",
+            "browser_type",
+            "browser_scroll",
+            "browser_back",
+            "browser_press",
+            "browser_get_images",
+            "browser_vision",
+            "browser_console",
+        ] {
+            assert!(
+                names.contains(&expected.to_string()),
+                "browser surface should expose {expected}"
+            );
+        }
+        assert!(
+            !names.contains(&"browser_close".to_string()),
+            "Rust browser backend intentionally has no Python supervisor close tool"
+        );
+    }
 }

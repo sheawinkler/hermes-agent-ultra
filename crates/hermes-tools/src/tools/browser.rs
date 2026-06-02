@@ -519,6 +519,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn browser_interaction_handlers_forward_params_to_backend() {
+        assert_eq!(
+            BrowserTypeHandler::new(backend())
+                .execute(json!({"selector": "#search", "text": "hello"}))
+                .await
+                .unwrap(),
+            "Typed 'hello' into #search"
+        );
+        assert_eq!(
+            BrowserScrollHandler::new(backend())
+                .execute(json!({"direction": "up", "amount": 250}))
+                .await
+                .unwrap(),
+            "Scrolled up"
+        );
+        assert_eq!(
+            BrowserBackHandler::new(backend())
+                .execute(json!({}))
+                .await
+                .unwrap(),
+            "Went back"
+        );
+        assert_eq!(
+            BrowserPressHandler::new(backend())
+                .execute(json!({"key": "Enter"}))
+                .await
+                .unwrap(),
+            "Pressed Enter"
+        );
+        assert_eq!(
+            BrowserGetImagesHandler::new(backend())
+                .execute(json!({"selector": "img.product"}))
+                .await
+                .unwrap(),
+            "Images: Some(\"img.product\")"
+        );
+        assert_eq!(
+            BrowserVisionHandler::new(backend())
+                .execute(json!({"instruction": "summarize the page"}))
+                .await
+                .unwrap(),
+            "Vision: summarize the page"
+        );
+    }
+
+    #[tokio::test]
+    async fn browser_handlers_reject_missing_required_params() {
+        assert!(BrowserTypeHandler::new(backend())
+            .execute(json!({"selector": "#search"}))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Missing 'text'"));
+        assert!(BrowserPressHandler::new(backend())
+            .execute(json!({}))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Missing 'key'"));
+        assert!(BrowserVisionHandler::new(backend())
+            .execute(json!({}))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Missing 'instruction'"));
+    }
+
+    #[tokio::test]
     async fn browser_console_clear_bool_is_compat_alias_for_action_clear() {
         let handler = BrowserConsoleHandler::new(backend());
         let result = handler.execute(json!({"clear": true})).await.unwrap();

@@ -2229,6 +2229,17 @@ mod web_search_env_tests {
     }
 
     #[test]
+    fn search_backend_choice_prefers_per_capability_override_over_generic_backend() {
+        let _scope = EnvScope::new();
+        std::env::set_var("HERMES_WEB_BACKEND", "firecrawl");
+        std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "tavily");
+        std::env::set_var("FIRECRAWL_API_KEY", "fire-key");
+        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+
+        assert_eq!(search_backend_choice_from_env(), "tavily");
+    }
+
+    #[test]
     fn search_backend_choice_uses_brave_when_key_is_available() {
         let _scope = EnvScope::new();
         std::env::set_var("BRAVE_SEARCH_API_KEY", "brave-key");
@@ -2268,6 +2279,16 @@ mod web_search_env_tests {
         let _scope = EnvScope::new();
         std::env::set_var("HERMES_WEB_BACKEND", "ddgs");
         assert_eq!(extract_backend_choice_from_env(), "search-only:ddgs");
+    }
+
+    #[test]
+    fn extract_backend_choice_prefers_per_capability_override_over_generic_backend() {
+        let _scope = EnvScope::new();
+        std::env::set_var("HERMES_WEB_BACKEND", "tavily");
+        std::env::set_var("HERMES_WEB_EXTRACT_BACKEND", "simple");
+        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+
+        assert_eq!(extract_backend_choice_from_env(), "simple");
     }
 
     #[test]

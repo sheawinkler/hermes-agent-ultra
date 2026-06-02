@@ -249,17 +249,22 @@ mod tests {
             &self,
             query: &str,
             num_results: usize,
-            _category: Option<&str>,
+            category: Option<&str>,
         ) -> Result<String, ToolError> {
-            Ok(format!("Results for '{}' (count: {})", query, num_results))
+            Ok(format!(
+                "Results for '{}' (count: {}, category: {})",
+                query,
+                num_results,
+                category.unwrap_or("")
+            ))
         }
     }
 
     struct MockExtractBackend;
     #[async_trait]
     impl WebExtractBackend for MockExtractBackend {
-        async fn extract(&self, url: &str, _include_links: bool) -> Result<String, ToolError> {
-            Ok(format!("Content from {}", url))
+        async fn extract(&self, url: &str, include_links: bool) -> Result<String, ToolError> {
+            Ok(format!("Content from {} links={}", url, include_links))
         }
     }
 
@@ -295,10 +300,12 @@ mod tests {
     async fn test_web_search_execute() {
         let handler = WebSearchHandler::new(Box::new(MockSearchBackend));
         let result = handler
-            .execute(json!({"query": "rust async"}))
+            .execute(json!({"query": "rust async", "num_results": 3, "category": "news"}))
             .await
             .unwrap();
         assert!(result.contains("rust async"));
+        assert!(result.contains("count: 3"));
+        assert!(result.contains("category: news"));
     }
 
     #[tokio::test]
@@ -312,10 +319,11 @@ mod tests {
     async fn test_web_extract_execute() {
         let handler = WebExtractHandler::new(Box::new(MockExtractBackend));
         let result = handler
-            .execute(json!({"url": "https://example.com"}))
+            .execute(json!({"url": "https://example.com", "include_links": false}))
             .await
             .unwrap();
         assert!(result.contains("example.com"));
+        assert!(result.contains("links=false"));
     }
 
     #[tokio::test]

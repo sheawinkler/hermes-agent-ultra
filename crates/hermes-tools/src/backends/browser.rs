@@ -1869,6 +1869,7 @@ mod tests {
                 "TOOL_GATEWAY_SCHEME",
                 "CAMOFOX_URL",
                 "CAMOFOX_CDP_URL",
+                "CAMOFOX_PROFILE",
                 "CHROME_CDP_URL",
                 "BROWSER_CDP_URL",
                 "CAMOFOX_REWRITE_LOOPBACK_URLS",
@@ -1931,6 +1932,24 @@ mod tests {
         assert_eq!(first.user_id, other_task.user_id);
         assert_ne!(first.session_key, other_task.session_key);
         assert_ne!(first.user_id, other_profile.user_id);
+    }
+
+    #[test]
+    fn camofox_from_env_uses_cdp_endpoint_and_named_profile() {
+        let _scope = EnvScope::new();
+        std::env::set_var(
+            "CAMOFOX_CDP_URL",
+            "http://127.0.0.1:9333/devtools/browser/local",
+        );
+        std::env::set_var("CAMOFOX_PROFILE", "qa-profile");
+
+        let backend = CamoFoxBrowserBackend::from_env();
+
+        assert_eq!(
+            backend.inner.endpoint,
+            "http://127.0.0.1:9333/devtools/browser/local"
+        );
+        assert_eq!(backend.profile, "qa-profile");
     }
 
     #[test]
