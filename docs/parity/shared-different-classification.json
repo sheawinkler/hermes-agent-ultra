@@ -3690,6 +3690,34 @@
       "rationale": "Ultra covers upstream web tools config behavior in Rust web backend tests for Exa/Tavily/Firecrawl/SearXNG/Brave/DDG/xAI selection, per-capability overrides, legacy generic backend fallback, managed Firecrawl gateway resolution, secret guards, singleton-free env re-resolution, and normalized provider payloads.",
       "owner": "sheawinkler",
       "ticket": 306
+    },
+    {
+      "path": "tests/tools/test_tool_result_storage.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream three-layer tool result persistence intent is covered by Rust tool_result_storage and dispatch contracts for newline-aware previews, heredoc delimiter safety, quoted sandbox write commands, local persisted-output blocks, read_file guidance, unicode-safe previews, threshold-zero persistence, read_file no-persist semantics, aggregate budget spilling, and dispatch-boundary persistence.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_env_passthrough.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream env passthrough registry/config intent is covered by Rust EnvPassthroughHandler registry contracts, terminal.env_passthrough YAML parsing, HERMES_SUBPROCESS_ENV_PASSTHROUGH mirroring, and LocalBackend sanitizer/profile-cleanup tests proving blocklisted provider and gateway-prefix vars remain blocked by default but pass through when explicitly allowed.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_file_write_safety.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream file write safety and HERMES_WRITE_SAFE_ROOT intent is covered by Rust CredentialGuard contracts for static credential/system write denies, macOS /private/etc and /private/var bypass protection, /boot protection, home credential prefixes, safe-root allow/deny behavior, tilde expansion, and static-deny precedence over safe-root.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_fuzzy_match.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream fuzzy replacement intent is covered by Rust LocalPatchBackend contracts for exact replacement, replace_all behavior, ambiguous single-replacement errors, identical old/new rejection, unicode-normalized smart punctuation matching with surfaced strategy names, and existing whitespace/indent/context fuzzy strategies.",
+      "owner": "sheawinkler",
+      "ticket": 25
     }
   ]
 }

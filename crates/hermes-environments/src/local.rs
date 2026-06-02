@@ -1,6 +1,6 @@
 //! Local terminal backend – executes commands on the same host.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -53,6 +53,8 @@ pub struct LocalBackend {
     shell_init_files: Vec<String>,
     /// Auto-source common shell startup files when no explicit list is set.
     auto_source_bashrc: bool,
+    /// Env-var names allowed through subprocess secret sanitizers.
+    env_passthrough: Vec<String>,
     /// Background processes tracked by session id for lifecycle operations.
     background_processes: Arc<Mutex<HashMap<String, ProcessSession>>>,
 }
@@ -60,12 +62,13 @@ pub struct LocalBackend {
 impl LocalBackend {
     /// Create a new local backend with the given defaults.
     pub fn new(default_timeout: u64, max_output_size: usize) -> Self {
-        let (shell_init_files, auto_source_bashrc) = terminal_shell_init_config_from_env();
+        let (shell_init_files, auto_source_bashrc, env_passthrough) = terminal_config_from_env();
         Self::new_with_shell_init(
             default_timeout,
             max_output_size,
             shell_init_files,
             auto_source_bashrc,
+            env_passthrough,
         )
     }
 
@@ -76,6 +79,7 @@ impl LocalBackend {
             config.max_output_size,
             config.shell_init_files.clone(),
             config.auto_source_bashrc,
+            config.env_passthrough.clone(),
         )
     }
 
@@ -84,12 +88,14 @@ impl LocalBackend {
         max_output_size: usize,
         shell_init_files: Vec<String>,
         auto_source_bashrc: bool,
+        env_passthrough: Vec<String>,
     ) -> Self {
         Self {
             default_timeout,
             max_output_size,
             shell_init_files,
             auto_source_bashrc,
+            env_passthrough,
             background_processes: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -648,6 +654,7 @@ const SUBPROCESS_ENV_BLOCKLIST_PREFIXES: &[&str] = &[
 ];
 
 const SUBPROCESS_ENV_FORCE_PREFIX: &str = "_HERMES_FORCE_";
+const SUBPROCESS_ENV_PASSTHROUGH_VAR: &str = "HERMES_SUBPROCESS_ENV_PASSTHROUGH";
 
 const SANE_PATH_ENTRIES: &[&str] = &[
     "/usr/local/bin",
@@ -664,6 +671,43 @@ fn should_strip_subprocess_env(key: &str) -> bool {
         || SUBPROCESS_ENV_BLOCKLIST_PREFIXES
             .iter()
             .any(|prefix| key.starts_with(prefix))
+}
+
+fn normalize_env_passthrough_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || !trimmed
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn parse_subprocess_env_passthrough(value: &str) -> BTreeSet<String> {
+    value
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ':' | ';'))
+        .filter_map(normalize_env_passthrough_name)
+        .collect()
+}
+
+fn subprocess_env_passthrough_set(configured: &[String]) -> BTreeSet<String> {
+    let mut values = std::env::var(SUBPROCESS_ENV_PASSTHROUGH_VAR)
+        .ok()
+        .map(|raw| parse_subprocess_env_passthrough(&raw))
+        .unwrap_or_default();
+    values.extend(
+        configured
+            .iter()
+            .filter_map(|name| normalize_env_passthrough_name(name)),
+    );
+    values
+}
+
+fn is_subprocess_env_passthrough(key: &str, passthrough: &BTreeSet<String>) -> bool {
+    passthrough.contains(key)
 }
 
 fn normalize_subprocess_path(path: Option<&str>) -> String {
@@ -686,8 +730,20 @@ fn normalize_subprocess_path(path: Option<&str>) -> String {
     entries.join(":")
 }
 
-fn shell_env_cleanup_snippet() -> String {
+fn shell_env_cleanup_snippet(configured_passthrough: &[String]) -> String {
     let mut snippet = String::new();
+    let configured_passthrough = configured_passthrough
+        .iter()
+        .filter_map(|name| normalize_env_passthrough_name(name))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !configured_passthrough.is_empty() {
+        snippet.push_str(
+            "HERMES_SUBPROCESS_ENV_PASSTHROUGH=\"${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-} ",
+        );
+        snippet.push_str(&configured_passthrough);
+        snippet.push_str("\"; ");
+    }
     if !SUBPROCESS_ENV_BLOCKLIST_PREFIXES.is_empty() {
         snippet
             .push_str("for __hermes_env in $(env | sed 's/=.*//'); do case \"$__hermes_env\" in ");
@@ -698,10 +754,10 @@ fn shell_env_cleanup_snippet() -> String {
             snippet.push_str(prefix);
             snippet.push('*');
         }
-        snippet.push_str(") unset \"$__hermes_env\" ;; esac; done; unset __hermes_env; ");
+        snippet.push_str(") case \" ${HERMES_SUBPROCESS_FORCE_TARGETS:-} ${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-} \" in *\" $__hermes_env \"*) ;; *) unset \"$__hermes_env\" ;; esac ;; esac; done; unset __hermes_env; ");
     }
     for key in SUBPROCESS_ENV_BLOCKLIST_EXACT {
-        snippet.push_str("case \" ${HERMES_SUBPROCESS_FORCE_TARGETS:-} \" in *\" ");
+        snippet.push_str("case \" ${HERMES_SUBPROCESS_FORCE_TARGETS:-} ${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-} \" in *\" ");
         snippet.push_str(key);
         snippet.push_str(" \"*) ;; *) unset ");
         snippet.push_str(key);
@@ -745,13 +801,17 @@ fn bool_env_or_default(name: &str, default: bool) -> bool {
     }
 }
 
-fn terminal_shell_init_config_from_env() -> (Vec<String>, bool) {
+fn terminal_config_from_env() -> (Vec<String>, bool, Vec<String>) {
     let explicit = std::env::var("TERMINAL_SHELL_INIT_FILES")
         .ok()
         .map(|v| parse_shell_init_list(&v))
         .unwrap_or_default();
     let auto_source_bashrc = bool_env_or_default("TERMINAL_AUTO_SOURCE_BASHRC", true);
-    (explicit, auto_source_bashrc)
+    let env_passthrough = std::env::var(SUBPROCESS_ENV_PASSTHROUGH_VAR)
+        .ok()
+        .map(|v| parse_subprocess_env_passthrough(&v).into_iter().collect())
+        .unwrap_or_default();
+    (explicit, auto_source_bashrc, env_passthrough)
 }
 
 fn expand_env_refs(input: &str) -> String {
@@ -856,10 +916,11 @@ fn shell_source_prelude(files: &[PathBuf]) -> String {
     prelude
 }
 
-fn scrub_subprocess_env(cmd: &mut TokioCommand) {
+fn scrub_subprocess_env(cmd: &mut TokioCommand, configured_passthrough: &[String]) {
+    let passthrough = subprocess_env_passthrough_set(configured_passthrough);
     let mut forced = Vec::new();
     for (key, _) in std::env::vars() {
-        if should_strip_subprocess_env(&key) {
+        if should_strip_subprocess_env(&key) && !is_subprocess_env_passthrough(&key, &passthrough) {
             cmd.env_remove(key);
         } else if let Some(target) = key.strip_prefix(SUBPROCESS_ENV_FORCE_PREFIX) {
             cmd.env_remove(&key);
@@ -885,6 +946,14 @@ fn scrub_subprocess_env(cmd: &mut TokioCommand) {
     } else {
         cmd.env("HERMES_SUBPROCESS_FORCE_TARGETS", forced_targets.join(" "));
     }
+    if passthrough.is_empty() {
+        cmd.env_remove(SUBPROCESS_ENV_PASSTHROUGH_VAR);
+    } else {
+        cmd.env(
+            SUBPROCESS_ENV_PASSTHROUGH_VAR,
+            passthrough.into_iter().collect::<Vec<_>>().join(" "),
+        );
+    }
 
     let normalized_path = normalize_subprocess_path(std::env::var("PATH").ok().as_deref());
     cmd.env("PATH", normalized_path);
@@ -894,10 +963,11 @@ fn with_login_profile_sources(
     command: &str,
     explicit_files: &[String],
     auto_source_bashrc: bool,
+    env_passthrough: &[String],
 ) -> String {
     #[cfg(unix)]
     {
-        let cleanup = shell_env_cleanup_snippet();
+        let cleanup = shell_env_cleanup_snippet(env_passthrough);
         let bash_prelude = shell_source_prelude(&resolve_shell_init_files_for_shell(
             "bash",
             explicit_files,
@@ -938,6 +1008,7 @@ else printf '%s\n' \"Hermes could not find bash or zsh in PATH. Run 'exec zsh -l
     {
         let _ = explicit_files;
         let _ = auto_source_bashrc;
+        let _ = env_passthrough;
         command.to_string()
     }
 }
@@ -1113,6 +1184,7 @@ impl TerminalBackend for LocalBackend {
             &rewritten_command,
             &self.shell_init_files,
             self.auto_source_bashrc,
+            &self.env_passthrough,
         );
 
         if pty && !background {
@@ -1131,7 +1203,7 @@ impl TerminalBackend for LocalBackend {
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .stdin(Stdio::null());
-                scrub_subprocess_env(&mut pty_cmd);
+                scrub_subprocess_env(&mut pty_cmd, &self.env_passthrough);
 
                 if let Some(dir) = workdir {
                     pty_cmd.current_dir(resolve_path(dir)?);
@@ -1180,7 +1252,7 @@ impl TerminalBackend for LocalBackend {
             shell_cmd
         };
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-        scrub_subprocess_env(&mut cmd);
+        scrub_subprocess_env(&mut cmd, &self.env_passthrough);
 
         if let Some(dir) = workdir {
             cmd.current_dir(resolve_path(dir)?);
@@ -1298,6 +1370,7 @@ impl TerminalBackend for LocalBackend {
             &rewritten_command,
             &self.shell_init_files,
             self.auto_source_bashrc,
+            &self.env_passthrough,
         );
 
         if background {
@@ -1332,7 +1405,7 @@ impl TerminalBackend for LocalBackend {
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .stdin(Stdio::piped());
-                scrub_subprocess_env(&mut pty_cmd);
+                scrub_subprocess_env(&mut pty_cmd, &self.env_passthrough);
 
                 if let Some(dir) = workdir {
                     pty_cmd.current_dir(resolve_path(dir)?);
@@ -1363,7 +1436,7 @@ impl TerminalBackend for LocalBackend {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::piped());
-        scrub_subprocess_env(&mut cmd);
+        scrub_subprocess_env(&mut cmd, &self.env_passthrough);
         if let Some(dir) = workdir {
             cmd.current_dir(resolve_path(dir)?);
         }
@@ -1724,6 +1797,12 @@ mod tests {
             std::env::set_var(key, value);
             Self { key, original }
         }
+
+        fn remove(key: &'static str) -> Self {
+            let original = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, original }
+        }
     }
 
     impl Drop for EnvGuard {
@@ -1744,7 +1823,7 @@ mod tests {
             std::fs::write(td.path().join(file), "export HERMES_TEST=1\n").unwrap();
         }
         let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
-        let wrapped = with_login_profile_sources("echo hi", &[], true);
+        let wrapped = with_login_profile_sources("echo hi", &[], true, &[]);
         assert!(wrapped.contains("command -v bash"));
         assert!(wrapped.contains("exec bash -lc"));
         assert!(wrapped.contains(".bash_profile"));
@@ -1760,7 +1839,7 @@ mod tests {
     fn test_with_login_profile_sources_prefers_user_shell_when_supported() {
         let _lock = ENV_TEST_LOCK.lock().expect("lock env");
         let _shell = EnvGuard::set("SHELL", "/bin/zsh");
-        let wrapped = with_login_profile_sources("echo hi", &[], true);
+        let wrapped = with_login_profile_sources("echo hi", &[], true, &[]);
         let preferred = "if command -v zsh >/dev/null 2>&1; then exec zsh -lc";
         let fallback = "if command -v bash >/dev/null 2>&1; then exec bash -lc";
         let preferred_idx = wrapped.find(preferred).expect("preferred zsh branch");
@@ -1839,6 +1918,109 @@ mod tests {
     }
 
     #[test]
+    fn test_subprocess_env_passthrough_parses_configured_and_env_values() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _passthrough = EnvGuard::set(
+            SUBPROCESS_ENV_PASSTHROUGH_VAR,
+            "OPENAI_API_KEY,ANTHROPIC_TOKEN:BAD-NAME VALID_NAME",
+        );
+        let parsed = subprocess_env_passthrough_set(&["GOOGLE_API_KEY".to_string()]);
+        assert!(parsed.contains("OPENAI_API_KEY"));
+        assert!(parsed.contains("ANTHROPIC_TOKEN"));
+        assert!(parsed.contains("VALID_NAME"));
+        assert!(parsed.contains("GOOGLE_API_KEY"));
+        assert!(!parsed.contains("BAD-NAME"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_shell_cleanup_keeps_configured_passthrough() {
+        let wrapped = with_login_profile_sources(
+            "echo hi",
+            &[],
+            true,
+            &[
+                "OPENAI_API_KEY".to_string(),
+                "HERMES_GATEWAY_SECRET".to_string(),
+            ],
+        );
+        assert!(wrapped.contains("HERMES_SUBPROCESS_ENV_PASSTHROUGH"));
+        assert!(wrapped.contains("OPENAI_API_KEY"));
+        assert!(wrapped.contains("HERMES_GATEWAY_SECRET"));
+        assert!(wrapped.contains(
+            "${HERMES_SUBPROCESS_FORCE_TARGETS:-} ${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-}"
+        ));
+    }
+
+    #[test]
+    fn test_terminal_sanitizer_blocks_provider_env_by_default() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _api = EnvGuard::set("OPENAI_API_KEY", "secret-value");
+        let _passthrough = EnvGuard::remove(SUBPROCESS_ENV_PASSTHROUGH_VAR);
+        let backend =
+            LocalBackend::new_with_shell_init(10, 1_048_576, Vec::new(), true, Vec::new());
+
+        let output = block_on(backend.execute_command(
+            "printf '%s' \"${OPENAI_API_KEY-unset}\"",
+            Some(10),
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "unset");
+    }
+
+    #[test]
+    fn test_terminal_config_passthrough_allows_blocklisted_env() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _api = EnvGuard::set("OPENAI_API_KEY", "secret-value");
+        let _passthrough = EnvGuard::remove(SUBPROCESS_ENV_PASSTHROUGH_VAR);
+        let backend = LocalBackend::new_with_shell_init(
+            10,
+            1_048_576,
+            Vec::new(),
+            true,
+            vec!["OPENAI_API_KEY".to_string()],
+        );
+
+        let output = block_on(backend.execute_command(
+            "printf '%s' \"$OPENAI_API_KEY\"",
+            Some(10),
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "secret-value");
+    }
+
+    #[test]
+    fn test_terminal_registry_env_passthrough_allows_prefix_blocked_env() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _gateway = EnvGuard::set("HERMES_GATEWAY_SECRET", "gateway-secret");
+        let _passthrough = EnvGuard::set(SUBPROCESS_ENV_PASSTHROUGH_VAR, "HERMES_GATEWAY_SECRET");
+        let backend =
+            LocalBackend::new_with_shell_init(10, 1_048_576, Vec::new(), true, Vec::new());
+
+        let output = block_on(backend.execute_command(
+            "printf '%s' \"$HERMES_GATEWAY_SECRET\"",
+            Some(10),
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "gateway-secret");
+    }
+
+    #[test]
     fn test_rewrite_compound_background_contract() {
         assert_eq!(rewrite_compound_background("A && B &"), "A && { B & }");
         assert_eq!(rewrite_compound_background("A || B &"), "A || { B & }");
@@ -1871,7 +2053,7 @@ mod tests {
     #[cfg(not(unix))]
     #[test]
     fn test_with_login_profile_sources_is_passthrough_off_unix() {
-        let wrapped = with_login_profile_sources("echo hi", &[], true);
+        let wrapped = with_login_profile_sources("echo hi", &[], true, &[]);
         assert_eq!(wrapped, "echo hi");
     }
 
@@ -1922,6 +2104,7 @@ mod tests {
             1_048_576,
             vec![init.to_string_lossy().to_string()],
             false,
+            Vec::new(),
         );
 
         let output = backend

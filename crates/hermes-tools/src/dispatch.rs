@@ -10,6 +10,9 @@ use hermes_core::{BudgetConfig, ToolCall, ToolResult};
 use tokio::task::JoinSet;
 
 use crate::registry::ToolRegistry;
+use crate::tools::tool_result_storage::{
+    default_threshold_for_tool, enforce_turn_budget, maybe_persist_tool_result,
+};
 
 /// Result of dispatching a single tool call, including timing information.
 #[derive(Debug, Clone)]
@@ -61,16 +64,12 @@ pub async fn dispatch_tools(
 
     let mut collect_join = |res: Result<DispatchedResult, tokio::task::JoinError>| match res {
         Ok(dr) => {
-            let mut content = dr.content;
-            // Per-result truncation
-            if content.len() > budget.max_result_size_chars {
-                let truncated = &content[..budget.max_result_size_chars];
-                let removed = content.len() - budget.max_result_size_chars;
-                content = format!(
-                    "{}\n\n[... truncated {} characters ...]",
-                    truncated, removed
-                );
-            }
+            let content = maybe_persist_tool_result(
+                &dr.content,
+                &dr.tool_name,
+                &dr.tool_call_id,
+                default_threshold_for_tool(&dr.tool_name, budget.max_result_size_chars),
+            );
             results.push(ToolResult {
                 tool_call_id: dr.tool_call_id,
                 content,
@@ -125,23 +124,7 @@ pub async fn dispatch_tools(
         collect_join(res);
     }
 
-    // Aggregate budget enforcement
-    let total_chars: usize = results.iter().map(|r| r.content.len()).sum();
-    if total_chars > budget.max_aggregate_chars {
-        let ratio = budget.max_aggregate_chars as f64 / total_chars as f64;
-        for result in results.iter_mut() {
-            let target_len = ((result.content.len() as f64) * ratio) as usize;
-            let min_len = target_len.max(200);
-            if result.content.len() > min_len {
-                let removed = result.content.len() - min_len;
-                result.content = format!(
-                    "{}\n\n[... truncated {} characters ...]",
-                    &result.content[..min_len],
-                    removed
-                );
-            }
-        }
-    }
+    enforce_turn_budget(&mut results, &budget);
 
     results
 }
@@ -164,16 +147,12 @@ pub async fn dispatch_single(
 
     let is_error = result.starts_with(r#"{"error"#);
 
-    let content = if result.len() > max_result_size_chars {
-        let truncated = &result[..max_result_size_chars];
-        let removed = result.len() - max_result_size_chars;
-        format!(
-            "{}\n\n[... truncated {} characters ...]",
-            truncated, removed
-        )
-    } else {
-        result
-    };
+    let content = maybe_persist_tool_result(
+        &result,
+        &call.function.name,
+        &call.id,
+        default_threshold_for_tool(&call.function.name, max_result_size_chars),
+    );
 
     ToolResult {
         tool_call_id: call.id,
@@ -185,6 +164,25 @@ pub async fn dispatch_single(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use async_trait::async_trait;
+    use hermes_core::{tool_schema, FunctionCall, JsonSchema, ToolError, ToolHandler, ToolSchema};
+    use serde_json::Value;
+
+    use crate::tools::tool_result_storage::{PERSISTED_OUTPUT_TAG, STORAGE_ENV_LOCK};
+
+    struct LargeHandler;
+
+    #[async_trait]
+    impl ToolHandler for LargeHandler {
+        async fn execute(&self, _params: Value) -> Result<String, ToolError> {
+            Ok(format!("large-start-{}", "x".repeat(5_000)))
+        }
+
+        fn schema(&self) -> ToolSchema {
+            tool_schema("large", "Large test output", JsonSchema::new("object"))
+        }
+    }
 
     #[test]
     fn test_dispatched_result_conversion() {
@@ -198,5 +196,56 @@ mod tests {
         let tr: ToolResult = dr.into();
         assert_eq!(tr.tool_call_id, "call_1");
         assert!(!tr.is_error);
+    }
+
+    #[test]
+    fn dispatch_single_persists_oversized_result() {
+        let _guard = STORAGE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::env::set_var("HERMES_TOOL_RESULT_STORAGE_DIR", tmp.path());
+
+        let registry = Arc::new(ToolRegistry::new());
+        let handler = Arc::new(LargeHandler);
+        registry.register(
+            "large",
+            "test",
+            handler.schema(),
+            handler,
+            Arc::new(|| true),
+            vec![],
+            false,
+            "Large output",
+            "",
+            None,
+        );
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let result = runtime.block_on(async {
+            dispatch_single(
+                ToolCall {
+                    id: "large_call".to_string(),
+                    function: FunctionCall {
+                        name: "large".to_string(),
+                        arguments: "{}".to_string(),
+                    },
+                    extra_content: None,
+                },
+                registry,
+                100,
+            )
+            .await
+        });
+
+        assert!(result.content.contains(PERSISTED_OUTPUT_TAG));
+        assert!(result.content.contains("large-start"));
+        let persisted =
+            std::fs::read_to_string(tmp.path().join("large_call.txt")).expect("persisted result");
+        assert!(persisted.contains("large-start-"));
+        assert!(persisted.contains(&"x".repeat(5_000)));
+
+        std::env::remove_var("HERMES_TOOL_RESULT_STORAGE_DIR");
     }
 }

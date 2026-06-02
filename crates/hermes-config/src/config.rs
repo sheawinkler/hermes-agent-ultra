@@ -1110,6 +1110,14 @@ pub struct TerminalConfig {
     )]
     pub auto_source_bashrc: bool,
 
+    /// Host env-var names allowed through provider/tool subprocess sanitizers.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub env_passthrough: Vec<String>,
+
     /// SSH backend host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_host: Option<String>,
@@ -1149,6 +1157,7 @@ impl Default for TerminalConfig {
             modal_mode: None,
             shell_init_files: Vec::new(),
             auto_source_bashrc: default_auto_source_bashrc(),
+            env_passthrough: Vec::new(),
             ssh_host: None,
             ssh_port: None,
             ssh_user: None,
@@ -1706,6 +1715,24 @@ tool_output: nonsense
         assert_eq!(json, "\"docker\"");
         let back: TerminalBackendType = serde_json::from_str(&json).unwrap();
         assert_eq!(back, TerminalBackendType::Docker);
+    }
+
+    #[test]
+    fn terminal_config_accepts_env_passthrough_list() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+terminal:
+  env_passthrough:
+    - OPENAI_API_KEY
+    - TENOR_API_KEY
+"#,
+        )
+        .expect("terminal env passthrough config");
+
+        assert_eq!(
+            cfg.terminal.env_passthrough,
+            vec!["OPENAI_API_KEY".to_string(), "TENOR_API_KEY".to_string()]
+        );
     }
 
     #[test]

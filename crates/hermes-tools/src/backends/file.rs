@@ -14,16 +14,24 @@ use hermes_core::ToolError;
 
 /// Real file patch backend using fuzzy string matching.
 ///
-/// Implements an 8-strategy matching chain (ported from Python `fuzzy_match.py`):
+/// Implements a 9-strategy matching chain (ported from Python `fuzzy_match.py`):
 /// 1. Exact match
 /// 2. Line-trimmed (strip leading/trailing whitespace per line)
 /// 3. Whitespace normalized (collapse multiple spaces/tabs)
 /// 4. Indentation flexible (ignore indentation differences)
 /// 5. Escape normalized (convert \\n literals to newlines)
-/// 6. Trimmed boundary (trim first/last line only)
-/// 7. Block anchor (match first+last lines, similarity for middle)
-/// 8. Context-aware (50% line similarity threshold)
+/// 6. Unicode normalized (smart punctuation aliases)
+/// 7. Trimmed boundary (trim first/last line only)
+/// 8. Block anchor (match first+last lines, similarity for middle)
+/// 9. Context-aware (50% line similarity threshold)
 pub struct LocalPatchBackend;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FuzzyMatch {
+    start: usize,
+    end: usize,
+    strategy: &'static str,
+}
 
 impl LocalPatchBackend {
     pub fn new() -> Self {
@@ -32,44 +40,85 @@ impl LocalPatchBackend {
 
     /// Find the best fuzzy match for `needle` in `haystack`.
     /// Returns (start_index, end_index) of the best match, or None.
-    fn fuzzy_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
+    fn fuzzy_find(haystack: &str, needle: &str) -> Option<FuzzyMatch> {
         // Strategy 1: Exact match
         if let Some(pos) = haystack.find(needle) {
-            return Some((pos, pos + needle.len()));
+            return Some(FuzzyMatch {
+                start: pos,
+                end: pos + needle.len(),
+                strategy: "exact",
+            });
         }
 
         // Strategy 2: Line-trimmed match
-        if let Some(result) = Self::strategy_line_trimmed(haystack, needle) {
-            return Some(result);
+        if let Some((start, end)) = Self::strategy_line_trimmed(haystack, needle) {
+            return Some(FuzzyMatch {
+                start,
+                end,
+                strategy: "line_trimmed",
+            });
         }
 
         // Strategy 3: Whitespace normalized
-        if let Some(result) = Self::strategy_whitespace_normalized(haystack, needle) {
-            return Some(result);
+        if let Some((start, end)) = Self::strategy_whitespace_normalized(haystack, needle) {
+            return Some(FuzzyMatch {
+                start,
+                end,
+                strategy: "whitespace_normalized",
+            });
         }
 
         // Strategy 4: Indentation flexible
-        if let Some(result) = Self::strategy_indentation_flexible(haystack, needle) {
-            return Some(result);
+        if let Some((start, end)) = Self::strategy_indentation_flexible(haystack, needle) {
+            return Some(FuzzyMatch {
+                start,
+                end,
+                strategy: "indentation_flexible",
+            });
         }
 
         // Strategy 5: Escape normalized
-        if let Some(result) = Self::strategy_escape_normalized(haystack, needle) {
-            return Some(result);
+        if let Some((start, end)) = Self::strategy_escape_normalized(haystack, needle) {
+            return Some(FuzzyMatch {
+                start,
+                end,
+                strategy: "escape_normalized",
+            });
         }
 
-        // Strategy 6: Trimmed boundary
-        if let Some(result) = Self::strategy_trimmed_boundary(haystack, needle) {
-            return Some(result);
+        // Strategy 6: Unicode normalized
+        if let Some((start, end)) = Self::strategy_unicode_normalized(haystack, needle) {
+            return Some(FuzzyMatch {
+                start,
+                end,
+                strategy: "unicode_normalized",
+            });
         }
 
-        // Strategy 7: Block anchor
-        if let Some(result) = Self::strategy_block_anchor(haystack, needle) {
-            return Some(result);
+        // Strategy 7: Trimmed boundary
+        if let Some((start, end)) = Self::strategy_trimmed_boundary(haystack, needle) {
+            return Some(FuzzyMatch {
+                start,
+                end,
+                strategy: "trimmed_boundary",
+            });
         }
 
-        // Strategy 8: Context-aware
-        Self::strategy_context_aware(haystack, needle)
+        // Strategy 8: Block anchor
+        if let Some((start, end)) = Self::strategy_block_anchor(haystack, needle) {
+            return Some(FuzzyMatch {
+                start,
+                end,
+                strategy: "block_anchor",
+            });
+        }
+
+        // Strategy 9: Context-aware
+        Self::strategy_context_aware(haystack, needle).map(|(start, end)| FuzzyMatch {
+            start,
+            end,
+            strategy: "context_aware",
+        })
     }
 
     /// Strategy 2: Match with line-by-line whitespace trimming.
@@ -157,6 +206,54 @@ impl LocalPatchBackend {
         haystack
             .find(&unescaped)
             .map(|pos| (pos, pos + unescaped.len()))
+    }
+
+    fn unicode_alias(ch: char) -> Option<&'static str> {
+        match ch {
+            '\u{2014}' | '\u{2013}' => Some("--"),
+            '\u{2018}' | '\u{2019}' => Some("'"),
+            '\u{201c}' | '\u{201d}' => Some("\""),
+            '\u{2026}' => Some("..."),
+            '\u{00a0}' => Some(" "),
+            _ => None,
+        }
+    }
+
+    fn unicode_normalize_with_spans(input: &str) -> (String, Vec<(usize, usize)>) {
+        let mut normalized = String::with_capacity(input.len());
+        let mut spans = Vec::new();
+        for (start, ch) in input.char_indices() {
+            let end = start + ch.len_utf8();
+            if let Some(alias) = Self::unicode_alias(ch) {
+                for alias_ch in alias.chars() {
+                    normalized.push(alias_ch);
+                    spans.push((start, end));
+                }
+            } else {
+                normalized.push(ch);
+                spans.push((start, end));
+            }
+        }
+        (normalized, spans)
+    }
+
+    fn normalized_byte_to_char_idx(value: &str, byte_idx: usize) -> usize {
+        value[..byte_idx.min(value.len())].chars().count()
+    }
+
+    fn strategy_unicode_normalized(haystack: &str, needle: &str) -> Option<(usize, usize)> {
+        let (norm_haystack, spans) = Self::unicode_normalize_with_spans(haystack);
+        let (norm_needle, _) = Self::unicode_normalize_with_spans(needle);
+        if norm_haystack == haystack && norm_needle == needle {
+            return None;
+        }
+        let pos = norm_haystack.find(&norm_needle)?;
+        let start_char = Self::normalized_byte_to_char_idx(&norm_haystack, pos);
+        let end_char = Self::normalized_byte_to_char_idx(&norm_haystack, pos + norm_needle.len());
+        if start_char >= spans.len() || end_char == 0 || end_char > spans.len() {
+            return None;
+        }
+        Some((spans[start_char].0, spans[end_char - 1].1))
     }
 
     /// Strategy 6: Trim whitespace from first and last lines only.
@@ -361,6 +458,12 @@ impl PatchBackend for LocalPatchBackend {
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read '{}': {}", path, e)))?;
 
+        if old_string == new_string {
+            return Err(ToolError::InvalidParams(
+                "old_string and new_string are identical; no replacement needed".into(),
+            ));
+        }
+
         if old_string.is_empty() {
             // Empty old_string means create new file or append
             let new_content = if content.is_empty() {
@@ -392,18 +495,27 @@ impl PatchBackend for LocalPatchBackend {
         }
 
         // Single replacement with fuzzy matching
+        let exact_count = content.matches(old_string).count();
+        if exact_count > 1 {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Found {exact_count} matches for the specified text in '{path}'. Use replace_all=true to replace all occurrences."
+            )));
+        }
         match Self::fuzzy_find(&content, old_string) {
-            Some((start, end)) => {
+            Some(found) => {
                 let mut new_content = String::with_capacity(content.len());
-                new_content.push_str(&content[..start]);
+                new_content.push_str(&content[..found.start]);
                 new_content.push_str(new_string);
-                new_content.push_str(&content[end..]);
+                new_content.push_str(&content[found.end..]);
 
                 tokio::fs::write(path, &new_content).await.map_err(|e| {
                     ToolError::ExecutionFailed(format!("Failed to write '{}': {}", path, e))
                 })?;
 
-                Ok(json!({"status": "ok", "replacements": 1}).to_string())
+                Ok(
+                    json!({"status": "ok", "replacements": 1, "strategy": found.strategy})
+                        .to_string(),
+                )
             }
             None => Err(ToolError::ExecutionFailed(format!(
                 "Could not find a match for the specified text in '{}'",
@@ -937,5 +1049,67 @@ mod tests {
 
         assert!(files.iter().any(|p| p.ends_with("SKILL.md")));
         assert!(!files.iter().any(|p| p.contains(".hub")));
+    }
+
+    #[tokio::test]
+    async fn patch_file_errors_on_ambiguous_single_replacement() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("ambiguous.txt");
+        std::fs::write(&path, "aaa bbb aaa").expect("write file");
+
+        let backend = LocalPatchBackend::new();
+        let err = backend
+            .patch_file(path.to_str().unwrap(), "aaa", "ccc", false)
+            .await
+            .expect_err("ambiguous replacement should fail");
+        assert!(err.to_string().contains("Found 2 matches"));
+
+        let ok = backend
+            .patch_file(path.to_str().unwrap(), "aaa", "ccc", true)
+            .await
+            .expect("replace all");
+        let parsed: Value = serde_json::from_str(&ok).expect("json");
+        assert_eq!(parsed["replacements"], 2);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "ccc bbb ccc");
+    }
+
+    #[tokio::test]
+    async fn patch_file_reports_strategy_and_matches_unicode_aliases() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("unicode.txt");
+        std::fs::write(&path, "return value\u{2014}fallback").expect("write file");
+
+        let backend = LocalPatchBackend::new();
+        let ok = backend
+            .patch_file(
+                path.to_str().unwrap(),
+                "return value--fallback",
+                "return value or fallback",
+                false,
+            )
+            .await
+            .expect("unicode normalized patch");
+        let parsed: Value = serde_json::from_str(&ok).expect("json");
+        assert_eq!(parsed["replacements"], 1);
+        assert_eq!(parsed["strategy"], "unicode_normalized");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "return value or fallback"
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_file_rejects_identical_old_and_new_strings() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("same.txt");
+        std::fs::write(&path, "abc").expect("write file");
+
+        let backend = LocalPatchBackend::new();
+        let err = backend
+            .patch_file(path.to_str().unwrap(), "abc", "abc", false)
+            .await
+            .expect_err("identical strings should fail");
+        assert!(err.to_string().contains("identical"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "abc");
     }
 }

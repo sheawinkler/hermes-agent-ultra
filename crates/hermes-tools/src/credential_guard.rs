@@ -50,8 +50,24 @@ const PROTECTED_FILE_NAMES: &[&str] = &[
 /// Directory names that are always protected.
 const PROTECTED_DIR_NAMES: &[&str] = &[".ssh", ".gnupg", ".aws", ".config/gcloud", ".kube"];
 
-const WRITE_DENY_EXACT_ABSOLUTE: &[&str] = &["/etc/shadow", "/etc/passwd", "/etc/sudoers"];
-const WRITE_DENY_PREFIX_ABSOLUTE: &[&str] = &["/etc/sudoers.d", "/etc/systemd/system"];
+const WRITE_DENY_EXACT_ABSOLUTE: &[&str] = &[
+    "/etc/hosts",
+    "/etc/shadow",
+    "/etc/passwd",
+    "/etc/sudoers",
+    "/private/etc/hosts",
+    "/private/etc/passwd",
+    "/private/etc/shadow",
+    "/private/etc/sudoers",
+];
+const WRITE_DENY_PREFIX_ABSOLUTE: &[&str] = &[
+    "/boot",
+    "/etc/sudoers.d",
+    "/etc/systemd",
+    "/private/etc/ssh",
+    "/private/etc/sudoers.d",
+    "/private/var",
+];
 const WRITE_DENY_HOME_EXACT: &[&str] = &[
     ".netrc",
     ".bashrc",
@@ -63,7 +79,15 @@ const WRITE_DENY_HOME_EXACT: &[&str] = &[
     ".pypirc",
     ".pgpass",
 ];
-const WRITE_DENY_HOME_PREFIX: &[&str] = &[".ssh", ".aws", ".gnupg", ".kube"];
+const WRITE_DENY_HOME_PREFIX: &[&str] = &[
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".kube",
+    ".docker",
+    ".azure",
+    ".config/gh",
+];
 
 // ---------------------------------------------------------------------------
 // Content secret patterns
@@ -234,10 +258,14 @@ pub fn is_protected_file(path: &Path) -> bool {
 /// file by name. This covers sensitive system files, shell profiles, package
 /// manager credential files, and profile-aware `$HERMES_HOME/.env`.
 pub fn is_write_denied(path: &Path) -> bool {
-    is_write_denied_with_roots(
+    is_write_denied_with_roots_and_safe_root(
         path,
         std::env::var_os("HOME").map(PathBuf::from).as_deref(),
         std::env::var_os("HERMES_HOME")
+            .map(PathBuf::from)
+            .as_deref(),
+        std::env::var_os("HERMES_WRITE_SAFE_ROOT")
+            .filter(|value| !value.is_empty())
             .map(PathBuf::from)
             .as_deref(),
     )
@@ -263,13 +291,7 @@ fn path_has_component_prefix(path: &Path, root: &Path, prefix: &str) -> bool {
         Ok(rel) => rel,
         Err(_) => return false,
     };
-    let Some(first) = rel.components().next().and_then(|c| match c {
-        std::path::Component::Normal(os) => os.to_str(),
-        _ => None,
-    }) else {
-        return false;
-    };
-    first == prefix
+    rel == Path::new(prefix) || rel.starts_with(Path::new(prefix))
 }
 
 /// Root-injected form for deterministic tests and callers that already know
@@ -278,6 +300,17 @@ pub fn is_write_denied_with_roots(
     path: &Path,
     home: Option<&Path>,
     hermes_home: Option<&Path>,
+) -> bool {
+    is_write_denied_with_roots_and_safe_root(path, home, hermes_home, None)
+}
+
+/// Root-injected form including the optional `HERMES_WRITE_SAFE_ROOT` sandbox.
+/// Static system and credential denies always win over the safe-root allowance.
+pub fn is_write_denied_with_roots_and_safe_root(
+    path: &Path,
+    home: Option<&Path>,
+    hermes_home: Option<&Path>,
+    safe_root: Option<&Path>,
 ) -> bool {
     let expanded = expand_home(path, home);
     let normalized = expanded.to_string_lossy();
@@ -315,6 +348,16 @@ pub fn is_write_denied_with_roots(
 
     if let Some(hermes_home) = hermes_home {
         if expanded == hermes_home.join(".env") {
+            return true;
+        }
+    }
+
+    if let Some(safe_root) = safe_root {
+        let expanded_safe_root = expand_home(safe_root, home);
+        if !expanded_safe_root.as_os_str().is_empty()
+            && expanded != expanded_safe_root
+            && !expanded.starts_with(&expanded_safe_root)
+        {
             return true;
         }
     }
@@ -553,6 +596,19 @@ mod tests {
                 Some(&hermes_home)
             ));
         }
+        for path in [
+            "/etc/hosts",
+            "/private/etc/hosts",
+            "/private/etc/passwd",
+            "/private/etc/shadow",
+            "/private/etc/sudoers",
+        ] {
+            assert!(is_write_denied_with_roots(
+                Path::new(path),
+                Some(&home),
+                Some(&hermes_home)
+            ));
+        }
         assert!(is_write_denied_with_roots(
             Path::new("/etc/sudoers.d/custom"),
             Some(&home),
@@ -563,6 +619,18 @@ mod tests {
             Some(&home),
             Some(&hermes_home)
         ));
+        for path in [
+            "/private/etc/ssh/sshd_config",
+            "/private/etc/sudoers.d/custom",
+            "/private/var/db/something",
+            "/boot/grub/grub.cfg",
+        ] {
+            assert!(is_write_denied_with_roots(
+                Path::new(path),
+                Some(&home),
+                Some(&hermes_home)
+            ));
+        }
 
         for rel in [
             ".ssh/authorized_keys",
@@ -570,6 +638,9 @@ mod tests {
             ".aws/credentials",
             ".gnupg/secring.gpg",
             ".kube/config",
+            ".docker/config.json",
+            ".azure/config",
+            ".config/gh/hosts.yml",
             ".netrc",
             ".bashrc",
             ".zshrc",
@@ -623,6 +694,62 @@ mod tests {
         assert!(is_write_denied_with_roots(
             Path::new("~/.netrc"),
             Some(&home),
+            None
+        ));
+    }
+
+    #[test]
+    fn write_safe_root_sandboxes_non_static_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let home = tmp.path().join("home");
+        let safe_root = tmp.path().join("workspace");
+        let outside = tmp.path().join("other/file.txt");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::create_dir_all(&safe_root).expect("safe root");
+
+        assert!(!is_write_denied_with_roots_and_safe_root(
+            &safe_root,
+            Some(&home),
+            None,
+            Some(&safe_root)
+        ));
+        assert!(!is_write_denied_with_roots_and_safe_root(
+            &safe_root.join("subdir/file.txt"),
+            Some(&home),
+            None,
+            Some(&safe_root)
+        ));
+        assert!(is_write_denied_with_roots_and_safe_root(
+            &outside,
+            Some(&home),
+            None,
+            Some(&safe_root)
+        ));
+        assert!(is_write_denied_with_roots_and_safe_root(
+            &home.join(".ssh/id_rsa"),
+            Some(&home),
+            None,
+            Some(&home)
+        ));
+    }
+
+    #[test]
+    fn write_safe_root_expands_tilde_and_ignores_absent_root() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let home = tmp.path().join("home");
+        let workspace = home.join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace");
+
+        assert!(!is_write_denied_with_roots_and_safe_root(
+            &workspace.join("file.txt"),
+            Some(&home),
+            None,
+            Some(Path::new("~/workspace"))
+        ));
+        assert!(!is_write_denied_with_roots_and_safe_root(
+            &tmp.path().join("regular.txt"),
+            Some(&home),
+            None,
             None
         ));
     }
