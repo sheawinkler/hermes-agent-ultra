@@ -427,6 +427,24 @@ impl GenericProvider {
         )
     }
 
+    /// Golden harness: OpenAI-style chat/completions body (messages + tools) for API oracle tests.
+    #[doc(hidden)]
+    pub fn oracle_chat_completions_body(
+        messages: &[Message],
+        tools: &[ToolSchema],
+        model: &str,
+    ) -> Value {
+        let api_messages = Self::sanitize_messages_for_strict_api(messages, false);
+        let mut body = serde_json::json!({
+            "model": model,
+            "messages": api_messages,
+        });
+        if !tools.is_empty() {
+            body["tools"] = Self::format_tools_for_openai_api(tools);
+        }
+        body
+    }
+
     fn build_request(
         &self,
         client: &Client,

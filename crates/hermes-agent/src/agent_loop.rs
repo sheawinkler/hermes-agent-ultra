@@ -2662,6 +2662,18 @@ impl AgentLoop {
         }
     }
 
+    /// Golden harness entry for `messages_for_api_call` (zero-copy migration oracle).
+    #[doc(hidden)]
+    pub fn oracle_messages_for_api_call(&self, ctx: &mut ContextManager) -> Vec<Message> {
+        self.messages_for_api_call(ctx)
+    }
+
+    /// Set turn-scoped memory prefetch injected at API-call time (test harness only).
+    #[doc(hidden)]
+    pub fn oracle_set_turn_ext_prefetch_cache(&self, prefetch: impl Into<String>) {
+        self.set_turn_ext_prefetch_cache(prefetch.into());
+    }
+
     pub(crate) fn session_persistence(&self) -> Option<Arc<SessionPersistence>> {
         let home = self.config().hermes_home.clone()?;
         let home = home.trim().to_string();
