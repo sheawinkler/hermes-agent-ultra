@@ -34,6 +34,7 @@ pub mod skill_orchestrator;
 pub mod smart_model_routing;
 pub mod sub_agent_orchestrator;
 pub mod subdirectory_hints;
+pub mod tool_call_args;
 
 // Re-export primary agent types
 pub use agent_loop::{

@@ -22,6 +22,7 @@ use hermes_intelligence::anthropic_adapter::{
     is_azure_anthropic_endpoint, is_oauth_token, is_third_party_endpoint, requires_bearer_auth,
     supports_fast_mode,
 };
+use hermes_intelligence::supports_vision;
 
 use hermes_core::{
     AgentError, FunctionCall, FunctionCallDelta, LlmProvider, LlmResponse, Message, MessageRole,
@@ -30,6 +31,7 @@ use hermes_core::{
 
 use crate::credential_pool::CredentialPool;
 use crate::rate_limit::RateLimitTracker;
+use crate::tool_call_args::arguments_value_to_string;
 
 const ACP_MULTIMODAL_PREFIX: &str = "__hermes_acp_parts_json__:";
 pub const OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
@@ -509,7 +511,12 @@ impl GenericProvider {
         }
     }
 
-    fn sanitize_messages_for_strict_api(messages: &[Message], enabled: bool) -> Value {
+    fn sanitize_messages_for_api(
+        messages: &[Message],
+        enabled: bool,
+        effective_model: &str,
+    ) -> Value {
+        let model_supports_vision = supports_vision(effective_model);
         let mut out = Vec::with_capacity(messages.len());
         for msg in messages {
             let mut api_msg = serde_json::to_value(msg).unwrap_or_else(|_| serde_json::json!({}));
@@ -518,7 +525,11 @@ impl GenericProvider {
                 .and_then(|v| v.as_str())
                 .and_then(parse_acp_multimodal_parts)
             {
-                api_msg["content"] = Value::Array(parts);
+                api_msg["content"] = if model_supports_vision {
+                    Value::Array(parts)
+                } else {
+                    Value::String(flatten_multimodal_parts_text(&parts))
+                };
             }
             if !enabled {
                 out.push(api_msg);
@@ -534,11 +545,7 @@ impl GenericProvider {
                                 .get("arguments")
                                 .cloned()
                                 .unwrap_or_else(|| Value::String("{}".to_string()));
-                            let args =
-                                args_raw.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
-                                    serde_json::to_string(&args_raw)
-                                        .unwrap_or_else(|_| "{}".to_string())
-                                });
+                            let (args, _) = arguments_value_to_string(Some(&args_raw));
                             Some(serde_json::json!({
                                 "name": name,
                                 "arguments": args,
@@ -865,7 +872,8 @@ impl LlmProvider for GenericProvider {
         let effective_model = model.unwrap_or(&self.model);
         let api_key = self.effective_api_key();
         let strict_tool_sanitize = Self::should_sanitize_tool_calls(extra_body);
-        let api_messages = Self::sanitize_messages_for_strict_api(messages, strict_tool_sanitize);
+        let api_messages =
+            Self::sanitize_messages_for_api(messages, strict_tool_sanitize, effective_model);
 
         let mut body = serde_json::json!({
             "model": effective_model,
@@ -935,7 +943,11 @@ impl LlmProvider for GenericProvider {
             let api_key = provider.effective_api_key();
             let strict_tool_sanitize = GenericProvider::should_sanitize_tool_calls(extra_body.as_ref());
             let api_messages =
-                GenericProvider::sanitize_messages_for_strict_api(&messages, strict_tool_sanitize);
+                GenericProvider::sanitize_messages_for_api(
+                    &messages,
+                    strict_tool_sanitize,
+                    effective_model,
+                );
 
             let mut body = serde_json::json!({
                 "model": effective_model,
@@ -2237,8 +2249,11 @@ impl LlmProvider for OpenRouterProvider {
         let api_key = provider.effective_api_key();
         let strict_tool_sanitize =
             GenericProvider::should_sanitize_tool_calls(merged_extra.as_ref());
-        let api_messages =
-            GenericProvider::sanitize_messages_for_strict_api(messages, strict_tool_sanitize);
+        let api_messages = GenericProvider::sanitize_messages_for_api(
+            messages,
+            strict_tool_sanitize,
+            effective_model,
+        );
 
         let mut body = serde_json::json!({
             "model": effective_model,
@@ -2448,11 +2463,7 @@ fn parse_openai_response(json: &Value) -> Result<LlmResponse, AgentError> {
                     let id = tc.get("id")?.as_str()?.to_string();
                     let function = tc.get("function")?;
                     let name = function.get("name")?.as_str()?.to_string();
-                    let arguments = function
-                        .get("arguments")
-                        .and_then(|a| a.as_str())
-                        .unwrap_or("{}")
-                        .to_string();
+                    let (arguments, _) = arguments_value_to_string(function.get("arguments"));
                     let extra_content = tc.get("extra_content").filter(|v| !v.is_null()).cloned();
 
                     Some(hermes_core::ToolCall {
@@ -2844,7 +2855,7 @@ mod tests {
             }],
         )];
 
-        let sanitized = GenericProvider::sanitize_messages_for_strict_api(&messages, true);
+        let sanitized = GenericProvider::sanitize_messages_for_api(&messages, true, "gpt-4o");
         let tc = &sanitized[0]["tool_calls"][0];
         assert_eq!(tc["id"], "call_123");
         assert_eq!(tc["type"], "function");
@@ -2867,7 +2878,7 @@ mod tests {
                 extra_content: None,
             }],
         )];
-        let sanitized = GenericProvider::sanitize_messages_for_strict_api(&messages, false);
+        let sanitized = GenericProvider::sanitize_messages_for_api(&messages, false, "gpt-4o");
         let tc = &sanitized[0]["tool_calls"][0];
         assert_eq!(tc["name"], "read_file");
         assert_eq!(tc["arguments"], "{\"path\":\"a.txt\"}");
@@ -2875,16 +2886,32 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_messages_for_strict_api_decodes_acp_multimodal_user_parts() {
+    fn test_sanitize_messages_for_api_decodes_acp_multimodal_user_parts_for_vision_models() {
         let parts = serde_json::json!([
             {"type": "text", "text": "inspect"},
             {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
         ]);
         let marker = format!("{}{}", ACP_MULTIMODAL_PREFIX, parts);
         let messages = vec![Message::user(marker)];
-        let sanitized = GenericProvider::sanitize_messages_for_strict_api(&messages, false);
+        let sanitized = GenericProvider::sanitize_messages_for_api(&messages, false, "gpt-4o");
         assert!(sanitized[0]["content"].is_array());
         assert_eq!(sanitized[0]["content"][1]["type"], "image_url");
+    }
+
+    #[test]
+    fn test_sanitize_messages_for_api_collapses_images_for_non_vision_models() {
+        let parts = serde_json::json!([
+            {"type": "text", "text": "inspect"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
+        ]);
+        let marker = format!("{}{}", ACP_MULTIMODAL_PREFIX, parts);
+        let messages = vec![Message::user(marker)];
+        let sanitized =
+            GenericProvider::sanitize_messages_for_api(&messages, false, "deepseek-chat");
+        let content = sanitized[0]["content"].as_str().expect("collapsed text");
+        assert!(content.contains("inspect"));
+        assert!(content.contains("[Attached image]"));
+        assert!(!content.contains("image_url"));
     }
 
     #[test]
@@ -2985,6 +3012,33 @@ mod tests {
         let tc = resp.message.tool_calls.as_ref().unwrap();
         assert_eq!(tc.len(), 1);
         assert_eq!(tc[0].function.name, "read_file");
+    }
+
+    #[test]
+    fn test_parse_openai_response_accepts_object_valued_tool_arguments() {
+        let json = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_dict_args",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": {"path": "README.md"}
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "model": "local-openai-compatible"
+        });
+
+        let resp = parse_openai_response(&json).expect("object arguments should parse");
+        let tc = resp.message.tool_calls.as_ref().unwrap();
+        let args: Value = serde_json::from_str(&tc[0].function.arguments).unwrap();
+        assert_eq!(args["path"], "README.md");
     }
 
     #[test]

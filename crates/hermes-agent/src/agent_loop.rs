@@ -60,6 +60,7 @@ use crate::smart_model_routing::{
     ResolvedCheapRuntime, TurnRouteSignature,
 };
 pub use crate::smart_model_routing::{ApiMode, CheapModelRouteConfig, SmartModelRoutingConfig};
+use crate::tool_call_args::{repair_tool_call_arguments, ToolArgumentRepair};
 
 // ---------------------------------------------------------------------------
 // ToolRegistry
@@ -952,11 +953,17 @@ fn classify_error(err: &str) -> ErrorClass {
         } else {
             ErrorClass::Retryable
         }
-    } else if lower.contains("context length")
+    } else if lower.contains("413")
+        || lower.contains("payload too large")
+        || lower.contains("request too large")
+        || lower.contains("context length")
         || lower.contains("maximum context")
+        || lower.contains("context window")
         || lower.contains("token limit")
         || lower.contains("context_length_exceeded")
         || lower.contains("input is too long")
+        || lower.contains("prompt is too long")
+        || lower.contains("reduce the length")
     {
         ErrorClass::ContextOverflow
     } else if lower.contains("401")
@@ -3783,13 +3790,18 @@ impl AgentLoop {
     }
 
     fn normalize_tool_call_arguments(tc: &mut ToolCall) -> Result<(), String> {
-        let trimmed = tc.function.arguments.trim();
-        if trimmed.is_empty() {
-            tc.function.arguments = "{}".to_string();
-            return Ok(());
+        let (normalized, repair) = repair_tool_call_arguments(&tc.function.arguments);
+        if repair != ToolArgumentRepair::Unchanged {
+            tracing::warn!(
+                "repaired tool-call arguments for tool={} repair={:?}",
+                tc.function.name,
+                repair
+            );
         }
-        serde_json::from_str::<Value>(trimmed)
-            .map(|_| ())
+        serde_json::from_str::<Value>(&normalized)
+            .map(|_| {
+                tc.function.arguments = normalized;
+            })
             .map_err(|e| e.to_string())
     }
 
@@ -4527,6 +4539,11 @@ impl AgentLoop {
                     finish_reason: None,
                     usage: None,
                 });
+            }
+
+            for tc in &mut tool_calls {
+                let (normalized, _) = repair_tool_call_arguments(&tc.function.arguments);
+                tc.function.arguments = normalized;
             }
 
             let has_truncated_tool_args = tool_calls.iter().any(|tc| {
@@ -9368,6 +9385,19 @@ mod tests {
     }
 
     #[test]
+    fn classify_error_context_overflow_contracts_include_413_and_generic_400_text() {
+        for err in [
+            "HTTP 413 payload too large",
+            "API error 400: request too large: max tokens per request is 200000",
+            "prompt is too long: context length 300000 exceeds max of 200000",
+            "Please reduce the length of the messages",
+            "The input exceeds the context window",
+        ] {
+            assert_eq!(classify_error(err), ErrorClass::ContextOverflow, "{err}");
+        }
+    }
+
+    #[test]
     fn tool_payload_validation_error_detector_matches_known_provider_signatures() {
         let strict_shape = "API error 400 Bad Request: Invalid input: expected \"function\"";
         assert!(is_tool_payload_validation_error(strict_shape));
@@ -10635,6 +10665,7 @@ mod tests {
         AlwaysFailMidToolCall,
         TextOnlyDrop,
         MemoryContextLeak,
+        MalformedToolArgs,
     }
 
     struct StreamRetryProvider {
@@ -10722,10 +10753,69 @@ mod tests {
                     Ok(stream_chunk_content("</memory-context> world")),
                     Ok(stream_chunk_finish("stop")),
                 ],
+                StreamRetryScenario::MalformedToolArgs => vec![
+                    Ok(stream_chunk_tool_name(0, "call_repair", "terminal")),
+                    Ok(stream_chunk_tool_args(
+                        0,
+                        "{\"command\":\"ls -la\",\"timeout\":30",
+                    )),
+                    Ok(stream_chunk_finish("tool_calls")),
+                ],
             };
 
             futures::stream::iter(events).boxed()
         }
+    }
+
+    #[test]
+    fn normalize_tool_call_arguments_repairs_malformed_json_without_retry_error() {
+        let mut tc = ToolCall {
+            id: "call_1".to_string(),
+            function: hermes_core::FunctionCall {
+                name: "terminal".to_string(),
+                arguments: "{\"command\":\"ls -la\",\"timeout\":30".to_string(),
+            },
+            extra_content: None,
+        };
+
+        AgentLoop::normalize_tool_call_arguments(&mut tc).expect("repairable arguments");
+        let parsed: Value = serde_json::from_str(&tc.function.arguments).expect("valid JSON");
+        assert_eq!(parsed["command"], "ls -la");
+        assert_eq!(parsed["timeout"], 30);
+    }
+
+    #[tokio::test]
+    async fn stream_tool_call_arguments_are_repaired_before_truncation_retry_gate() {
+        let provider = Arc::new(StreamRetryProvider::new(
+            StreamRetryScenario::MalformedToolArgs,
+        ));
+        let cfg = AgentConfig {
+            stream_read_max_retries: 0,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider);
+        let mut ctx = ContextManager::default_budget();
+        ctx.add_message(Message::system("system"));
+        ctx.add_message(Message::user("run"));
+
+        let out = agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &|_| {})
+            .await
+            .expect("stream should collect");
+
+        let StreamCollectOutcome::Complete(resp) = out else {
+            panic!("expected complete response");
+        };
+        assert_eq!(resp.finish_reason.as_deref(), Some("tool_calls"));
+        let tc = resp
+            .message
+            .tool_calls
+            .as_ref()
+            .and_then(|calls| calls.first())
+            .expect("tool call");
+        let parsed: Value = serde_json::from_str(&tc.function.arguments).expect("valid JSON");
+        assert_eq!(parsed["command"], "ls -la");
+        assert_eq!(parsed["timeout"], 30);
     }
 
     #[tokio::test]

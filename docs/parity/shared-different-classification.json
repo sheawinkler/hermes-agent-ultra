@@ -2430,6 +2430,391 @@
       "rationale": "Python remote manifest/cache behavior is intentionally replaced by Rust provider catalog resolution: curated models plus models.dev/live provider discovery are cached in a signed provider-model cache, stale or tampered cache payloads are rejected, and provider_catalog_entries exposes bounded previews with total model counts for CLI/TUI listing.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_1630_context_overflow_loop.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_413_compression.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_860_dedup.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_anthropic_prompt_cache_policy.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_anthropic_truncation_continuation.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_api_max_retries_config.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_async_httpx_del_neuter.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_background_review.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_background_review_toolset_restriction.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_compress_focus_plugin_fallback.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_compression_boundary.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_compression_boundary_hook.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_compression_feasibility.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_compression_persistence.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_concurrent_interrupt.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_context_token_tracking.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_create_openai_client_reuse.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_deepseek_reasoning_content_echo.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_dict_tool_call_args.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_empty_response_recovery_persistence.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_exit_cleanup_interrupt.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_image_rejection_fallback.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_image_shrink_recovery.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_interactive_interrupt.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_interrupt_propagation.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_invalid_context_length_warning.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_iteration_budget_race.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_jsondecodeerror_retryable.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_long_context_tier_429.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_memory_nudge_counter_hydration.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_memory_provider_init.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_memory_sync_interrupted.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_openai_client_lifecycle.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_plugin_context_engine_init.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_primary_runtime_restore.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_provider_attribution_headers.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_provider_parity.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_real_interrupt_subagent.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_repair_tool_call_arguments.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_run_agent.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_run_agent_codex_responses.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_session_meta_filtering.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_session_reset_fix.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_steer.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_stream_drop_logging.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_streaming.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_streaming_tool_call_repair.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_strict_api_validation.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_strip_reasoning_tags_cli.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_switch_model_context.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_tool_arg_coercion.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_tool_call_args_sanitizer.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_tool_call_guardrail_runtime.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_tool_executor_contextvar_propagation.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_vision_aware_preprocessing.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "owner": "sheawinkler",
+      "ticket": 25
     }
   ]
 }
