@@ -473,6 +473,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "plugins/observability/langfuse/__init__.py",
+      "rationale": "Langfuse observability runtime is covered by Rust-native telemetry: HERMES_LANGFUSE/LANGFUSE credential resolution with placeholder-key rejection, Langfuse OTLP endpoint/header construction, sampling/resource attributes, and structured agent LLM/tool spans; the Python SDK plugin remains reference-only compatibility material.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "plugins/observability/langfuse/README.md",
       "rationale": "Local Langfuse README intentionally documents the Hermes tools credential flow while preserving the manual enable path.",
       "ticket": 304

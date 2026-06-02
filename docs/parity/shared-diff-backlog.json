@@ -931,16 +931,16 @@
       "workstream": "WS3"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
-      "classification_path": "plugins/observability",
-      "existing_coverage": "claimed_by_shared_diff_classification",
+      "action": "Rust-native Langfuse observability now covers HERMES_LANGFUSE/LANGFUSE credential resolution, placeholder-key rejection, Langfuse OTLP endpoint/header construction, sample/resource metadata, and structured Rust LLM/tool spans; keep the Python SDK plugin as reference-only divergence.",
+      "classification": "intentional_divergence",
+      "classification_path": "plugins/observability/langfuse/__init__.py",
+      "existing_coverage": "crates/hermes-telemetry/src/lib.rs::LangfuseTraceConfig + crates/hermes-agent/src/agent_loop.rs structured spans",
       "local_blob": "a99a8eb9279144f873704a98e3768f1f15c4e990",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "plugins/observability/langfuse/__init__.py",
-      "rust_requirement": "rust_native_runtime_parity_required_if_needed",
-      "status": "pending_review",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
       "ticket": 25,
       "upstream_blob": "8516030fb019768c2145ea2f4e5f9145a7dea683",
       "workstream": "WS3"
@@ -15781,7 +15781,7 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-06-02T20:04:11.919081+00:00",
+  "generated_at_utc": "2026-06-02T21:15:55.338064+00:00",
   "refs": {
     "local_ref": "HEAD",
     "local_sha": "827a88bfdb76c9f553c6fb6e644ad178b8ed13e2",
@@ -15791,20 +15791,19 @@
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "functional": 375,
-      "intentional_divergence": 503,
+      "functional": 374,
+      "intentional_divergence": 504,
       "policy_only": 173
     },
     "by_rust_requirement": {
-      "not_required_for_runtime": 677,
+      "not_required_for_runtime": 678,
       "rust_equivalent_or_contract_test_required": 287,
-      "rust_native_runtime_parity_required_if_needed": 1,
       "rust_primary_ux_or_documented_divergence_required": 87
     },
     "by_status": {
-      "cleared_intentional_divergence": 503,
+      "cleared_intentional_divergence": 504,
       "cleared_non_runtime": 174,
-      "pending_review": 375
+      "pending_review": 374
     },
     "by_workstream": {
       "WS3": 58,
@@ -15813,10 +15812,10 @@
       "WS6": 698,
       "WS8": 13
     },
-    "cleared_intentional_divergence": 503,
+    "cleared_intentional_divergence": 504,
     "cleared_non_runtime": 174,
     "pending_classification": 0,
-    "pending_review": 375,
+    "pending_review": 374,
     "total_shared_different": 1052
   }
 }

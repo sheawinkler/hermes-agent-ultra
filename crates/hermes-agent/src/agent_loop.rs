@@ -4884,6 +4884,15 @@ impl AgentLoop {
             self.inject_hook_context(&pre_results, &mut ctx);
 
             // --- LLM API call with transport retry + semantic empty/thinking recovery (Python parity) ---
+            let llm_span = tracing::info_span!(
+                "hermes.llm",
+                turn = total_turns,
+                request_model = %active_model,
+                response_model = tracing::field::Empty,
+                api_time_ms = tracing::field::Empty,
+                finish_reason = tracing::field::Empty,
+                tool_call_count = tracing::field::Empty
+            );
             let api_start = Instant::now();
             let mut inner_empty = 0u32;
             let mut inner_thinking = 0u32;
@@ -5001,6 +5010,30 @@ impl AgentLoop {
                 api_elapsed,
                 governor_window_limit,
             );
+            let response_tool_call_count = response
+                .message
+                .tool_calls
+                .as_ref()
+                .map(|v| v.len())
+                .unwrap_or(0);
+            llm_span.record("response_model", response.model.as_str());
+            llm_span.record("api_time_ms", api_elapsed);
+            if let Some(finish_reason) = response.finish_reason.as_deref() {
+                llm_span.record("finish_reason", finish_reason);
+            }
+            llm_span.record("tool_call_count", response_tool_call_count);
+            llm_span.in_scope(|| {
+                tracing::info!(
+                    target: "hermes.langfuse",
+                    turn = total_turns,
+                    model = %response.model,
+                    api_time_ms = api_elapsed,
+                    tool_call_count = response_tool_call_count,
+                    finish_reason = response.finish_reason.as_deref().unwrap_or(""),
+                    "llm response"
+                );
+            });
+            drop(llm_span);
             replay.record(
                 "llm_response",
                 serde_json::json!({
@@ -5008,7 +5041,7 @@ impl AgentLoop {
                     "model": response.model,
                     "finish_reason": response.finish_reason,
                     "api_time_ms": api_elapsed,
-                    "tool_call_count": response.message.tool_calls.as_ref().map(|v| v.len()).unwrap_or(0),
+                    "tool_call_count": response_tool_call_count,
                     "has_visible_text": Self::assistant_visible_text(&response.message),
                     "route_learning": self.route_learning_snapshot(
                         turn_runtime_route.as_ref(),
@@ -5431,6 +5464,15 @@ impl AgentLoop {
                     persist_user_idx,
                 ));
             }
+            let tool_span = tracing::info_span!(
+                "hermes.tool_batch",
+                turn = total_turns,
+                tool_count = tool_calls.len(),
+                tool_concurrency = tracing::field::Empty,
+                tool_time_ms = tracing::field::Empty,
+                errors = tracing::field::Empty,
+                error_rate = tracing::field::Empty
+            );
             let tool_start = Instant::now();
             let tool_governor = governor_for_turn(
                 &self.config,
@@ -5469,6 +5511,23 @@ impl AgentLoop {
             } else {
                 governor_consecutive_error_turns = 0;
             }
+            tool_span.record("tool_concurrency", tool_governor.tool_concurrency);
+            tool_span.record("tool_time_ms", tool_elapsed);
+            tool_span.record("errors", turn_tool_error_count);
+            tool_span.record("error_rate", turn_tool_error_rate);
+            tool_span.in_scope(|| {
+                tracing::info!(
+                    target: "hermes.langfuse",
+                    turn = total_turns,
+                    tool_count = tool_calls.len(),
+                    tool_concurrency = tool_governor.tool_concurrency,
+                    tool_time_ms = tool_elapsed,
+                    errors = turn_tool_error_count,
+                    error_rate = turn_tool_error_rate,
+                    "tool batch"
+                );
+            });
+            drop(tool_span);
             replay.record(
                 "tool_batch",
                 serde_json::json!({
@@ -6000,6 +6059,16 @@ impl AgentLoop {
             self.inject_hook_context(&pre_results, &mut ctx);
 
             // --- Streaming first attempt + same D-step semantic recovery as `run()` (retries use non-stream) ---
+            let llm_span = tracing::info_span!(
+                "hermes.llm",
+                turn = total_turns,
+                request_model = %active_model,
+                response_model = tracing::field::Empty,
+                api_time_ms = tracing::field::Empty,
+                finish_reason = tracing::field::Empty,
+                tool_call_count = tracing::field::Empty,
+                streaming = true
+            );
             let api_start = Instant::now();
             let mut inner_empty = 0u32;
             let mut inner_thinking = 0u32;
@@ -6165,6 +6234,31 @@ impl AgentLoop {
                 _api_elapsed_ms,
                 governor_window_limit,
             );
+            let response_tool_call_count = response
+                .message
+                .tool_calls
+                .as_ref()
+                .map(|v| v.len())
+                .unwrap_or(0);
+            llm_span.record("response_model", response.model.as_str());
+            llm_span.record("api_time_ms", _api_elapsed_ms);
+            if let Some(finish_reason) = response.finish_reason.as_deref() {
+                llm_span.record("finish_reason", finish_reason);
+            }
+            llm_span.record("tool_call_count", response_tool_call_count);
+            llm_span.in_scope(|| {
+                tracing::info!(
+                    target: "hermes.langfuse",
+                    turn = total_turns,
+                    model = %response.model,
+                    api_time_ms = _api_elapsed_ms,
+                    tool_call_count = response_tool_call_count,
+                    finish_reason = response.finish_reason.as_deref().unwrap_or(""),
+                    streaming = true,
+                    "llm response"
+                );
+            });
+            drop(llm_span);
             replay.record(
                 "llm_response",
                 serde_json::json!({
@@ -6172,7 +6266,7 @@ impl AgentLoop {
                     "model": response.model,
                     "finish_reason": response.finish_reason,
                     "api_time_ms": _api_elapsed_ms,
-                    "tool_call_count": response.message.tool_calls.as_ref().map(|v| v.len()).unwrap_or(0),
+                    "tool_call_count": response_tool_call_count,
                     "has_visible_text": Self::assistant_visible_text(&response.message),
                     "route_learning": self.route_learning_snapshot(
                         turn_runtime_route.as_ref(),
@@ -6650,17 +6744,29 @@ impl AgentLoop {
                 ));
             }
 
+            let tool_span = tracing::info_span!(
+                "hermes.tool_batch",
+                turn = total_turns,
+                tool_count = tool_calls.len(),
+                tool_concurrency = tracing::field::Empty,
+                tool_time_ms = tracing::field::Empty,
+                errors = tracing::field::Empty,
+                error_rate = tracing::field::Empty,
+                streaming = true
+            );
+            let tool_concurrency = governor_for_turn(
+                &self.config,
+                &ctx,
+                tool_calls.len(),
+                Some(&turn_governor_runtime),
+            )
+            .tool_concurrency;
+            let tool_start = Instant::now();
             let mut results = self
                 .execute_tool_calls(
                     &tool_calls,
                     total_turns,
-                    governor_for_turn(
-                        &self.config,
-                        &ctx,
-                        tool_calls.len(),
-                        Some(&turn_governor_runtime),
-                    )
-                    .tool_concurrency,
+                    tool_concurrency,
                     contextlattice_connect_intent,
                     self.config
                         .max_cost_usd
@@ -6668,6 +6774,7 @@ impl AgentLoop {
                     &mut tool_errors,
                 )
                 .await;
+            let tool_elapsed = tool_start.elapsed().as_millis() as u64;
             let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
             let turn_tool_error_rate = if results.is_empty() {
                 0.0
@@ -6685,18 +6792,31 @@ impl AgentLoop {
             } else {
                 governor_consecutive_error_turns = 0;
             }
+            tool_span.record("tool_concurrency", tool_concurrency);
+            tool_span.record("tool_time_ms", tool_elapsed);
+            tool_span.record("errors", turn_tool_error_count);
+            tool_span.record("error_rate", turn_tool_error_rate);
+            tool_span.in_scope(|| {
+                tracing::info!(
+                    target: "hermes.langfuse",
+                    turn = total_turns,
+                    tool_count = tool_calls.len(),
+                    tool_concurrency,
+                    tool_time_ms = tool_elapsed,
+                    errors = turn_tool_error_count,
+                    error_rate = turn_tool_error_rate,
+                    streaming = true,
+                    "tool batch"
+                );
+            });
+            drop(tool_span);
             replay.record(
                 "tool_batch",
                 serde_json::json!({
                     "turn": total_turns,
                     "tool_count": tool_calls.len(),
-                    "tool_concurrency": governor_for_turn(
-                        &self.config,
-                        &ctx,
-                        tool_calls.len(),
-                        Some(&turn_governor_runtime),
-                    )
-                    .tool_concurrency,
+                    "tool_concurrency": tool_concurrency,
+                    "tool_time_ms": tool_elapsed,
                     "errors": turn_tool_error_count,
                     "error_rate": turn_tool_error_rate,
                 }),

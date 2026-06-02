@@ -2000,6 +2000,7 @@ dependencies = [
 name = "hermes-telemetry"
 version = "0.14.2"
 dependencies = [
+ "base64 0.22.1",
  "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",
