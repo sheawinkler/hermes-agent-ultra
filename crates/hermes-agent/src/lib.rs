@@ -17,6 +17,7 @@ pub mod context_files;
 pub mod context_references;
 pub mod conversation_loop;
 pub mod codex_runtime;
+pub mod transports;
 pub mod copilot_acp;
 pub mod credential_pool;
 pub mod credential_pool_recovery;
