@@ -3719,24 +3719,24 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "ui-tui",
-      "rationale": "TUI package and documentation deltas can affect distributed interactive UX behavior and must be reviewed against Hermes Ultra's Rust-primary UX surface.",
+      "rationale": "Upstream TypeScript/Ink TUI source remains reference-only; Rust Ratatui CLI/TUI behavior is covered by docs/parity/ui-tui-source-coverage.json and enforced by crates/hermes-parity-tests/tests/ui_tui_source_coverage_contract.rs.",
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "ui-tui/packages",
-      "rationale": "TUI package differences affect distributed interactive UI behavior.",
+      "rationale": "Upstream TypeScript/Ink TUI source remains reference-only; Rust Ratatui CLI/TUI behavior is covered by docs/parity/ui-tui-source-coverage.json and enforced by crates/hermes-parity-tests/tests/ui_tui_source_coverage_contract.rs.",
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "ui-tui/src",
-      "rationale": "TUI source differences affect interactive UX/runtime surfaces.",
+      "rationale": "Upstream TypeScript/Ink TUI source remains reference-only; Rust Ratatui CLI/TUI behavior is covered by docs/parity/ui-tui-source-coverage.json and enforced by crates/hermes-parity-tests/tests/ui_tui_source_coverage_contract.rs.",
       "ticket": 25
     },
     {

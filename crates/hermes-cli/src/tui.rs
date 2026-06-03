@@ -1020,67 +1020,8 @@ impl TuiState {
     fn handle_insert_key(&mut self, key: KeyEvent, app: &mut App) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
         let mods = key.modifiers;
-        if mods.contains(KeyModifiers::CONTROL) {
-            match key.code {
-                KeyCode::Char('l') => {
-                    self.activity_lane_open = !self.activity_lane_open;
-                    self.status_message = if self.activity_lane_open {
-                        "Activity lane enabled".to_string()
-                    } else {
-                        "Activity lane hidden".to_string()
-                    };
-                    return false;
-                }
-                KeyCode::Char('o') => {
-                    self.activity_lane_mode = match self.activity_lane_mode {
-                        ActivityLaneMode::Live => ActivityLaneMode::Cockpit,
-                        ActivityLaneMode::Cockpit => ActivityLaneMode::Live,
-                    };
-                    self.status_message = match self.activity_lane_mode {
-                        ActivityLaneMode::Live => "Activity lane mode: live".to_string(),
-                        ActivityLaneMode::Cockpit => "Activity lane mode: ops cockpit".to_string(),
-                    };
-                    return false;
-                }
-                KeyCode::Char('d') => {
-                    self.view_density = match self.view_density {
-                        ViewDensity::Compact => ViewDensity::Detailed,
-                        ViewDensity::Detailed => ViewDensity::Compact,
-                    };
-                    self.status_message = match self.view_density {
-                        ViewDensity::Compact => "Compact transcript mode".to_string(),
-                        ViewDensity::Detailed => "Detailed transcript mode".to_string(),
-                    };
-                    return false;
-                }
-                KeyCode::Char('t') => {
-                    self.show_timestamps = !self.show_timestamps;
-                    self.status_message = if self.show_timestamps {
-                        "Timestamps visible".to_string()
-                    } else {
-                        "Timestamps hidden".to_string()
-                    };
-                    return false;
-                }
-                KeyCode::Char('e') => {
-                    if self.expanded_tool_cards.insert("__all__".to_string()) {
-                        self.status_message = "Expanded tool cards".to_string();
-                    } else {
-                        self.expanded_tool_cards.remove("__all__");
-                        self.status_message = "Collapsed tool cards".to_string();
-                    }
-                    return false;
-                }
-                KeyCode::Left => {
-                    self.move_cursor_word_left();
-                    return false;
-                }
-                KeyCode::Right => {
-                    self.move_cursor_word_right();
-                    return false;
-                }
-                _ => {}
-            }
+        if self.handle_insert_control_chord(key) {
+            return false;
         }
         let completion_nav_active = self.input.starts_with('/')
             && !self.completions.is_empty()
@@ -1263,6 +1204,73 @@ impl TuiState {
                 self.refresh_completions();
                 false
             }
+        }
+    }
+
+    fn handle_insert_control_chord(&mut self, key: KeyEvent) -> bool {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        if !key.modifiers.contains(KeyModifiers::CONTROL) {
+            return false;
+        }
+        match key.code {
+            KeyCode::Char('l') => {
+                self.activity_lane_open = !self.activity_lane_open;
+                self.status_message = if self.activity_lane_open {
+                    "Activity lane enabled".to_string()
+                } else {
+                    "Activity lane hidden".to_string()
+                };
+                true
+            }
+            KeyCode::Char('o') => {
+                self.activity_lane_mode = match self.activity_lane_mode {
+                    ActivityLaneMode::Live => ActivityLaneMode::Cockpit,
+                    ActivityLaneMode::Cockpit => ActivityLaneMode::Live,
+                };
+                self.status_message = match self.activity_lane_mode {
+                    ActivityLaneMode::Live => "Activity lane mode: live".to_string(),
+                    ActivityLaneMode::Cockpit => "Activity lane mode: ops cockpit".to_string(),
+                };
+                true
+            }
+            KeyCode::Char('d') => {
+                self.view_density = match self.view_density {
+                    ViewDensity::Compact => ViewDensity::Detailed,
+                    ViewDensity::Detailed => ViewDensity::Compact,
+                };
+                self.status_message = match self.view_density {
+                    ViewDensity::Compact => "Compact transcript mode".to_string(),
+                    ViewDensity::Detailed => "Detailed transcript mode".to_string(),
+                };
+                true
+            }
+            KeyCode::Char('t') => {
+                self.show_timestamps = !self.show_timestamps;
+                self.status_message = if self.show_timestamps {
+                    "Timestamps visible".to_string()
+                } else {
+                    "Timestamps hidden".to_string()
+                };
+                true
+            }
+            KeyCode::Char('e') => {
+                if self.expanded_tool_cards.insert("__all__".to_string()) {
+                    self.status_message = "Expanded tool cards".to_string();
+                } else {
+                    self.expanded_tool_cards.remove("__all__");
+                    self.status_message = "Collapsed tool cards".to_string();
+                }
+                true
+            }
+            KeyCode::Left => {
+                self.move_cursor_word_left();
+                true
+            }
+            KeyCode::Right => {
+                self.move_cursor_word_right();
+                true
+            }
+            _ => false,
         }
     }
 
@@ -5991,6 +5999,59 @@ mod tests {
 
         let shift_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
         assert!(!is_submit_shortcut(&shift_enter, &state.input));
+    }
+
+    #[test]
+    fn test_insert_control_chords_toggle_ui_state_without_text_mutation() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut state = TuiState::default();
+        state.input = "keep me".to_string();
+        state.cursor_position = state.input.len();
+
+        assert!(state
+            .handle_insert_control_chord(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)));
+        assert!(!state.activity_lane_open);
+        assert_eq!(state.status_message, "Activity lane hidden");
+
+        assert!(state
+            .handle_insert_control_chord(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL)));
+        assert_eq!(state.activity_lane_mode, ActivityLaneMode::Cockpit);
+        assert_eq!(state.status_message, "Activity lane mode: ops cockpit");
+
+        assert!(state
+            .handle_insert_control_chord(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)));
+        assert_eq!(state.view_density, ViewDensity::Compact);
+        assert_eq!(state.status_message, "Compact transcript mode");
+
+        assert!(state
+            .handle_insert_control_chord(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL)));
+        assert!(state.show_timestamps);
+        assert_eq!(state.status_message, "Timestamps visible");
+
+        assert!(state
+            .handle_insert_control_chord(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL)));
+        assert!(state.expanded_tool_cards.contains("__all__"));
+        assert_eq!(state.input, "keep me");
+    }
+
+    #[test]
+    fn test_insert_control_word_navigation_respects_unicode_boundaries() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut state = TuiState::default();
+        state.input = "alpha beta éclair".to_string();
+        state.cursor_position = state.input.len();
+
+        assert!(
+            state.handle_insert_control_chord(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL))
+        );
+        assert_eq!(&state.input[state.cursor_position..], "éclair");
+
+        assert!(
+            state.handle_insert_control_chord(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL))
+        );
+        assert_eq!(state.cursor_position, state.input.len());
     }
 
     #[test]
