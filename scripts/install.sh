@@ -259,14 +259,23 @@ run_bounded_post_install_cmd() {
     return $?
   fi
 
-  local marker="${TMP_DIR:-/tmp}/hermes-install-timeout-${label//[^A-Za-z0-9_]/_}-$$-${RANDOM}"
-  rm -f "${marker}"
+  local safe_label="${label//[^A-Za-z0-9_]/_}"
+  local marker="${TMP_DIR:-/tmp}/hermes-install-timeout-${safe_label}-$$-${RANDOM}"
+  local done_marker="${TMP_DIR:-/tmp}/hermes-install-done-${safe_label}-$$-${RANDOM}"
+  rm -f "${marker}" "${done_marker}"
 
   "$@" &
   local cmd_pid=$!
   (
-    sleep "${seconds}"
-    if kill -0 "${cmd_pid}" 2>/dev/null; then
+    local elapsed=0
+    while [[ "${elapsed}" -lt "${seconds}" ]]; do
+      sleep 1
+      if [[ -f "${done_marker}" ]]; then
+        exit 0
+      fi
+      elapsed=$((elapsed + 1))
+    done
+    if [[ ! -f "${done_marker}" ]] && kill -0 "${cmd_pid}" 2>/dev/null; then
       : > "${marker}"
       kill -TERM "${cmd_pid}" 2>/dev/null || true
       sleep 2
@@ -277,16 +286,17 @@ run_bounded_post_install_cmd() {
 
   local status=0
   wait "${cmd_pid}" || status=$?
-  kill "${watcher_pid}" 2>/dev/null || true
+  : > "${done_marker}"
   wait "${watcher_pid}" 2>/dev/null || true
 
   if [[ -f "${marker}" ]]; then
-    rm -f "${marker}"
+    rm -f "${marker}" "${done_marker}"
     echo "${label} timed out after ${seconds}s; continuing. Run manually:"
     echo "  $*"
     return 124
   fi
 
+  rm -f "${done_marker}"
   return "${status}"
 }
 
@@ -402,6 +412,8 @@ if [[ "${PRIMARY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
 fi
 if truthy_env "${INSTALL_LEGACY_ALIAS}" && [[ -n "${LEGACY_BIN_NAME}" ]] && [[ "${LEGACY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
   ln -sfn "${CANONICAL_BIN_NAME}" "${INSTALL_DIR}/${LEGACY_BIN_NAME}"
+elif [[ -n "${LEGACY_BIN_NAME}" ]] && [[ "${LEGACY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
+  echo "Legacy ${LEGACY_BIN_NAME} alias not installed by default; existing upstream ${LEGACY_BIN_NAME} commands are left untouched."
 fi
 
 echo "Installed to ${INSTALL_DIR}/${CANONICAL_BIN_NAME}"
@@ -457,7 +469,11 @@ if [[ -x "${BIN_PATH}" ]]; then
       run_post_install_flow "${BIN_PATH}"
       ;;
     auto)
-      if prompt_yes_no "Run post-install setup flow (doctor + auth status + setup)?" "yes"; then
+      if [[ "${IS_INTERACTIVE}" != "true" ]]; then
+        echo "Post-install setup skipped (non-interactive install). Run later:"
+        echo "  ${BIN_PATH} setup"
+        echo "To run verification during install, pass --setup or set RUN_SETUP_MODE=always."
+      elif prompt_yes_no "Run post-install setup flow (doctor + auth status + setup)?" "yes"; then
         run_post_install_flow "${BIN_PATH}"
       else
         echo "Post-install setup skipped. Run later:"

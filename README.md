@@ -58,6 +58,17 @@ Ultra keeps parity work separate from intentional extensions.
 curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | bash
 ```
 
+The one-line installer is safe to run on machines that also have upstream
+NousResearch Hermes installed as `hermes`: by default it installs
+`hermes-agent-ultra` and `hermes-ultra` only, leaving any existing `hermes`
+command untouched. In non-interactive `curl | bash` installs, post-install
+doctor/auth/setup probes are skipped by default; run setup later with
+`hermes-ultra setup`, or opt in during install with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | bash -s -- --setup
+```
+
 Custom install path:
 
 ```bash
