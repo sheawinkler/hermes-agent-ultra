@@ -275,6 +275,18 @@ pub struct MetricsRegistry {
     pub http_rejects_total: AtomicU64,
     pub prompt_cache_hits: AtomicU64,
     pub prompt_cache_misses: AtomicU64,
+    /// Full user-turn completions through the agent loop.
+    pub agent_turns_total: AtomicU64,
+    /// LLM round-trip wall time (milliseconds, cumulative).
+    pub agent_llm_latency_ms_total: AtomicU64,
+    /// Codex app-server turns completed.
+    pub agent_codex_turns_total: AtomicU64,
+    /// Codex tool iterations observed inside app-server turns.
+    pub agent_codex_tool_iterations_total: AtomicU64,
+    /// Nous cross-session rate-limit breaker trips.
+    pub agent_nous_rate_limit_recorded_total: AtomicU64,
+    /// Nous rate-limit pre-call skips (guard hit before HTTP).
+    pub agent_nous_rate_limit_skips_total: AtomicU64,
 }
 
 pub static METRICS: Lazy<MetricsRegistry> = Lazy::new(MetricsRegistry::default);
@@ -310,6 +322,35 @@ pub fn record_prompt_cache_miss() {
     METRICS.prompt_cache_misses.fetch_add(1, Ordering::Relaxed);
 }
 
+pub fn record_agent_turn() {
+    METRICS.agent_turns_total.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_llm_latency(duration: Duration) {
+    METRICS
+        .agent_llm_latency_ms_total
+        .fetch_add(duration.as_millis() as u64, Ordering::Relaxed);
+}
+
+pub fn record_codex_turn(tool_iterations: u32) {
+    METRICS.agent_codex_turns_total.fetch_add(1, Ordering::Relaxed);
+    METRICS
+        .agent_codex_tool_iterations_total
+        .fetch_add(tool_iterations as u64, Ordering::Relaxed);
+}
+
+pub fn record_nous_rate_limit_recorded() {
+    METRICS
+        .agent_nous_rate_limit_recorded_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_nous_rate_limit_skip() {
+    METRICS
+        .agent_nous_rate_limit_skips_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MetricsSnapshot {
     pub llm_requests_total: u64,
@@ -320,6 +361,12 @@ pub struct MetricsSnapshot {
     pub http_rejects_total: u64,
     pub prompt_cache_hits: u64,
     pub prompt_cache_misses: u64,
+    pub agent_turns_total: u64,
+    pub agent_llm_latency_ms_total: u64,
+    pub agent_codex_turns_total: u64,
+    pub agent_codex_tool_iterations_total: u64,
+    pub agent_nous_rate_limit_recorded_total: u64,
+    pub agent_nous_rate_limit_skips_total: u64,
 }
 
 pub fn snapshot() -> MetricsSnapshot {
@@ -332,6 +379,18 @@ pub fn snapshot() -> MetricsSnapshot {
         http_rejects_total: METRICS.http_rejects_total.load(Ordering::Relaxed),
         prompt_cache_hits: METRICS.prompt_cache_hits.load(Ordering::Relaxed),
         prompt_cache_misses: METRICS.prompt_cache_misses.load(Ordering::Relaxed),
+        agent_turns_total: METRICS.agent_turns_total.load(Ordering::Relaxed),
+        agent_llm_latency_ms_total: METRICS.agent_llm_latency_ms_total.load(Ordering::Relaxed),
+        agent_codex_turns_total: METRICS.agent_codex_turns_total.load(Ordering::Relaxed),
+        agent_codex_tool_iterations_total: METRICS
+            .agent_codex_tool_iterations_total
+            .load(Ordering::Relaxed),
+        agent_nous_rate_limit_recorded_total: METRICS
+            .agent_nous_rate_limit_recorded_total
+            .load(Ordering::Relaxed),
+        agent_nous_rate_limit_skips_total: METRICS
+            .agent_nous_rate_limit_skips_total
+            .load(Ordering::Relaxed),
     }
 }
 
@@ -407,6 +466,58 @@ pub fn prometheus_text() -> String {
         &mut out,
         "hermes_prompt_cache_misses {}",
         s.prompt_cache_misses
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP hermes_agent_turns_total Completed agent user turns."
+    );
+    let _ = writeln!(&mut out, "# TYPE hermes_agent_turns_total counter");
+    let _ = writeln!(&mut out, "hermes_agent_turns_total {}", s.agent_turns_total);
+    let _ = writeln!(
+        &mut out,
+        "# HELP hermes_agent_llm_latency_ms_total Cumulative LLM call latency (ms)."
+    );
+    let _ = writeln!(&mut out, "# TYPE hermes_agent_llm_latency_ms_total counter");
+    let _ = writeln!(
+        &mut out,
+        "hermes_agent_llm_latency_ms_total {}",
+        s.agent_llm_latency_ms_total
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP hermes_agent_codex_turns_total Codex app-server turns."
+    );
+    let _ = writeln!(&mut out, "# TYPE hermes_agent_codex_turns_total counter");
+    let _ = writeln!(
+        &mut out,
+        "hermes_agent_codex_turns_total {}",
+        s.agent_codex_turns_total
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP hermes_agent_nous_rate_limit_recorded_total Nous cross-session breaker writes."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE hermes_agent_nous_rate_limit_recorded_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "hermes_agent_nous_rate_limit_recorded_total {}",
+        s.agent_nous_rate_limit_recorded_total
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP hermes_agent_nous_rate_limit_skips_total Nous guard pre-call skips."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE hermes_agent_nous_rate_limit_skips_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "hermes_agent_nous_rate_limit_skips_total {}",
+        s.agent_nous_rate_limit_skips_total
     );
     out
 }

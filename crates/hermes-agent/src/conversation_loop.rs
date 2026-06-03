@@ -306,6 +306,7 @@ impl AgentLoop {
 
         loop_result.messages = messages;
         let loop_result = self.finalize_agent_result(loop_result);
+        hermes_telemetry::record_agent_turn();
 
         ConversationResult {
             final_response,
@@ -817,6 +818,7 @@ impl AgentLoop {
             }
 
             total_turns += 1;
+            self.invalidate_turn_api_messages_cache();
             checkpoint_mgr.new_turn();
             iteration_budget.consume();
             tracing::debug!("Agent turn {}", total_turns);
