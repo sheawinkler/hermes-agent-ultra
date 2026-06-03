@@ -641,6 +641,19 @@ pub fn register_builtin_tools(
         vec![],
     );
 
+    // -- RTK raw trace control ----------------------------------------------
+    reg(
+        registry,
+        "system",
+        Arc::new(
+            crate::tools::raw_trace_control::RawTraceControlHandler::new(Arc::new(
+                registry.clone(),
+            )),
+        ),
+        "🧾",
+        vec![],
+    );
+
     // -- Tool result storage -------------------------------------------------
     reg(
         registry,
@@ -869,6 +882,10 @@ mod tests {
         assert!(
             names.contains(&"tool_policy_simulate".to_string()),
             "invalid backend should keep policy simulator"
+        );
+        assert!(
+            names.contains(&"raw_trace_control".to_string()),
+            "invalid backend should keep raw trace control"
         );
     }
 

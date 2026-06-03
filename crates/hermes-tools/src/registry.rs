@@ -139,9 +139,7 @@ impl ToolRegistry {
     pub fn set_raw_mode(&self, enabled: bool) {
         let mut inner = self.inner.lock().unwrap();
         inner.rtk_raw_mode = enabled;
-        if enabled {
-            inner.rtk_raw_once = false;
-        }
+        inner.rtk_raw_once = false;
     }
 
     /// Enable one-shot raw pass-through for the next tool dispatch.
