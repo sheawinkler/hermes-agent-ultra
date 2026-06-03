@@ -239,7 +239,7 @@ impl ToolRegistry {
             rtk_filter,
         ) = {
             let mut inner = self.inner.lock().unwrap();
-            let decision = inner.policy.evaluate(name, &params);
+            let decision = evaluate_dispatch_policy(&inner.policy, name, &params);
             let raw_bypassed = inner.rtk_raw_mode || inner.rtk_raw_once;
             if inner.rtk_raw_once {
                 inner.rtk_raw_once = false;
@@ -320,7 +320,7 @@ impl ToolRegistry {
             }
             let (effective_params, rewrite_applied) =
                 inner.rtk_filter.rewrite_params(name, &params, raw_bypassed);
-            let decision = inner.policy.evaluate(name, &params);
+            let decision = evaluate_dispatch_policy(&inner.policy, name, &params);
             match inner.tools.get(name) {
                 Some(e) => (
                     Arc::clone(&e.handler),
@@ -478,6 +478,19 @@ impl ToolRegistry {
         };
         let _ =
             persist_tool_policy_counters(&default_tool_policy_counters_path(), &counters_snapshot);
+    }
+}
+
+fn evaluate_dispatch_policy(
+    policy: &ToolPolicyEngine,
+    name: &str,
+    params: &Value,
+) -> ToolPolicyDecision {
+    if name == crate::tools::tool_policy_simulate::TOOL_POLICY_SIMULATE_TOOL_NAME {
+        let policy_params = crate::tools::tool_policy_simulate::dispatch_policy_params(params);
+        policy.evaluate(name, &policy_params)
+    } else {
+        policy.evaluate(name, params)
     }
 }
 

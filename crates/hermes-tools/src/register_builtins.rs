@@ -628,6 +628,19 @@ pub fn register_builtin_tools(
         vec![],
     );
 
+    // -- Tool policy simulation ---------------------------------------------
+    reg(
+        registry,
+        "system",
+        Arc::new(
+            crate::tools::tool_policy_simulate::ToolPolicySimulateHandler::new(Arc::new(
+                registry.clone(),
+            )),
+        ),
+        "🧭",
+        vec![],
+    );
+
     // -- Tool result storage -------------------------------------------------
     reg(
         registry,
@@ -853,6 +866,10 @@ mod tests {
                 "invalid backend should keep independent tool {independent}"
             );
         }
+        assert!(
+            names.contains(&"tool_policy_simulate".to_string()),
+            "invalid backend should keep policy simulator"
+        );
     }
 
     #[test]

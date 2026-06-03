@@ -28,6 +28,7 @@ pub mod skills;
 pub mod spotify;
 pub mod terminal;
 pub mod todo;
+pub mod tool_policy_simulate;
 pub mod tool_result_storage;
 pub mod transcription;
 pub mod tts;
