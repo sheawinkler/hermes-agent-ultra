@@ -39,6 +39,7 @@ syn = { version = "2", features = ["full"] }
 sha2 = "0.11"
 hex = "0.4"
 rand = "0.10"
+url = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

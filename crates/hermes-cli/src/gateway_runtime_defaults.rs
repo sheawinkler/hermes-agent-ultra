@@ -19,8 +19,8 @@ pub fn apply_gateway_runtime_defaults() {
     set_var_if_unset("HERMES_DDGS_REGION", "cn-zh");
     set_var_if_unset("HERMES_TOOL_PROGRESS_INITIAL_DELAY_MS", "4000");
     set_var_if_unset("HERMES_TOOL_PROGRESS_INTERVAL_MS", "15000");
-    set_var_if_unset("HERMES_WEB_TOOL_BUDGET_MAX_CALLS", "3");
-    set_var_if_unset("HERMES_WEB_SEARCH_BUDGET_MAX_CALLS", "2");
+    // Per-tool run budgets default in hermes-agent `web_tool_budget` (browser=2, extract=5, search=2).
+    // Optional aggregate backstop: set HERMES_WEB_TOOL_BUDGET_MAX_CALLS explicitly if needed.
 }
 
 #[cfg(test)]

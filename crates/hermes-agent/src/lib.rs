@@ -53,6 +53,7 @@ pub mod tools_wiring;
 pub mod user_interest;
 pub mod vision_adapter;
 pub mod vision_message_prepare;
+mod web_tool_budget;
 
 // Re-export primary agent types
 pub use agent_loop::{
