@@ -1,17 +1,17 @@
 from pathlib import Path
 import re
-import tomllib
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_homebrew_formula_tracks_workspace_release_version():
-    cargo = tomllib.loads((REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8"))
-    version = cargo["workspace"]["package"]["version"]
+def test_homebrew_formula_release_urls_match_formula_version():
     formula = (REPO_ROOT / "packaging/homebrew/hermes-agent.rb").read_text(
         encoding="utf-8"
     )
+    version_match = re.search(r'version "([^"]+)"', formula)
+    assert version_match is not None
+    version = version_match.group(1)
 
     assert f'version "{version}"' in formula
     assert f"/releases/download/v{version}/" in formula

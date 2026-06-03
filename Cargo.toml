@@ -21,7 +21,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.14.2"
+version = "0.15.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/sheawinkler/hermes-agent-ultra"
