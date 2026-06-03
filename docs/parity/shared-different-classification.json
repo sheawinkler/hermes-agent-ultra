@@ -723,10 +723,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests",
-      "rationale": "Top-level test differences can encode behavior contracts and must be mapped to Rust-native or local contract-test coverage before being cleared.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -793,10 +793,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/agent",
-      "rationale": "Agent tests cover model routing, provider, memory, and loop semantics.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -1059,10 +1059,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/cli",
-      "rationale": "CLI test deltas cover command contracts and user-visible runtime behavior.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -1171,10 +1171,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/e2e",
-      "rationale": "End-to-end tests cover user-visible runtime workflows and must stay parity-reviewed before clearance.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -2543,24 +2543,24 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/honcho_plugin",
-      "rationale": "Honcho plugin tests cover memory/plugin behavior.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/integration",
-      "rationale": "Integration tests cover cross-component runtime behavior and must stay parity-reviewed before clearance.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/plugins",
-      "rationale": "Plugin tests cover loader, hook, and runtime integration behavior.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -2620,10 +2620,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/run_agent",
-      "rationale": "Run-agent tests cover orchestration and provider execution semantics.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -3019,17 +3019,17 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/skills",
-      "rationale": "Skill tests cover loader, guard, and execution semantics.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/stress",
-      "rationale": "Stress tests cover runtime reliability envelopes.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -3040,10 +3040,10 @@
       "ticket": 304
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/tools",
-      "rationale": "Tool tests cover command, policy, and backend semantics that affect runtime parity.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -3712,10 +3712,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/tui_gateway",
-      "rationale": "TUI gateway tests cover interactive gateway behavior and must stay parity-reviewed against Rust-native UX/runtime contracts.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
