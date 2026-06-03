@@ -1,22 +1,22 @@
 # Shared-Different Backlog
 
-Generated: `2026-06-02T22:39:30.390629+00:00`
+Generated: `2026-06-03T00:29:20.317Z`
 
 ## Summary
 
 - Total shared-different paths: `1052`
 - Pending classification: `0`
-- Pending functional review: `261`
+- Pending functional review: `174`
 - Cleared non-runtime: `174`
-- Cleared intentional divergence: `617`
+- Cleared intentional divergence: `704`
 
 ## Status Counts
 
 | Status | Count |
 | --- | ---: |
-| `cleared_intentional_divergence` | 617 |
+| `cleared_intentional_divergence` | 704 |
 | `cleared_non_runtime` | 174 |
-| `pending_review` | 261 |
+| `pending_review` | 174 |
 
 ## Workstream Counts
 
@@ -37,18 +37,15 @@ Generated: `2026-06-02T22:39:30.390629+00:00`
 
 | Classification Path | Count |
 | --- | ---: |
-| `ui-tui/src` | 64 |
 | `tests/tools` | 47 |
 | `tests` | 39 |
 | `tests/cli` | 26 |
 | `tests/agent` | 22 |
-| `ui-tui/packages` | 20 |
 | `tests/plugins` | 14 |
 | `tests/skills` | 6 |
 | `tests/honcho_plugin` | 5 |
 | `tests/stress` | 5 |
 | `tests/tui_gateway` | 4 |
 | `tests/integration` | 3 |
-| `ui-tui` | 3 |
 | `tests/e2e` | 2 |
 | `tests/run_agent` | 1 |
