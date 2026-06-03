@@ -19,7 +19,7 @@
       in {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "hermes-agent";
-          version = "0.14.2";
+          version = "0.15.0";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
 
