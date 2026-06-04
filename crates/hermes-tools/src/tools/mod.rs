@@ -19,6 +19,7 @@ pub mod managed_tool_gateway;
 pub mod memory;
 pub mod messaging;
 pub mod mixture_of_agents;
+pub mod ops_snapshot;
 pub mod osv_check;
 pub mod process_registry;
 pub mod raw_trace_control;

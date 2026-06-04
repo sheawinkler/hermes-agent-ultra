@@ -681,6 +681,17 @@ pub fn register_builtin_tools(
         vec![],
     );
 
+    // -- Read-only ops snapshot ---------------------------------------------
+    reg(
+        registry,
+        "system",
+        Arc::new(crate::tools::ops_snapshot::OpsSnapshotHandler::new(
+            Arc::new(registry.clone()),
+        )),
+        "🛰️",
+        vec![],
+    );
+
     // -- Tool result storage -------------------------------------------------
     reg(
         registry,
@@ -925,6 +936,10 @@ mod tests {
         assert!(
             names.contains(&"telemetry_snapshot".to_string()),
             "invalid backend should keep telemetry snapshots"
+        );
+        assert!(
+            names.contains(&"ops_snapshot".to_string()),
+            "invalid backend should keep read-only ops snapshots"
         );
     }
 

@@ -74,6 +74,7 @@ pub use tools::managed_tool_gateway::ManagedToolGatewayHandler;
 pub use tools::memory::{MemoryBackend, MemoryHandler};
 pub use tools::messaging::{MessagingBackend, SendMessageHandler};
 pub use tools::mixture_of_agents::MixtureOfAgentsHandler;
+pub use tools::ops_snapshot::OpsSnapshotHandler;
 pub use tools::osv_check::OsvCheckHandler;
 pub use tools::process_registry::ProcessRegistryHandler;
 pub use tools::raw_trace_control::RawTraceControlHandler;
