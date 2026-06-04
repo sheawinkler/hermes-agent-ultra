@@ -24,6 +24,20 @@ pub fn register_builtin_tools(
     terminal_backend: Arc<dyn TerminalBackend>,
     skill_provider: Arc<dyn SkillProvider>,
 ) {
+    register_builtin_tools_with_data_dir(
+        registry,
+        terminal_backend,
+        skill_provider,
+        hermes_data_dir(),
+    );
+}
+
+fn register_builtin_tools_with_data_dir(
+    registry: &ToolRegistry,
+    terminal_backend: Arc<dyn TerminalBackend>,
+    skill_provider: Arc<dyn SkillProvider>,
+    data_dir: PathBuf,
+) {
     fn reg(
         registry: &ToolRegistry,
         toolset: &str,
@@ -294,7 +308,7 @@ pub fn register_builtin_tools(
 
     // -- Session search ------------------------------------------------------
     {
-        let db_path = hermes_data_dir().join("sessions.db");
+        let db_path = data_dir.join("sessions.db");
         if let Ok(backend) = crate::backends::session_search::SqliteSessionSearchBackend::new(
             &db_path.to_string_lossy(),
         ) {
@@ -314,7 +328,7 @@ pub fn register_builtin_tools(
 
     // -- Todo ----------------------------------------------------------------
     {
-        let todo_path = hermes_data_dir().join("todos.json");
+        let todo_path = data_dir.join("todos.json");
         reg(
             registry,
             "todo",
@@ -920,12 +934,13 @@ mod tests {
         names
     }
 
-    fn registered_all_names() -> Vec<String> {
+    fn registered_all_names_with_data_dir(data_dir: PathBuf) -> Vec<String> {
         let registry = ToolRegistry::new();
-        register_builtin_tools(
+        register_builtin_tools_with_data_dir(
             &registry,
             Arc::new(MockTerminalBackend),
             Arc::new(MockSkillProvider),
+            data_dir,
         );
         let mut names: Vec<String> = registry
             .list_tools()
@@ -1070,7 +1085,7 @@ mod tests {
         let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
         let _hermes_home =
             EnvGuard::set("HERMES_HOME", hermes_home.path().to_string_lossy().as_ref());
-        let names = registered_all_names();
+        let names = registered_all_names_with_data_dir(hermes_home.path().to_path_buf());
 
         assert!(names.contains(&"terminal".to_string()));
         assert!(names.contains(&"process".to_string()));
