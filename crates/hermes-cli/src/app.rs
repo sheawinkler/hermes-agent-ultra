@@ -35,7 +35,7 @@ use hermes_config::{
 };
 use hermes_core::ToolSchema;
 use hermes_core::{AgentError, LlmProvider};
-use hermes_cron::cron_scheduler_for_data_dir;
+use hermes_cron::{CronRunner, CronScheduler, FileJobPersistence};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
@@ -2065,7 +2065,12 @@ impl App {
         let cron_data_dir = state_root.join("cron");
         std::fs::create_dir_all(&cron_data_dir)
             .map_err(|e| AgentError::Io(format!("cron dir {}: {}", cron_data_dir.display(), e)))?;
-        let cron_scheduler = Arc::new(cron_scheduler_for_data_dir(cron_data_dir));
+        let cron_scheduler = Arc::new(build_runtime_cron_scheduler(
+            &config,
+            &current_model,
+            cron_data_dir,
+            &tool_registry,
+        ));
         cron_scheduler
             .load_persisted_jobs()
             .await
@@ -3696,9 +3701,46 @@ mod tests {
     use hermes_agent::plugins::{HookResult, Plugin, PluginContext, PluginManager};
     use hermes_config::LlmProviderConfig;
     use std::collections::HashMap;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
         test_env_lock::lock()
+    }
+
+    struct TestToolHandler {
+        name: &'static str,
+    }
+
+    #[async_trait::async_trait]
+    impl hermes_core::ToolHandler for TestToolHandler {
+        async fn execute(&self, _params: Value) -> Result<String, hermes_core::ToolError> {
+            Ok(format!("{} ok", self.name))
+        }
+
+        fn schema(&self) -> ToolSchema {
+            ToolSchema::new(
+                self.name,
+                "test tool",
+                hermes_core::JsonSchema::new("object"),
+            )
+        }
+    }
+
+    fn register_test_tool(tools: &ToolRegistry, name: &'static str) {
+        let handler: Arc<dyn hermes_core::ToolHandler> = Arc::new(TestToolHandler { name });
+        tools.register(
+            name,
+            "test",
+            handler.schema(),
+            handler,
+            Arc::new(|| true),
+            vec![],
+            true,
+            "test tool",
+            "T",
+            None,
+        );
     }
 
     fn build_minimal_test_app() -> App {
@@ -4306,6 +4348,88 @@ mod tests {
             .get("custom")
             .expect("runtime provider should exist");
         assert_eq!(runtime.api_key_env.as_deref(), Some("MY_FALLBACK_KEY"));
+    }
+
+    #[tokio::test]
+    async fn runtime_cron_scheduler_uses_configured_provider_not_minimal_fallback() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "chatcmpl-live-cron-test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-live-cron",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": "live-cron-provider-ok"
+                        },
+                        "finish_reason": "stop"
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut config = GatewayConfig::default();
+        config.model = Some("openai:gpt-live-cron".to_string());
+        config.llm_providers.insert(
+            "openai".to_string(),
+            LlmProviderConfig {
+                api_key: Some("test-key".to_string()),
+                base_url: Some(server.uri()),
+                model: Some("gpt-live-cron".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let temp = tempfile::tempdir().expect("cron tempdir");
+        let tools = ToolRegistry::new();
+        let scheduler = build_runtime_cron_scheduler(
+            &config,
+            "openai:gpt-live-cron",
+            temp.path().to_path_buf(),
+            &tools,
+        );
+        let job_id = scheduler
+            .create_job(hermes_cron::CronJob::new(
+                "0 * * * *",
+                "prove live cron provider wiring",
+            ))
+            .await
+            .expect("create cron job");
+        let result = scheduler.run_job(&job_id).await.expect("run cron job");
+        let final_text = result
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| message.content.as_deref())
+            .unwrap_or_default();
+
+        assert!(final_text.contains("live-cron-provider-ok"));
+        assert!(!final_text.contains("fallback LLM path"));
+        server.verify().await;
+    }
+
+    #[test]
+    fn runtime_cron_scheduler_bridge_excludes_recursive_cronjob_tool() {
+        let tools = ToolRegistry::new();
+        register_test_tool(&tools, "cronjob");
+        register_test_tool(&tools, "terminal");
+
+        let agent_registry = bridge_tool_registry_excluding(&tools, &["cronjob"]);
+        let names = agent_registry.names();
+
+        assert!(!names.contains(&"cronjob".to_string()));
+        assert!(names.contains(&"terminal".to_string()));
     }
 
     #[test]
@@ -5785,8 +5909,15 @@ fn merge_service_tier_extra_body(
 // ---------------------------------------------------------------------------
 
 pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
+    bridge_tool_registry_excluding(tools, &[])
+}
+
+fn bridge_tool_registry_excluding(tools: &ToolRegistry, excluded: &[&str]) -> AgentToolRegistry {
     let mut agent_registry = AgentToolRegistry::new();
     for schema in tools.get_definitions() {
+        if excluded.iter().any(|name| schema.name == *name) {
+            continue;
+        }
         let name = schema.name.clone();
         let tools_clone = tools.clone();
         agent_registry.register(
@@ -5800,6 +5931,24 @@ pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
         );
     }
     agent_registry
+}
+
+/// Build a scheduler for long-running CLI runtimes from the active provider and
+/// registered tools. This keeps scheduled jobs equivalent to explicit
+/// `hermes cron run` instead of completing through the minimal CRUD scheduler.
+pub fn build_runtime_cron_scheduler(
+    config: &GatewayConfig,
+    model: &str,
+    data_dir: PathBuf,
+    tools: &ToolRegistry,
+) -> CronScheduler {
+    let persistence = Arc::new(FileJobPersistence::with_dir(data_dir));
+    let provider = build_provider(config, model);
+    let runner = Arc::new(CronRunner::new(
+        provider,
+        Arc::new(bridge_tool_registry_excluding(tools, &["cronjob"])),
+    ));
+    CronScheduler::new(persistence, runner)
 }
 
 // ---------------------------------------------------------------------------

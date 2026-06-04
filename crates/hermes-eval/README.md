@@ -4,14 +4,16 @@
 
 ## Quick Start
 
-Run the configured smoke benchmark with a deterministic noop rollout:
+Run the configured smoke benchmark with a deterministic smoke rollout:
 
 ```bash
 cargo run -p hermes-eval --bin hermes-bench -- \
   --benchmark crates/hermes-eval/benchmarks/configured-smoke.toml \
-  --rollout noop \
+  --rollout smoke \
   --print-json
 ```
+
+`--rollout=noop` remains accepted as a compatibility alias for older scripts.
 
 Run against a real `AgentLoop` rollout:
 
