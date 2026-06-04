@@ -47,7 +47,7 @@ use crate::alpha_runtime::{
     set_objective_simulation_mode, set_quorum_policy, summarize_objective_contract,
     upsert_objective_contract, utility_terms_from_contract, ObjectiveLearningLedgerEntry,
 };
-use crate::app::{App, PetDock, PetSettings};
+use crate::app::{build_runtime_cron_scheduler, App, PetDock, PetSettings};
 use crate::kanban::{
     add_task, archive_done, claim_task, create_or_select_board, ensure_board, find_task_mut,
     lane_counts, load_store, maybe_checkpoint_to_contextlattice, move_task, save_store,
@@ -21118,7 +21118,6 @@ pub async fn handle_cli_chat(
     use crate::tool_preview::{build_tool_preview_from_value, tool_emoji};
     use hermes_config::load_config;
     use hermes_core::MessageRole;
-    use hermes_cron::cron_scheduler_for_data_dir;
     use hermes_skills::{FileSkillStore, SkillManager};
     use hermes_tools::ToolRegistry;
 
@@ -21163,7 +21162,12 @@ pub async fn handle_cli_chat(
         let cron_data_dir = hermes_config::cron_dir();
         std::fs::create_dir_all(&cron_data_dir)
             .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-        let cron_scheduler = Arc::new(cron_scheduler_for_data_dir(cron_data_dir));
+        let cron_scheduler = Arc::new(build_runtime_cron_scheduler(
+            &config,
+            &current_model,
+            cron_data_dir,
+            &tool_registry,
+        ));
         cron_scheduler
             .load_persisted_jobs()
             .await
@@ -26535,7 +26539,12 @@ pub async fn handle_cli_acp(
             let cron_data_dir = hermes_config::cron_dir();
             std::fs::create_dir_all(&cron_data_dir)
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-            let cron_scheduler = Arc::new(hermes_cron::cron_scheduler_for_data_dir(cron_data_dir));
+            let cron_scheduler = Arc::new(build_runtime_cron_scheduler(
+                &config,
+                &model,
+                cron_data_dir,
+                &tool_registry,
+            ));
             cron_scheduler
                 .load_persisted_jobs()
                 .await

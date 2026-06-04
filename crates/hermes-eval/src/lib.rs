@@ -19,7 +19,7 @@
 //!
 //! ## Wiring a real agent
 //!
-//! - **Smoke / CI**: [`tblite::NoopRollout`](crate::tblite::NoopRollout).
+//! - **Smoke / CI**: [`tblite::SmokeRollout`](crate::tblite::SmokeRollout).
 //! - **Real agent** (feature `agent-loop`): [`AgentLoopRollout`](crate::AgentLoopRollout) wraps
 //!   [`hermes_agent::AgentLoop`]; build the loop like `hermes-cli`, then `Arc` + [`Runner::run`](runner::Runner::run).
 //!
@@ -54,5 +54,7 @@ pub use error::{EvalError, EvalResult};
 pub use reporter::{JsonReporter, Reporter};
 pub use result::{AggregateMetrics, RunRecord, TaskResult, TaskStatus};
 pub use runner::{Runner, RunnerConfig, TaskRollout};
-pub use tblite::{tblite_smoke_tasks, NoopRollout, SmokePassVerifier, TbliteSmokeAdapter};
+pub use tblite::{
+    tblite_smoke_tasks, NoopRollout, SmokePassVerifier, SmokeRollout, TbliteSmokeAdapter,
+};
 pub use verifier::{VerificationOutcome, Verifier};

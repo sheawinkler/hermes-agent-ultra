@@ -3,7 +3,7 @@
 //! Example:
 //!   cargo run -p hermes-eval --bin hermes-bench -- \
 //!     --benchmark crates/hermes-eval/benchmarks/configured-smoke.toml \
-//!     --rollout noop --print-json
+//!     --rollout smoke --print-json
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,8 +14,8 @@ use hermes_core::SkillProvider;
 #[cfg(feature = "agent-loop")]
 use hermes_eval::AgentLoopRollout;
 use hermes_eval::{
-    ConfiguredBenchmarkAdapter, EvalError, EvalResult, JsonReporter, NoopRollout, Reporter, Runner,
-    RunnerConfig,
+    ConfiguredBenchmarkAdapter, EvalError, EvalResult, JsonReporter, Reporter, Runner,
+    RunnerConfig, SmokeRollout,
 };
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
@@ -23,7 +23,8 @@ use hermes_tools::ToolRegistry;
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum RolloutKind {
     Agent,
-    Noop,
+    #[value(alias = "noop")]
+    Smoke,
 }
 
 #[derive(Debug, Parser)]
@@ -38,7 +39,7 @@ struct Args {
     #[arg(long)]
     model: Option<String>,
 
-    /// Rollout backend (agent = real AgentLoop, noop = deterministic no-agent rollout).
+    /// Rollout backend (agent = real AgentLoop, smoke = deterministic CI smoke rollout).
     #[arg(long, value_enum, default_value_t = RolloutKind::Agent)]
     rollout: RolloutKind,
 
@@ -112,7 +113,7 @@ async fn run() -> EvalResult<()> {
 
     let adapter = Arc::new(ConfiguredBenchmarkAdapter::from_path(&benchmark_path)?);
     let record = match args.rollout {
-        RolloutKind::Noop => runner.run(adapter, Arc::new(NoopRollout)).await?,
+        RolloutKind::Smoke => runner.run(adapter, Arc::new(SmokeRollout)).await?,
         RolloutKind::Agent => {
             #[cfg(feature = "agent-loop")]
             {

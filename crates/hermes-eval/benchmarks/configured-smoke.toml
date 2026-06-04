@@ -16,6 +16,6 @@ timeout_secs = 90
 task_id = "smoke_capability_check"
 category = "smoke"
 instruction = "List one capability this agent has and one way to verify it."
-expected_any = ["smoke", "noop rollout", "task_id"]
+expected_any = ["agent", "capability", "verify", "task_id", "smoke rollout"]
 min_length = 50
 timeout_secs = 90

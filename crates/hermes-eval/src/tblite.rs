@@ -3,8 +3,8 @@
 //! Does **not** download HuggingFace datasets or run Docker — it exposes two tiny
 //! [`TaskSpec`](crate::TaskSpec) entries whose metadata matches the upstream
 //! benchmark id (`NousResearch/openthoughts-tblite`) for wiring checks and CI.
-//! Verification is a no-op pass suitable only for smoke; real evals must swap
-//! in a Docker- or script-based [`Verifier`](crate::verifier::Verifier).
+//! Verification is a deterministic smoke pass for CI wiring; full evals should
+//! use benchmark-specific [`Verifier`](crate::verifier::Verifier) implementations.
 
 use std::time::Duration;
 
@@ -22,7 +22,7 @@ pub fn tblite_smoke_tasks() -> Vec<TaskSpec> {
         TaskSpec {
             task_id: "tblite_smoke_01".into(),
             category: Some("smoke".into()),
-            instruction: "TBLite smoke task 01: deterministic no-agent rollout.".into(),
+            instruction: "TBLite smoke task 01: deterministic smoke rollout.".into(),
             context: json!({
                 "benchmark": "openthoughts-tblite",
                 "smoke": true,
@@ -33,7 +33,7 @@ pub fn tblite_smoke_tasks() -> Vec<TaskSpec> {
         TaskSpec {
             task_id: "tblite_smoke_02".into(),
             category: Some("smoke".into()),
-            instruction: "TBLite smoke task 02: deterministic no-agent rollout.".into(),
+            instruction: "TBLite smoke task 02: deterministic smoke rollout.".into(),
             context: json!({
                 "benchmark": "openthoughts-tblite",
                 "smoke": true,
@@ -90,18 +90,21 @@ impl Verifier for SmokePassVerifier {
 
 /// Deterministic rollout: returns a JSON blob with the task id (no LLM, no tools).
 #[derive(Debug, Default, Clone, Copy)]
-pub struct NoopRollout;
+pub struct SmokeRollout;
 
 #[async_trait]
-impl TaskRollout for NoopRollout {
+impl TaskRollout for SmokeRollout {
     async fn execute(&self, task: &TaskSpec) -> EvalResult<serde_json::Value> {
         Ok(json!({
             "smoke": true,
             "task_id": task.task_id,
-            "note": "noop rollout — replace with hermes-agent driver for real evals",
+            "note": "deterministic smoke rollout; use --rollout agent for live agent evals",
         }))
     }
 }
+
+/// Backward-compatible alias for scripts that still pass the old rollout name.
+pub type NoopRollout = SmokeRollout;
 
 #[cfg(test)]
 mod tests {
@@ -127,7 +130,7 @@ mod tests {
         let record = runner
             .run(
                 Arc::new(TbliteSmokeAdapter::default()),
-                Arc::new(NoopRollout),
+                Arc::new(SmokeRollout),
             )
             .await
             .expect("smoke run");
