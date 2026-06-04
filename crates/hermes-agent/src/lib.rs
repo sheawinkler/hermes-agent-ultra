@@ -72,7 +72,9 @@ pub use agent_loop::{
     AgentCallbacks, AgentConfig, AgentLoop, ApiMode, AsyncToolDispatch, CheapModelRouteConfig,
     ErrorClass, RetryConfig, SmartModelRoutingConfig, ToolRegistry, TurnMetrics,
 };
-pub use session_state::SessionUsageMetrics;
+pub use session_state::{
+    format_gateway_usage_text, format_usage_command_text, SessionUsageDisplay, SessionUsageMetrics,
+};
 pub use conversation_loop::{
     ConversationResult, RunConversationParams, extract_last_assistant_reply,
     split_messages_for_run_conversation,

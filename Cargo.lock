@@ -2358,6 +2358,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures",
+ "hermes-agent",
  "hermes-config",
  "hermes-core",
  "hermes-skills",

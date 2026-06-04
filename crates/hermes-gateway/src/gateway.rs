@@ -444,6 +444,8 @@ pub struct Gateway {
     runtime_state: RwLock<HashMap<String, SessionRuntimeState>>,
     /// Basic usage counters for each session.
     usage_stats: RwLock<HashMap<String, UsageStats>>,
+    /// LLM token totals from agent loop (Python `agent.session_*` for `/usage`).
+    session_token_usage: RwLock<HashMap<String, hermes_agent::SessionUsageDisplay>>,
     /// Tracks async `/background` and `/btw` tasks.
     background_tasks: Arc<BackgroundTaskManager>,
     /// MCP reload generation number.
@@ -598,6 +600,7 @@ impl Gateway {
             streaming_handler_with_context: RwLock::new(None),
             runtime_state: RwLock::new(HashMap::new()),
             usage_stats: RwLock::new(HashMap::new()),
+            session_token_usage: RwLock::new(HashMap::new()),
             background_tasks: Arc::new(BackgroundTaskManager::new(8)),
             mcp_reload_generation: RwLock::new(0),
             hook_registry: RwLock::new(None),
@@ -2779,13 +2782,36 @@ impl Gateway {
         stat.last_updated_at = Some(Utc::now());
     }
 
+    /// Cache agent-reported token totals for `/usage` between gateway turns.
+    pub async fn sync_session_token_usage(
+        &self,
+        session_key: &str,
+        display: hermes_agent::SessionUsageDisplay,
+    ) {
+        self.session_token_usage
+            .write()
+            .await
+            .insert(session_key.to_string(), display);
+    }
+
     async fn build_usage_text(&self, session_key: &str) -> String {
+        if let Some(display) = self
+            .session_token_usage
+            .read()
+            .await
+            .get(session_key)
+            .cloned()
+        {
+            if display.calls > 0 {
+                return hermes_agent::format_gateway_usage_text(&display);
+            }
+        }
         let usage = self.usage_stats.read().await;
         let stat = usage.get(session_key).cloned().unwrap_or_default();
         let approx_input_tokens = stat.input_chars / 4;
         let approx_output_tokens = stat.output_chars / 4;
         format!(
-            "📊 Usage\n- user messages: {}\n- assistant messages: {}\n- input chars: {} (~{} tokens)\n- output chars: {} (~{} tokens)",
+            "📊 Usage\n- user messages: {}\n- assistant messages: {}\n- input chars: {} (~{} tokens)\n- output chars: {} (~{} tokens)\n(API token totals appear after the first model call.)",
             stat.user_messages,
             stat.assistant_messages,
             stat.input_chars,

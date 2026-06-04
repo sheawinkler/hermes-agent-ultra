@@ -239,6 +239,12 @@ pub(crate) async fn gateway_handle_message_non_streaming(
         })
         .await
         .map_err(|e| GatewayError::Platform(e.to_string()))?;
+    let usage_display = agent.session_usage_display();
+    let session_key = ctx.session_key.clone();
+    drop(agent);
+    gateway_for_review
+        .sync_session_token_usage(&session_key, usage_display)
+        .await;
     Ok(conv
         .final_response
         .clone()
@@ -511,6 +517,12 @@ pub(crate) async fn gateway_handle_message_streaming(
         })
         .await
         .map_err(|e| GatewayError::Platform(e.to_string()))?;
+    let usage_display = agent.session_usage_display();
+    let session_key = ctx.session_key.clone();
+    drop(agent);
+    gateway_for_review
+        .sync_session_token_usage(&session_key, usage_display)
+        .await;
     Ok(conv
         .final_response
         .clone()

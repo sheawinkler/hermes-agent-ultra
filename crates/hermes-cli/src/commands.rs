@@ -5847,36 +5847,20 @@ async fn handle_autocompact_command(app: &mut App, args: &[&str]) -> Result<Comm
 }
 
 fn handle_usage_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    let msg_count = app.messages.len();
-    let user_msgs = app
-        .messages
-        .iter()
-        .filter(|m| m.role == hermes_core::MessageRole::User)
-        .count();
-    let assistant_msgs = app
-        .messages
-        .iter()
-        .filter(|m| m.role == hermes_core::MessageRole::Assistant)
-        .count();
-
-    let estimated_tokens: usize = app
-        .messages
-        .iter()
-        .map(|m| m.content.as_ref().map_or(0, |c| c.len()) / 4)
-        .sum();
-
-    emit_command_output(
-        app,
-        format!(
-            "Session Usage Statistics\n  Session:     {}\n  Model:       {}\n  Messages:    {} total\n    User:      {}\n    Assistant: {}\n  Est. tokens: ~{}",
-            app.session_id,
-            app.current_model,
-            msg_count,
-            user_msgs,
-            assistant_msgs,
+    let display = app.agent.session_usage_display();
+    let mut body = hermes_agent::format_usage_command_text(&display);
+    if display.calls == 0 {
+        let estimated_tokens: usize = app
+            .messages
+            .iter()
+            .map(|m| m.content.as_ref().map_or(0, |c| c.len()) / 4)
+            .sum();
+        body.push_str(&format!(
+            "\n\n(Transcript heuristic ~{} tokens — no provider usage yet.)",
             estimated_tokens
-        ),
-    );
+        ));
+    }
+    emit_command_output(app, body);
     Ok(CommandResult::Handled)
 }
 
@@ -5896,22 +5880,31 @@ fn handle_status_command(app: &mut App) -> Result<CommandResult, AgentError> {
         .iter()
         .filter(|m| m.role == hermes_core::MessageRole::User)
         .count();
-    let estimated_tokens: usize = app
-        .messages
-        .iter()
-        .map(|m| m.content.as_ref().map_or(0, |c| c.len()) / 4)
-        .sum();
+    let usage = app.agent.session_usage_metrics();
+    let token_line = if usage.api_calls > 0 {
+        format!(
+            "  Session tokens: {} total ({} in / {} out, {} API calls)",
+            usage.total_tokens, usage.input_tokens, usage.output_tokens, usage.api_calls
+        )
+    } else {
+        let estimated_tokens: usize = app
+            .messages
+            .iter()
+            .map(|m| m.content.as_ref().map_or(0, |c| c.len()) / 4)
+            .sum();
+        format!("  Est. tokens:   ~{} (no API calls yet)", estimated_tokens)
+    };
 
     emit_command_output(
         app,
         format!(
-            "Session Status\n  ID:            {}\n  Model:         {}\n  Personality:   {}\n  Turns:         {}\n  Messages:      {}\n  Est. tokens:   ~{}\n  Max turns:     {}",
+            "Session Status\n  ID:            {}\n  Model:         {}\n  Personality:   {}\n  Turns:         {}\n  Messages:      {}\n{}\n  Max turns:     {}",
             app.session_id,
             app.current_model,
             app.current_personality.as_deref().unwrap_or("(none)"),
             turns,
             msg_count,
-            estimated_tokens,
+            token_line,
             app.config.max_turns
         ),
     );

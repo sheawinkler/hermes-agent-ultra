@@ -79,6 +79,23 @@ fn reset_clears_user_turn_count() {
 }
 
 #[test]
+fn accumulate_api_call_updates_session_metrics() {
+    let agent = test_agent();
+    let usage = hermes_core::UsageStats {
+        prompt_tokens: 100,
+        completion_tokens: 50,
+        total_tokens: 150,
+        estimated_cost: None,
+    };
+    agent.record_api_usage(&usage);
+    let m = agent.session_usage_metrics();
+    assert_eq!(m.api_calls, 1);
+    assert_eq!(m.prompt_tokens, 100);
+    assert_eq!(m.completion_tokens, 50);
+    assert_eq!(m.total_tokens, 150);
+}
+
+#[test]
 fn reset_with_session_metadata_clears_counters() {
     let agent = test_agent();
     agent.set_runtime_session_id("new-sid");

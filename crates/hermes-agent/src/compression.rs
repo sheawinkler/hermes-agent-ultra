@@ -282,6 +282,10 @@ impl ContextCompressor {
         self.config.context_length
     }
 
+    pub fn last_prompt_tokens(&self) -> u64 {
+        self.last_prompt_tokens
+    }
+
     /// Reset per-session compressor state (`/new`, `/reset`; Python `on_session_reset`).
     pub fn reset_session_state(&mut self) {
         self.compression_count = 0;

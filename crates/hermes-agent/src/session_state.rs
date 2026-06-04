@@ -2,8 +2,12 @@
 
 use std::collections::HashMap;
 
-use hermes_core::Message;
-use serde_json::Value;
+use hermes_core::{Message, UsageStats};
+use hermes_intelligence::usage_pricing::{
+    calculate_cost, CanonicalUsage, CostResult, CostSource, CostStatus,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use tracing::debug;
 
 use crate::agent_loop::{AgentConfig, AgentLoop};
@@ -41,6 +45,140 @@ impl SessionUsageMetrics {
         self.cost_status = "unknown".to_string();
         self.cost_source = "none".to_string();
     }
+
+    /// Accumulate one LLM response (Python `conversation_loop` session_* updates).
+    pub fn accumulate_api_call(
+        &mut self,
+        usage: &UsageStats,
+        model: &str,
+        provider: Option<&str>,
+        base_url: Option<&str>,
+    ) {
+        self.api_calls = self.api_calls.saturating_add(1);
+        self.prompt_tokens = self.prompt_tokens.saturating_add(usage.prompt_tokens);
+        self.completion_tokens = self.completion_tokens.saturating_add(usage.completion_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(usage.total_tokens);
+        self.input_tokens = self.input_tokens.saturating_add(usage.prompt_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(usage.completion_tokens);
+
+        let canonical = CanonicalUsage {
+            input_tokens: usage.prompt_tokens,
+            output_tokens: usage.completion_tokens,
+            ..CanonicalUsage::default()
+        };
+        let cost = calculate_cost(model, &canonical, provider, base_url);
+        self.apply_cost_result(&cost);
+    }
+
+    fn apply_cost_result(&mut self, cost: &CostResult) {
+        if let Some(amount) = cost.amount_usd {
+            self.estimated_cost_usd += amount.max(0.0);
+        }
+        self.cost_status = cost_status_str(&cost.status).to_string();
+        self.cost_source = cost_source_str(&cost.source).to_string();
+    }
+}
+
+fn cost_status_str(status: &CostStatus) -> &'static str {
+    match status {
+        CostStatus::Actual => "actual",
+        CostStatus::Estimated => "estimated",
+        CostStatus::Included => "included",
+        CostStatus::Unknown => "unknown",
+    }
+}
+
+fn cost_source_str(source: &CostSource) -> &'static str {
+    match source {
+        CostSource::OfficialDocsSnapshot => "official_docs_snapshot",
+        CostSource::ProviderModelsApi => "provider_models_api",
+        CostSource::UserOverride => "user_override",
+        CostSource::None => "none",
+    }
+}
+
+/// TUI/gateway usage payload (Python `tui_gateway.server._get_usage`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SessionUsageDisplay {
+    pub model: String,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub reasoning: u64,
+    pub prompt: u64,
+    pub completion: u64,
+    pub total: u64,
+    pub calls: u32,
+    pub context_used: Option<u64>,
+    pub context_max: Option<u64>,
+    pub context_percent: Option<u32>,
+    pub compressions: u32,
+    pub cost_status: String,
+    pub cost_usd: Option<f64>,
+}
+
+pub fn format_usage_command_text(display: &SessionUsageDisplay) -> String {
+    if display.calls == 0 {
+        return "(._.) No API calls made yet in this session.".to_string();
+    }
+    let mut lines = vec![
+        "Session token usage".to_string(),
+        format!("  Model:       {}", display.model),
+        format!("  API calls:   {}", display.calls),
+        format!("  Input:       {:>12}", display.input),
+    ];
+    if display.cache_read > 0 {
+        lines.push(format!("  Cache read:  {:>12}", display.cache_read));
+    }
+    if display.cache_write > 0 {
+        lines.push(format!("  Cache write: {:>12}", display.cache_write));
+    }
+    lines.push(format!("  Output:      {:>12}", display.output));
+    lines.push(format!("  Prompt:      {:>12}", display.prompt));
+    lines.push(format!("  Completion:  {:>12}", display.completion));
+    lines.push(format!("  Total:       {:>12}", display.total));
+    if let (Some(used), Some(max), Some(pct)) =
+        (display.context_used, display.context_max, display.context_percent)
+    {
+        lines.push(format!("  Context:     {:>12} / {} ({}%)", used, max, pct));
+    }
+    if display.compressions > 0 {
+        lines.push(format!("  Compressions: {}", display.compressions));
+    }
+    if let Some(cost) = display.cost_usd {
+        lines.push(format!(
+            "  Est. cost:   ${:.4} ({})",
+            cost, display.cost_status
+        ));
+    } else {
+        lines.push(format!("  Cost status: {}", display.cost_status));
+    }
+    lines.join("\n")
+}
+
+pub fn format_gateway_usage_text(display: &SessionUsageDisplay) -> String {
+    if display.calls == 0 {
+        return "📊 No API calls made yet in this session.".to_string();
+    }
+    let mut lines = vec![
+        "📊 Session usage".to_string(),
+        format!("- model: {}", display.model),
+        format!("- input tokens: {}", display.input),
+    ];
+    if display.cache_read > 0 {
+        lines.push(format!("- cache read: {}", display.cache_read));
+    }
+    if display.cache_write > 0 {
+        lines.push(format!("- cache write: {}", display.cache_write));
+    }
+    lines.push(format!("- output tokens: {}", display.output));
+    lines.push(format!("- total tokens: {}", display.total));
+    lines.push(format!("- api calls: {}", display.calls));
+    if let Some(cost) = display.cost_usd {
+        lines.push(format!("- est. cost: ${:.4} ({})", cost, display.cost_status));
+    }
+    lines.join("\n")
 }
 
 /// Optional context-engine session hooks (Python `hasattr` checks on `context_compressor`).
@@ -193,6 +331,112 @@ impl AgentLoop {
             .map(|g| g.clone())
             .unwrap_or_default()
     }
+
+    /// Record token usage from one LLM HTTP response.
+    pub fn record_api_usage(&self, usage: &UsageStats) {
+        let config = self.config();
+        let model = self.active_model();
+        let provider = config.provider.as_deref();
+        let runtime = self.primary_runtime_snapshot();
+        let base_url = runtime.base_url.as_deref();
+        if let Ok(mut metrics) = self.session_usage.lock() {
+            metrics.accumulate_api_call(usage, &model, provider, base_url);
+        }
+        if let Ok(mut compressor) = self.context_compressor.try_lock() {
+            compressor.update_from_usage(usage.prompt_tokens);
+        }
+    }
+
+    /// Usage snapshot for TUI `session.usage` and `/usage` (Python `_get_usage`).
+    pub fn session_usage_display(&self) -> SessionUsageDisplay {
+        let metrics = self.session_usage_metrics();
+        let model = self.active_model();
+        let config = self.config();
+        let provider = config.provider.as_deref();
+        let runtime = self.primary_runtime_snapshot();
+        let base_url = runtime.base_url.as_deref();
+
+        let input = if metrics.input_tokens > 0 {
+            metrics.input_tokens
+        } else {
+            metrics.prompt_tokens
+        };
+        let output = if metrics.output_tokens > 0 {
+            metrics.output_tokens
+        } else {
+            metrics.completion_tokens
+        };
+
+        let mut display = SessionUsageDisplay {
+            model,
+            input,
+            output,
+            cache_read: metrics.cache_read_tokens,
+            cache_write: metrics.cache_write_tokens,
+            reasoning: metrics.reasoning_tokens,
+            prompt: metrics.prompt_tokens,
+            completion: metrics.completion_tokens,
+            total: metrics.total_tokens,
+            calls: metrics.api_calls,
+            cost_status: metrics.cost_status.clone(),
+            cost_usd: if metrics.estimated_cost_usd > 0.0 {
+                Some(metrics.estimated_cost_usd)
+            } else {
+                None
+            },
+            ..SessionUsageDisplay::default()
+        };
+
+        if let Ok(compressor) = self.context_compressor.try_lock() {
+            let ctx_used = compressor.last_prompt_tokens();
+            let ctx_max = compressor.config_context_length();
+            display.context_used = Some(ctx_used);
+            display.context_max = Some(ctx_max);
+            display.compressions = compressor.compression_count() as u32;
+            if ctx_max > 0 {
+                let pct = ((ctx_used as f64 / ctx_max as f64) * 100.0).round() as u32;
+                display.context_percent = Some(pct.min(100));
+            }
+        }
+
+        if display.cost_usd.is_none() && display.calls > 0 {
+            let canonical = CanonicalUsage {
+                input_tokens: display.input,
+                output_tokens: display.output,
+                cache_read_tokens: display.cache_read,
+                cache_write_tokens: display.cache_write,
+                ..CanonicalUsage::default()
+            };
+            let cost = calculate_cost(&display.model, &canonical, provider, base_url);
+            display.cost_status = cost_status_str(&cost.status).to_string();
+            display.cost_usd = cost.amount_usd;
+        }
+
+        display
+    }
+
+    /// Gateway/TUI JSON shape for `session.usage` RPC.
+    pub fn session_usage_json(&self) -> Value {
+        let d = self.session_usage_display();
+        json!({
+            "model": d.model,
+            "input": d.input,
+            "output": d.output,
+            "cache_read": d.cache_read,
+            "cache_write": d.cache_write,
+            "reasoning": d.reasoning,
+            "prompt": d.prompt,
+            "completion": d.completion,
+            "total": d.total,
+            "calls": d.calls,
+            "context_used": d.context_used,
+            "context_max": d.context_max,
+            "context_percent": d.context_percent,
+            "compressions": d.compressions,
+            "cost_status": d.cost_status,
+            "cost_usd": d.cost_usd,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -314,4 +558,20 @@ mod tests {
         assert_eq!(ctx.get("platform").and_then(|v| v.as_str()), Some("telegram"));
     }
 
+    #[test]
+    fn accumulate_api_call_increments_counters() {
+        let mut m = SessionUsageMetrics::default();
+        let usage = UsageStats {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+            estimated_cost: None,
+        };
+        m.accumulate_api_call(&usage, "gpt-4o", Some("openai"), None);
+        assert_eq!(m.api_calls, 1);
+        assert_eq!(m.total_tokens, 15);
+        m.accumulate_api_call(&usage, "gpt-4o", Some("openai"), None);
+        assert_eq!(m.api_calls, 2);
+        assert_eq!(m.total_tokens, 30);
+    }
 }

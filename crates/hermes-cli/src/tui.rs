@@ -4375,6 +4375,13 @@ fn render_status(
             truncate_chars(&state.sticky_prompt, 40)
         ));
     }
+    let usage = app.agent.session_usage_metrics();
+    if usage.api_calls > 0 {
+        status_text.push_str(&format!(
+            " | tok:{} calls:{}",
+            usage.total_tokens, usage.api_calls
+        ));
+    }
     if !state.status_message.is_empty() || !scroll_hint.is_empty() {
         status_text.push_str(" | ");
         status_text.push_str(&state.status_message);

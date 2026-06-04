@@ -30,6 +30,7 @@ webhook = []
 
 [dependencies]
 hermes-core = { workspace = true }
+hermes-agent = { workspace = true }
 hermes-config = { workspace = true }
 hermes-skills = { workspace = true, optional = true }
 hermes-tools = { workspace = true }
