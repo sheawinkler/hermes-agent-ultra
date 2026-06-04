@@ -2153,7 +2153,6 @@ impl Gateway {
         let first_visible_chunk_ms = Arc::new(AtomicU64::new(u64::MAX));
         let streaming_finished = Arc::new(AtomicBool::new(false));
         let stream_visible_start = Instant::now();
-        let native_last_flushed = Arc::new(StdMutex::new(String::new()));
 
         let on_chunk: Arc<dyn Fn(String) + Send + Sync> = if native_streaming {
             let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -2166,7 +2165,6 @@ impl Gateway {
             let failed = native_failed.clone();
             let visible_emitted = first_visible_emitted.clone();
             let visible_ms = first_visible_chunk_ms.clone();
-            let last_flushed_state = native_last_flushed.clone();
             native_worker = Some(tokio::spawn(async move {
                 let flush_interval = Duration::from_millis(wecom_native_stream_flush_interval_ms());
                 let mut ticker = tokio::time::interval(flush_interval);
@@ -2227,9 +2225,6 @@ impl Gateway {
                                 return;
                             }
                             last_flushed.clone_from(&accumulated);
-                            if let Ok(mut guard) = last_flushed_state.lock() {
-                                guard.clone_from(&accumulated);
-                            }
                         }
                     }
                 }
@@ -2246,8 +2241,6 @@ impl Gateway {
                     {
                         warn!(error = %err, stream_id = %sid, "native streaming finish failed");
                         failed.store(true, Ordering::Release);
-                    } else if let Ok(mut guard) = last_flushed_state.lock() {
-                        guard.clone_from(&final_content);
                     }
                 }
             }));
@@ -2525,31 +2518,9 @@ impl Gateway {
                     None,
                 )
                 .await?;
-            } else {
-                let streamed = native_last_flushed
-                    .lock()
-                    .map(|g| g.clone())
-                    .unwrap_or_default();
-                let delivery = Self::streaming_delivery_text(&streamed, &fallback_text);
-                if delivery.trim() != streamed.trim()
-                    && delivery.chars().count() > streamed.chars().count()
-                {
-                    info!(
-                        platform = %incoming.platform,
-                        chat_id = %incoming.chat_id,
-                        streamed_chars = streamed.chars().count(),
-                        delivery_chars = delivery.chars().count(),
-                        "native stream missing final handler text; sending supplemental reply"
-                    );
-                    self.send_message(
-                        &incoming.platform,
-                        &incoming.chat_id,
-                        &delivery,
-                        None,
-                    )
-                    .await?;
-                }
             }
+            // Native stream success: final body was already sent via send_native_stream_chunk
+            // (finish=true). Do not send_message again — it duplicates the streamed reply.
         } else if let Some(stream_id) = stream_id {
             if let (Some(edit_lock), Some(finalized)) =
                 (stream_edit_lock.as_ref(), stream_finalized.as_ref())
@@ -5643,7 +5614,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gateway_native_streaming_supplements_when_handler_response_longer() {
+    async fn gateway_native_streaming_never_send_message_when_stream_succeeds() {
         unsafe { std::env::set_var("HERMES_WECOM_STREAM_FLUSH_INTERVAL_MS", "1") };
 
         let sent = Arc::new(Mutex::new(Vec::new()));
@@ -5688,9 +5659,10 @@ mod tests {
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
-        let sent_msgs = sent.lock().unwrap();
-        assert_eq!(sent_msgs.len(), 1);
-        assert_eq!(sent_msgs[0].1, full);
+        assert!(
+            sent.lock().unwrap().is_empty(),
+            "successful native stream must not trigger send_message"
+        );
 
         unsafe { std::env::remove_var("HERMES_WECOM_STREAM_FLUSH_INTERVAL_MS") };
     }
