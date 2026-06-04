@@ -285,6 +285,7 @@ impl AgentLoop {
         self.apply_turn_message_prelude(&mut messages).await;
 
         crate::session_log::set_session_context(self.config().session_id.as_deref());
+        self.replay_compression_warning_at_turn_start().await;
         self.reset_vision_supported_for_turn();
         self.cleanup_dead_connections_at_turn_start().await;
         tracing::info!(

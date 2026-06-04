@@ -2304,6 +2304,9 @@ pub struct AgentLoop {
     pub(crate) last_nous_rate_limit_headers: Arc<Mutex<Option<std::collections::HashMap<String, String>>>>,
     /// Per-turn vision capability (Python `_vision_supported`; reset each `prepare_turn`).
     pub(crate) vision_supported: Arc<std::sync::atomic::AtomicBool>,
+    /// Compression feasibility warning replayed at turn start (Python `_compression_warning`).
+    compression_warning: Arc<Mutex<Option<String>>>,
+    compression_feasibility_checked: Arc<AtomicBool>,
 }
 
 /// Async tool execution hook (gateway: `hermes_tools::ToolRegistry::dispatch_async`).
@@ -2884,6 +2887,8 @@ impl AgentLoop {
             codex_app_server_session: Arc::new(Mutex::new(None)),
             last_nous_rate_limit_headers: Arc::new(Mutex::new(None)),
             vision_supported: Arc::new(AtomicBool::new(true)),
+            compression_warning: Arc::new(Mutex::new(None)),
+            compression_feasibility_checked: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -3173,6 +3178,8 @@ impl AgentLoop {
             codex_app_server_session: Arc::new(Mutex::new(None)),
             last_nous_rate_limit_headers: Arc::new(Mutex::new(None)),
             vision_supported: Arc::new(AtomicBool::new(true)),
+            compression_warning: Arc::new(Mutex::new(None)),
+            compression_feasibility_checked: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -3732,6 +3739,46 @@ impl AgentLoop {
         self.effective_llm_provider()
             .turn_start_connection_hygiene(&probe_url)
             .await;
+    }
+
+    async fn compute_compression_feasibility_warning(&self) -> Option<String> {
+        const AUX_FLOOR: u64 = 64_000;
+        let threshold = self.context_compressor.lock().await.threshold_tokens();
+        let aux_model = std::env::var("HERMES_COMPRESSION_MODEL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "google/gemini-3-flash-preview".to_string());
+        let aux_ctx = get_model_context_length(&aux_model);
+        if aux_ctx >= AUX_FLOOR && aux_ctx < threshold {
+            return Some(format!(
+                "Compression model '{aux_model}' context ({aux_ctx} tokens) is below the \
+                 session compression threshold ({threshold} tokens). Auto-lowered threshold \
+                 for this session; set a larger compression model in config.yaml if needed."
+            ));
+        }
+        None
+    }
+
+    /// Replay stored compression feasibility warning once (Python `_replay_compression_warning`).
+    pub(crate) async fn replay_compression_warning_at_turn_start(&self) {
+        if !self
+            .compression_feasibility_checked
+            .swap(true, Ordering::AcqRel)
+        {
+            if let Some(msg) = self.compute_compression_feasibility_warning().await {
+                if let Ok(mut slot) = self.compression_warning.lock() {
+                    *slot = Some(msg);
+                }
+            }
+        }
+        let msg = self
+            .compression_warning
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take());
+        if let Some(msg) = msg {
+            self.emit_status("lifecycle", &msg);
+        }
     }
 
     pub(crate) fn log_turn_exit_diagnostic(

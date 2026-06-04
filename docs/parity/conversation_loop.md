@@ -81,7 +81,7 @@ flowchart LR
 | Reset per-turn retry / guard state | `436–450` | reset inside `run_with_message_prelude` locals `728–766` | ✅ |
 | `_vision_supported = True` | `455` | `vision_supported` + API rejection strip/retry in `chat_completion_helpers` | ✅ |
 | Dead connection cleanup | `457–469` | `cleanup_dead_connections_at_turn_start` → `turn_start_connection_hygiene` | ✅ |
-| Replay compression warning | `472–474` | — | ❌ |
+| Replay compression warning | `472–474` | `replay_compression_warning_at_turn_start` in `prepare_turn` | ✅ |
 | `IterationBudget` new turn | `479` | `iteration_budget::IterationBudget` `752` | ✅ |
 | Turn start log | `481–490` | `tracing::info!("conversation turn")` in `prepare_turn` + `ReplayRecorder` | ✅ |
 | Copy history + append user | `493–562` | `prepare_turn` `272–273` + prelude in loop `584–586` | ✅ |
@@ -251,8 +251,8 @@ Each inner loop iteration calls `invalidate_turn_api_messages_cache()` before LL
 3. ~~**Trajectory save config**~~ — `AgentConfig.save_trajectories` + env `HERMES_SAVE_TRAJECTORIES` fallback.
 4. ~~**Task VM/browser cleanup**~~ — `cleanup_task_resources` + `AgentBrowserBackend::release_task_session`.
 5. ~~**Turn-prep dead-connection cleanup**~~ — done via `turn_start_connection_hygiene` (stale-client probe; not full socket scan).
-6. **Replay compression warning** — Python warns when continuing a compressed session.
-7. **Hook payload golden fixtures** — `plugins.rs` / gateway hook parity tests.
+6. ~~**Replay compression warning**~~ — `replay_compression_warning_at_turn_start` in `prepare_turn`.
+7. ~~**Hook payload golden fixtures**~~ — `tests/fixtures/hook_payloads/*.json` + `plugins.rs` golden test.
 
 ## Line index quick reference
 
