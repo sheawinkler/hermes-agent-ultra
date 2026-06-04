@@ -3,7 +3,9 @@
 //! Foundation crate defining all shared types, traits, and error types
 //! used across the hermes-agent-rust workspace.
 
+pub mod auth_gate;
 pub mod errors;
+pub mod providers;
 pub mod schema_sanitizer;
 pub mod tool_call_parser;
 pub mod tool_schema;

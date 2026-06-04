@@ -3,6 +3,7 @@
 //! Each submodule implements one or more tool handlers that conform
 //! to the `ToolHandler` trait from `hermes-core`.
 
+pub mod auth_snapshot;
 pub mod browser;
 pub mod clarify;
 pub mod code_execution;

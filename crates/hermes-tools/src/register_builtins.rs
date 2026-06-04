@@ -628,6 +628,15 @@ pub fn register_builtin_tools(
         vec![],
     );
 
+    // -- Auth/provider snapshot ---------------------------------------------
+    reg(
+        registry,
+        "system",
+        Arc::new(crate::tools::auth_snapshot::AuthSnapshotHandler),
+        "🔐",
+        vec![],
+    );
+
     // -- Tool policy simulation ---------------------------------------------
     reg(
         registry,
@@ -920,6 +929,10 @@ mod tests {
         assert!(
             names.contains(&"tool_policy_simulate".to_string()),
             "invalid backend should keep policy simulator"
+        );
+        assert!(
+            names.contains(&"auth_snapshot".to_string()),
+            "invalid backend should keep read-only auth snapshots"
         );
         assert!(
             names.contains(&"raw_trace_control".to_string()),

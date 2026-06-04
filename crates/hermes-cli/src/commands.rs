@@ -16,6 +16,11 @@ use std::{
 use bytes::Bytes;
 use hermes_agent::plugins::PluginManifest;
 use hermes_agent::MemoryProviderPlugin;
+use hermes_core::auth_gate::{
+    load_oauth_runtime_gate_manifest_from_path,
+    oauth_runtime_gate_for_provider as shared_oauth_runtime_gate_for_provider,
+    oauth_runtime_gate_manifest_default, OAuthRuntimeGateManifest,
+};
 use hermes_core::AgentError;
 use hermes_intelligence::model_metadata::{get_model_context_length, get_model_info};
 use hermes_intelligence::models_dev::default_client;
@@ -17720,9 +17725,12 @@ async fn handle_integrations_command(
         .is_some();
     let auth_ok = credential_present || (oauth_capable && oauth_state_present);
     let oauth_gate = oauth_runtime_gate_for_provider(&provider);
-    let oauth_manifest_source = oauth_min_version_for_provider(&provider)
-        .map(|(_, source)| source)
-        .unwrap_or_else(|| "n/a".to_string());
+    let oauth_manifest_source = if oauth_capable {
+        let (_, source) = load_oauth_runtime_gate_manifest();
+        source
+    } else {
+        "n/a".to_string()
+    };
 
     let memory_url = std::env::var("CONTEXTLATTICE_ORCHESTRATOR_URL")
         .ok()
@@ -18638,83 +18646,6 @@ fn readiness_state_label(state: ReadinessState) -> &'static str {
     }
 }
 
-fn parse_version_triplet(raw: &str) -> Option<(u64, u64, u64)> {
-    let mut parts = raw.trim().split('.');
-    let major = parts.next()?.parse::<u64>().ok()?;
-    let minor = parts.next().unwrap_or("0").parse::<u64>().ok()?;
-    let patch_raw = parts.next().unwrap_or("0");
-    let patch = patch_raw
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect::<String>()
-        .parse::<u64>()
-        .ok()?;
-    Some((major, minor, patch))
-}
-
-fn version_at_least(current: &str, minimum: &str) -> bool {
-    let Some(cur) = parse_version_triplet(current) else {
-        return false;
-    };
-    let Some(min) = parse_version_triplet(minimum) else {
-        return false;
-    };
-    cur >= min
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OAuthRuntimeGateManifest {
-    #[serde(default = "oauth_runtime_gate_default_min_version")]
-    default_min_version: String,
-    #[serde(default)]
-    required_oauth_provider_ids: Vec<String>,
-    #[serde(default)]
-    provider_min_versions: HashMap<String, String>,
-}
-
-fn oauth_runtime_gate_default_min_version() -> String {
-    "0.1.0".to_string()
-}
-
-fn oauth_runtime_gate_manifest_default() -> OAuthRuntimeGateManifest {
-    OAuthRuntimeGateManifest {
-        default_min_version: oauth_runtime_gate_default_min_version(),
-        required_oauth_provider_ids: vec![
-            "anthropic".to_string(),
-            "nous".to_string(),
-            "openai-codex".to_string(),
-            "qwen-oauth".to_string(),
-            "google-gemini-cli".to_string(),
-        ],
-        provider_min_versions: HashMap::new(),
-    }
-}
-
-fn normalize_oauth_runtime_gate_manifest(
-    manifest: OAuthRuntimeGateManifest,
-) -> OAuthRuntimeGateManifest {
-    let mut out = manifest;
-    if out.default_min_version.trim().is_empty() {
-        out.default_min_version = oauth_runtime_gate_default_min_version();
-    }
-    out.required_oauth_provider_ids = out
-        .required_oauth_provider_ids
-        .into_iter()
-        .map(|v| crate::providers::canonical_provider_id(v.trim()))
-        .filter(|v| !v.trim().is_empty())
-        .collect();
-    let mut mins = HashMap::new();
-    for (provider, version) in out.provider_min_versions {
-        let key = crate::providers::canonical_provider_id(provider.trim());
-        if key.is_empty() || version.trim().is_empty() {
-            continue;
-        }
-        mins.insert(key, version.trim().to_string());
-    }
-    out.provider_min_versions = mins;
-    out
-}
-
 fn oauth_runtime_gate_manifest_path() -> Option<PathBuf> {
     std::env::var("HERMES_OAUTH_GATE_MANIFEST_PATH")
         .ok()
@@ -18732,13 +18663,8 @@ fn oauth_runtime_gate_manifest_path() -> Option<PathBuf> {
 
 fn load_oauth_runtime_gate_manifest() -> (OAuthRuntimeGateManifest, String) {
     if let Some(path) = oauth_runtime_gate_manifest_path() {
-        if let Ok(raw) = std::fs::read_to_string(&path) {
-            if let Ok(parsed) = serde_json::from_str::<OAuthRuntimeGateManifest>(&raw) {
-                return (
-                    normalize_oauth_runtime_gate_manifest(parsed),
-                    path.display().to_string(),
-                );
-            }
+        if let Some(parsed) = load_oauth_runtime_gate_manifest_from_path(&path) {
+            return (parsed, path.display().to_string());
         }
     }
     (
@@ -18747,30 +18673,10 @@ fn load_oauth_runtime_gate_manifest() -> (OAuthRuntimeGateManifest, String) {
     )
 }
 
-fn oauth_min_version_for_provider(provider: &str) -> Option<(String, String)> {
-    let normalized = crate::providers::canonical_provider_id(provider);
-    if !crate::providers::provider_capability_for(&normalized)?.oauth_supported {
-        return None;
-    }
-    let (manifest, source) = load_oauth_runtime_gate_manifest();
-    let min = manifest
-        .provider_min_versions
-        .get(&normalized)
-        .cloned()
-        .unwrap_or_else(|| manifest.default_min_version.clone());
-    Some((min, source))
-}
-
 fn oauth_runtime_gate_for_provider(provider: &str) -> Option<(bool, String)> {
-    let (minimum, source) = oauth_min_version_for_provider(provider)?;
-    let current = env!("CARGO_PKG_VERSION");
-    Some((
-        version_at_least(current, &minimum),
-        format!(
-            "runtime={} required>={} manifest={}",
-            current, minimum, source
-        ),
-    ))
+    let (manifest, source) = load_oauth_runtime_gate_manifest();
+    shared_oauth_runtime_gate_for_provider(provider, env!("CARGO_PKG_VERSION"), &manifest, source)
+        .map(|gate| (gate.ok, gate.detail))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

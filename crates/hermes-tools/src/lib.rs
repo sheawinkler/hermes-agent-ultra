@@ -48,6 +48,7 @@ pub mod credential_guard;
 pub use credential_guard::CredentialGuard;
 
 // Re-export all tool handler implementations and their backend traits
+pub use tools::auth_snapshot::AuthSnapshotHandler;
 pub use tools::browser::{
     BrowserBackHandler, BrowserBackend, BrowserClickHandler, BrowserConsoleHandler,
     BrowserGetImagesHandler, BrowserNavigateHandler, BrowserPressHandler, BrowserScrollHandler,
