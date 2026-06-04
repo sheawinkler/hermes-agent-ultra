@@ -26,6 +26,7 @@ pub mod memory;
 pub mod messaging;
 pub mod mixture_of_agents;
 pub mod osv_check;
+pub mod path_security;
 pub mod process_registry;
 pub mod schema_sanitizer;
 pub mod session_search;
