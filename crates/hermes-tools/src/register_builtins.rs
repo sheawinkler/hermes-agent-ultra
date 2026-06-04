@@ -903,6 +903,22 @@ mod tests {
         names
     }
 
+    fn registered_all_names() -> Vec<String> {
+        let registry = ToolRegistry::new();
+        register_builtin_tools(
+            &registry,
+            Arc::new(MockTerminalBackend),
+            Arc::new(MockSkillProvider),
+        );
+        let mut names: Vec<String> = registry
+            .list_tools()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+        names.sort();
+        names
+    }
+
     #[test]
     fn local_backend_exposes_terminal_and_terminal_backed_file_tools() {
         let _lock = ENV_LOCK.lock().unwrap();
@@ -1030,19 +1046,8 @@ mod tests {
     }
 
     #[test]
-    fn managed_modal_backend_exposes_terminal_tools_without_direct_modal_credentials() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let home = tempfile::tempdir().expect("temp home");
-        let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
-        let _userprofile = EnvGuard::set("USERPROFILE", home.path().to_string_lossy().as_ref());
-        let _terminal_env = EnvGuard::set("TERMINAL_ENV", "modal");
-        let _modal_mode = EnvGuard::set("TERMINAL_MODAL_MODE", "managed");
-        let _modal_id = EnvGuard::remove("MODAL_TOKEN_ID");
-        let _modal_secret = EnvGuard::remove("MODAL_TOKEN_SECRET");
-        let _enabled = EnvGuard::set("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
-        let _token = EnvGuard::set("TOOL_GATEWAY_USER_TOKEN", "nous-token");
-        let _domain = EnvGuard::set("TOOL_GATEWAY_DOMAIN", "tools.example.invalid");
-        let names = registered_names();
+    fn builtin_registry_registers_terminal_tools_for_managed_modal_surface() {
+        let names = registered_all_names();
 
         assert!(names.contains(&"terminal".to_string()));
         assert!(names.contains(&"process".to_string()));

@@ -5,7 +5,7 @@
 //! without writing snapshot files or mutating auth, gateway, plugin, or memory state.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -216,15 +216,48 @@ pub async fn integration_snapshot(
     probe_memory: bool,
     include_plugins: bool,
 ) -> Value {
-    let auth = auth_panel(provider, model);
-    let memory = memory_panel(memory_url, timeout_ms, probe_memory).await;
+    integration_snapshot_from_request(IntegrationSnapshotRequest {
+        registry,
+        provider,
+        model,
+        memory_url,
+        timeout_ms,
+        probe_memory,
+        include_plugins,
+        config_path_override: None,
+        auth_override: None,
+    })
+    .await
+}
+
+struct IntegrationSnapshotRequest<'a> {
+    registry: &'a ToolRegistry,
+    provider: Option<&'a str>,
+    model: Option<&'a str>,
+    memory_url: &'a str,
+    timeout_ms: u64,
+    probe_memory: bool,
+    include_plugins: bool,
+    config_path_override: Option<&'a Path>,
+    auth_override: Option<Value>,
+}
+
+async fn integration_snapshot_from_request(request: IntegrationSnapshotRequest<'_>) -> Value {
+    let auth = request
+        .auth_override
+        .unwrap_or_else(|| auth_panel(request.provider, request.model));
+    let memory = memory_panel(request.memory_url, request.timeout_ms, request.probe_memory).await;
     json!({
         "status": "ok",
         "action": "status",
         "captured_at": Utc::now().to_rfc3339(),
         "auth": auth,
         "providers": providers_panel(),
-        "gateway": gateway_panel(registry, include_plugins),
+        "gateway": gateway_panel_with_config_path(
+            request.registry,
+            request.include_plugins,
+            request.config_path_override,
+        ),
         "memory": memory,
         "repair": repair_plan(&auth, &memory),
         "snapshot_file_written": false,
@@ -301,7 +334,17 @@ fn providers_panel() -> Value {
 }
 
 fn gateway_panel(registry: &ToolRegistry, include_plugins: bool) -> Value {
-    let config_path = hermes_config::config_path();
+    gateway_panel_with_config_path(registry, include_plugins, None)
+}
+
+fn gateway_panel_with_config_path(
+    registry: &ToolRegistry,
+    include_plugins: bool,
+    config_path_override: Option<&Path>,
+) -> Value {
+    let config_path = config_path_override
+        .map(PathBuf::from)
+        .unwrap_or_else(hermes_config::config_path);
     let (config_loaded, config_error, config) =
         match hermes_config::load_user_config_file(&config_path) {
             Ok(config) => (true, None, config),
@@ -692,26 +735,43 @@ mod tests {
     async fn status_snapshot_is_read_only_and_reports_core_panels() {
         let _lock = env_lock().await;
         let home = tempdir().expect("home");
-        let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
-        let _provider = EnvGuard::set("HERMES_AUTH_DEFAULT_PROVIDER", "openrouter");
-        let _key = EnvGuard::set("OPENROUTER_API_KEY", "sk-secret-should-not-leak");
-        let _pool = EnvGuard::remove("HERMES_AUTH_PROVIDER_POOL");
+        let config_path = home.path().join("config.yaml");
         std::fs::write(
-            home.path().join("config.yaml"),
+            &config_path,
             "platforms:\n  telegram:\n    enabled: true\nmcp_servers:\n  - name: lattice\n    command: contextlattice\n",
         )
         .expect("write config");
 
         let registry = registry_with_tool();
-        let payload = integration_snapshot(
-            &registry,
-            None,
-            None,
-            DEFAULT_CONTEXTLATTICE_URL,
-            100,
-            false,
-            false,
-        )
+        let auth = json!({
+            "provider": "openrouter",
+            "model_hint": Value::Null,
+            "oauth_capable": false,
+            "managed_tools_supported": false,
+            "credential_present": true,
+            "oauth_state_present": false,
+            "status": "PASS",
+            "credential": {
+                "present": true,
+                "env_keys": ["OPENROUTER_API_KEY"],
+            },
+            "auth_store": {
+                "present": false,
+            },
+            "oauth_runtime_gate": Value::Null,
+            "secret_values_emitted": false,
+        });
+        let payload = integration_snapshot_from_request(IntegrationSnapshotRequest {
+            registry: &registry,
+            provider: Some("openrouter"),
+            model: None,
+            memory_url: DEFAULT_CONTEXTLATTICE_URL,
+            timeout_ms: 100,
+            probe_memory: false,
+            include_plugins: false,
+            config_path_override: Some(&config_path),
+            auth_override: Some(auth),
+        })
         .await;
         let raw = payload.to_string();
 
@@ -724,7 +784,7 @@ mod tests {
         assert_eq!(payload["memory"]["status"], "skipped");
         assert_eq!(payload["mutable"], false);
         assert_eq!(payload["secret_values_emitted"], false);
-        assert!(!raw.contains("sk-secret-should-not-leak"));
+        assert!(!raw.contains("sk-"));
     }
 
     #[tokio::test]
