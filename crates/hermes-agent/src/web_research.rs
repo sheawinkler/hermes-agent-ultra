@@ -99,28 +99,12 @@ impl WebResearchController {
         c
     }
 
-    pub fn config(&self) -> &WebResearchConfig {
-        &self.config
-    }
-
-    pub fn limits(&self) -> &WebToolBudgetLimits {
-        &self.limits
-    }
-
-    pub fn budget_state(&self) -> &WebToolBudgetState {
-        &self.budget_state
-    }
-
     pub fn force_finalize(&self) -> bool {
         self.force_finalize
     }
 
     pub fn planner_invoked(&self) -> bool {
         self.planner_invoked
-    }
-
-    pub fn web_stopped(&self) -> bool {
-        self.web_stopped
     }
 
     pub fn filter_tool_schemas<'a>(&self, schemas: &'a [ToolSchema]) -> Vec<ToolSchema> {
@@ -308,10 +292,6 @@ impl WebResearchController {
         (deferred, user_notices)
     }
 
-    fn only_web_remaining(tool_calls: &[ToolCall]) -> bool {
-        !tool_calls.is_empty() && tool_calls.iter().all(|tc| is_budgeted_web_tool(&tc.function.name))
-    }
-
     fn evidence_has_activity(&self) -> bool {
         self.evidence.successful_searches > 0
             || self.evidence.successful_extracts > 0
@@ -408,15 +388,6 @@ impl WebResearchController {
         let text = content.map(str::trim).unwrap_or("");
         if text.len() >= 40 {
             self.evidence.last_assistant_draft = Some(text.to_string());
-        }
-    }
-
-    pub fn emit_notice<F>(&mut self, key: &str, notice: &str, emit: F)
-    where
-        F: FnOnce(&str),
-    {
-        if self.emit_notice_once(key, notice.to_string()) {
-            emit(notice);
         }
     }
 
@@ -600,7 +571,7 @@ pub fn parse_plan_json(raw: &str, config: &WebResearchConfig) -> Option<WebResea
     let raw_plan: RawWebResearchPlan = serde_json::from_value(value).ok()?;
     let mut search = clamp_budget(raw_plan.search_budget, config.max_search);
     let mut extract = clamp_budget(raw_plan.extract_budget, config.max_extract);
-    let mut browser = clamp_budget(raw_plan.browser_budget, config.max_browser);
+    let browser = clamp_budget(raw_plan.browser_budget, config.max_browser);
     let mut total = clamp_budget(
         raw_plan.total_budget,
         config.max_total,

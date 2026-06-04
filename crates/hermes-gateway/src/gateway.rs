@@ -58,6 +58,7 @@ fn streaming_feedback_delay_ms() -> u64 {
 }
 
 /// Weixin iLink typing refresh interval when the `weixin` feature is disabled at compile time.
+#[cfg(not(feature = "weixin"))]
 const WEIXIN_TYPING_REFRESH_SECS_FALLBACK: u64 = 5;
 
 /// Cancels a platform typing keepalive started by [`Gateway::spawn_route_typing`].
