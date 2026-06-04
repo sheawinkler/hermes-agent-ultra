@@ -6,7 +6,7 @@
 //! - dual logging (raw + filtered) for operator auditability
 
 use std::collections::BTreeSet;
-use std::fs::{create_dir_all, OpenOptions};
+use std::fs::{OpenOptions, create_dir_all};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -16,6 +16,8 @@ use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
 use tracing::warn;
+
+use crate::tools::ansi_strip::strip_ansi;
 
 const COMMAND_KEYS: &[&str] = &[
     "command",
@@ -314,15 +316,6 @@ fn is_command_oriented_tool(tool_name: &str, params: &Value) -> bool {
         return true;
     }
     extract_command(params).is_some()
-}
-
-fn ansi_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\x1B\[[0-9;?]*[ -/]*[@-~]").expect("ansi regex"))
-}
-
-fn strip_ansi(s: &str) -> String {
-    ansi_regex().replace_all(s, "").to_string()
 }
 
 fn noise_regexes() -> &'static [Regex] {

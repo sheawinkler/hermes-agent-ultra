@@ -14,14 +14,14 @@
 //!
 //! Corresponds to `hermes-agent/tools/ansi_strip.py`.
 
-use regex::bytes::{Regex as BytesRegex};
+use regex::Regex;
 use std::sync::OnceLock;
 
-/// Compiled ANSI escape sequence regex for bytes (lazily initialized).
-fn ansi_escape_re() -> &'static BytesRegex {
-    static RE: OnceLock<BytesRegex> = OnceLock::new();
+/// Compiled ANSI escape sequence regex (lazily initialized).
+fn ansi_escape_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        BytesRegex::new(
+        Regex::new(
             r"(?x)
             \x1b(?:
                 \[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]    # CSI sequence
@@ -39,9 +39,10 @@ fn ansi_escape_re() -> &'static BytesRegex {
     })
 }
 
-/// Fast-path check — look for ESC byte or C1 control bytes.
-fn has_escape_byte(text: &[u8]) -> bool {
-    text.iter().any(|&b| b == 0x1b || (0x80..=0x9f).contains(&b))
+/// Fast-path check — look for ESC char or C1 control chars.
+fn has_escape_char(text: &str) -> bool {
+    text.chars()
+        .any(|ch| ch == '\x1b' || ('\u{80}'..='\u{9f}').contains(&ch))
 }
 
 /// Remove ANSI escape sequences from text.
@@ -65,14 +66,11 @@ fn has_escape_byte(text: &[u8]) -> bool {
 /// assert_eq!(strip_ansi("\x1b[2J\x1b[H"), "");
 /// ```
 pub fn strip_ansi(text: &str) -> String {
-    let bytes = text.as_bytes();
-
-    if bytes.is_empty() || !has_escape_byte(bytes) {
+    if text.is_empty() || !has_escape_char(text) {
         return text.to_string();
     }
 
-    let cleaned = ansi_escape_re().replace_all(bytes, &b""[..]);
-    String::from_utf8_lossy(&cleaned).to_string()
+    ansi_escape_re().replace_all(text, "").to_string()
 }
 
 #[cfg(test)]
@@ -178,6 +176,13 @@ mod tests {
     }
 
     #[test]
+    fn test_strip_ansi_preserves_multibyte_clean_text() {
+        let input = "emoji 🎉 and ñ café";
+        let result = strip_ansi(input);
+        assert_eq!(result, input);
+    }
+
+    #[test]
     fn test_strip_ansi_multiple_sequences() {
         let input = "\x1b[1m\x1b[31m\x1b[4mBold Red Underline\x1b[0m";
         let result = strip_ansi(input);
@@ -201,19 +206,9 @@ mod tests {
     }
 
     #[test]
-    fn test_strip_ansi_raw_8bit_bytes() {
-        // Test that the byte-based regex works correctly for 7-bit sequences
-        // which are the most common in practice.
-        // 8-bit C1 sequences (\x80-\x9f) are extremely rare in modern terminals.
-
-        // Test 7-bit escapes work in byte mode
-        let input_7bit = b"\x1b[31mRed\x1b[0m";
-        let result_7bit = crate::tools::ansi_strip::ansi_escape_re().replace_all(input_7bit, &b""[..]);
-        assert_eq!(&*result_7bit, b"Red");
-
-        // Test OSC sequence
-        let input_osc = b"\x1b]0;Title\x07Text";
-        let result_osc = crate::tools::ansi_strip::ansi_escape_re().replace_all(input_osc, &b""[..]);
-        assert_eq!(&*result_osc, b"Text");
+    fn test_strip_ansi_unicode_regex_does_not_strip_utf8_bytes() {
+        let input = "\x1b[31memoji 🎉 and ñ café\x1b[0m";
+        let result = strip_ansi(input);
+        assert_eq!(result, "emoji 🎉 and ñ café");
     }
 }

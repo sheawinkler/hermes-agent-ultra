@@ -12,7 +12,8 @@
 //!
 //! Corresponds to `hermes-agent/tools/schema_sanitizer.py`.
 
-use serde_json::{json, Value};
+use hermes_core::ToolSchema;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use tracing::{debug, info};
 
@@ -30,52 +31,77 @@ pub fn sanitize_tool_schemas(tools: Vec<Value>) -> Vec<Value> {
     tools.into_iter().map(sanitize_single_tool).collect()
 }
 
+/// Sanitize registry `ToolSchema` values through the same OpenAI-format path
+/// used by Python's `sanitize_tool_schemas`.
+pub fn sanitize_tool_schema_list(schemas: Vec<ToolSchema>) -> Vec<ToolSchema> {
+    if schemas.is_empty() {
+        return schemas;
+    }
+
+    schemas
+        .into_iter()
+        .map(|schema| {
+            let tool_value = json!({
+                "type": "function",
+                "function": schema,
+            });
+            let sanitized = sanitize_single_tool(tool_value);
+            sanitized
+                .get("function")
+                .cloned()
+                .and_then(|value| serde_json::from_value::<ToolSchema>(value).ok())
+                .unwrap_or(schema)
+        })
+        .collect()
+}
+
 /// Deep-copy and sanitize a single OpenAI-format tool entry.
 fn sanitize_single_tool(tool: Value) -> Value {
     let mut out = tool.clone();
 
     if let Some(function) = out.get_mut("function")
-        && let Some(fn_obj) = function.as_object_mut() {
-            // Get or create parameters
-            let params = fn_obj.get("parameters").cloned();
+        && let Some(fn_obj) = function.as_object_mut()
+    {
+        // Get or create parameters
+        let params = fn_obj.get("parameters").cloned();
 
-            if !params.as_ref().is_some_and(|p| p.is_object()) {
-                // Missing / non-object parameters → substitute minimal valid shape
-                fn_obj.insert(
-                    "parameters".to_string(),
-                    json!({"type": "object", "properties": {}}),
-                );
-                return out;
-            }
-
-            let tool_name = fn_obj
-                .get("name")
-                .and_then(|n| n.as_str())
-                .unwrap_or("<tool>");
-
-            // Sanitize recursively
-            let mut sanitized = sanitize_node(params.unwrap(), tool_name);
-
-            // Guarantee top-level is an object with properties
-            if let Some(obj) = sanitized.as_object_mut() {
-                if obj.get("type").and_then(|t| t.as_str()) != Some("object") {
-                    obj.insert("type".to_string(), json!("object"));
-                }
-                if !obj.contains_key("properties") || !obj["properties"].is_object() {
-                    obj.insert("properties".to_string(), json!({}));
-                }
-            } else {
-                sanitized = json!({"type": "object", "properties": {}});
-            }
-
-            // Collapse nullable unions
-            sanitized = strip_nullable_unions(sanitized, true);
-
-            // Strip top-level combinators
-            sanitized = strip_top_level_combinators(sanitized, tool_name);
-
-            fn_obj.insert("parameters".to_string(), sanitized);
+        if !params.as_ref().is_some_and(|p| p.is_object()) {
+            // Missing / non-object parameters → substitute minimal valid shape
+            fn_obj.insert(
+                "parameters".to_string(),
+                json!({"type": "object", "properties": {}}),
+            );
+            return out;
         }
+
+        let tool_name = fn_obj
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("<tool>");
+
+        // Sanitize recursively
+        let mut sanitized = sanitize_node(params.unwrap(), tool_name);
+
+        // Guarantee top-level is an object with properties
+        if let Some(obj) = sanitized.as_object_mut() {
+            if obj.get("type").and_then(|t| t.as_str()) != Some("object") {
+                obj.insert("type".to_string(), json!("object"));
+            }
+            if !obj.contains_key("properties") || !obj["properties"].is_object() {
+                obj.insert("properties".to_string(), json!({}));
+            }
+        } else {
+            sanitized = json!({"type": "object", "properties": {}});
+        }
+
+        // Collapse nullable unions
+        sanitized = strip_nullable_unions(sanitized, true);
+
+        // Strip top-level combinators
+        sanitized = strip_top_level_combinators(sanitized, tool_name);
+
+        fn_obj.insert("parameters".to_string(), sanitized);
+    }
 
     out
 }
@@ -159,12 +185,16 @@ pub fn strip_nullable_unions(schema: Value, keep_nullable_hint: bool) -> Value {
                         // Carry over metadata
                         for meta_key in &["title", "description", "default", "examples"] {
                             if let Some(val) = stripped.get(*meta_key)
-                                && !replacement.contains_key(*meta_key) {
-                                    replacement.insert(meta_key.to_string(), val.clone());
-                                }
+                                && !replacement.contains_key(*meta_key)
+                            {
+                                replacement.insert(meta_key.to_string(), val.clone());
+                            }
                         }
 
-                        return strip_nullable_unions(Value::Object(replacement), keep_nullable_hint);
+                        return strip_nullable_unions(
+                            Value::Object(replacement),
+                            keep_nullable_hint,
+                        );
                     }
                 }
             }
@@ -223,50 +253,53 @@ fn sanitize_node(node: Value, path: &str) -> Value {
         for (key, value) in obj {
             // Normalize type: [X, "null"] → type: X
             if key == "type"
-                && let Some(arr) = value.as_array() {
-                    let non_null: Vec<&Value> = arr
-                        .iter()
-                        .filter(|t| !matches!(t.as_str(), Some("null")))
-                        .collect();
+                && let Some(arr) = value.as_array()
+            {
+                let non_null: Vec<&Value> = arr
+                    .iter()
+                    .filter(|t| !matches!(t.as_str(), Some("null")))
+                    .collect();
 
-                    if non_null.len() == 1
-                        && let Some(s) = non_null[0].as_str() {
-                            out.insert("type".to_string(), json!(s));
-                            if arr.iter().any(|t| t.as_str() == Some("null")) {
-                                out.entry("nullable".to_string()).or_insert(json!(true));
-                            }
-                            continue;
-                        }
-
-                    // Fallback: pick first non-null string type
-                    if let Some(first) = non_null
-                        .iter()
-                        .find_map(|t| t.as_str().filter(|s| *s != "null"))
-                    {
-                        out.insert("type".to_string(), json!(first));
-                        continue;
+                if non_null.len() == 1
+                    && let Some(s) = non_null[0].as_str()
+                {
+                    out.insert("type".to_string(), json!(s));
+                    if arr.iter().any(|t| t.as_str() == Some("null")) {
+                        out.entry("nullable".to_string()).or_insert(json!(true));
                     }
-
-                    // All-null or empty → treat as object
-                    out.insert("type".to_string(), json!("object"));
                     continue;
                 }
+
+                // Fallback: pick first non-null string type
+                if let Some(first) = non_null
+                    .iter()
+                    .find_map(|t| t.as_str().filter(|s| *s != "null"))
+                {
+                    out.insert("type".to_string(), json!(first));
+                    continue;
+                }
+
+                // All-null or empty → treat as object
+                out.insert("type".to_string(), json!("object"));
+                continue;
+            }
 
             // Recurse into nested schema structures
             if matches!(key.as_str(), "properties" | "$defs" | "definitions")
-                && let Some(nested_obj) = value.as_object() {
-                    let sanitized: serde_json::Map<_, _> = nested_obj
-                        .iter()
-                        .map(|(sub_k, sub_v)| {
-                            (
-                                sub_k.clone(),
-                                sanitize_node(sub_v.clone(), &format!("{}.{}.{}", path, key, sub_k)),
-                            )
-                        })
-                        .collect();
-                    out.insert(key.clone(), Value::Object(sanitized));
-                    continue;
-                }
+                && let Some(nested_obj) = value.as_object()
+            {
+                let sanitized: serde_json::Map<_, _> = nested_obj
+                    .iter()
+                    .map(|(sub_k, sub_v)| {
+                        (
+                            sub_k.clone(),
+                            sanitize_node(sub_v.clone(), &format!("{}.{}.{}", path, key, sub_k)),
+                        )
+                    })
+                    .collect();
+                out.insert(key.clone(), Value::Object(sanitized));
+                continue;
+            }
 
             if matches!(key.as_str(), "items" | "additionalProperties") {
                 if value.is_boolean() {
@@ -282,17 +315,18 @@ fn sanitize_node(node: Value, path: &str) -> Value {
             }
 
             if matches!(key.as_str(), "anyOf" | "oneOf" | "allOf")
-                && let Some(arr) = value.as_array() {
-                    let sanitized: Vec<Value> = arr
-                        .iter()
-                        .enumerate()
-                        .map(|(i, item)| {
-                            sanitize_node(item.clone(), &format!("{}.{}[{}]", path, key, i))
-                        })
-                        .collect();
-                    out.insert(key.clone(), Value::Array(sanitized));
-                    continue;
-                }
+                && let Some(arr) = value.as_array()
+            {
+                let sanitized: Vec<Value> = arr
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| {
+                        sanitize_node(item.clone(), &format!("{}.{}[{}]", path, key, i))
+                    })
+                    .collect();
+                out.insert(key.clone(), Value::Array(sanitized));
+                continue;
+            }
 
             // Don't recurse into required, enum, examples (they're not schemas)
             if matches!(key.as_str(), "required" | "enum" | "examples") {
@@ -318,28 +352,29 @@ fn sanitize_node(node: Value, path: &str) -> Value {
 
         // Prune required entries that don't exist in properties
         if out.get("type").and_then(|t| t.as_str()) == Some("object")
-            && let Some(Value::Array(required)) = out.get("required") {
-                let props = out
-                    .get("properties")
-                    .and_then(|p| p.as_object())
-                    .map(|o| o.keys().collect::<Vec<_>>())
-                    .unwrap_or_default();
+            && let Some(Value::Array(required)) = out.get("required")
+        {
+            let props = out
+                .get("properties")
+                .and_then(|p| p.as_object())
+                .map(|o| o.keys().collect::<Vec<_>>())
+                .unwrap_or_default();
 
-                let valid: Vec<Value> = required
-                    .iter()
-                    .filter(|r| {
-                        r.as_str()
-                            .is_some_and(|s| props.iter().any(|p| p.as_str() == s))
-                    })
-                    .cloned()
-                    .collect();
+            let valid: Vec<Value> = required
+                .iter()
+                .filter(|r| {
+                    r.as_str()
+                        .is_some_and(|s| props.iter().any(|p| p.as_str() == s))
+                })
+                .cloned()
+                .collect();
 
-                if valid.is_empty() {
-                    out.remove("required");
-                } else if valid.len() != required.len() {
-                    out.insert("required".to_string(), Value::Array(valid));
-                }
+            if valid.is_empty() {
+                out.remove("required");
+            } else if valid.len() != required.len() {
+                out.insert("required".to_string(), Value::Array(valid));
             }
+        }
 
         return Value::Object(out);
     }
@@ -401,10 +436,11 @@ pub fn strip_pattern_and_format(tools: &mut [Value]) -> usize {
     for tool in tools.iter_mut() {
         // OpenAI-format: {"function": {"parameters": {...}}}
         if let Some(function) = tool.get_mut("function")
-            && let Some(params) = function.get_mut("parameters") {
-                walk(params, &mut stripped);
-                continue;
-            }
+            && let Some(params) = function.get_mut("parameters")
+        {
+            walk(params, &mut stripped);
+            continue;
+        }
 
         // Responses-format: {"parameters": {...}}
         if let Some(params) = tool.get_mut("parameters") {
@@ -444,10 +480,10 @@ pub fn strip_slash_enum(tools: &mut [Value]) -> usize {
                     && enum_val
                         .iter()
                         .any(|v| v.as_str().is_some_and(|s| s.contains('/')))
-                    {
-                        obj.remove("enum");
-                        *stripped += 1;
-                    }
+                {
+                    obj.remove("enum");
+                    *stripped += 1;
+                }
 
                 for value in obj.values_mut() {
                     walk(value, stripped);
@@ -464,10 +500,11 @@ pub fn strip_slash_enum(tools: &mut [Value]) -> usize {
 
     for tool in tools.iter_mut() {
         if let Some(function) = tool.get_mut("function")
-            && let Some(params) = function.get_mut("parameters") {
-                walk(params, &mut stripped);
-                continue;
-            }
+            && let Some(params) = function.get_mut("parameters")
+        {
+            walk(params, &mut stripped);
+            continue;
+        }
 
         if let Some(params) = tool.get_mut("parameters") {
             walk(params, &mut stripped);
@@ -568,10 +605,12 @@ mod tests {
         })];
         let count = strip_pattern_and_format(&mut tools);
         assert_eq!(count, 2);
-        assert!(!tools[0]["function"]["parameters"]["properties"]["email"]
-            .as_object()
-            .unwrap()
-            .contains_key("format"));
+        assert!(
+            !tools[0]["function"]["parameters"]["properties"]["email"]
+                .as_object()
+                .unwrap()
+                .contains_key("format")
+        );
     }
 
     #[test]
@@ -589,10 +628,12 @@ mod tests {
         })];
         let count = strip_slash_enum(&mut tools);
         assert_eq!(count, 1);
-        assert!(!tools[0]["parameters"]["properties"]["model"]
-            .as_object()
-            .unwrap()
-            .contains_key("enum"));
+        assert!(
+            !tools[0]["parameters"]["properties"]["model"]
+                .as_object()
+                .unwrap()
+                .contains_key("enum")
+        );
     }
 
     #[test]
@@ -617,6 +658,10 @@ mod tests {
         let result = sanitize_single_tool(input);
         let params = &result["function"]["parameters"];
         assert_eq!(params["type"], "object");
-        assert!(params["properties"]["optional_field"]["nullable"].as_bool().unwrap_or(false));
+        assert!(
+            params["properties"]["optional_field"]["nullable"]
+                .as_bool()
+                .unwrap_or(false)
+        );
     }
 }

@@ -16,9 +16,10 @@ use tracing::warn;
 
 use crate::rtk_filter::{RawModeState, RtkFilterEngine};
 use crate::tool_policy::{
-    annotate_policy_audit, annotate_policy_simulation, default_tool_policy_counters_path,
-    persist_tool_policy_counters, ToolPolicyCounters, ToolPolicyDecision, ToolPolicyEngine,
+    ToolPolicyCounters, ToolPolicyDecision, ToolPolicyEngine, annotate_policy_audit,
+    annotate_policy_simulation, default_tool_policy_counters_path, persist_tool_policy_counters,
 };
+use crate::tools::schema_sanitizer::sanitize_tool_schema_list;
 
 // ---------------------------------------------------------------------------
 // ToolEntry
@@ -206,12 +207,13 @@ impl ToolRegistry {
     /// This is used to build the tool list sent to the LLM.
     pub fn get_definitions(&self) -> Vec<ToolSchema> {
         let inner = self.inner.lock().unwrap();
-        inner
+        let definitions: Vec<ToolSchema> = inner
             .tools
             .values()
             .filter(|entry| (entry.check_fn)())
             .map(|entry| entry.schema.clone())
-            .collect()
+            .collect();
+        sanitize_tool_schema_list(definitions)
     }
 
     /// Dispatch a tool call by name, catching all errors.
@@ -266,12 +268,8 @@ impl ToolRegistry {
             );
         } else {
             tokio::runtime::Runtime::new()
-                .map(|rt| {
-                    rt.block_on(async { handler.execute(effective_params.clone()).await })
-                })
-                .unwrap_or_else(|e| {
-                    Err(hermes_core::ToolError::ExecutionFailed(e.to_string()))
-                })
+                .map(|rt| rt.block_on(async { handler.execute(effective_params.clone()).await }))
+                .unwrap_or_else(|e| Err(hermes_core::ToolError::ExecutionFailed(e.to_string())))
         };
 
         let output = match result {
@@ -586,7 +584,7 @@ pub struct ToolEntryInfo {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use hermes_core::{tool_schema, JsonSchema, ToolError};
+    use hermes_core::{JsonSchema, ToolError, tool_schema};
     use serde_json::json;
     use std::time::Instant;
 
@@ -717,6 +715,46 @@ mod tests {
         assert_eq!(defs[0].name, "echo");
     }
 
+    struct BareObjectSchemaHandler;
+
+    #[async_trait]
+    impl ToolHandler for BareObjectSchemaHandler {
+        async fn execute(&self, _params: Value) -> Result<String, ToolError> {
+            Ok("ok".to_string())
+        }
+
+        fn schema(&self) -> ToolSchema {
+            tool_schema(
+                "bare_object",
+                "Bare object schema",
+                JsonSchema::new("object"),
+            )
+        }
+    }
+
+    #[test]
+    fn get_definitions_sanitizes_tool_schemas() {
+        let registry = ToolRegistry::new();
+        let handler = Arc::new(BareObjectSchemaHandler);
+        let schema = handler.schema();
+        registry.register(
+            "bare_object",
+            "test",
+            schema,
+            handler,
+            Arc::new(|| true),
+            vec![],
+            false,
+            "Bare object schema",
+            "T",
+            None,
+        );
+
+        let defs = registry.get_definitions();
+        assert_eq!(defs.len(), 1);
+        assert!(defs[0].parameters.properties.is_some());
+    }
+
     #[test]
     fn test_dispatch_async_blocked_by_policy() {
         let registry = ToolRegistry::new();
@@ -767,10 +805,12 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let result = rt.block_on(async { registry.dispatch_async("echo", json!({"k":"v"})).await });
         let parsed: Value = serde_json::from_str(&result).expect("json output");
-        assert!(parsed["_tool_policy_warning"]
-            .as_str()
-            .unwrap_or("")
-            .contains("allowlist"));
+        assert!(
+            parsed["_tool_policy_warning"]
+                .as_str()
+                .unwrap_or("")
+                .contains("allowlist")
+        );
         assert_eq!(parsed["k"], "v");
     }
 
