@@ -1816,14 +1816,14 @@ fn format_tool_progress_message(turn: u32, tool_names: &[String], pulse: u32) ->
         )
     });
     let base = if webish {
-        format!("处理中：正在检索网络数据（第 {turn} 步，工具 {joined}）")
+        format!("正在检索网络数据（第 {turn} 步，工具 {joined}）")
     } else if tool_names.len() > 1 {
         format!(
-            "处理中：正在执行工具（第 {turn} 步，{} 个调用：{joined}）",
+            "正在执行工具（第 {turn} 步，{} 个调用：{joined}）",
             tool_names.len()
         )
     } else if let Some(name) = tool_names.first() {
-        format!("处理中：正在执行 {name}（第 {turn} 步）")
+        format!("正在执行 {name}（第 {turn} 步）")
     } else {
         format!("处理中，请稍候（第 {turn} 步）")
     };
@@ -1840,20 +1840,20 @@ fn summarize_tool_failure_for_user(tool_name: &str, error: &str) -> Option<Strin
         "web_extract"
             if err.contains("403") || err.contains("401") || err.contains("blocks automated") =>
         {
-            Some("处理中：该网页拒绝自动抓取，正在尝试浏览器打开…".to_string())
+            Some("该网页拒绝自动抓取，正在尝试浏览器打开…".to_string())
         }
         "browser_navigate"
             if err.contains("cdp not reachable")
                 || err.contains("auto-start")
                 || err.contains("chrome executable not found") =>
         {
-            Some("处理中：正在启动浏览器读取页面，请稍候…".to_string())
+            Some("正在启动浏览器读取页面，请稍候…".to_string())
         }
         "browser_navigate" if err.contains("did not become ready") => {
-            Some("处理中：浏览器启动较慢，仍在等待…".to_string())
+            Some("浏览器启动较慢，仍在等待…".to_string())
         }
         "web_search" if err.contains("timed out") || err.contains("failed after trying") => {
-            Some("处理中：网络搜索较慢，正在尝试其他搜索引擎…".to_string())
+            Some("网络搜索较慢，正在尝试其他搜索引擎…".to_string())
         }
         _ => None,
     }
