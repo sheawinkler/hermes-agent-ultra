@@ -228,7 +228,7 @@ Each inner loop iteration calls `invalidate_turn_api_messages_cache()` before LL
 | `agent/transports/codex_app_server*.py` | `transports/codex_app_server*.rs`, `codex_runtime.rs` | ✅ transport + `codex_approval_callback` |
 | `agent/auxiliary_client.set_runtime_main` | `hermes-intelligence/src/runtime_main.rs` | ✅ |
 | `tools/skill_provenance.py` | `skill_provenance.rs` | ✅ foreground default |
-| `hermes_cli/plugins.py` | `plugins.rs`, `shell_hooks.rs` | ⚠️ hook payload parity fixtures ongoing |
+| `hermes_cli/plugins.py` | `plugins.rs`, `shell_hooks.rs` | ✅ golden hook payloads for all `HookType`s |
 
 ## Tests (parity contracts)
 

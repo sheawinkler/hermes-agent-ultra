@@ -559,6 +559,20 @@ mod tests {
     }
 
     #[test]
+    fn golden_hook_fixtures_match_plugin_schema() {
+        use crate::plugins::{validate_hook_payload, HookType};
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hook_payloads");
+        for hook in HookType::all() {
+            let path = root.join(format!("{}.json", hook.as_str()));
+            let ctx: Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            validate_hook_payload(*hook, &ctx)
+                .unwrap_or_else(|e| panic!("{}: {e}", hook.as_str()));
+        }
+    }
+
+    #[test]
     fn parse_hooks_block_reads_on_session_end() {
         let yaml = r#"
 on_session_end:

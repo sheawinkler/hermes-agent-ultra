@@ -1,0 +1,10 @@
+{
+  "attempt": 1,
+  "model": "gpt-4o",
+  "stream": false,
+  "ok": true,
+  "finish_reason": "stop",
+  "error": null,
+  "has_tool_calls": false,
+  "interrupted": false
+}

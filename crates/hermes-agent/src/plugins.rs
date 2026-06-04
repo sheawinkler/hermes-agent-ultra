@@ -103,7 +103,7 @@ fn optional_string_or_null(obj: &serde_json::Map<String, Value>, key: &str) -> R
     Ok(())
 }
 
-fn validate_hook_payload(hook: HookType, context: &Value) -> Result<(), String> {
+pub(crate) fn validate_hook_payload(hook: HookType, context: &Value) -> Result<(), String> {
     let obj = expect_obj(context, hook)?;
     match hook {
         HookType::PreToolCall => {
@@ -1073,15 +1073,16 @@ dependencies:
 
     #[test]
     fn test_hook_payload_golden_fixtures() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hook_payloads");
-        let pre_api: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(root.join("pre_api_request.json")).unwrap())
-                .unwrap();
-        assert!(validate_hook_payload(HookType::PreApiRequest, &pre_api).is_ok());
-        let on_end: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(root.join("on_session_end.json")).unwrap())
-                .unwrap();
-        assert!(validate_hook_payload(HookType::OnSessionEnd, &on_end).is_ok());
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hook_payloads");
+        for hook in HookType::all() {
+            let path = root.join(format!("{}.json", hook.as_str()));
+            assert!(path.is_file(), "missing fixture for {}", hook.as_str());
+            let ctx: Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            validate_hook_payload(*hook, &ctx)
+                .unwrap_or_else(|e| panic!("{}: {e}", hook.as_str()));
+        }
     }
 
     fn test_invoke_hook_keeps_backward_compat_even_with_invalid_payload() {
