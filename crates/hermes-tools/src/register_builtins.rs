@@ -751,17 +751,28 @@ pub fn register_builtin_tools(
     tracing::info!("Registered {} built-in tools", registry.list_tools().len());
 }
 
-/// Return the Hermes data directory (`~/.hermes/`), creating it if needed.
+/// Return the Hermes data directory, creating it if needed.
 fn hermes_data_dir() -> PathBuf {
+    if let Some(dir) = hermes_home_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        return dir;
+    }
     let home = dirs_home().unwrap_or_else(|| PathBuf::from("."));
     let dir = home.join(".hermes");
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
 
+fn hermes_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HERMES_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }
 
@@ -774,6 +785,12 @@ mod tests {
     use serde_json::Value;
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     struct EnvGuard {
         key: &'static str,
@@ -921,7 +938,7 @@ mod tests {
 
     #[test]
     fn local_backend_exposes_terminal_and_terminal_backed_file_tools() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_env();
         let home = tempfile::tempdir().expect("temp home");
         let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
         let _terminal_env = EnvGuard::set("TERMINAL_ENV", "local");
@@ -945,7 +962,7 @@ mod tests {
 
     #[test]
     fn invalid_backend_hides_terminal_backed_tools_but_keeps_local_file_tools() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_env();
         let home = tempfile::tempdir().expect("temp home");
         let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
         let _terminal_env = EnvGuard::set("TERMINAL_ENV", "unknown-backend");
@@ -1015,7 +1032,7 @@ mod tests {
 
     #[test]
     fn builtin_registry_exposes_snapshot_surfaces_to_cli_list() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_env();
         let home = tempfile::tempdir().expect("temp home");
         let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
         let _terminal_env = EnvGuard::set("TERMINAL_ENV", "local");
@@ -1047,16 +1064,30 @@ mod tests {
 
     #[test]
     fn builtin_registry_registers_terminal_tools_for_managed_modal_surface() {
+        let _lock = lock_env();
+        let home = tempfile::tempdir().expect("temp home");
+        let hermes_home = tempfile::tempdir().expect("temp hermes home");
+        let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
+        let _hermes_home =
+            EnvGuard::set("HERMES_HOME", hermes_home.path().to_string_lossy().as_ref());
         let names = registered_all_names();
 
         assert!(names.contains(&"terminal".to_string()));
         assert!(names.contains(&"process".to_string()));
         assert!(names.contains(&"execute_code".to_string()));
+        assert!(
+            hermes_home.path().join("sessions.db").is_file(),
+            "session search should initialize under HERMES_HOME"
+        );
+        assert!(
+            !home.path().join(".hermes").join("sessions.db").exists(),
+            "HERMES_HOME must not be nested below HOME/.hermes"
+        );
     }
 
     #[test]
     fn browser_tool_surface_exposes_current_commands_without_legacy_close() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = lock_env();
         let home = tempfile::tempdir().expect("temp home");
         let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
         let names = registered_names();
