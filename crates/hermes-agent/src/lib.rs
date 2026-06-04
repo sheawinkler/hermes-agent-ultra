@@ -5,6 +5,7 @@
 //! model finishes naturally or the turn budget is exhausted.
 
 pub mod agent_loop;
+mod agent_runtime_helpers;
 pub mod api_bridge;
 pub mod api_message_oracle;
 pub mod api_messages;
@@ -12,13 +13,13 @@ pub mod auxiliary_builder;
 pub mod budget;
 pub mod chat_completion_helpers;
 pub mod code_index;
+pub mod codex_responses_adapter;
+pub mod codex_runtime;
 pub mod compression;
 pub mod context;
 pub mod context_files;
 pub mod context_references;
 pub mod conversation_loop;
-pub mod codex_runtime;
-pub mod transports;
 pub mod copilot_acp;
 pub mod credential_pool;
 pub mod credential_pool_recovery;
@@ -32,7 +33,9 @@ pub mod lsp_context;
 pub mod memory_manager;
 pub mod memory_plugins;
 pub mod message_sanitization;
+pub mod transports;
 pub use message_sanitization as python_alignment;
+mod error_classifier;
 pub mod nous_rate_guard;
 pub mod oauth;
 pub mod plugins;
@@ -43,25 +46,24 @@ mod provider_serialize_cache;
 pub mod providers_extra;
 pub mod rate_limit;
 pub mod reasoning;
-mod error_classifier;
 mod retry_failover;
 pub mod session_log;
 pub mod session_persistence;
 pub mod session_state;
-pub mod usage_parse;
 pub mod shell_hooks;
-pub mod skill_provenance;
 pub mod skill_orchestrator;
+pub mod skill_provenance;
 pub mod smart_model_routing;
 pub mod steer;
 pub mod stream_scrubber;
 pub mod sub_agent_orchestrator;
 pub mod subdirectory_hints;
-pub mod tool_executor;
-mod turn_finalize_hooks;
 mod system_prompt;
+pub mod tool_executor;
 pub mod tool_guardrails;
 pub mod tools_wiring;
+mod turn_finalize_hooks;
+pub mod usage_parse;
 pub mod user_interest;
 pub mod vision_adapter;
 pub mod vision_message_prepare;
@@ -73,12 +75,12 @@ pub use agent_loop::{
     AgentCallbacks, AgentConfig, AgentLoop, ApiMode, AsyncToolDispatch, CheapModelRouteConfig,
     ErrorClass, RetryConfig, SmartModelRoutingConfig, ToolRegistry, TurnMetrics,
 };
-pub use session_state::{
-    format_gateway_usage_text, format_usage_command_text, SessionUsageDisplay, SessionUsageMetrics,
-};
 pub use conversation_loop::{
     ConversationResult, RunConversationParams, extract_last_assistant_reply,
     split_messages_for_run_conversation,
+};
+pub use session_state::{
+    SessionUsageDisplay, SessionUsageMetrics, format_gateway_usage_text, format_usage_command_text,
 };
 
 // Re-export context management
@@ -148,8 +150,8 @@ pub use skill_orchestrator::SkillOrchestrator;
 
 // Re-export session persistence
 pub use session_persistence::{
-    decode_content_preview, format_session_db_unavailable, get_last_init_error,
-    leading_system_prompt_for_persist, SessionFlushCursor, SessionPersistence, SessionRecord,
+    SessionFlushCursor, SessionPersistence, SessionRecord, decode_content_preview,
+    format_session_db_unavailable, get_last_init_error, leading_system_prompt_for_persist,
 };
 
 // Re-export context files

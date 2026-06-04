@@ -1,17 +1,4 @@
-﻿//! Python `agent.conversation_loop.run_conversation` parity ? single entry for one user turn.
-//!
-//! (`prepare_turn`): sanitize, append user, hydrate counters, message prelude.
-//! one [`AgentLoop::run_with_message_prelude`] (`run` / `run_stream` / `run_*_prepared` wrappers).
-//! (`finalize_turn`): turn-level hooks, [`ConversationResult`] assembly, optional persist.
-//!
-//! # Result types
-//!
-//! - [`AgentResult`] ??output of the autonomous loop (`run` / `run_stream`): messages, turns,
-//!   usage, `api_calls`, `turn_exit_reason`, etc.
-//! - [`ConversationResult`] ??Python `run_conversation` return dict: **owns** the loop result via
-//!   [`ConversationResult::loop_result`] and adds E-segment presentation (`final_response`,
-//!   `last_reasoning`, `completed`). Use accessors ([`ConversationResult::messages`],
-//!   [`ConversationResult::api_calls`]) instead of duplicating loop fields at the top level.
+﻿//! Python `agent.conversation_loop.run_conversation`
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -20,8 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use hermes_core::{
-    AgentError, AgentResult, Message, MessageRole, StreamChunk, ToolCall, ToolSchema,
-    UsageStats,
+    AgentError, AgentResult, Message, MessageRole, StreamChunk, ToolCall, ToolSchema, UsageStats,
 };
 use serde_json::Value;
 
@@ -29,24 +15,24 @@ use crate::agent_loop::{
     AgentLoop, LoopExit, OBJECTIVE_DEEP_AUDIT_MAX_RETRIES, OBJECTIVE_GUARD_MAX_RETRIES,
     ReplayRecorder, RepoReviewBudgetState, StreamCollectOutcome, ToolProgressWatchdog,
     TurnRuntimeRoute, apply_repo_review_discovery_budget_policy,
-    apply_repo_review_tool_profile_narrowing, apply_web_tool_budget, build_auxiliary_arc_for_config,
-    contextlattice_connect_system_hint, contextlattice_intelligence_system_hint,
-    detect_contextlattice_connect_intent, effective_max_turns, estimate_usage_cost_usd,
-    exploratory_problem_solving_system_hint, extract_last_user_assistant,
-    finalizer_action_execution_requires_retry, finalizer_claim_requires_evidence_retry,
-    finalizer_output_quality_requires_retry, governor_for_turn, governor_runtime_state,
-    governor_window_size, is_budgeted_web_tool, latest_user_content, merge_usage,
-    objective_guard_policy, objective_guard_retry_prompt, objective_guard_satisfied,
-    objective_mode_system_hint, push_window_f64, push_window_u64,
+    apply_repo_review_tool_profile_narrowing, apply_web_tool_budget,
+    build_auxiliary_arc_for_config, contextlattice_connect_system_hint,
+    contextlattice_intelligence_system_hint, detect_contextlattice_connect_intent,
+    effective_max_turns, estimate_usage_cost_usd, exploratory_problem_solving_system_hint,
+    extract_last_user_assistant, finalizer_action_execution_requires_retry,
+    finalizer_claim_requires_evidence_retry, finalizer_output_quality_requires_retry,
+    governor_for_turn, governor_runtime_state, governor_window_size, is_budgeted_web_tool,
+    latest_user_content, merge_usage, objective_guard_policy, objective_guard_retry_prompt,
+    objective_guard_satisfied, objective_mode_system_hint, push_window_f64, push_window_u64,
     should_apply_turn_reliability_guard, should_trip_tool_loop_guard,
     update_repo_review_budget_state_from_results, web_tool_budget_max_consecutive_errors,
     web_tool_budget_user_notice,
 };
 use crate::budget;
+use crate::codex_responses_adapter::summarize_user_message_for_log_str;
 use crate::context::ContextManager;
 use crate::message_sanitization::{
-    CODEX_CONTINUE_USER_MESSAGE, budget_pressure_text,
-    continuation_prompt_for_response,
+    CODEX_CONTINUE_USER_MESSAGE, budget_pressure_text, continuation_prompt_for_response,
     inject_budget_pressure_into_last_tool_result, sanitize_surrogates,
     strip_system_messages_from_history, strip_think_blocks_for_ack,
 };
@@ -160,6 +146,8 @@ impl ConversationResult {
 /// Metadata carried from B segment through E segment.
 #[derive(Debug, Clone)]
 pub struct TurnFinalizeMeta {
+    /// Inbound user turn text (Python `user_message` kwarg), not `persist_user_message`.
+    pub inbound_user_message: String,
     pub original_user_message: String,
     pub task_id: String,
     pub persist_session: bool,
@@ -277,6 +265,9 @@ impl AgentLoop {
             }
         };
 
+        let inbound_user_message = user_message.clone();
+        let history_len = conversation_history.len();
+
         let mut messages: Vec<Message> = conversation_history;
         messages.push(Message::user(user_message));
 
@@ -286,13 +277,39 @@ impl AgentLoop {
         self.replay_compression_warning_at_turn_start().await;
         self.reset_vision_supported_for_turn();
         self.cleanup_dead_connections_at_turn_start().await;
+
+        let preview_text = summarize_user_message_for_log_str(&inbound_user_message);
+        let msg_preview = if preview_text.chars().count() > 80 {
+            format!("{}...", preview_text.chars().take(80).collect::<String>())
+        } else {
+            preview_text.clone()
+        };
+        let msg_preview = msg_preview.replace('\n', " ");
+        let rt = self.primary_runtime_snapshot();
         tracing::info!(
             session_id = %crate::session_log::current_session_tag(),
             task_id = %task_id,
             user_turn = user_turn_count,
             model = %self.active_model(),
+            provider = rt.provider.as_deref().unwrap_or("unknown"),
+            platform = %self.config().platform.as_deref().unwrap_or("unknown"),
+            history_len = history_len,
+            msg = %msg_preview,
             "conversation turn"
         );
+        if !self.config().quiet_mode {
+            let print_preview = summarize_user_message_for_log_str(&inbound_user_message);
+            let suffix = if print_preview.chars().count() > 60 {
+                "..."
+            } else {
+                ""
+            };
+            let short: String = print_preview.chars().take(60).collect();
+            self.emit_status(
+                "lifecycle",
+                &format!("💬 Starting conversation: '{short}{suffix}'"),
+            );
+        }
         self.memory_on_turn_start(user_turn_count, &original_user_message);
 
         self.apply_turn_prep_infrastructure_hooks();
@@ -300,6 +317,7 @@ impl AgentLoop {
 
         Ok(PreparedTurn {
             meta: TurnFinalizeMeta {
+                inbound_user_message,
                 original_user_message,
                 task_id,
                 persist_session: params.persist_session,
@@ -318,8 +336,8 @@ impl AgentLoop {
         let mut final_response = extract_last_assistant_reply(&messages);
         let last_reasoning = extract_last_reasoning_current_turn(&messages);
         let interrupted = loop_result.interrupted;
-        let max_iterations = effective_max_turns(self.config().max_turns)
-            .unwrap_or(self.config().max_turns);
+        let max_iterations =
+            effective_max_turns(self.config().max_turns).unwrap_or(self.config().max_turns);
         let completed = final_response.is_some()
             && !loop_result.failed
             && !interrupted
@@ -932,8 +950,7 @@ impl AgentLoop {
                 governor_for_turn(&self.config(), &ctx, 0, Some(&turn_governor_runtime));
 
             if let Some(ref ctrl) = web_research_ctrl {
-                active_tool_schemas =
-                    Arc::from(ctrl.filter_tool_schemas(tool_schemas.as_ref()));
+                active_tool_schemas = Arc::from(ctrl.filter_tool_schemas(tool_schemas.as_ref()));
                 if !web_finalize_hint_injected {
                     if let Some(hint) = ctrl.finalization_system_hint() {
                         ctx.add_message(Message::system(hint));
@@ -1824,19 +1841,16 @@ impl AgentLoop {
             // Cap concurrent delegate_task calls
             self.cap_delegates(&mut tool_calls);
             let deferred_web_budget_results = if let Some(ref mut ctrl) = web_research_ctrl {
-                ctrl.ensure_plan_on_first_web(
-                    web_auxiliary.as_ref(),
-                    &first_user,
-                    &tool_calls,
-                )
-                .await;
-                let (blocked, notices) = ctrl.gate_web_batch(
-                    web_auxiliary.as_ref(),
-                    ctx.get_messages(),
-                    &mut tool_calls,
-                    total_turns,
-                )
-                .await;
+                ctrl.ensure_plan_on_first_web(web_auxiliary.as_ref(), &first_user, &tool_calls)
+                    .await;
+                let (blocked, notices) = ctrl
+                    .gate_web_batch(
+                        web_auxiliary.as_ref(),
+                        ctx.get_messages(),
+                        &mut tool_calls,
+                        total_turns,
+                    )
+                    .await;
                 for notice in notices {
                     self.emit_status("tool_failure", &notice);
                 }
@@ -1850,8 +1864,8 @@ impl AgentLoop {
                     total_turns,
                 );
                 if !blocked.is_empty() {
-                    let blocked_by_errors =
-                        web_tool_consecutive_error_turns >= web_tool_budget_max_consecutive_errors();
+                    let blocked_by_errors = web_tool_consecutive_error_turns
+                        >= web_tool_budget_max_consecutive_errors();
                     for (tool_name, _) in &blocked {
                         self.emit_status(
                             "tool_failure",
@@ -2488,7 +2502,11 @@ mod tests {
         let history: Vec<Message> = (0..3).map(|i| Message::user(format!("u{i}"))).collect();
         agent.hydrate_memory_nudge_counters_from_history(&history);
         assert_eq!(
-            agent.evolution_counters.lock().expect("lock").user_turn_count,
+            agent
+                .evolution_counters
+                .lock()
+                .expect("lock")
+                .user_turn_count,
             3
         );
     }

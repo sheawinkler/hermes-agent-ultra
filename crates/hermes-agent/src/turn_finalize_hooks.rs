@@ -3,6 +3,7 @@
 use hermes_core::{Message, MessageRole};
 
 use crate::agent_loop::AgentLoop;
+use crate::codex_responses_adapter::summarize_user_message_for_log_str;
 use crate::conversation_loop::TurnFinalizeMeta;
 
 /// Remove private empty-response retry scaffolding and rewind orphan tool tails.
@@ -64,7 +65,8 @@ impl AgentLoop {
         completed: bool,
     ) {
         drop_trailing_empty_response_scaffolding(messages);
-        self.maybe_save_turn_trajectory(&meta.original_user_message, messages, completed);
+        let trajectory_user = summarize_user_message_for_log_str(&meta.inbound_user_message);
+        self.maybe_save_turn_trajectory(&trajectory_user, messages, completed);
         self.cleanup_task_resources(&meta.task_id);
         if loop_result.turn_exit_reason.contains("max_iterations")
             && hermes_tools::kanban_task_from_env().is_some()
