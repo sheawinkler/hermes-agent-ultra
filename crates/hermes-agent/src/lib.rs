@@ -29,6 +29,7 @@ pub mod lsp_context;
 pub mod memory_manager;
 pub mod memory_plugins;
 pub mod message_sanitization;
+pub use message_sanitization as python_alignment;
 pub mod oauth;
 pub mod plugins;
 mod prompt_builder;

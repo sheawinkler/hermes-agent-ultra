@@ -51,7 +51,8 @@ use crate::message_sanitization::{
     continuation_prompt_for_response, format_partial_stream_tool_call_warning,
     inject_budget_pressure_into_last_tool_result, looks_like_codex_intermediate_ack,
     partial_stream_dropped_tool_names, partial_stream_tool_calls_in_flight,
-    should_treat_stop_as_truncated, strip_think_blocks_for_ack,
+    sanitize_surrogates, should_treat_stop_as_truncated, strip_budget_warnings_from_messages,
+    strip_think_blocks_for_ack,
 };
 use crate::plugins::{HookResult, HookType, PluginManager};
 use crate::prompt_builder::TOOL_USE_ENFORCEMENT_MODELS;
@@ -71,7 +72,8 @@ use crate::system_prompt::{
     BACKEND_PROBE_COMMAND, format_probe_output, platform_hint_for, probe_remote_backend_cached,
 };
 use crate::user_interest::{
-    InterestStore, ingest_user_message, is_poi_synthetic_user_text, spawn_session_end_ingest,
+    InterestStore, SessionPoiBuffer, ingest_user_message, is_poi_synthetic_user_text,
+    spawn_session_end_ingest,
 };
 use hermes_intelligence::auxiliary::AuxiliaryClient;
 
@@ -2189,6 +2191,8 @@ pub struct AgentLoop {
     interest_synced_user_hashes: Arc<Mutex<HashSet<u64>>>,
     /// Messages prefix already scanned by [`Self::interest_sync_user_messages`].
     interest_synced_message_len: Arc<Mutex<usize>>,
+    /// Per-session POI signals until session-end flush (`per_turn_buffer`).
+    interest_session_buffer: Arc<Mutex<SessionPoiBuffer>>,
     /// Optional plugin manager for lifecycle hooks.
     pub plugin_manager: Option<Arc<std::sync::Mutex<PluginManager>>>,
     /// Callbacks for progress reporting.
@@ -2656,6 +2660,7 @@ impl AgentLoop {
             interest_store: None,
             interest_synced_user_hashes: Arc::new(Mutex::new(HashSet::new())),
             interest_synced_message_len: Arc::new(Mutex::new(0)),
+            interest_session_buffer: Arc::new(Mutex::new(SessionPoiBuffer::default())),
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
@@ -2957,6 +2962,7 @@ impl AgentLoop {
             interest_store: None,
             interest_synced_user_hashes: Arc::new(Mutex::new(HashSet::new())),
             interest_synced_message_len: Arc::new(Mutex::new(0)),
+            interest_session_buffer: Arc::new(Mutex::new(SessionPoiBuffer::default())),
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
@@ -3287,15 +3293,19 @@ impl AgentLoop {
         if let Ok(mut synced) = self.interest_synced_user_hashes.lock() {
             synced.clear();
         }
+        if let Ok(mut buffer) = self.interest_session_buffer.lock() {
+            buffer.clear();
+        }
     }
 
     fn interest_sync_user_messages(&self, messages: &[Message]) {
         if !self.config().interest.enabled || !self.config().interest.uses_rules() {
             return;
         }
-        let Some(ref store) = self.interest_store else {
+        let interest_cfg = self.config().interest.clone();
+        if !interest_cfg.per_turn_persist && !interest_cfg.per_turn_buffer {
             return;
-        };
+        }
         let Ok(mut synced_len) = self.interest_synced_message_len.lock() else {
             return;
         };
@@ -3304,9 +3314,6 @@ impl AgentLoop {
             return;
         }
         let Ok(mut synced) = self.interest_synced_user_hashes.lock() else {
-            return;
-        };
-        let Ok(guard) = store.lock() else {
             return;
         };
         for msg in messages.iter().skip(start) {
@@ -3329,7 +3336,18 @@ impl AgentLoop {
             if !synced.insert(hash) {
                 continue;
             }
-            let _ = ingest_user_message(&guard, trimmed, 0.35);
+            if interest_cfg.per_turn_persist {
+                let Some(ref store) = self.interest_store else {
+                    continue;
+                };
+                if let Ok(guard) = store.lock() {
+                    let _ = ingest_user_message(&guard, &interest_cfg, trimmed, 0.35);
+                }
+            } else if interest_cfg.per_turn_buffer {
+                if let Ok(mut buffer) = self.interest_session_buffer.lock() {
+                    buffer.absorb_turn(trimmed, &interest_cfg);
+                }
+            }
         }
         *synced_len = messages.len();
     }
@@ -3341,6 +3359,17 @@ impl AgentLoop {
         let Some(ref store) = self.interest_store else {
             return;
         };
+        let buffered = self
+            .interest_session_buffer
+            .lock()
+            .map(|mut b| b.drain())
+            .unwrap_or_default();
+        if let Ok(mut synced) = self.interest_synced_user_hashes.lock() {
+            synced.clear();
+        }
+        if let Ok(mut len) = self.interest_synced_message_len.lock() {
+            *len = 0;
+        }
         let as_values: Vec<Value> = messages
             .iter()
             .filter_map(|m| serde_json::to_value(m).ok())
@@ -3354,7 +3383,13 @@ impl AgentLoop {
         } else {
             None
         };
-        spawn_session_end_ingest(Arc::clone(store), interest_cfg, as_values, auxiliary);
+        spawn_session_end_ingest(
+            Arc::clone(store),
+            interest_cfg,
+            as_values,
+            buffered,
+            auxiliary,
+        );
     }
 
     fn memory_prefetch(&self, query: &str, session_id: &str) -> String {
@@ -6270,6 +6305,19 @@ impl AgentLoop {
             .map(PathBuf::from)
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+
+    /// Per-turn message prelude (sanitize, budget strip, @file expansion, restore primary).
+    pub(crate) async fn apply_turn_message_prelude(&self, messages: &mut Vec<Message>) {
+        for msg in messages.iter_mut() {
+            if let Some(ref mut c) = msg.content {
+                *c = sanitize_surrogates(c).into_owned();
+            }
+        }
+        strip_budget_warnings_from_messages(messages);
+        self.preprocess_user_message_context_references(messages)
+            .await;
+        self.restore_primary_runtime_at_turn_start();
     }
 
     pub(crate) async fn preprocess_user_message_context_references(

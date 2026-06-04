@@ -7,9 +7,7 @@
 use hermes_core::{AgentError, AgentResult, Message, MessageRole, StreamChunk, ToolSchema};
 
 use crate::agent_loop::AgentLoop;
-use crate::message_sanitization::{
-    sanitize_surrogates, strip_budget_warnings_from_messages, strip_system_messages_from_history,
-};
+use crate::message_sanitization::{sanitize_surrogates, strip_system_messages_from_history};
 use crate::plugins::{HookResult, HookType};
 use crate::session_persistence::leading_system_prompt_for_persist;
 
@@ -161,19 +159,6 @@ impl AgentLoop {
             },
             messages,
         })
-    }
-
-    /// Per-turn message prelude (sanitize, budget strip, @file expansion, restore primary).
-    pub(crate) async fn apply_turn_message_prelude(&self, messages: &mut Vec<Message>) {
-        for msg in messages.iter_mut() {
-            if let Some(ref mut c) = msg.content {
-                *c = sanitize_surrogates(c).into_owned();
-            }
-        }
-        strip_budget_warnings_from_messages(messages);
-        self.preprocess_user_message_context_references(messages)
-            .await;
-        self.restore_primary_runtime_at_turn_start();
     }
 
     /// turn-level hooks + [`ConversationResult`] + optional session persist.
