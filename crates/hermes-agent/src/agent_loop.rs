@@ -850,6 +850,10 @@ pub struct AgentConfig {
     /// Maximum character budget for injected LSP context block.
     #[serde(default = "default_lsp_context_max_chars")]
     pub lsp_context_max_chars: usize,
+
+    /// Adaptive web research planner/evaluator and per-message tool budgets.
+    #[serde(default)]
+    pub web_research: hermes_config::WebResearchConfig,
 }
 
 fn default_max_turns() -> u32 {
@@ -1084,6 +1088,7 @@ impl Default for AgentConfig {
             code_index_max_symbols: default_code_index_max_symbols(),
             lsp_context_enabled: default_lsp_context_enabled(),
             lsp_context_max_chars: default_lsp_context_max_chars(),
+            web_research: hermes_config::WebResearchConfig::default(),
         }
     }
 }
