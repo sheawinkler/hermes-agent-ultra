@@ -52,12 +52,18 @@ fn dashboard_url(host: &str, port: u16) -> String {
     format!("http://{}:{}/", display_host, port)
 }
 
-fn read_dashboard_platform() -> Result<(std::path::PathBuf, PlatformConfig), ToolError> {
-    let cfg_path = hermes_home().join("config.yaml");
+fn read_dashboard_platform_from_home(
+    home: &std::path::Path,
+) -> Result<(std::path::PathBuf, PlatformConfig), ToolError> {
+    let cfg_path = home.join("config.yaml");
     let cfg = load_user_config_file(&cfg_path)
         .map_err(|e| ToolError::ExecutionFailed(format!("load config: {e}")))?;
     let platform = cfg.platforms.get("api_server").cloned().unwrap_or_default();
     Ok((cfg_path, platform))
+}
+
+fn read_dashboard_platform() -> Result<(std::path::PathBuf, PlatformConfig), ToolError> {
+    read_dashboard_platform_from_home(&hermes_home())
 }
 
 fn current_host_and_port(platform: &PlatformConfig) -> (String, u16) {
@@ -91,7 +97,8 @@ fn emit_status_payload(cfg_path: &std::path::Path, platform: &PlatformConfig) ->
     .to_string()
 }
 
-fn persist_dashboard_platform(
+fn persist_dashboard_platform_in_home(
+    home: &std::path::Path,
     enabled: bool,
     host: String,
     port: u16,
@@ -103,7 +110,7 @@ fn persist_dashboard_platform(
         ));
     }
 
-    let cfg_path = hermes_home().join("config.yaml");
+    let cfg_path = home.join("config.yaml");
     let mut cfg = load_user_config_file(&cfg_path)
         .map_err(|e| ToolError::ExecutionFailed(format!("load config: {e}")))?;
 
@@ -131,6 +138,15 @@ fn persist_dashboard_platform(
         "config_path": cfg_path.display().to_string(),
     })
     .to_string())
+}
+
+fn persist_dashboard_platform(
+    enabled: bool,
+    host: String,
+    port: u16,
+    insecure: bool,
+) -> Result<String, ToolError> {
+    persist_dashboard_platform_in_home(&hermes_home(), enabled, host, port, insecure)
 }
 
 #[derive(Default)]
@@ -221,80 +237,53 @@ impl ToolHandler for DashboardControlHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hermes_config::managed_gateway::test_lock;
-    use std::path::Path;
-
-    struct HermesHomeScope(Option<String>);
-
-    impl HermesHomeScope {
-        fn set(path: &Path) -> Self {
-            let original = std::env::var("HERMES_HOME").ok();
-            std::env::set_var("HERMES_HOME", path);
-            Self(original)
-        }
-    }
-
-    impl Drop for HermesHomeScope {
-        fn drop(&mut self) {
-            match &self.0 {
-                Some(value) => std::env::set_var("HERMES_HOME", value),
-                None => std::env::remove_var("HERMES_HOME"),
-            }
-        }
-    }
-
-    fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("test runtime")
-            .block_on(future)
-    }
 
     #[test]
     fn enable_status_disable_roundtrip() {
-        let _guard = test_lock::lock();
         let temp = tempfile::tempdir().expect("tempdir");
-        let _home = HermesHomeScope::set(temp.path());
 
-        block_on(async {
-            let handler = DashboardControlHandler;
-            let enabled = handler
-                .execute(json!({"action":"enable","host":"127.0.0.1","port":9191}))
-                .await
-                .expect("enable");
-            let enabled_json: Value = serde_json::from_str(&enabled).expect("json");
-            assert_eq!(enabled_json["enabled"], true);
-            assert_eq!(enabled_json["port"], 9191);
+        let enabled = persist_dashboard_platform_in_home(
+            temp.path(),
+            true,
+            "127.0.0.1".to_string(),
+            9191,
+            false,
+        )
+        .expect("enable");
+        let enabled_json: Value = serde_json::from_str(&enabled).expect("json");
+        assert_eq!(enabled_json["enabled"], true);
+        assert_eq!(enabled_json["port"], 9191);
 
-            let status = handler
-                .execute(json!({"action":"status"}))
-                .await
-                .expect("status");
-            let status_json: Value = serde_json::from_str(&status).expect("json");
-            assert_eq!(status_json["enabled"], true);
-            assert_eq!(status_json["host"], "127.0.0.1");
-            assert_eq!(status_json["port"], 9191);
+        let (cfg_path, platform) = read_dashboard_platform_from_home(temp.path()).expect("status");
+        let status_json: Value =
+            serde_json::from_str(&emit_status_payload(&cfg_path, &platform)).expect("json");
+        assert_eq!(status_json["enabled"], true);
+        assert_eq!(status_json["host"], "127.0.0.1");
+        assert_eq!(status_json["port"], 9191);
 
-            let disabled = handler
-                .execute(json!({"action":"disable"}))
-                .await
-                .expect("disable");
-            let disabled_json: Value = serde_json::from_str(&disabled).expect("json");
-            assert_eq!(disabled_json["enabled"], false);
-        });
+        let disabled = persist_dashboard_platform_in_home(
+            temp.path(),
+            false,
+            "127.0.0.1".to_string(),
+            9191,
+            true,
+        )
+        .expect("disable");
+        let disabled_json: Value = serde_json::from_str(&disabled).expect("json");
+        assert_eq!(disabled_json["enabled"], false);
     }
 
     #[test]
     fn rejects_non_local_without_insecure() {
-        let _guard = test_lock::lock();
         let temp = tempfile::tempdir().expect("tempdir");
-        let _home = HermesHomeScope::set(temp.path());
-
-        let handler = DashboardControlHandler;
-        let err =
-            block_on(handler.execute(json!({"action":"enable","host":"0.0.0.0","port":8080})))
-                .expect_err("non-local should fail");
+        let err = persist_dashboard_platform_in_home(
+            temp.path(),
+            true,
+            "0.0.0.0".to_string(),
+            8080,
+            false,
+        )
+        .expect_err("non-local should fail");
         match err {
             ToolError::InvalidParams(msg) => assert!(msg.contains("non-localhost")),
             other => panic!("unexpected error: {other:?}"),

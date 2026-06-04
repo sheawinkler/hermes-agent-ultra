@@ -311,7 +311,14 @@ impl DiskCleanup {
         let mut auto = Vec::new();
         let mut prompt = Vec::new();
         for item in self.load_tracked() {
-            if !Path::new(&item.path).exists() {
+            let path = Path::new(&item.path);
+            if !path.exists() {
+                continue;
+            }
+            if item.category == "cron-output" && self.guess_category(path) != Some("cron-output") {
+                continue;
+            }
+            if self.is_protected_cron_path(path) {
                 continue;
             }
             let age_days = age_days(&item.timestamp, now).unwrap_or(0);
@@ -346,6 +353,14 @@ impl DiskCleanup {
                 continue;
             }
             let age_days = age_days(&item.timestamp, now).unwrap_or(0);
+            if item.category == "cron-output" && self.guess_category(path) != Some("cron-output") {
+                self.audit_log(&format!("SKIP stale cron-output entry: {}", path.display()));
+                continue;
+            }
+            if self.is_protected_cron_path(path) {
+                self.audit_log(&format!("SKIP protected cron path: {}", path.display()));
+                continue;
+            }
             let should_delete = item.category == "test"
                 || (item.category == "temp" && age_days > 7)
                 || (item.category == "cron-output" && age_days > 14);
@@ -423,6 +438,32 @@ impl DiskCleanup {
             top10: existing,
             total_tracked: tracked.len(),
         }
+    }
+
+    fn is_protected_cron_path(&self, path: &Path) -> bool {
+        let Ok(abs) = normalized_path(path) else {
+            return false;
+        };
+        let home = fs::canonicalize(&self.hermes_home).unwrap_or_else(|_| {
+            absolute_path(&self.hermes_home).unwrap_or(self.hermes_home.clone())
+        });
+        let Ok(rel) = abs.strip_prefix(&home) else {
+            return false;
+        };
+        let parts: Vec<_> = rel
+            .components()
+            .filter_map(|c| c.as_os_str().to_str())
+            .collect();
+
+        matches!(
+            parts.as_slice(),
+            ["cron"]
+                | ["cronjobs"]
+                | ["cron", "jobs.json"]
+                | ["cronjobs", "jobs.json"]
+                | ["cron", ".tick.lock"]
+                | ["cronjobs", ".tick.lock"]
+        )
     }
 
     fn remove_empty_dirs(&self) -> usize {
@@ -936,6 +977,108 @@ mod tests {
         assert_eq!(cleaner.guess_category(&jobs), None);
         assert_eq!(cleaner.guess_category(&lock), None);
         assert_eq!(cleaner.guess_category(&output), Some("cron-output"));
+    }
+
+    fn stale_item(path: &Path, category: &str, size: u64) -> TrackedItem {
+        TrackedItem {
+            path: path.to_string_lossy().to_string(),
+            timestamp: (Utc::now() - chrono::Duration::days(20)).to_rfc3339(),
+            category: category.to_string(),
+            size,
+        }
+    }
+
+    #[test]
+    fn quick_skips_stale_cron_output_jobs_json_and_drops_tracking() {
+        let tmp = TempDir::new().unwrap();
+        let cleaner = cleaner(&tmp);
+        let cron_dir = cleaner.hermes_home().join("cron");
+        fs::create_dir_all(&cron_dir).unwrap();
+        let jobs = cron_dir.join("jobs.json");
+        fs::write(&jobs, "{\"jobs\":[]}").unwrap();
+        cleaner
+            .save_tracked(&[stale_item(&jobs, "cron-output", 123)])
+            .unwrap();
+
+        let summary = cleaner.quick();
+
+        assert_eq!(summary.deleted, 0);
+        assert!(jobs.exists(), "cron/jobs.json must never be deleted");
+        assert!(cleaner.load_tracked().is_empty());
+    }
+
+    #[test]
+    fn quick_skips_stale_cron_output_cron_dir_and_drops_tracking() {
+        let tmp = TempDir::new().unwrap();
+        let cleaner = cleaner(&tmp);
+        let cron_dir = cleaner.hermes_home().join("cron");
+        let output_dir = cron_dir.join("output/job-1");
+        fs::create_dir_all(&output_dir).unwrap();
+        fs::write(output_dir.join("run.md"), "x").unwrap();
+        cleaner
+            .save_tracked(&[stale_item(&cron_dir, "cron-output", 0)])
+            .unwrap();
+
+        let summary = cleaner.quick();
+
+        assert_eq!(summary.deleted, 0);
+        assert!(cron_dir.exists(), "cron/ control-plane dir must remain");
+        assert!(cleaner.load_tracked().is_empty());
+    }
+
+    #[test]
+    fn quick_skips_protected_cron_path_even_with_auto_delete_category() {
+        let tmp = TempDir::new().unwrap();
+        let cleaner = cleaner(&tmp);
+        let cron_dir = cleaner.hermes_home().join("cron");
+        fs::create_dir_all(&cron_dir).unwrap();
+        let tick_lock = cron_dir.join(".tick.lock");
+        fs::write(&tick_lock, "").unwrap();
+        cleaner
+            .save_tracked(&[stale_item(&tick_lock, "test", 0)])
+            .unwrap();
+
+        let summary = cleaner.quick();
+
+        assert_eq!(summary.deleted, 0);
+        assert!(tick_lock.exists(), ".tick.lock must never be deleted");
+        assert!(cleaner.load_tracked().is_empty());
+    }
+
+    #[test]
+    fn dry_run_omits_stale_cron_output_control_plane_entries() {
+        let tmp = TempDir::new().unwrap();
+        let cleaner = cleaner(&tmp);
+        let cron_dir = cleaner.hermes_home().join("cron");
+        fs::create_dir_all(&cron_dir).unwrap();
+        let jobs = cron_dir.join("jobs.json");
+        fs::write(&jobs, "[]").unwrap();
+        cleaner
+            .save_tracked(&[stale_item(&jobs, "cron-output", 123)])
+            .unwrap();
+
+        let (auto, prompt) = cleaner.dry_run();
+
+        assert!(auto.is_empty());
+        assert!(prompt.is_empty());
+    }
+
+    #[test]
+    fn quick_deletes_legitimate_old_cron_output() {
+        let tmp = TempDir::new().unwrap();
+        let cleaner = cleaner(&tmp);
+        let output_dir = cleaner.hermes_home().join("cron/output/job-1");
+        fs::create_dir_all(&output_dir).unwrap();
+        let run_md = output_dir.join("run.md");
+        fs::write(&run_md, "x").unwrap();
+        cleaner
+            .save_tracked(&[stale_item(&run_md, "cron-output", 10)])
+            .unwrap();
+
+        let summary = cleaner.quick();
+
+        assert_eq!(summary.deleted, 1);
+        assert!(!run_md.exists());
     }
 
     #[test]
