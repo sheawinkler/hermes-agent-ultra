@@ -58,6 +58,26 @@ pub struct AutoMaintenanceResult {
 }
 
 impl SessionPersistence {
+    fn ensure_text_column(
+        conn: &rusqlite::Connection,
+        table: &str,
+        column: &str,
+    ) -> Result<(), AgentError> {
+        match conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} TEXT"), []) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("duplicate column") {
+                    Ok(())
+                } else {
+                    Err(AgentError::Io(format!(
+                        "Failed to migrate {table}.{column}: {e}"
+                    )))
+                }
+            }
+        }
+    }
+
     /// Create a new persistence manager rooted at the given hermes home directory.
     pub fn new(hermes_home: impl AsRef<Path>) -> Self {
         let home = hermes_home.as_ref();
@@ -113,7 +133,11 @@ impl SessionPersistence {
                 updated_at TEXT NOT NULL,
                 title TEXT,
                 message_count INTEGER DEFAULT 0,
-                system_prompt TEXT
+                system_prompt TEXT,
+                parent_session_id TEXT,
+                model_config TEXT,
+                end_reason TEXT,
+                ended_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -151,13 +175,14 @@ impl SessionPersistence {
         )
         .map_err(|e| AgentError::Io(format!("Failed to create tables: {e}")))?;
 
-        if let Err(e) = conn.execute("ALTER TABLE sessions ADD COLUMN system_prompt TEXT", []) {
-            let msg = e.to_string();
-            if !msg.contains("duplicate column") {
-                return Err(AgentError::Io(format!(
-                    "Failed to migrate sessions.system_prompt: {e}"
-                )));
-            }
+        for column in [
+            "system_prompt",
+            "parent_session_id",
+            "model_config",
+            "end_reason",
+            "ended_at",
+        ] {
+            Self::ensure_text_column(&conn, "sessions", column)?;
         }
         if let Err(e) = conn.execute("ALTER TABLE messages ADD COLUMN reasoning_content TEXT", []) {
             let msg = e.to_string();
@@ -658,6 +683,26 @@ mod tests {
             .unwrap();
 
         let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let mut sessions_stmt = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .expect("sessions pragma prepare");
+        let session_cols = sessions_stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        for column in [
+            "system_prompt",
+            "parent_session_id",
+            "model_config",
+            "end_reason",
+            "ended_at",
+        ] {
+            assert!(
+                session_cols.iter().any(|name| name == column),
+                "missing migrated sessions.{column}"
+            );
+        }
         let mut stmt = conn
             .prepare("PRAGMA table_info(messages)")
             .expect("pragma prepare");

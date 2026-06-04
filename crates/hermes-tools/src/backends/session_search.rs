@@ -39,9 +39,9 @@ struct SummaryTask {
 }
 
 impl SqliteSessionSearchBackend {
-    fn ensure_parent_session_column(conn: &Connection) -> Result<(), ToolError> {
+    fn ensure_text_column(conn: &Connection, table: &str, column: &str) -> Result<(), ToolError> {
         match conn.execute(
-            "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT",
+            &format!("ALTER TABLE {table} ADD COLUMN {column} TEXT"),
             rusqlite::params![],
         ) {
             Ok(_) => Ok(()),
@@ -51,12 +51,134 @@ impl SqliteSessionSearchBackend {
                     Ok(())
                 } else {
                     Err(ToolError::ExecutionFailed(format!(
-                        "Failed to ensure parent_session_id column: {}",
-                        e
+                        "Failed to ensure {table}.{column}: {e}"
                     )))
                 }
             }
         }
+    }
+
+    fn ensure_session_compat_columns(conn: &Connection) -> Result<(), ToolError> {
+        for column in [
+            "parent_session_id",
+            "model_config",
+            "end_reason",
+            "ended_at",
+        ] {
+            Self::ensure_text_column(conn, "sessions", column)?;
+        }
+        Ok(())
+    }
+
+    fn branch_marker_from_model_config(model_config: Option<&str>) -> Option<String> {
+        let raw = model_config?.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        serde_json::from_str::<Value>(raw).ok().and_then(|v| {
+            v.get("_branched_from")
+                .and_then(|marker| marker.as_str())
+                .map(str::trim)
+                .filter(|marker| !marker.is_empty())
+                .map(ToString::to_string)
+        })
+    }
+
+    fn parse_timestamp_utc(raw: Option<&str>) -> Option<DateTime<Utc>> {
+        let raw = raw.map(str::trim).filter(|s| !s.is_empty())?;
+        if let Ok(seconds) = raw.parse::<f64>() {
+            let sec = seconds.trunc() as i64;
+            let nanos = ((seconds.fract().abs()) * 1_000_000_000_f64).round() as u32;
+            if let Some(dt) = Utc.timestamp_opt(sec, nanos).single() {
+                return Some(dt);
+            }
+        }
+        if let Ok(dt) = DateTime::parse_from_rfc3339(raw) {
+            return Some(dt.with_timezone(&Utc));
+        }
+        if let Ok(naive) = NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S") {
+            return Some(Utc.from_utc_datetime(&naive));
+        }
+        None
+    }
+
+    fn is_legacy_branch_child(
+        created_at: Option<&str>,
+        parent_end_reason: Option<&str>,
+        parent_ended_at: Option<&str>,
+    ) -> bool {
+        if parent_end_reason.map(str::trim) != Some("branched") {
+            return false;
+        }
+        match (
+            Self::parse_timestamp_utc(created_at),
+            Self::parse_timestamp_utc(parent_ended_at),
+        ) {
+            (Some(child_started), Some(parent_ended)) => child_started >= parent_ended,
+            // If an old DB has the reason but not a parseable ended_at, keep the
+            // branch visible rather than hiding potentially user-created work.
+            _ => parent_ended_at
+                .map(str::trim)
+                .unwrap_or_default()
+                .is_empty(),
+        }
+    }
+
+    fn is_branch_child(
+        parent_session_id: Option<&str>,
+        model_config: Option<&str>,
+        created_at: Option<&str>,
+        parent_end_reason: Option<&str>,
+        parent_ended_at: Option<&str>,
+    ) -> bool {
+        let has_parent = parent_session_id
+            .map(str::trim)
+            .filter(|parent| !parent.is_empty())
+            .is_some();
+        has_parent
+            && (Self::branch_marker_from_model_config(model_config).is_some()
+                || Self::is_legacy_branch_child(created_at, parent_end_reason, parent_ended_at))
+    }
+
+    fn visible_session_id_for_row(
+        conn: &Connection,
+        session_id: &str,
+        parent_session_id: Option<&str>,
+        model_config: Option<&str>,
+        created_at: Option<&str>,
+        parent_end_reason: Option<&str>,
+        parent_ended_at: Option<&str>,
+    ) -> String {
+        if Self::is_branch_child(
+            parent_session_id,
+            model_config,
+            created_at,
+            parent_end_reason,
+            parent_ended_at,
+        ) {
+            session_id.to_string()
+        } else {
+            Self::resolve_to_parent(conn, session_id)
+        }
+    }
+
+    fn session_metadata(
+        conn: &Connection,
+        session_id: &str,
+    ) -> (Option<String>, String, Option<String>) {
+        conn.query_row(
+            "SELECT created_at, COALESCE(platform, 'cli'), model FROM sessions WHERE id = ?1",
+            rusqlite::params![session_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?
+                        .unwrap_or_else(|| "cli".to_string()),
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .unwrap_or_else(|_| (None, "cli".to_string(), None))
     }
 
     fn resolve_to_parent(conn: &Connection, session_id: &str) -> String {
@@ -337,7 +459,10 @@ impl SqliteSessionSearchBackend {
                 updated_at TEXT NOT NULL,
                 title TEXT,
                 message_count INTEGER DEFAULT 0,
-                parent_session_id TEXT
+                parent_session_id TEXT,
+                model_config TEXT,
+                end_reason TEXT,
+                ended_at TEXT
             );
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -366,7 +491,7 @@ impl SqliteSessionSearchBackend {
             ToolError::ExecutionFailed(format!("Failed to ensure session schema: {}", e))
         })?;
 
-        Self::ensure_parent_session_column(&conn)?;
+        Self::ensure_session_compat_columns(&conn)?;
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -431,11 +556,13 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                     .collect::<Vec<_>>()
                     .join(", ");
                 let sql = format!(
-                    "SELECT id, title, platform, created_at, updated_at, message_count
-                     FROM sessions
-                     WHERE (parent_session_id IS NULL OR parent_session_id = '')
-                       AND COALESCE(platform, '') NOT IN ({})
-                     ORDER BY updated_at DESC
+                    "SELECT s.id, s.title, s.platform, s.created_at, s.updated_at,
+                            s.message_count, s.parent_session_id, s.model_config,
+                            p.end_reason, p.ended_at
+                     FROM sessions s
+                     LEFT JOIN sessions p ON p.id = s.parent_session_id
+                     WHERE COALESCE(s.platform, '') NOT IN ({})
+                     ORDER BY s.updated_at DESC
                      LIMIT ?",
                     placeholders
                 );
@@ -449,7 +576,8 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                     .iter()
                     .map(|s| rusqlite::types::Value::Text((*s).to_string()))
                     .collect();
-                params_values.push(rusqlite::types::Value::Integer(limit as i64));
+                let scan_limit = (limit.saturating_mul(5).saturating_add(20)).max(limit);
+                params_values.push(rusqlite::types::Value::Integer(scan_limit as i64));
                 let params = rusqlite::params_from_iter(params_values.iter());
                 let rows = stmt
                     .query_map(params, |row| {
@@ -461,6 +589,10 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                             row.get::<_, String>(3)?,
                             row.get::<_, String>(4)?,
                             row.get::<_, i64>(5).unwrap_or(0),
+                            row.get::<_, Option<String>>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                            row.get::<_, Option<String>>(8)?,
+                            row.get::<_, Option<String>>(9)?,
                         ))
                     })
                     .map_err(|e| {
@@ -471,7 +603,34 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                     current_session_id.map(|sid| Self::resolve_to_parent(&conn, sid.trim()));
                 let mut results = Vec::new();
                 for row in rows.flatten() {
-                    let (session_id, title, source, started_at, last_active, message_count) = row;
+                    let (
+                        session_id,
+                        title,
+                        source,
+                        started_at,
+                        last_active,
+                        message_count,
+                        parent_session_id,
+                        model_config,
+                        parent_end_reason,
+                        parent_ended_at,
+                    ) = row;
+                    let has_parent = parent_session_id
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|parent| !parent.is_empty())
+                        .is_some();
+                    if has_parent
+                        && !Self::is_branch_child(
+                            parent_session_id.as_deref(),
+                            model_config.as_deref(),
+                            Some(&started_at),
+                            parent_end_reason.as_deref(),
+                            parent_ended_at.as_deref(),
+                        )
+                    {
+                        continue;
+                    }
                     if let Some(ref current_root) = current_lineage_root {
                         if current_root == &session_id {
                             continue;
@@ -500,6 +659,9 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                         "message_count": message_count,
                         "preview": preview,
                     }));
+                    if results.len() >= limit {
+                        break;
+                    }
                 }
                 let payload = json!({
                     "success": true,
@@ -519,10 +681,14 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                     .collect::<Vec<_>>()
                     .join(", ");
                 let mut sql = String::from(
-                    "SELECT m.session_id, s.created_at, s.platform, s.model, bm25(messages_fts) AS rank
+                    "SELECT m.session_id, s.created_at, s.platform, s.model,
+                            s.parent_session_id, s.model_config,
+                            p.end_reason, p.ended_at,
+                            bm25(messages_fts) AS rank
                      FROM messages_fts
                      JOIN messages m ON m.id = messages_fts.rowid
                      LEFT JOIN sessions s ON s.id = m.session_id
+                     LEFT JOIN sessions p ON p.id = s.parent_session_id
                      WHERE messages_fts MATCH ?1
                        AND m.content IS NOT NULL
                        AND m.content != ''
@@ -575,6 +741,10 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                             row.get::<_, Option<String>>(2)?
                                 .unwrap_or_else(|| "cli".to_string()),
                             row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<String>>(6)?,
+                            row.get::<_, Option<String>>(7)?,
                         ))
                     })
                     .map_err(|e| {
@@ -586,8 +756,25 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                     current_session_id.map(|sid| Self::resolve_to_parent(&conn, sid.trim()));
                 let mut tasks = Vec::new();
                 for row in rows.flatten() {
-                    let (raw_session_id, started_at, source, model) = row;
-                    let resolved_session_id = Self::resolve_to_parent(&conn, &raw_session_id);
+                    let (
+                        raw_session_id,
+                        raw_started_at,
+                        raw_source,
+                        raw_model,
+                        parent_session_id,
+                        model_config,
+                        parent_end_reason,
+                        parent_ended_at,
+                    ) = row;
+                    let resolved_session_id = Self::visible_session_id_for_row(
+                        &conn,
+                        &raw_session_id,
+                        parent_session_id.as_deref(),
+                        model_config.as_deref(),
+                        raw_started_at.as_deref(),
+                        parent_end_reason.as_deref(),
+                        parent_ended_at.as_deref(),
+                    );
                     if let Some(ref current_root) = current_lineage_root {
                         if &resolved_session_id == current_root {
                             continue;
@@ -596,6 +783,11 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                     if !seen.insert(resolved_session_id.clone()) {
                         continue;
                     }
+                    let (started_at, source, model) = if resolved_session_id == raw_session_id {
+                        (raw_started_at, raw_source, raw_model)
+                    } else {
+                        Self::session_metadata(&conn, &resolved_session_id)
+                    };
 
                     let mut msg_stmt = conn
                         .prepare(
@@ -729,6 +921,72 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
 #[cfg(test)]
 mod tests {
     use super::SqliteSessionSearchBackend;
+    use crate::tools::session_search::SessionSearchBackend;
+    use rusqlite::Connection;
+    use serde_json::Value;
+    use tempfile::TempDir;
+
+    fn backend_with_db() -> (TempDir, SqliteSessionSearchBackend) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db_path = tmp.path().join("sessions.db");
+        let backend =
+            SqliteSessionSearchBackend::new(db_path.to_str().expect("utf8 path")).expect("backend");
+        (tmp, backend)
+    }
+
+    fn db_conn(tmp: &TempDir) -> Connection {
+        Connection::open(tmp.path().join("sessions.db")).expect("open db")
+    }
+
+    fn insert_session(
+        conn: &Connection,
+        id: &str,
+        parent: Option<&str>,
+        model_config: Option<&str>,
+        end_reason: Option<&str>,
+        ended_at: Option<&str>,
+        created_at: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO sessions (
+                id, model, platform, created_at, updated_at, title, message_count,
+                parent_session_id, model_config, end_reason, ended_at
+             )
+             VALUES (?1, 'test/model', 'cli', ?6, ?6, ?1, 0, ?2, ?3, ?4, ?5)",
+            rusqlite::params![id, parent, model_config, end_reason, ended_at, created_at],
+        )
+        .expect("insert session");
+    }
+
+    fn insert_message(conn: &Connection, session_id: &str, role: &str, content: &str) {
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content, created_at)
+             VALUES (?1, ?2, ?3, '2026-01-01T00:00:30Z')",
+            rusqlite::params![session_id, role, content],
+        )
+        .expect("insert message");
+        conn.execute(
+            "UPDATE sessions SET message_count = (
+                SELECT COUNT(*) FROM messages WHERE session_id = ?1
+             ) WHERE id = ?1",
+            rusqlite::params![session_id],
+        )
+        .expect("update message count");
+    }
+
+    fn result_ids(output: &str) -> Vec<String> {
+        let parsed: Value = serde_json::from_str(output).expect("json output");
+        parsed["results"]
+            .as_array()
+            .expect("results")
+            .iter()
+            .filter_map(|item| {
+                item.get("session_id")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string)
+            })
+            .collect()
+    }
 
     #[test]
     fn format_timestamp_handles_none() {
@@ -750,5 +1008,129 @@ mod tests {
         let out = SqliteSessionSearchBackend::format_timestamp(Some("2026-01-02T03:04:05Z"));
         assert!(out.contains("2026"));
         assert!(out.contains(" at "));
+    }
+
+    #[tokio::test]
+    async fn recent_mode_keeps_marked_branch_visible_after_parent_reended() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "parent",
+            None,
+            None,
+            Some("tui_shutdown"),
+            Some("2026-01-01T00:00:20Z"),
+            "2026-01-01T00:00:00Z",
+        );
+        insert_session(
+            &conn,
+            "branch",
+            Some("parent"),
+            Some(r#"{"_branched_from":"parent"}"#),
+            None,
+            None,
+            "2026-01-01T00:00:10Z",
+        );
+        insert_message(&conn, "branch", "user", "branch work must stay visible");
+
+        let output = backend.search(None, None, 5, None).await.expect("recent");
+        let ids = result_ids(&output);
+
+        assert!(ids.contains(&"branch".to_string()), "{output}");
+    }
+
+    #[tokio::test]
+    async fn recent_mode_keeps_legacy_branch_visible() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "parent",
+            None,
+            None,
+            Some("branched"),
+            Some("2026-01-01T00:00:05Z"),
+            "2026-01-01T00:00:00Z",
+        );
+        insert_session(
+            &conn,
+            "legacy-branch",
+            Some("parent"),
+            None,
+            None,
+            None,
+            "2026-01-01T00:00:06Z",
+        );
+        insert_message(&conn, "legacy-branch", "user", "legacy branch work");
+
+        let output = backend.search(None, None, 5, None).await.expect("recent");
+        let ids = result_ids(&output);
+
+        assert!(ids.contains(&"legacy-branch".to_string()), "{output}");
+    }
+
+    #[tokio::test]
+    async fn recent_mode_hides_unmarked_child_sessions() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "parent",
+            None,
+            None,
+            Some("completed"),
+            Some("2026-01-01T00:00:05Z"),
+            "2026-01-01T00:00:00Z",
+        );
+        insert_session(
+            &conn,
+            "subagent-child",
+            Some("parent"),
+            None,
+            None,
+            None,
+            "2026-01-01T00:00:01Z",
+        );
+        insert_message(&conn, "subagent-child", "assistant", "internal child work");
+
+        let output = backend.search(None, None, 5, None).await.expect("recent");
+        let ids = result_ids(&output);
+
+        assert!(!ids.contains(&"subagent-child".to_string()), "{output}");
+    }
+
+    #[tokio::test]
+    async fn search_keeps_marked_branch_result_on_branch_session() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "parent",
+            None,
+            None,
+            Some("tui_shutdown"),
+            Some("2026-01-01T00:00:20Z"),
+            "2026-01-01T00:00:00Z",
+        );
+        insert_message(&conn, "parent", "user", "parent only message");
+        insert_session(
+            &conn,
+            "branch",
+            Some("parent"),
+            Some(r#"{"_branched_from":"parent"}"#),
+            None,
+            None,
+            "2026-01-01T00:00:10Z",
+        );
+        insert_message(&conn, "branch", "user", "unique branch phrase");
+
+        let output = backend
+            .search(Some("unique"), None, 5, None)
+            .await
+            .expect("search");
+        let ids = result_ids(&output);
+
+        assert_eq!(ids.first().map(String::as_str), Some("branch"), "{output}");
     }
 }
