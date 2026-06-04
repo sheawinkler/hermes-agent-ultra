@@ -650,6 +650,22 @@ pub fn register_builtin_tools(
         vec![],
     );
 
+    // -- Alpha objective/mission snapshots ----------------------------------
+    reg(
+        registry,
+        "system",
+        Arc::new(crate::tools::alpha_snapshot::ObjectiveSnapshotHandler::new()),
+        "🎯",
+        vec![],
+    );
+    reg(
+        registry,
+        "system",
+        Arc::new(crate::tools::alpha_snapshot::MissionSnapshotHandler::new()),
+        "🛰️",
+        vec![],
+    );
+
     // -- Tool policy simulation ---------------------------------------------
     reg(
         registry,
@@ -952,6 +968,14 @@ mod tests {
             "invalid backend should keep read-only integration snapshots"
         );
         assert!(
+            names.contains(&"objective_snapshot".to_string()),
+            "invalid backend should keep read-only objective snapshots"
+        );
+        assert!(
+            names.contains(&"mission_snapshot".to_string()),
+            "invalid backend should keep read-only mission snapshots"
+        );
+        assert!(
             names.contains(&"raw_trace_control".to_string()),
             "invalid backend should keep raw trace control"
         );
@@ -974,7 +998,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_registry_exposes_integration_snapshot_to_cli_list() {
+    fn builtin_registry_exposes_snapshot_surfaces_to_cli_list() {
         let _lock = ENV_LOCK.lock().unwrap();
         let home = tempfile::tempdir().expect("temp home");
         let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
@@ -994,6 +1018,14 @@ mod tests {
         assert!(
             names.contains(&"integrations_snapshot".to_string()),
             "`hermes tools list` should expose integrations_snapshot"
+        );
+        assert!(
+            names.contains(&"objective_snapshot".to_string()),
+            "`hermes tools list` should expose objective_snapshot"
+        );
+        assert!(
+            names.contains(&"mission_snapshot".to_string()),
+            "`hermes tools list` should expose mission_snapshot"
         );
     }
 

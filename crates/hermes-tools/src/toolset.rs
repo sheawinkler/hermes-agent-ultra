@@ -87,6 +87,8 @@ pub const TOOLSET_SYSTEM: &[&str] = &[
     "credential_files",
     "auth_snapshot",
     "integrations_snapshot",
+    "objective_snapshot",
+    "mission_snapshot",
     "tool_policy_simulate",
     "raw_trace_control",
     "replay_trace_control",
@@ -602,6 +604,8 @@ mod tests {
         assert!(tools.contains(&"cronjob".to_string()));
         assert!(tools.contains(&"auth_snapshot".to_string()));
         assert!(tools.contains(&"integrations_snapshot".to_string()));
+        assert!(tools.contains(&"objective_snapshot".to_string()));
+        assert!(tools.contains(&"mission_snapshot".to_string()));
         assert!(tools.contains(&"ops_snapshot".to_string()));
     }
 

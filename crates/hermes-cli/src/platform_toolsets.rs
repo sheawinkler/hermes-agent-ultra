@@ -212,6 +212,8 @@ mod tests {
         register(&reg, "clarify", "clarify");
         register(&reg, "auth_snapshot", "system");
         register(&reg, "integrations_snapshot", "system");
+        register(&reg, "objective_snapshot", "system");
+        register(&reg, "mission_snapshot", "system");
         register(&reg, "ops_snapshot", "system");
         register(&reg, "browser_navigate", "browser");
         register(&reg, "browser_snapshot", "browser");
@@ -252,6 +254,8 @@ mod tests {
         assert!(names.contains(&"send_message".to_string()));
         assert!(names.contains(&"terminal".to_string()));
         assert!(names.contains(&"integrations_snapshot".to_string()));
+        assert!(names.contains(&"objective_snapshot".to_string()));
+        assert!(names.contains(&"mission_snapshot".to_string()));
     }
 
     #[test]
