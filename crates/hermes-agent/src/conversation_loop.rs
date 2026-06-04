@@ -235,6 +235,9 @@ impl AgentLoop {
         &self,
         params: &RunConversationParams,
     ) -> Result<PreparedTurn, AgentError> {
+        // Sanitize surrogate characters from user input.  Clipboard paste from
+        // rich-text editors (Google Docs, Word, etc.) can inject lone surrogates
+        // that are invalid UTF-8 and crash JSON serialization in the OpenAI SDK.
         let mut user_message = params.user_message.clone();
         user_message = sanitize_surrogates(&user_message).into_owned();
 
@@ -470,7 +473,8 @@ impl AgentLoop {
         messages: Vec<Message>,
         tools: Option<Vec<ToolSchema>>,
     ) -> Result<AgentResult, AgentError> {
-        self.run_with_message_prelude(messages, tools, None, false).await
+        self.run_with_message_prelude(messages, tools, None, false)
+            .await
     }
 
     /// Like [`Self::run`] after [`crate::conversation_loop::AgentLoop::prepare_turn`] applied the message prelude.
@@ -479,10 +483,9 @@ impl AgentLoop {
         messages: Vec<Message>,
         tools: Option<Vec<ToolSchema>>,
     ) -> Result<AgentResult, AgentError> {
-        self.run_with_message_prelude(messages, tools, None, true).await
+        self.run_with_message_prelude(messages, tools, None, true)
+            .await
     }
-
-
 
     /// Run the same loop as [`Self::run`], streaming the first LLM attempt per turn when `on_chunk` is set.
     ///
@@ -508,12 +511,8 @@ impl AgentLoop {
             .await
     }
 
-
     #[inline]
-    fn emit_stream_chunk(
-        emit: Option<&(dyn Fn(StreamChunk) + Send + Sync)>,
-        chunk: StreamChunk,
-    ) {
+    fn emit_stream_chunk(emit: Option<&(dyn Fn(StreamChunk) + Send + Sync)>, chunk: StreamChunk) {
         if let Some(f) = emit {
             f(chunk);
         }
@@ -530,51 +529,52 @@ impl AgentLoop {
         let ui_streaming = on_chunk.is_some();
         let stream_mute = ui_streaming.then(|| Arc::new(AtomicBool::new(false)));
         let stream_needs_break = ui_streaming.then(|| Arc::new(AtomicBool::new(false)));
-        let stream_chunk_sink: Box<dyn Fn(StreamChunk) + Send + Sync> = if let Some(raw_emit) = on_chunk {
-            let stream_mute = stream_mute.clone().expect("streaming");
-            let break_for_emit = stream_needs_break.clone().expect("streaming");
-            Box::new(move |chunk: StreamChunk| {
-                let StreamChunk {
-                    delta,
-                    finish_reason,
-                    usage,
-                } = chunk;
-                if let Some(delta_val) = delta {
-                    if let Some(content) = delta_val.content.clone() {
-                        if stream_mute.load(Ordering::Acquire) {
+        let stream_chunk_sink: Box<dyn Fn(StreamChunk) + Send + Sync> =
+            if let Some(raw_emit) = on_chunk {
+                let stream_mute = stream_mute.clone().expect("streaming");
+                let break_for_emit = stream_needs_break.clone().expect("streaming");
+                Box::new(move |chunk: StreamChunk| {
+                    let StreamChunk {
+                        delta,
+                        finish_reason,
+                        usage,
+                    } = chunk;
+                    if let Some(delta_val) = delta {
+                        if let Some(content) = delta_val.content.clone() {
+                            if stream_mute.load(Ordering::Acquire) {
+                                return;
+                            }
+                            let mut out = content;
+                            if break_for_emit.swap(false, Ordering::AcqRel) {
+                                out = format!("\n\n{}", out);
+                            }
+                            raw_emit(StreamChunk {
+                                delta: Some(hermes_core::StreamDelta {
+                                    content: Some(out),
+                                    tool_calls: delta_val.tool_calls,
+                                    extra: delta_val.extra,
+                                }),
+                                finish_reason,
+                                usage,
+                            });
                             return;
                         }
-                        let mut out = content;
-                        if break_for_emit.swap(false, Ordering::AcqRel) {
-                            out = format!("\n\n{}", out);
-                        }
                         raw_emit(StreamChunk {
-                            delta: Some(hermes_core::StreamDelta {
-                                content: Some(out),
-                                tool_calls: delta_val.tool_calls,
-                                extra: delta_val.extra,
-                            }),
+                            delta: Some(delta_val),
                             finish_reason,
                             usage,
                         });
                         return;
                     }
                     raw_emit(StreamChunk {
-                        delta: Some(delta_val),
+                        delta: None,
                         finish_reason,
                         usage,
                     });
-                    return;
-                }
-                raw_emit(StreamChunk {
-                    delta: None,
-                    finish_reason,
-                    usage,
-                });
-            })
-        } else {
-            Box::new(|_| ())
-        };
+                })
+            } else {
+                Box::new(|_| ())
+            };
 
         let mut ctx = ContextManager::for_model(self.active_model().as_str());
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
@@ -1537,19 +1537,25 @@ impl AgentLoop {
                         "premature_finalize_suspected_count": premature_finalize_suspected_count,
                     }),
                 );
-                if stream_mute.as_ref().is_some_and(|m| m.swap(false, Ordering::AcqRel)) {
-                    Self::emit_stream_chunk(Some(stream_chunk_sink.as_ref()), StreamChunk {
-                        delta: Some(hermes_core::StreamDelta {
-                            content: None,
-                            tool_calls: None,
-                            extra: Some(serde_json::json!({
-                                "control": "mute_post_response",
-                                "enabled": false
-                            })),
-                        }),
-                        finish_reason: None,
-                        usage: None,
-                    });
+                if stream_mute
+                    .as_ref()
+                    .is_some_and(|m| m.swap(false, Ordering::AcqRel))
+                {
+                    Self::emit_stream_chunk(
+                        Some(stream_chunk_sink.as_ref()),
+                        StreamChunk {
+                            delta: Some(hermes_core::StreamDelta {
+                                content: None,
+                                tool_calls: None,
+                                extra: Some(serde_json::json!({
+                                    "control": "mute_post_response",
+                                    "enabled": false
+                                })),
+                            }),
+                            finish_reason: None,
+                            usage: None,
+                        },
+                    );
                 }
                 return Ok(self.seal_loop_result(
                     &ctx,
@@ -1611,18 +1617,21 @@ impl AgentLoop {
                 .map(|m| m.swap(should_mute_post, Ordering::AcqRel))
                 .unwrap_or(false);
             if was_muted != should_mute_post {
-                Self::emit_stream_chunk(Some(stream_chunk_sink.as_ref()), StreamChunk {
-                    delta: Some(hermes_core::StreamDelta {
-                        content: None,
-                        tool_calls: None,
-                        extra: Some(serde_json::json!({
-                            "control": "mute_post_response",
-                            "enabled": should_mute_post
-                        })),
-                    }),
-                    finish_reason: None,
-                    usage: None,
-                });
+                Self::emit_stream_chunk(
+                    Some(stream_chunk_sink.as_ref()),
+                    StreamChunk {
+                        delta: Some(hermes_core::StreamDelta {
+                            content: None,
+                            tool_calls: None,
+                            extra: Some(serde_json::json!({
+                                "control": "mute_post_response",
+                                "enabled": should_mute_post
+                            })),
+                        }),
+                        finish_reason: None,
+                        usage: None,
+                    },
+                );
             }
 
             let invalid_tool_calls: Vec<String> = tool_calls
@@ -2087,19 +2096,25 @@ impl AgentLoop {
                 {
                     ctx.add_message(summary);
                 }
-                if stream_mute.as_ref().is_some_and(|m| m.swap(false, Ordering::AcqRel)) {
-                    Self::emit_stream_chunk(Some(stream_chunk_sink.as_ref()), StreamChunk {
-                        delta: Some(hermes_core::StreamDelta {
-                            content: None,
-                            tool_calls: None,
-                            extra: Some(serde_json::json!({
-                                "control": "mute_post_response",
-                                "enabled": false
-                            })),
-                        }),
-                        finish_reason: None,
-                        usage: None,
-                    });
+                if stream_mute
+                    .as_ref()
+                    .is_some_and(|m| m.swap(false, Ordering::AcqRel))
+                {
+                    Self::emit_stream_chunk(
+                        Some(stream_chunk_sink.as_ref()),
+                        StreamChunk {
+                            delta: Some(hermes_core::StreamDelta {
+                                content: None,
+                                tool_calls: None,
+                                extra: Some(serde_json::json!({
+                                    "control": "mute_post_response",
+                                    "enabled": false
+                                })),
+                            }),
+                            finish_reason: None,
+                            usage: None,
+                        },
+                    );
                 }
                 self.turn_end_plugin_hooks(
                     ctx.get_messages(),
@@ -2136,15 +2151,18 @@ impl AgentLoop {
             if let Some(brk) = stream_needs_break.as_ref() {
                 brk.store(true, Ordering::Release);
             }
-            Self::emit_stream_chunk(Some(stream_chunk_sink.as_ref()), StreamChunk {
-                delta: Some(hermes_core::StreamDelta {
-                    content: None,
-                    tool_calls: None,
-                    extra: Some(serde_json::json!({"control": "stream_break"})),
-                }),
-                finish_reason: None,
-                usage: None,
-            });
+            Self::emit_stream_chunk(
+                Some(stream_chunk_sink.as_ref()),
+                StreamChunk {
+                    delta: Some(hermes_core::StreamDelta {
+                        content: None,
+                        tool_calls: None,
+                        extra: Some(serde_json::json!({"control": "stream_break"})),
+                    }),
+                    finish_reason: None,
+                    usage: None,
+                },
+            );
             self.emit_background_review_metrics(total_turns, &ctx);
 
             let total_chars = ctx.total_chars();

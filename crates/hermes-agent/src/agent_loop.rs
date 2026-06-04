@@ -14415,4 +14415,86 @@ mod tests {
         assert_eq!(blocked.len(), 1);
         assert!(calls.is_empty());
     }
+
+    /// Documents the turn-level API message cache contract used by
+    /// `conversation_loop` (`invalidate_turn_api_messages_cache` each inner iteration).
+    #[test]
+    fn turn_api_messages_cache_contract() {
+        struct NoopProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for NoopProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<LlmResponse, AgentError> {
+                Err(AgentError::LlmApi("noop".into()))
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                Box::pin(futures::stream::empty())
+            }
+        }
+
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(NoopProvider),
+        );
+
+        let mut ctx = ContextManager::default_budget();
+        ctx.add_message(Message::user("aaa"));
+        let first = agent.build_turn_api_messages(&mut ctx);
+        let second = agent.build_turn_api_messages(&mut ctx);
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "unchanged ctx should reuse cached Arc"
+        );
+
+        ctx.add_message(Message::assistant("draft"));
+        let after_assistant = agent.build_turn_api_messages(&mut ctx);
+        assert!(
+            !Arc::ptr_eq(&first, &after_assistant),
+            "append must change cache key and rebuild"
+        );
+
+        let _ = ctx.get_messages_mut().pop();
+        let after_pop = agent.build_turn_api_messages(&mut ctx);
+        assert!(
+            !after_pop
+                .iter()
+                .any(|m| m.role == MessageRole::Assistant),
+            "pop must not leak assistant into API messages (rebuild or miss)"
+        );
+
+        let mut ctx_inplace = ContextManager::default_budget();
+        ctx_inplace.add_message(Message::user("aaa"));
+        let before_edit = agent.build_turn_api_messages(&mut ctx_inplace);
+        ctx_inplace.get_messages_mut()[0].content = Some("xyz".to_string());
+        let stale_hit = agent.build_turn_api_messages(&mut ctx_inplace);
+        assert!(
+            Arc::ptr_eq(&before_edit, &stale_hit),
+            "in-place edit with same count/chars can return stale cache without invalidate"
+        );
+        agent.invalidate_turn_api_messages_cache();
+        let after_invalidate = agent.build_turn_api_messages(&mut ctx_inplace);
+        assert!(!Arc::ptr_eq(&before_edit, &after_invalidate));
+        let user_text = after_invalidate
+            .iter()
+            .find(|m| m.role == MessageRole::User)
+            .and_then(|m| m.content.as_deref());
+        assert_eq!(user_text, Some("xyz"));
+    }
 }
