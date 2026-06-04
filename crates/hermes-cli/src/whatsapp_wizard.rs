@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use hermes_config::{GatewayConfig, PlatformConfig};
 use hermes_gateway::platforms::whatsapp::{
-    clear_pairing_session, has_legacy_baileys_session, is_paired, session_db_path,
+    clear_pairing_session, has_legacy_baileys_session, is_paired, mark_paired, session_db_path,
     WhatsAppConfig, WhatsAppRustClient,
 };
 
@@ -19,6 +19,19 @@ pub struct WhatsAppSetupResult {
 
 pub fn whatsapp_session_path() -> PathBuf {
     hermes_config::hermes_home().join("whatsapp").join("session")
+}
+
+/// Menu label for `hermes gateway setup` (distinct from "configured" = enabled + paired).
+pub fn whatsapp_gateway_menu_status(platform: Option<&PlatformConfig>) -> &'static str {
+    let paired = is_paired(&whatsapp_session_path());
+    let enabled = platform.is_some_and(|p| p.enabled);
+    if enabled && paired {
+        "configured"
+    } else if paired {
+        "paired, not enabled"
+    } else {
+        "not configured"
+    }
 }
 
 fn prompt_line(label: &str) -> Result<String, hermes_core::AgentError> {
@@ -214,8 +227,59 @@ async fn ensure_legacy_migration_ok(session: &Path) -> Result<bool, hermes_core:
     Ok(true)
 }
 
+async fn prompt_existing_paired_session(
+    session: &Path,
+    mode: &str,
+    allow_from: &[String],
+    gateway: Option<&GatewayConfig>,
+) -> Result<Option<WhatsAppSetupResult>, hermes_core::AgentError> {
+    if !is_paired(session) {
+        return Ok(None);
+    }
+
+    if let Some(disk) = gateway {
+        let enabled = disk.platforms.get("whatsapp").is_some_and(|p| p.enabled);
+        if enabled {
+            println!("\nWhatsApp is already configured (paired session at {}).", session.display());
+            let re_pair = prompt_line("Re-pair with a new QR code? [y/N]: ")?;
+            if !re_pair.eq_ignore_ascii_case("y") {
+                return Ok(Some(WhatsAppSetupResult {
+                    mode: mode.to_string(),
+                    allow_from: allow_from.to_vec(),
+                    paired: true,
+                }));
+            }
+            return Ok(None);
+        }
+        println!("\nA paired WhatsApp session exists at {}.", session.display());
+        println!("Gateway config does not have WhatsApp enabled yet.");
+        let enable = prompt_line("Use this session and enable WhatsApp? [Y/n]: ")?;
+        if !enable.eq_ignore_ascii_case("n") {
+            return Ok(Some(WhatsAppSetupResult {
+                mode: mode.to_string(),
+                allow_from: allow_from.to_vec(),
+                paired: true,
+            }));
+        }
+        return Ok(None);
+    }
+
+    println!("\nExisting Rust session found at {}.", session.display());
+    let keep = prompt_line("Keep this session (skip QR pairing)? [Y/n]: ")?;
+    if !keep.eq_ignore_ascii_case("n") {
+        return Ok(Some(WhatsAppSetupResult {
+            mode: mode.to_string(),
+            allow_from: allow_from.to_vec(),
+            paired: true,
+        }));
+    }
+    Ok(None)
+}
+
 /// Interactive QR setup shared by `hermes whatsapp` and `hermes gateway setup`.
-pub async fn run_whatsapp_setup_interactive() -> Result<WhatsAppSetupResult, hermes_core::AgentError> {
+pub async fn run_whatsapp_setup_interactive(
+    gateway: Option<&GatewayConfig>,
+) -> Result<WhatsAppSetupResult, hermes_core::AgentError> {
     let (mode, allow_from) = prompt_whatsapp_mode_and_allowlist().await?;
     let session = whatsapp_session_path();
 
@@ -227,16 +291,10 @@ pub async fn run_whatsapp_setup_interactive() -> Result<WhatsAppSetupResult, her
         });
     }
 
-    if is_paired(&session) {
-        println!("\nExisting Rust session found at {}.", session.display());
-        let reuse = prompt_line("Skip re-pairing? [Y/n]: ")?;
-        if !reuse.eq_ignore_ascii_case("n") {
-            return Ok(WhatsAppSetupResult {
-                mode,
-                allow_from,
-                paired: true,
-            });
-        }
+    if let Some(existing) =
+        prompt_existing_paired_session(&session, &mode, &allow_from, gateway).await?
+    {
+        return Ok(existing);
     }
 
     let paired = run_qr_pairing(&session).await?;
@@ -254,7 +312,7 @@ pub async fn configure_whatsapp_for_gateway(
     println!("WhatsApp (personal QR / wa-rs)");
     println!("Scan with WhatsApp → Linked Devices to link this machine.\n");
 
-    let result = run_whatsapp_setup_interactive().await?;
+    let result = run_whatsapp_setup_interactive(Some(disk)).await?;
     if result.paired {
         apply_whatsapp_to_gateway_config(disk, &result.mode, &result.allow_from);
         println!("\nWhatsApp enabled for gateway.");
@@ -269,7 +327,7 @@ pub async fn whatsapp_baileys_wizard() -> Result<(), hermes_core::AgentError> {
     println!("WhatsApp Setup (Rust / wa-rs)");
     println!("==============================\n");
 
-    let result = run_whatsapp_setup_interactive().await?;
+    let result = run_whatsapp_setup_interactive(None).await?;
     if result.paired {
         persist_whatsapp_config_yaml(&result.mode, &result.allow_from, true)?;
         println!("\nPairing successful! WhatsApp is enabled.");
@@ -327,6 +385,23 @@ pub async fn whatsapp_cloud_setup() -> Result<(), hermes_core::AgentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whatsapp_gateway_menu_status_labels() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // SAFETY: single-threaded test; isolates session from the developer machine.
+        unsafe {
+            std::env::set_var("HERMES_HOME", dir.path());
+        }
+        assert_eq!(whatsapp_gateway_menu_status(None), "not configured");
+        let mut p = PlatformConfig::default();
+        p.enabled = true;
+        assert_eq!(whatsapp_gateway_menu_status(Some(&p)), "not configured");
+        mark_paired(&whatsapp_session_path()).unwrap();
+        assert_eq!(whatsapp_gateway_menu_status(None), "paired, not enabled");
+        p.enabled = true;
+        assert_eq!(whatsapp_gateway_menu_status(Some(&p)), "configured");
+    }
 
     #[test]
     fn apply_whatsapp_sets_mode_extra() {

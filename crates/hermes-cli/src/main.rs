@@ -3698,7 +3698,9 @@ fn gateway_platform_is_configured(key: &str, platform: Option<&PlatformConfig>) 
 }
 
 fn gateway_platform_menu_label(entry: &GatewayPlatformEntry, platform: Option<&PlatformConfig>) -> String {
-    let status = if gateway_platform_is_configured(entry.key, platform) {
+    let status = if entry.key == "whatsapp" {
+        hermes_cli::whatsapp_wizard::whatsapp_gateway_menu_status(platform)
+    } else if gateway_platform_is_configured(entry.key, platform) {
         "configured"
     } else {
         "not configured"
