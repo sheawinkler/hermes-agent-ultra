@@ -43,11 +43,11 @@ use crate::fallback::TurnFallbackState;
 use crate::interrupt::InterruptController;
 use crate::lsp_context::{LspContextConfig, build_lsp_context_note};
 use crate::memory_manager::MemoryManager;
+use crate::agent_runtime_helpers;
 use crate::message_sanitization::{
-    build_partial_stream_stub_response, format_partial_stream_tool_call_warning, looks_like_codex_intermediate_ack,
+    build_partial_stream_stub_response, format_partial_stream_tool_call_warning,
     partial_stream_dropped_tool_names, partial_stream_tool_calls_in_flight, sanitize_surrogates,
     should_treat_stop_as_truncated, strip_budget_warnings_from_messages,
-    strip_think_blocks_for_ack,
 };
 use crate::plugins::{HookResult, HookType, PluginManager};
 use crate::prompt_builder::TOOL_USE_ENFORCEMENT_MODELS;
@@ -1301,7 +1301,10 @@ pub(crate) fn is_tool_payload_validation_error(err: &str) -> bool {
         || lower.contains("tools") && lower.contains("invalid")
 }
 
-pub(crate) fn preferred_tool_payload_fallback_model(provider_hint: &str, model_name: &str) -> Option<String> {
+pub(crate) fn preferred_tool_payload_fallback_model(
+    provider_hint: &str,
+    model_name: &str,
+) -> Option<String> {
     let provider = provider_hint.trim().to_ascii_lowercase();
     let model = model_name.trim().to_ascii_lowercase();
     let nous_openai_route = provider == "nous" && model.starts_with("openai/");
@@ -2264,7 +2267,8 @@ pub struct AgentLoop {
     /// Optional in-process sub-agent orchestrator. When set, `delegate_task`
     /// tool calls are executed by the orchestrator (spawn/timeout/cancel/
     /// lineage) instead of simply returning a signal envelope.
-    pub(crate) sub_agent_orchestrator: Option<Arc<crate::sub_agent_orchestrator::SubAgentOrchestrator>>,
+    pub(crate) sub_agent_orchestrator:
+        Option<Arc<crate::sub_agent_orchestrator::SubAgentOrchestrator>>,
     /// Always-on workspace code index + repo-map source.
     code_index: Option<Arc<Mutex<CodeIndex>>>,
     /// LSP-style context injection controls.
@@ -2302,9 +2306,11 @@ pub struct AgentLoop {
     /// Python `_disable_streaming` — set after "stream not supported" for the rest of the session.
     disable_streaming: Arc<AtomicBool>,
     /// Lazy `CodexAppServerSession` (Python `agent._codex_session`).
-    pub(crate) codex_app_server_session: Arc<Mutex<Option<crate::transports::codex_app_server_session::CodexAppServerSession>>>,
+    pub(crate) codex_app_server_session:
+        Arc<Mutex<Option<crate::transports::codex_app_server_session::CodexAppServerSession>>>,
     /// Last-known Nous `x-ratelimit-*` headers from a successful response (Python `_rate_limit_state`).
-    pub(crate) last_nous_rate_limit_headers: Arc<Mutex<Option<std::collections::HashMap<String, String>>>>,
+    pub(crate) last_nous_rate_limit_headers:
+        Arc<Mutex<Option<std::collections::HashMap<String, String>>>>,
     /// Per-turn vision capability (Python `_vision_supported`; reset each `prepare_turn`).
     pub(crate) vision_supported: Arc<std::sync::atomic::AtomicBool>,
     /// Compression feasibility warning replayed at turn start (Python `_compression_warning`).
@@ -2866,7 +2872,9 @@ impl AgentLoop {
             delegate_depth: 0,
             primary_credential_pool: None,
             evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
-            session_usage: Arc::new(Mutex::new(crate::session_state::SessionUsageMetrics::default())),
+            session_usage: Arc::new(Mutex::new(
+                crate::session_state::SessionUsageMetrics::default(),
+            )),
             oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
             sub_agent_orchestrator: None,
             code_index,
@@ -2968,6 +2976,17 @@ impl AgentLoop {
             .unwrap_or_default();
         let api_mode = Self::api_mode_as_hook_str(&cfg.api_mode);
         self.refresh_prompt_cache_policy(provider, &base_url, api_mode);
+        let session_id = cfg.session_id.as_deref();
+        let (tool_repairs, seq_repairs) =
+            agent_runtime_helpers::prepare_live_history_for_api(ctx.get_messages_mut(), session_id);
+        if tool_repairs > 0 || seq_repairs > 0 {
+            tracing::debug!(
+                tool_call_arg_repairs = tool_repairs,
+                message_sequence_repairs = seq_repairs,
+                "pre-API live history repairs"
+            );
+            self.invalidate_turn_api_messages_cache();
+        }
         self.pending_steer
             .drain_pre_api_into_messages(ctx.get_messages_mut());
         self.interest_sync_user_messages(ctx.get_messages());
@@ -2995,8 +3014,13 @@ impl AgentLoop {
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty());
-        let force_strip_images =
-            !self.vision_supported.load(std::sync::atomic::Ordering::Acquire);
+        let force_strip_images = !self
+            .vision_supported
+            .load(std::sync::atomic::Ordering::Acquire);
+        let provider = cfg.provider.as_deref().unwrap_or("");
+        let base_url = self
+            .resolve_runtime_base_url(provider, None)
+            .unwrap_or_default();
         let messages = crate::api_messages::assemble_api_messages_from_ctx(
             ctx.get_messages(),
             &prefetch,
@@ -3006,6 +3030,12 @@ impl AgentLoop {
             cfg.use_prompt_caching,
             cfg.use_native_cache_layout,
             force_strip_images,
+        );
+        let messages = agent_runtime_helpers::prepare_wire_messages_for_api(
+            messages,
+            provider,
+            self.active_model().as_str(),
+            base_url.as_str(),
         );
         let arc: Arc<[Message]> = messages.into();
 
@@ -3158,7 +3188,9 @@ impl AgentLoop {
             delegate_depth: 0,
             primary_credential_pool: None,
             evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
-            session_usage: Arc::new(Mutex::new(crate::session_state::SessionUsageMetrics::default())),
+            session_usage: Arc::new(Mutex::new(
+                crate::session_state::SessionUsageMetrics::default(),
+            )),
             oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
             sub_agent_orchestrator: None,
             code_index,
@@ -3472,7 +3504,11 @@ impl AgentLoop {
         }
     }
 
-    pub(crate) fn apply_hook_output_transforms(&self, results: &[HookResult], content: &mut Option<String>) {
+    pub(crate) fn apply_hook_output_transforms(
+        &self,
+        results: &[HookResult],
+        content: &mut Option<String>,
+    ) {
         let mut current = content.clone().unwrap_or_default();
         let mut changed = false;
         for r in results {
@@ -4253,7 +4289,11 @@ impl AgentLoop {
         }
     }
 
-    pub(crate) fn lsp_context_note(&self, tool_calls: &[ToolCall], results: &[ToolResult]) -> Option<String> {
+    pub(crate) fn lsp_context_note(
+        &self,
+        tool_calls: &[ToolCall],
+        results: &[ToolResult],
+    ) -> Option<String> {
         if !self.lsp_context.enabled {
             return None;
         }
@@ -5247,7 +5287,7 @@ impl AgentLoop {
 
     /// Recompute prompt-cache policy from current route (Python `_anthropic_prompt_cache_policy`).
     pub fn refresh_prompt_cache_policy(&self, provider: &str, base_url: &str, api_mode: &str) {
-        let (should_cache, native) = crate::prompt_caching::anthropic_prompt_cache_policy(
+        let (should_cache, native) = agent_runtime_helpers::anthropic_prompt_cache_policy(
             provider,
             base_url,
             api_mode,
@@ -5560,7 +5600,7 @@ impl AgentLoop {
             transcript_chars = before,
             gateway_messages = gateway_msgs,
             context_usage_pct = before_pct,
-            "Preflight compression: preparing session"
+            "📦 Preflight compression: preparing session"
         );
         // Avoid auxiliary summarisation on multi-megabyte histories (very slow, often ineffective).
         if before_pct > 150 {
@@ -5619,7 +5659,11 @@ impl AgentLoop {
         }
     }
 
-    pub(crate) fn emit_tool_failure_notices(&self, tool_calls: &[ToolCall], results: &[ToolResult]) {
+    pub(crate) fn emit_tool_failure_notices(
+        &self,
+        tool_calls: &[ToolCall],
+        results: &[ToolResult],
+    ) {
         for tc in tool_calls {
             let Some(result) = results
                 .iter()
@@ -5650,7 +5694,12 @@ impl AgentLoop {
     }
 
     /// DeepSeek / thinking models may return structured reasoning before visible content.
-    pub(crate) fn handle_reasoning_only_prefill(&self, message: &Message, attempt: u32, max_attempts: u32) {
+    pub(crate) fn handle_reasoning_only_prefill(
+        &self,
+        message: &Message,
+        attempt: u32,
+        max_attempts: u32,
+    ) {
         self.emit_reasoning_from_message(message);
         tracing::debug!(
             "reasoning-only assistant response; prefill continuation ({}/{})",
@@ -5703,7 +5752,7 @@ impl AgentLoop {
         let Some(content) = m.content.as_deref() else {
             return false;
         };
-        !strip_think_blocks_for_ack(content).trim().is_empty()
+        !agent_runtime_helpers::strip_think_blocks(content).trim().is_empty()
     }
 
     pub(crate) fn coerce_textual_tool_calls(mut m: Message) -> (Message, Vec<ToolCall>, bool) {
@@ -5779,7 +5828,7 @@ impl AgentLoop {
     pub(crate) fn build_finalization_signals(
         &self,
         task_hint: &str,
-        history_includes_tool: bool,
+        messages: &[Message],
         message: &Message,
         finish_reason: Option<&str>,
     ) -> FinalizationSignals {
@@ -5790,11 +5839,10 @@ impl AgentLoop {
         let continuation_required = Self::finish_reason_requires_continuation(finish_reason);
         let ack_detected = !has_tool_calls
             && !continuation_required
-            && !history_includes_tool
-            && looks_like_codex_intermediate_ack(
+            && agent_runtime_helpers::looks_like_codex_intermediate_ack(
                 task_hint,
                 message.content.as_deref().unwrap_or(""),
-                history_includes_tool,
+                messages,
             );
 
         FinalizationSignals {
@@ -5809,14 +5857,7 @@ impl AgentLoop {
     }
 
     pub(crate) fn normalize_tool_call_arguments(tc: &mut ToolCall) -> Result<(), String> {
-        let trimmed = tc.function.arguments.trim();
-        if trimmed.is_empty() {
-            tc.function.arguments = "{}".to_string();
-            return Ok(());
-        }
-        serde_json::from_str::<Value>(trimmed)
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        agent_runtime_helpers::normalize_tool_call_arguments(tc)
     }
 
     fn tool_call_arguments_look_truncated(tc: &ToolCall) -> bool {
@@ -6284,27 +6325,12 @@ impl AgentLoop {
             return false;
         }
         let names = self.tool_registry.names();
-        let target = tc.function.name.to_lowercase();
-
-        if let Some(name) = names.iter().find(|n| n.to_lowercase() == target) {
-            tracing::info!("Repaired tool call: '{}' → '{}'", tc.function.name, name);
-            tc.function.name = name.clone();
-            return true;
-        }
-
-        if let Some(name) = names
-            .iter()
-            .find(|n| n.to_lowercase().contains(&target) || target.contains(&n.to_lowercase()))
-        {
-            tracing::info!(
-                "Repaired tool call (fuzzy): '{}' → '{}'",
-                tc.function.name,
-                name
-            );
-            tc.function.name = name.clone();
-            return true;
-        }
-        false
+        let Some(fixed) = agent_runtime_helpers::repair_tool_name(&tc.function.name, &names) else {
+            return false;
+        };
+        tracing::info!("Repaired tool call: '{}' → '{}'", tc.function.name, fixed);
+        tc.function.name = fixed;
+        true
     }
 
     /// Inject current session id into `session_search` calls when absent.
@@ -6407,7 +6433,8 @@ impl AgentLoop {
         if self.disable_streaming.load(Ordering::Acquire) {
             return false;
         }
-        if route.is_some_and(Self::route_blocks_llm_streaming) || self.provider_blocks_llm_streaming()
+        if route.is_some_and(Self::route_blocks_llm_streaming)
+            || self.provider_blocks_llm_streaming()
         {
             return false;
         }
@@ -6697,7 +6724,10 @@ impl AgentLoop {
         })
     }
 
-    pub(crate) fn resolve_smart_runtime_route(&self, messages: &[Message]) -> Option<TurnRuntimeRoute> {
+    pub(crate) fn resolve_smart_runtime_route(
+        &self,
+        messages: &[Message],
+    ) -> Option<TurnRuntimeRoute> {
         let text = self.latest_user_text(messages)?;
         let primary = self.primary_runtime_snapshot();
         let outcome = resolve_turn_route(
@@ -6908,7 +6938,9 @@ impl AgentLoop {
         Ok(Some(response.message))
     }
 
-    pub(crate) fn tool_result_from_dispatch_output(output: String) -> Result<String, hermes_core::ToolError> {
+    pub(crate) fn tool_result_from_dispatch_output(
+        output: String,
+    ) -> Result<String, hermes_core::ToolError> {
         if let Ok(value) = serde_json::from_str::<Value>(&output) {
             if let Some(err) = value.get("error").and_then(|v| v.as_str()) {
                 return Err(hermes_core::ToolError::ExecutionFailed(err.to_string()));
@@ -6988,7 +7020,12 @@ impl AgentLoop {
     }
 
     /// Metrics (always) + optional Python-style memory/skill review LLM pass on session end.
-    pub(crate) fn spawn_background_review(&self, turn: u32, ctx: &ContextManager, review_memory_at_end: bool) {
+    pub(crate) fn spawn_background_review(
+        &self,
+        turn: u32,
+        ctx: &ContextManager,
+        review_memory_at_end: bool,
+    ) {
         self.emit_background_review_metrics(turn, ctx);
         if !self.config().background_review_enabled {
             return;
@@ -7543,7 +7580,10 @@ pub(crate) fn objective_guard_satisfied(
     true
 }
 
-pub(crate) fn objective_guard_retry_prompt(requires_analytics: bool, deep_audit_required: bool) -> String {
+pub(crate) fn objective_guard_retry_prompt(
+    requires_analytics: bool,
+    deep_audit_required: bool,
+) -> String {
     let analytics_line = if requires_analytics {
         "Also include copied analytics values and `objective_state=<advancing|flat|regressing|unproven>`."
     } else {
@@ -8054,7 +8094,10 @@ fn strip_list_prefix(line: &str) -> &str {
     without_bullet
 }
 
-pub(crate) fn finalizer_output_quality_requires_retry(assistant_text: &str, retry_count: u32) -> bool {
+pub(crate) fn finalizer_output_quality_requires_retry(
+    assistant_text: &str,
+    retry_count: u32,
+) -> bool {
     if retry_count >= FINALIZER_OUTPUT_QUALITY_MAX_RETRIES {
         return false;
     }
@@ -8457,13 +8500,18 @@ fn extract_marker_values(text: &str, marker: &str, limit: usize) -> Vec<String> 
     out
 }
 
-pub(crate) fn estimate_usage_cost_usd(usage: &UsageStats, model: &str, config: &AgentConfig) -> Option<f64> {
+pub(crate) fn estimate_usage_cost_usd(
+    usage: &UsageStats,
+    model: &str,
+    config: &AgentConfig,
+) -> Option<f64> {
     if let Some(v) = usage.estimated_cost {
         return Some(v.max(0.0));
     }
     let canonical = usage_stats_to_canonical(usage);
     let provider = config.provider.as_deref();
-    let cost = hermes_intelligence::usage_pricing::calculate_cost(model, &canonical, provider, None);
+    let cost =
+        hermes_intelligence::usage_pricing::calculate_cost(model, &canonical, provider, None);
     if let Some(amount) = cost.amount_usd {
         return Some(amount.max(0.0));
     }
@@ -8479,7 +8527,9 @@ pub(crate) fn estimate_usage_cost_usd(usage: &UsageStats, model: &str, config: &
     Some(prompt_cost + completion_cost)
 }
 
-fn usage_stats_to_canonical(usage: &UsageStats) -> hermes_intelligence::usage_pricing::CanonicalUsage {
+fn usage_stats_to_canonical(
+    usage: &UsageStats,
+) -> hermes_intelligence::usage_pricing::CanonicalUsage {
     let input = if usage.input_tokens > 0 {
         usage.input_tokens
     } else {
@@ -11926,7 +11976,11 @@ mod tests {
         assert!(!mock_like.use_streaming_llm_transport(false, 0, None));
         assert!(mock_like.use_streaming_llm_transport(true, 0, None));
 
-        let open = AgentLoop::new(AgentConfig::default(), registry.clone(), Arc::new(OpenProvider));
+        let open = AgentLoop::new(
+            AgentConfig::default(),
+            registry.clone(),
+            Arc::new(OpenProvider),
+        );
         assert!(open.use_streaming_llm_transport(false, 0, None));
 
         let acp_cfg = AgentConfig {
@@ -13687,9 +13741,7 @@ mod tests {
         let _ = ctx.get_messages_mut().pop();
         let after_pop = agent.build_turn_api_messages(&mut ctx);
         assert!(
-            !after_pop
-                .iter()
-                .any(|m| m.role == MessageRole::Assistant),
+            !after_pop.iter().any(|m| m.role == MessageRole::Assistant),
             "pop must not leak assistant into API messages (rebuild or miss)"
         );
 

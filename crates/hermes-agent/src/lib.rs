@@ -5,7 +5,7 @@
 //! model finishes naturally or the turn budget is exhausted.
 
 pub mod agent_loop;
-mod agent_runtime_helpers;
+pub mod agent_runtime_helpers;
 pub mod api_bridge;
 pub mod api_message_oracle;
 pub mod api_messages;
@@ -166,12 +166,23 @@ pub use lsp_context::{LspContextConfig, build_lsp_context_note};
 // Re-export subdirectory hints
 pub use subdirectory_hints::{SubdirectoryHintTracker, generate_project_hints};
 
+// Python `agent/agent_runtime_helpers.py` parity
+pub use agent_runtime_helpers::{
+    TOOL_CALL_ARGUMENTS_CORRUPTION_MARKER, VALID_API_ROLES,
+    convert_to_trajectory_format, drop_thinking_only_and_merge_users, dump_api_request_debug,
+    extract_api_error_context, extract_reasoning_from_message_content, is_thinking_only_assistant,
+    looks_like_codex_intermediate_ack, needs_thinking_reasoning_pad, normalize_tool_call_arguments,
+    prepare_live_history_for_api, prepare_wire_messages_for_api, recover_with_credential_pool,
+    repair_message_sequence, repair_tool_name, sanitize_api_messages, sanitize_tool_call_arguments,
+    strip_think_blocks,
+};
+
 // Python `run_agent.py` alignment helpers (budget strip/inject, surrogate sanitize)
 pub use message_sanitization::{
     CODEX_CONTINUE_USER_MESSAGE, PARTIAL_STREAM_STUB_ID, budget_pressure_text,
     build_partial_stream_stub_response, continuation_prompt_for_response,
     format_partial_stream_tool_call_warning, get_continuation_prompt, has_natural_response_ending,
-    inject_budget_pressure_into_last_tool_result, looks_like_codex_intermediate_ack,
+    inject_budget_pressure_into_last_tool_result,
     partial_stream_dropped_tool_names, sanitize_surrogates, should_treat_stop_as_truncated,
     strip_budget_warnings_from_messages, strip_system_messages_from_history,
     strip_think_blocks_for_ack,

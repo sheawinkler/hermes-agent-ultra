@@ -1389,7 +1389,7 @@ impl AgentLoop {
                 );
                 let finalization_signals = self.build_finalization_signals(
                     &task_hint,
-                    history_includes_tool,
+                    ctx.get_messages(),
                     &assistant_msg,
                     effective_finish_reason.as_deref(),
                 );

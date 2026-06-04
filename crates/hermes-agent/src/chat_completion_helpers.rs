@@ -606,12 +606,18 @@ impl AgentLoop {
                                     active_provider.as_str(),
                                     route.and_then(|rt| rt.base_url.as_deref()),
                                 );
+                                let error_ctx = serde_json::json!({
+                                    "message": err_str,
+                                });
                                 let (recovered, new_flag) =
-                                    crate::credential_pool_recovery::try_recover_with_credential_pool(
+                                    crate::agent_runtime_helpers::recover_with_credential_pool(
                                         pool.map(|p| p.as_ref()),
                                         active_provider.as_str(),
-                                        base_url.as_deref(),
+                                        base_url.as_deref().unwrap_or(""),
+                                        Some(429),
                                         has_retried_429_same_cred,
+                                        Some(crate::error_classifier::FailoverReason::RateLimit),
+                                        &error_ctx,
                                     );
                                 has_retried_429_same_cred = new_flag;
                                 if recovered {

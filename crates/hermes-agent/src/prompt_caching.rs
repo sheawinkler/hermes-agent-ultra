@@ -26,36 +26,7 @@ pub fn anthropic_prompt_cache_policy(
     api_mode: &str,
     model: &str,
 ) -> (bool, bool) {
-    let model_lower = model.to_ascii_lowercase();
-    let provider_lower = provider.to_ascii_lowercase();
-    let base_lower = base_url.to_ascii_lowercase();
-    let is_claude = model_lower.contains("claude");
-    let is_openrouter = base_url_host_matches(base_url, "openrouter.ai");
-    let is_nous_portal = base_lower.contains("nousresearch");
-    let is_anthropic_wire = api_mode == "anthropic_messages";
-    let is_native_anthropic = is_anthropic_wire
-        && (provider_lower == "anthropic"
-            || base_url_hostname(base_url).as_deref() == Some("api.anthropic.com"));
-
-    if is_native_anthropic {
-        return (true, true);
-    }
-    if (is_openrouter || is_nous_portal) && is_claude {
-        return (true, false);
-    }
-    if is_nous_portal && model_lower.contains("qwen") {
-        return (true, false);
-    }
-    if is_anthropic_wire && is_claude {
-        return (true, true);
-    }
-    if provider_lower.contains("minimax")
-        || base_lower.contains("minimax")
-        || base_lower.contains("minimaxi")
-    {
-        return (true, true);
-    }
-    (false, false)
+    crate::agent_runtime_helpers::anthropic_prompt_cache_policy(provider, base_url, api_mode, model)
 }
 
 fn base_url_hostname(base_url: &str) -> Option<String> {
