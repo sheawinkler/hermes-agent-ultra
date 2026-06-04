@@ -38,6 +38,17 @@ struct SummaryTask {
     conversation_text: String,
 }
 
+#[derive(Clone)]
+struct SessionRowContext {
+    id: String,
+    created_at: Option<String>,
+    parent_session_id: Option<String>,
+    model_config: Option<String>,
+    parent_end_reason: Option<String>,
+    parent_ended_at: Option<String>,
+    updated_at: Option<String>,
+}
+
 impl SqliteSessionSearchBackend {
     fn ensure_text_column(conn: &Connection, table: &str, column: &str) -> Result<(), ToolError> {
         match conn.execute(
@@ -140,6 +151,131 @@ impl SqliteSessionSearchBackend {
                 || Self::is_legacy_branch_child(created_at, parent_end_reason, parent_ended_at))
     }
 
+    fn is_compression_child(
+        created_at: Option<&str>,
+        parent_end_reason: Option<&str>,
+        parent_ended_at: Option<&str>,
+    ) -> bool {
+        if parent_end_reason.map(str::trim) != Some("compression") {
+            return false;
+        }
+        match (
+            Self::parse_timestamp_utc(created_at),
+            Self::parse_timestamp_utc(parent_ended_at),
+        ) {
+            (Some(child_started), Some(parent_ended)) => child_started >= parent_ended,
+            _ => false,
+        }
+    }
+
+    fn session_row_context(conn: &Connection, session_id: &str) -> Option<SessionRowContext> {
+        conn.query_row(
+            "SELECT s.id, s.created_at, s.parent_session_id, s.model_config,
+                    p.end_reason, p.ended_at, s.updated_at
+             FROM sessions s
+             LEFT JOIN sessions p ON p.id = s.parent_session_id
+             WHERE s.id = ?1",
+            rusqlite::params![session_id],
+            |row| {
+                Ok(SessionRowContext {
+                    id: row.get::<_, String>(0)?,
+                    created_at: row.get::<_, Option<String>>(1)?,
+                    parent_session_id: row.get::<_, Option<String>>(2)?,
+                    model_config: row.get::<_, Option<String>>(3)?,
+                    parent_end_reason: row.get::<_, Option<String>>(4)?,
+                    parent_ended_at: row.get::<_, Option<String>>(5)?,
+                    updated_at: row.get::<_, Option<String>>(6)?,
+                })
+            },
+        )
+        .ok()
+    }
+
+    fn compression_root(conn: &Connection, session_id: &str) -> String {
+        let mut visited = HashSet::new();
+        let mut sid = session_id.to_string();
+        loop {
+            if sid.is_empty() || !visited.insert(sid.clone()) {
+                break;
+            }
+            let Some(ctx) = Self::session_row_context(conn, &sid) else {
+                break;
+            };
+            if !Self::is_compression_child(
+                ctx.created_at.as_deref(),
+                ctx.parent_end_reason.as_deref(),
+                ctx.parent_ended_at.as_deref(),
+            ) {
+                break;
+            }
+            let Some(parent) = ctx
+                .parent_session_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+            else {
+                break;
+            };
+            sid = parent.to_string();
+        }
+        sid
+    }
+
+    fn compression_tip(conn: &Connection, root_session_id: &str) -> String {
+        let mut visited = HashSet::new();
+        let mut sid = root_session_id.to_string();
+        loop {
+            if sid.is_empty() || !visited.insert(sid.clone()) {
+                break;
+            }
+            let child = conn
+                .query_row(
+                    "SELECT c.id
+                     FROM sessions c
+                     JOIN sessions p ON p.id = c.parent_session_id
+                     WHERE c.parent_session_id = ?1
+                       AND p.end_reason = 'compression'
+                       AND c.created_at >= p.ended_at
+                     ORDER BY c.created_at DESC, c.updated_at DESC, c.id DESC
+                     LIMIT 1",
+                    rusqlite::params![sid.clone()],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok()
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty());
+            match child {
+                Some(next) => sid = next,
+                None => break,
+            }
+        }
+        sid
+    }
+
+    fn logical_session_key_for_row(
+        conn: &Connection,
+        session_id: &str,
+        parent_session_id: Option<&str>,
+        model_config: Option<&str>,
+        created_at: Option<&str>,
+        parent_end_reason: Option<&str>,
+        parent_ended_at: Option<&str>,
+    ) -> String {
+        if Self::is_branch_child(
+            parent_session_id,
+            model_config,
+            created_at,
+            parent_end_reason,
+            parent_ended_at,
+        ) {
+            return session_id.to_string();
+        }
+        if Self::is_compression_child(created_at, parent_end_reason, parent_ended_at) {
+            return Self::compression_root(conn, session_id);
+        }
+        Self::resolve_to_parent(conn, session_id)
+    }
+
     fn visible_session_id_for_row(
         conn: &Connection,
         session_id: &str,
@@ -158,8 +294,131 @@ impl SqliteSessionSearchBackend {
         ) {
             session_id.to_string()
         } else {
-            Self::resolve_to_parent(conn, session_id)
+            let root = if Self::is_compression_child(created_at, parent_end_reason, parent_ended_at)
+            {
+                Self::compression_root(conn, session_id)
+            } else {
+                Self::resolve_to_parent(conn, session_id)
+            };
+            Self::compression_tip(conn, &root)
         }
+    }
+
+    fn logical_session_key_for_session_id(conn: &Connection, session_id: &str) -> String {
+        Self::session_row_context(conn, session_id)
+            .map(|ctx| {
+                Self::logical_session_key_for_row(
+                    conn,
+                    &ctx.id,
+                    ctx.parent_session_id.as_deref(),
+                    ctx.model_config.as_deref(),
+                    ctx.created_at.as_deref(),
+                    ctx.parent_end_reason.as_deref(),
+                    ctx.parent_ended_at.as_deref(),
+                )
+            })
+            .unwrap_or_else(|| Self::resolve_to_parent(conn, session_id))
+    }
+
+    fn escape_like(raw: &str) -> String {
+        raw.replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    }
+
+    fn id_match_score(needle: &str, values: &[&str]) -> u8 {
+        if values
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case(needle))
+        {
+            0
+        } else if values
+            .iter()
+            .any(|value| value.to_lowercase().starts_with(needle))
+        {
+            1
+        } else {
+            2
+        }
+    }
+
+    fn search_sessions_by_id(
+        conn: &Connection,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<SessionRowContext>, ToolError> {
+        let needle = query.trim().to_lowercase();
+        if needle.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let hidden_placeholders = HIDDEN_SESSION_SOURCES
+            .iter()
+            .map(|_| "?".to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT s.id, s.created_at, s.parent_session_id, s.model_config,
+                    p.end_reason, p.ended_at, s.updated_at
+             FROM sessions s
+             LEFT JOIN sessions p ON p.id = s.parent_session_id
+             WHERE LOWER(s.id) LIKE ? ESCAPE '\\'
+               AND COALESCE(s.platform, '') NOT IN ({})
+             ORDER BY s.updated_at DESC, s.created_at DESC, s.id DESC
+             LIMIT ?",
+            hidden_placeholders
+        );
+        let mut values: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::Text(format!(
+            "%{}%",
+            Self::escape_like(&needle)
+        ))];
+        values.extend(
+            HIDDEN_SESSION_SOURCES
+                .iter()
+                .map(|s| rusqlite::types::Value::Text((*s).to_string())),
+        );
+        values.push(rusqlite::types::Value::Integer(
+            (limit * 4).max(limit) as i64
+        ));
+        let params = rusqlite::params_from_iter(values.iter());
+        let mut stmt = conn.prepare(&sql).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to prepare session id search query: {e}"))
+        })?;
+        let rows = stmt
+            .query_map(params, |row| {
+                Ok(SessionRowContext {
+                    id: row.get::<_, String>(0)?,
+                    created_at: row.get::<_, Option<String>>(1)?,
+                    parent_session_id: row.get::<_, Option<String>>(2)?,
+                    model_config: row.get::<_, Option<String>>(3)?,
+                    parent_end_reason: row.get::<_, Option<String>>(4)?,
+                    parent_ended_at: row.get::<_, Option<String>>(5)?,
+                    updated_at: row.get::<_, Option<String>>(6)?,
+                })
+            })
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("Session id search query failed: {e}"))
+            })?;
+
+        let mut ranked = Vec::new();
+        for (idx, row) in rows.flatten().enumerate() {
+            let logical_key = Self::logical_session_key_for_row(
+                conn,
+                &row.id,
+                row.parent_session_id.as_deref(),
+                row.model_config.as_deref(),
+                row.created_at.as_deref(),
+                row.parent_end_reason.as_deref(),
+                row.parent_ended_at.as_deref(),
+            );
+            let score = Self::id_match_score(&needle, &[row.id.as_str(), logical_key.as_str()]);
+            ranked.push((score, idx, row));
+        }
+        ranked.sort_by_key(|(score, idx, row)| (*score, *idx, row.updated_at.clone()));
+        Ok(ranked
+            .into_iter()
+            .take(limit)
+            .map(|(_, _, row)| row)
+            .collect())
     }
 
     fn session_metadata(
@@ -179,6 +438,51 @@ impl SqliteSessionSearchBackend {
             },
         )
         .unwrap_or_else(|_| (None, "cli".to_string(), None))
+    }
+
+    fn load_summary_task(
+        conn: &Connection,
+        session_id: &str,
+        query: &str,
+        allow_empty_id_hit: bool,
+    ) -> Result<Option<SummaryTask>, ToolError> {
+        let (started_at, source, model) = Self::session_metadata(conn, session_id);
+        let mut msg_stmt = conn
+            .prepare(
+                "SELECT role, COALESCE(content, ''), tool_calls
+                 FROM messages WHERE session_id = ?1 ORDER BY id ASC",
+            )
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed to prepare messages query: {e}"))
+            })?;
+        let msg_rows = msg_stmt
+            .query_map(rusqlite::params![session_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed to load session messages: {e}"))
+            })?;
+        let messages: Vec<(String, String, Option<String>)> = msg_rows.flatten().collect();
+        let conversation_text = if messages.is_empty() {
+            if !allow_empty_id_hit {
+                return Ok(None);
+            }
+            format!("Session ID: {session_id}")
+        } else {
+            let transcript = Self::format_conversation(&messages);
+            Self::truncate_around_matches(&transcript, query, MAX_SESSION_CHARS)
+        };
+        Ok(Some(SummaryTask {
+            session_id: session_id.to_string(),
+            source,
+            when: Some(Self::format_timestamp(started_at.as_deref())),
+            model,
+            conversation_text,
+        }))
     }
 
     fn resolve_to_parent(conn: &Connection, session_id: &str) -> String {
@@ -599,8 +903,8 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                         ToolError::ExecutionFailed(format!("Recent sessions query failed: {}", e))
                     })?;
 
-                let current_lineage_root =
-                    current_session_id.map(|sid| Self::resolve_to_parent(&conn, sid.trim()));
+                let current_lineage_root = current_session_id
+                    .map(|sid| Self::logical_session_key_for_session_id(&conn, sid.trim()));
                 let mut results = Vec::new();
                 for row in rows.flatten() {
                     let (
@@ -675,164 +979,174 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                 });
                 (Vec::new(), 0, Some(payload))
             } else {
-                let hidden_placeholders = HIDDEN_SESSION_SOURCES
-                    .iter()
-                    .map(|_| "?".to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let mut sql = String::from(
-                    "SELECT m.session_id, s.created_at, s.platform, s.model,
-                            s.parent_session_id, s.model_config,
-                            p.end_reason, p.ended_at,
-                            bm25(messages_fts) AS rank
-                     FROM messages_fts
-                     JOIN messages m ON m.id = messages_fts.rowid
-                     LEFT JOIN sessions s ON s.id = m.session_id
-                     LEFT JOIN sessions p ON p.id = s.parent_session_id
-                     WHERE messages_fts MATCH ?1
-                       AND m.content IS NOT NULL
-                       AND m.content != ''
-                       AND COALESCE(s.platform, '') NOT IN (",
-                );
-                sql.push_str(&hidden_placeholders);
-                sql.push(')');
-
-                let mut role_values = Vec::new();
-                if let Some(raw_roles) = role_filter {
-                    for role in raw_roles
-                        .split(',')
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                    {
-                        role_values.push(role.to_string());
-                    }
-                    if !role_values.is_empty() {
-                        let placeholders = (0..role_values.len())
-                            .map(|_| "?".to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        sql.push_str(&format!(" AND m.role IN ({})", placeholders));
-                    }
-                }
-                sql.push_str(" ORDER BY rank LIMIT 50");
-
-                let mut stmt = conn.prepare(&sql).map_err(|e| {
-                    ToolError::ExecutionFailed(format!(
-                        "Failed to prepare session search query: {}",
-                        e
-                    ))
-                })?;
-
-                let mut values: Vec<rusqlite::types::Value> =
-                    vec![rusqlite::types::Value::Text(query.to_string())];
-                values.extend(
-                    HIDDEN_SESSION_SOURCES
-                        .iter()
-                        .map(|s| rusqlite::types::Value::Text((*s).to_string())),
-                );
-                values.extend(role_values.into_iter().map(rusqlite::types::Value::Text));
-                let params = rusqlite::params_from_iter(values.iter());
-
-                let rows = stmt
-                    .query_map(params, |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, Option<String>>(2)?
-                                .unwrap_or_else(|| "cli".to_string()),
-                            row.get::<_, Option<String>>(3)?,
-                            row.get::<_, Option<String>>(4)?,
-                            row.get::<_, Option<String>>(5)?,
-                            row.get::<_, Option<String>>(6)?,
-                            row.get::<_, Option<String>>(7)?,
-                        ))
-                    })
-                    .map_err(|e| {
-                        ToolError::ExecutionFailed(format!("Session search query failed: {}", e))
-                    })?;
-
                 let mut seen = HashSet::new();
-                let current_lineage_root =
-                    current_session_id.map(|sid| Self::resolve_to_parent(&conn, sid.trim()));
+                let current_lineage_root = current_session_id
+                    .map(|sid| Self::logical_session_key_for_session_id(&conn, sid.trim()));
                 let mut tasks = Vec::new();
-                for row in rows.flatten() {
-                    let (
-                        raw_session_id,
-                        raw_started_at,
-                        raw_source,
-                        raw_model,
-                        parent_session_id,
-                        model_config,
-                        parent_end_reason,
-                        parent_ended_at,
-                    ) = row;
-                    let resolved_session_id = Self::visible_session_id_for_row(
-                        &conn,
-                        &raw_session_id,
-                        parent_session_id.as_deref(),
-                        model_config.as_deref(),
-                        raw_started_at.as_deref(),
-                        parent_end_reason.as_deref(),
-                        parent_ended_at.as_deref(),
-                    );
-                    if let Some(ref current_root) = current_lineage_root {
-                        if &resolved_session_id == current_root {
-                            continue;
-                        }
-                    }
-                    if !seen.insert(resolved_session_id.clone()) {
-                        continue;
-                    }
-                    let (started_at, source, model) = if resolved_session_id == raw_session_id {
-                        (raw_started_at, raw_source, raw_model)
-                    } else {
-                        Self::session_metadata(&conn, &resolved_session_id)
-                    };
 
-                    let mut msg_stmt = conn
-                        .prepare(
-                            "SELECT role, COALESCE(content, ''), tool_calls
-                             FROM messages WHERE session_id = ?1 ORDER BY id ASC",
-                        )
-                        .map_err(|e| {
-                            ToolError::ExecutionFailed(format!(
-                                "Failed to prepare messages query: {}",
-                                e
-                            ))
-                        })?;
-                    let msg_rows = msg_stmt
-                        .query_map(rusqlite::params![resolved_session_id.clone()], |r| {
-                            Ok((
-                                r.get::<_, String>(0)?,
-                                r.get::<_, String>(1)?,
-                                r.get::<_, Option<String>>(2)?,
-                            ))
-                        })
-                        .map_err(|e| {
-                            ToolError::ExecutionFailed(format!(
-                                "Failed to load session messages: {}",
-                                e
-                            ))
-                        })?;
-                    let messages: Vec<(String, String, Option<String>)> =
-                        msg_rows.flatten().collect();
-                    if messages.is_empty() {
+                for row in Self::search_sessions_by_id(&conn, query, limit)? {
+                    let visible_session_id = Self::visible_session_id_for_row(
+                        &conn,
+                        &row.id,
+                        row.parent_session_id.as_deref(),
+                        row.model_config.as_deref(),
+                        row.created_at.as_deref(),
+                        row.parent_end_reason.as_deref(),
+                        row.parent_ended_at.as_deref(),
+                    );
+                    let logical_key = Self::logical_session_key_for_row(
+                        &conn,
+                        &row.id,
+                        row.parent_session_id.as_deref(),
+                        row.model_config.as_deref(),
+                        row.created_at.as_deref(),
+                        row.parent_end_reason.as_deref(),
+                        row.parent_ended_at.as_deref(),
+                    );
+                    if current_lineage_root.as_ref() == Some(&logical_key) {
                         continue;
                     }
-                    let transcript = Self::format_conversation(&messages);
-                    let transcript =
-                        Self::truncate_around_matches(&transcript, query, MAX_SESSION_CHARS);
-                    tasks.push(SummaryTask {
-                        session_id: resolved_session_id,
-                        source,
-                        when: Some(Self::format_timestamp(started_at.as_deref())),
-                        model,
-                        conversation_text: transcript,
-                    });
+                    if !seen.insert(logical_key) {
+                        continue;
+                    }
+                    if let Some(task) =
+                        Self::load_summary_task(&conn, &visible_session_id, query, true)?
+                    {
+                        tasks.push(task);
+                    }
                     if tasks.len() >= limit {
                         break;
                     }
                 }
+
+                if tasks.len() < limit {
+                    let hidden_placeholders = HIDDEN_SESSION_SOURCES
+                        .iter()
+                        .map(|_| "?".to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let mut sql = String::from(
+                        "SELECT m.session_id, s.created_at, s.platform, s.model,
+                                s.parent_session_id, s.model_config,
+                                p.end_reason, p.ended_at,
+                                bm25(messages_fts) AS rank
+                         FROM messages_fts
+                         JOIN messages m ON m.id = messages_fts.rowid
+                         LEFT JOIN sessions s ON s.id = m.session_id
+                         LEFT JOIN sessions p ON p.id = s.parent_session_id
+                         WHERE messages_fts MATCH ?1
+                           AND m.content IS NOT NULL
+                           AND m.content != ''
+                           AND COALESCE(s.platform, '') NOT IN (",
+                    );
+                    sql.push_str(&hidden_placeholders);
+                    sql.push(')');
+
+                    let mut role_values = Vec::new();
+                    if let Some(raw_roles) = role_filter {
+                        for role in raw_roles
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                        {
+                            role_values.push(role.to_string());
+                        }
+                        if !role_values.is_empty() {
+                            let placeholders = (0..role_values.len())
+                                .map(|_| "?".to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            sql.push_str(&format!(" AND m.role IN ({})", placeholders));
+                        }
+                    }
+                    sql.push_str(" ORDER BY rank LIMIT 50");
+
+                    let mut stmt = conn.prepare(&sql).map_err(|e| {
+                        ToolError::ExecutionFailed(format!(
+                            "Failed to prepare session search query: {}",
+                            e
+                        ))
+                    })?;
+
+                    let mut values: Vec<rusqlite::types::Value> =
+                        vec![rusqlite::types::Value::Text(query.to_string())];
+                    values.extend(
+                        HIDDEN_SESSION_SOURCES
+                            .iter()
+                            .map(|s| rusqlite::types::Value::Text((*s).to_string())),
+                    );
+                    values.extend(role_values.into_iter().map(rusqlite::types::Value::Text));
+                    let params = rusqlite::params_from_iter(values.iter());
+
+                    let rows = stmt
+                        .query_map(params, |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, Option<String>>(2)?
+                                    .unwrap_or_else(|| "cli".to_string()),
+                                row.get::<_, Option<String>>(3)?,
+                                row.get::<_, Option<String>>(4)?,
+                                row.get::<_, Option<String>>(5)?,
+                                row.get::<_, Option<String>>(6)?,
+                                row.get::<_, Option<String>>(7)?,
+                            ))
+                        })
+                        .map_err(|e| {
+                            ToolError::ExecutionFailed(format!(
+                                "Session search query failed: {}",
+                                e
+                            ))
+                        })?;
+
+                    for row in rows.flatten() {
+                        if tasks.len() >= limit {
+                            break;
+                        }
+                        let (
+                            raw_session_id,
+                            raw_started_at,
+                            _raw_source,
+                            _raw_model,
+                            parent_session_id,
+                            model_config,
+                            parent_end_reason,
+                            parent_ended_at,
+                        ) = row;
+                        let resolved_session_id = Self::visible_session_id_for_row(
+                            &conn,
+                            &raw_session_id,
+                            parent_session_id.as_deref(),
+                            model_config.as_deref(),
+                            raw_started_at.as_deref(),
+                            parent_end_reason.as_deref(),
+                            parent_ended_at.as_deref(),
+                        );
+                        let logical_key = Self::logical_session_key_for_row(
+                            &conn,
+                            &raw_session_id,
+                            parent_session_id.as_deref(),
+                            model_config.as_deref(),
+                            raw_started_at.as_deref(),
+                            parent_end_reason.as_deref(),
+                            parent_ended_at.as_deref(),
+                        );
+                        if let Some(ref current_root) = current_lineage_root {
+                            if &logical_key == current_root {
+                                continue;
+                            }
+                        }
+                        if !seen.insert(logical_key) {
+                            continue;
+                        }
+                        if let Some(task) =
+                            Self::load_summary_task(&conn, &resolved_session_id, query, false)?
+                        {
+                            tasks.push(task);
+                        }
+                    }
+                }
+
                 let searched = seen.len();
                 (tasks, searched, None)
             }
@@ -1132,5 +1446,153 @@ mod tests {
         let ids = result_ids(&output);
 
         assert_eq!(ids.first().map(String::as_str), Some("branch"), "{output}");
+    }
+
+    #[tokio::test]
+    async fn search_matches_session_id_before_content_hits() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "20260603_090200_exact",
+            None,
+            None,
+            None,
+            None,
+            "2026-06-03T09:02:00Z",
+        );
+        insert_message(
+            &conn,
+            "20260603_090200_exact",
+            "user",
+            "ordinary message without the numeric query",
+        );
+        insert_session(
+            &conn,
+            "content-session",
+            None,
+            None,
+            None,
+            None,
+            "2026-06-03T09:03:00Z",
+        );
+        insert_message(
+            &conn,
+            "content-session",
+            "assistant",
+            "20260603 appears only in this transcript",
+        );
+
+        let output = backend
+            .search(Some("20260603"), None, 2, None)
+            .await
+            .expect("search");
+        let ids = result_ids(&output);
+
+        assert_eq!(
+            ids,
+            vec![
+                "20260603_090200_exact".to_string(),
+                "content-session".to_string()
+            ],
+            "{output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_dedupes_session_id_and_content_hits_by_logical_session() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "20260603_090200_exact",
+            None,
+            None,
+            None,
+            None,
+            "2026-06-03T09:02:00Z",
+        );
+        insert_message(
+            &conn,
+            "20260603_090200_exact",
+            "user",
+            "20260603 also appears in the content hit",
+        );
+
+        let output = backend
+            .search(Some("20260603"), None, 5, None)
+            .await
+            .expect("search");
+        let ids = result_ids(&output);
+
+        assert_eq!(ids, vec!["20260603_090200_exact".to_string()], "{output}");
+    }
+
+    #[tokio::test]
+    async fn search_session_id_resolves_compression_root_to_tip() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "20260602_235959_root99",
+            None,
+            None,
+            Some("compression"),
+            Some("2026-06-03T00:00:05Z"),
+            "2026-06-02T23:59:59Z",
+        );
+        insert_message(&conn, "20260602_235959_root99", "user", "root segment");
+        insert_session(
+            &conn,
+            "20260603_010000_tip01",
+            Some("20260602_235959_root99"),
+            None,
+            None,
+            None,
+            "2026-06-03T00:00:06Z",
+        );
+        insert_message(&conn, "20260603_010000_tip01", "user", "continued segment");
+
+        let output = backend
+            .search(Some("root99"), None, 1, None)
+            .await
+            .expect("search");
+        let ids = result_ids(&output);
+
+        assert_eq!(ids, vec!["20260603_010000_tip01".to_string()], "{output}");
+    }
+
+    #[tokio::test]
+    async fn search_session_id_treats_like_wildcards_literally() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "literal%id",
+            None,
+            None,
+            None,
+            None,
+            "2026-06-03T09:02:00Z",
+        );
+        insert_message(&conn, "literal%id", "user", "literal percent id");
+        insert_session(
+            &conn,
+            "literalXid",
+            None,
+            None,
+            None,
+            None,
+            "2026-06-03T09:03:00Z",
+        );
+        insert_message(&conn, "literalXid", "user", "wildcard should not match");
+
+        let output = backend
+            .search(Some("%"), None, 1, None)
+            .await
+            .expect("search");
+        let ids = result_ids(&output);
+
+        assert_eq!(ids, vec!["literal%id".to_string()], "{output}");
     }
 }
