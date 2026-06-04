@@ -2086,11 +2086,10 @@ impl App {
         let agent_config = build_agent_config(&config, &current_model);
         let provider = build_provider(&config, &current_model);
 
-        let agent_inner = hermes_agent::attach_agent_runtime(AgentLoop::new(
-            agent_config,
-            agent_tool_registry,
-            provider,
-        ))
+        let agent_inner = hermes_agent::attach_agent_runtime(
+            AgentLoop::new(agent_config, agent_tool_registry, provider)
+                .with_async_tool_dispatch(async_tool_dispatch_for(tool_registry.clone())),
+        )
         .with_callbacks(Self::stream_callbacks(stream_handle_shared.clone()));
         let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
             &agent_inner,
@@ -2448,6 +2447,7 @@ impl App {
             agent_tool_registry,
             provider,
         ))
+        .with_async_tool_dispatch(async_tool_dispatch_for(self.tool_registry.clone()))
         .with_callbacks(Self::stream_callbacks(self.stream_handle_shared.clone()));
         let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
             &agent_inner,

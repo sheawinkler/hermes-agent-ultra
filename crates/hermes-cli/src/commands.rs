@@ -19121,6 +19121,7 @@ pub async fn handle_cli_chat(
         let provider = crate::app::build_provider(&config, provider_model);
         let base =
             hermes_agent::AgentLoop::new(agent_config, Arc::clone(&agent_tool_registry), provider)
+                .with_async_tool_dispatch(crate::app::async_tool_dispatch_for(tool_registry.clone()))
                 .with_callbacks(callbacks);
         if query_mode {
             hermes_agent::attach_discovered_plugins(base)
@@ -24746,11 +24747,10 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
         agent_config.session_id = Some(session.session_id.clone());
 
         let agent_tools = Arc::new(crate::app::bridge_tool_registry(&self.tool_registry));
-        let agent = hermes_agent::attach_agent_runtime(hermes_agent::AgentLoop::new(
-            agent_config,
-            agent_tools,
-            provider,
-        ));
+        let agent = hermes_agent::attach_agent_runtime(
+            hermes_agent::AgentLoop::new(agent_config, agent_tools, provider)
+                .with_async_tool_dispatch(crate::app::async_tool_dispatch_for(self.tool_registry.clone())),
+        );
         let messages = acp_history_to_messages(history, user_text);
         let (conversation_history, user_message) = split_messages_for_run_conversation(&messages)
             .ok_or_else(|| "ACP prompt has no user message for run_conversation".to_string())?;
