@@ -1751,6 +1751,12 @@ mod tests {
 
     static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1817,7 +1823,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_with_login_profile_sources_prepends_profile_loads() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let td = tempdir().unwrap();
         for file in [".profile", ".bash_profile", ".bashrc", ".zshrc"] {
             std::fs::write(td.path().join(file), "export HERMES_TEST=1\n").unwrap();
@@ -1837,7 +1843,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_with_login_profile_sources_prefers_user_shell_when_supported() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let _shell = EnvGuard::set("SHELL", "/bin/zsh");
         let wrapped = with_login_profile_sources("echo hi", &[], true, &[]);
         let preferred = "if command -v zsh >/dev/null 2>&1; then exec zsh -lc";
@@ -1852,7 +1858,7 @@ mod tests {
 
     #[test]
     fn test_resolve_shell_init_files_auto_profile_before_bashrc() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let td = tempdir().unwrap();
         for file in [".profile", ".bash_profile", ".bashrc"] {
             std::fs::write(td.path().join(file), "export HERMES_TEST=1\n").unwrap();
@@ -1869,7 +1875,7 @@ mod tests {
 
     #[test]
     fn test_resolve_shell_init_files_explicit_list_wins_over_auto() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let td = tempdir().unwrap();
         std::fs::write(td.path().join(".bashrc"), "export FROM_BASHRC=1\n").unwrap();
         let custom = td.path().join("custom.sh");
@@ -1886,7 +1892,7 @@ mod tests {
 
     #[test]
     fn test_resolve_shell_init_files_auto_source_off_suppresses_defaults() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let td = tempdir().unwrap();
         std::fs::write(td.path().join(".bashrc"), "export FROM_BASHRC=1\n").unwrap();
         let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
@@ -1897,7 +1903,7 @@ mod tests {
 
     #[test]
     fn test_resolve_shell_init_files_expands_home_and_env_vars() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let td = tempdir().unwrap();
         let rc_dir = td.path().join("rc");
         std::fs::create_dir_all(&rc_dir).unwrap();
@@ -1919,7 +1925,7 @@ mod tests {
 
     #[test]
     fn test_subprocess_env_passthrough_parses_configured_and_env_values() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let _passthrough = EnvGuard::set(
             SUBPROCESS_ENV_PASSTHROUGH_VAR,
             "OPENAI_API_KEY,ANTHROPIC_TOKEN:BAD-NAME VALID_NAME",
@@ -1954,7 +1960,7 @@ mod tests {
 
     #[test]
     fn test_terminal_sanitizer_blocks_provider_env_by_default() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let _api = EnvGuard::set("OPENAI_API_KEY", "secret-value");
         let _passthrough = EnvGuard::remove(SUBPROCESS_ENV_PASSTHROUGH_VAR);
         let backend =
@@ -1975,7 +1981,7 @@ mod tests {
 
     #[test]
     fn test_terminal_config_passthrough_allows_blocklisted_env() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let _api = EnvGuard::set("OPENAI_API_KEY", "secret-value");
         let _passthrough = EnvGuard::remove(SUBPROCESS_ENV_PASSTHROUGH_VAR);
         let backend = LocalBackend::new_with_shell_init(
@@ -2001,7 +2007,7 @@ mod tests {
 
     #[test]
     fn test_terminal_registry_env_passthrough_allows_prefix_blocked_env() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let _gateway = EnvGuard::set("HERMES_GATEWAY_SECRET", "gateway-secret");
         let _passthrough = EnvGuard::set(SUBPROCESS_ENV_PASSTHROUGH_VAR, "HERMES_GATEWAY_SECRET");
         let backend =
@@ -2273,18 +2279,16 @@ mod tests {
         let _ = std::fs::remove_dir(&dir);
     }
 
-    #[tokio::test]
-    async fn test_relative_file_paths_use_terminal_cwd() {
+    #[test]
+    fn test_relative_file_paths_use_terminal_cwd() {
+        let _lock = lock_env();
         let td = tempdir().unwrap();
         let terminal_cwd = td.path().join("worktree");
         std::fs::create_dir_all(&terminal_cwd).unwrap();
         let _cwd_guard = EnvGuard::set("TERMINAL_CWD", terminal_cwd.to_string_lossy().as_ref());
         let backend = LocalBackend::default();
 
-        backend
-            .write_file("nested/file.txt", "from terminal cwd")
-            .await
-            .unwrap();
+        block_on(backend.write_file("nested/file.txt", "from terminal cwd")).unwrap();
 
         let expected = terminal_cwd.join("nested/file.txt");
         assert_eq!(
@@ -2292,10 +2296,7 @@ mod tests {
             "from terminal cwd"
         );
         assert_eq!(
-            backend
-                .read_file("nested/file.txt", None, None)
-                .await
-                .unwrap(),
+            block_on(backend.read_file("nested/file.txt", None, None)).unwrap(),
             "from terminal cwd"
         );
     }
@@ -2324,6 +2325,7 @@ mod tests {
 
     #[test]
     fn test_resolve_path_expands_tilde_username_with_suffix() {
+        let _lock = lock_env();
         let Some(user) = current_username() else {
             return;
         };
@@ -2336,14 +2338,15 @@ mod tests {
         assert!(resolved.ends_with("workspace/file.txt"));
     }
 
-    #[tokio::test]
-    async fn test_write_file_expands_tilde_home() {
+    #[test]
+    fn test_write_file_expands_tilde_home() {
+        let _lock = lock_env();
         let td = tempdir().unwrap();
         let _home_guard = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
         let backend = LocalBackend::default();
         let file = "~/nested/path/test.txt";
 
-        backend.write_file(file, "ok").await.unwrap();
+        block_on(backend.write_file(file, "ok")).unwrap();
         let expanded = td.path().join("nested/path/test.txt");
         let content = std::fs::read_to_string(&expanded).unwrap();
         assert_eq!(content, "ok");
@@ -2351,7 +2354,7 @@ mod tests {
 
     #[test]
     fn test_execute_command_strips_gateway_env_vars() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let _token_guard = EnvGuard::set("TOOL_GATEWAY_USER_TOKEN", "should-not-leak");
         let _managed_guard = EnvGuard::set("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
         let _http_guard = EnvGuard::set("HERMES_HTTP_API_KEY", "secret-http-key");
@@ -2373,7 +2376,7 @@ mod tests {
 
     #[test]
     fn test_execute_command_strips_provider_tool_and_gateway_env_vars() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let _openai_key = EnvGuard::set("OPENAI_API_KEY", "sk-should-not-leak");
         let _openai_base = EnvGuard::set("OPENAI_BASE_URL", "http://localhost:8000/v1");
         let _bedrock_bearer = EnvGuard::set("AWS_BEARER_TOKEN_BEDROCK", "bedrock-secret");
@@ -2398,7 +2401,7 @@ mod tests {
 
     #[test]
     fn test_execute_command_preserves_general_aws_credentials() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let _access_key = EnvGuard::set("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE");
         let _secret_key = EnvGuard::set("AWS_SECRET_ACCESS_KEY", "aws-secret");
         let _session = EnvGuard::set("AWS_SESSION_TOKEN", "aws-session");
@@ -2436,7 +2439,7 @@ mod tests {
 
     #[test]
     fn test_execute_command_force_prefix_reinjects_blocked_var() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let _blocked = EnvGuard::set("OPENAI_API_KEY", "sk-should-not-leak");
         let _forced = EnvGuard::set("_HERMES_FORCE_OPENAI_API_KEY", "sk-explicit");
         let backend = LocalBackend::default();
@@ -2456,7 +2459,7 @@ mod tests {
 
     #[test]
     fn test_execute_command_cleans_profile_reintroduced_blocked_vars() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = lock_env();
         let td = tempdir().unwrap();
         std::fs::write(
             td.path().join(".profile"),
