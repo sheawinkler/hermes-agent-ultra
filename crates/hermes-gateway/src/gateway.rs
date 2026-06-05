@@ -93,7 +93,7 @@ use hermes_core::{
 };
 
 use crate::background::{BackgroundTaskManager, TaskStatus};
-use crate::commands::{GatewayCommandResult, handle_command};
+use crate::commands::{BatchCommandClass, BatchedCommand, GatewayCommandResult, handle_command, parse_batch_commands};
 use crate::dm::{DmDecision, DmManager};
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::pairing_store::DmPairingStore;
@@ -1458,6 +1458,13 @@ impl Gateway {
         incoming: &IncomingMessage,
         session_key: &str,
     ) -> Result<bool, GatewayError> {
+        // Batch fast-path: when the message contains 2+ slash commands, route to the
+        // generalised batch dispatcher instead of the single-command path.
+        let batch = parse_batch_commands(&incoming.text);
+        if !batch.is_empty() {
+            return self.execute_batch_commands(incoming, session_key, batch).await;
+        }
+
         let result = handle_command(&incoming.text);
         if !matches!(result, GatewayCommandResult::Unknown(_)) {
             if let Some(command_name) = Self::extract_command_name(&incoming.text) {
@@ -2944,6 +2951,152 @@ impl Gateway {
             usage.input_chars,
             usage.output_chars
         )
+    }
+
+    /// Dispatch a validated batch of 2+ commands parsed by [`parse_batch_commands`].
+    ///
+    /// Policy:
+    /// - Any `Control` command in the batch → reject entire batch.
+    /// - Any `SessionMutation` command in the batch → reject entire batch.
+    /// - Mixed `FireAndForget` + `ReadOnly` → reject (ambiguous ordering).
+    /// - All `FireAndForget` → parallel spawn, single upfront ack message.
+    /// - All `ReadOnly` → sequential execution (each sends its own reply).
+    async fn execute_batch_commands(
+        &self,
+        incoming: &IncomingMessage,
+        session_key: &str,
+        commands: Vec<BatchedCommand>,
+    ) -> Result<bool, GatewayError> {
+        let has_control = commands.iter().any(|c| c.class == BatchCommandClass::Control);
+        let has_mutation = commands
+            .iter()
+            .any(|c| c.class == BatchCommandClass::SessionMutation);
+
+        if has_control || has_mutation {
+            let bad_names: Vec<String> = commands
+                .iter()
+                .filter(|c| {
+                    matches!(
+                        c.class,
+                        BatchCommandClass::Control | BatchCommandClass::SessionMutation
+                    )
+                })
+                .map(|c| format!("/{}", c.name))
+                .collect();
+            let msg = format!(
+                "⚠️ Batch rejected: {} cannot be used in a multi-command message — \
+                 these commands modify session state or require exclusive control. \
+                 Send each command separately.",
+                bad_names.join(", ")
+            );
+            self.send_incoming_reply(incoming, &msg, None).await?;
+            return Ok(true);
+        }
+
+        let ff_count = commands
+            .iter()
+            .filter(|c| c.class == BatchCommandClass::FireAndForget)
+            .count();
+        let ro_count = commands
+            .iter()
+            .filter(|c| c.class == BatchCommandClass::ReadOnly)
+            .count();
+
+        if ff_count > 0 && ro_count > 0 {
+            let msg = "⚠️ Mixed batch (fire-and-forget + read-only commands) is not supported. \
+                       Send each group in a separate message."
+                .to_string();
+            self.send_incoming_reply(incoming, &msg, None).await?;
+            return Ok(true);
+        }
+
+        if ff_count > 0 {
+            // ── All FireAndForget: parallel dispatch ────────────────────────
+            let legacy_handler = self.message_handler.read().await.as_ref().cloned();
+            let context_handler = self
+                .message_handler_with_context
+                .read()
+                .await
+                .as_ref()
+                .cloned();
+            if context_handler.is_none() && legacy_handler.is_none() {
+                return Err(GatewayError::Platform(
+                    "No message handler configured".into(),
+                ));
+            }
+
+            let n = commands.len();
+            let mut ack = format!(
+                "🔄 Received {} background tasks — starting in parallel:\n",
+                n
+            );
+            let mut dispatches: Vec<(String, Arc<Vec<Message>>)> = Vec::with_capacity(n);
+
+            for (i, cmd) in commands.iter().enumerate() {
+                let is_btw = cmd.name == "btw";
+                let task_id = Self::python_async_task_id(if is_btw { "btw" } else { "bg" });
+                let preview = Self::gateway_command_preview(&cmd.args);
+                ack.push_str(&format!("{}. [{}] \"{}\"\n", i + 1, task_id, preview));
+                let _ = self
+                    .background_tasks
+                    .submit_with_id(task_id.clone(), cmd.args.clone());
+
+                let messages: Arc<Vec<Message>> = if is_btw {
+                    let mut history =
+                        self.session_manager.get_messages(session_key).await;
+                    history.push(Message::user(format!(
+                        "[Ephemeral /btw side question. Answer using the conversation \
+                         context. No tools available. Be direct and concise.]\n\n{}",
+                        cmd.args
+                    )));
+                    Arc::new(history)
+                } else {
+                    Arc::new(vec![Message::user(cmd.args.clone())])
+                };
+                dispatches.push((task_id, messages));
+            }
+
+            self.send_incoming_reply(incoming, &ack, None).await?;
+
+            for (task_id, messages) in dispatches {
+                let manager = self.background_tasks.clone();
+                let task_id_inner = task_id;
+                let runtime_context =
+                    self.build_runtime_context(incoming, session_key).await;
+                let ctx_handler = context_handler.clone();
+                let leg_handler = legacy_handler.clone();
+                tokio::spawn(async move {
+                    let legacy_messages = Arc::clone(&messages);
+                    let result = if let Some(handler) = ctx_handler {
+                        handler(messages, runtime_context).await
+                    } else if let Some(handler) = leg_handler {
+                        handler(legacy_messages).await
+                    } else {
+                        Err(GatewayError::Platform(
+                            "No message handler configured".into(),
+                        ))
+                    };
+                    match result {
+                        Ok(r) => manager.complete(&task_id_inner, r),
+                        Err(e) => manager.fail(&task_id_inner, e.to_string()),
+                    }
+                });
+            }
+            return Ok(true);
+        }
+
+        // ── All ReadOnly: sequential dispatch ──────────────────────────────
+        for cmd in commands {
+            let full_input = if cmd.args.is_empty() {
+                format!("/{}", cmd.name)
+            } else {
+                format!("/{} {}", cmd.name, cmd.args)
+            };
+            let result = handle_command(&full_input);
+            self.apply_command_result(incoming, session_key, result)
+                .await?;
+        }
+        Ok(true)
     }
 
     async fn handle_background_command(

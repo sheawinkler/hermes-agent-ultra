@@ -283,6 +283,157 @@ pub fn is_known_gateway_command(input: &str) -> bool {
     !matches!(handle_command(input), GatewayCommandResult::Unknown(_))
 }
 
+// ---------------------------------------------------------------------------
+// Batch command parsing
+// ---------------------------------------------------------------------------
+
+/// How a command behaves in a batch (multi-command) message context.
+///
+/// Used by [`parse_batch_commands`] to decide whether a multi-line message
+/// containing several slash commands can be dispatched automatically.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BatchCommandClass {
+    /// Can be dispatched in parallel without touching session state.
+    /// Examples: `/background`, `/btw`.
+    FireAndForget,
+    /// Stateless query — safe to run sequentially, each sends its own reply.
+    /// Examples: `/status`, `/usage`, `/help`.
+    ReadOnly,
+    /// Mutates session or agent state.  Must NOT appear in a batch.
+    /// Examples: `/model`, `/reset`, `/new`, `/yolo`, `/rollback`.
+    SessionMutation,
+    /// Interrupt or access-control action.  Must NOT appear in a batch.
+    /// Examples: `/stop`, `/approve`, `/deny`, `/retry`, `/undo`.
+    Control,
+}
+
+/// A single command parsed from a multi-line batch message.
+#[derive(Debug, Clone)]
+pub struct BatchedCommand {
+    /// Canonical lower-case command name without the leading `/`.
+    pub name: String,
+    /// Everything after the command keyword (iOS dashes normalised).
+    pub args: String,
+    /// Batch execution class.
+    pub class: BatchCommandClass,
+}
+
+/// Classify a raw (lower-cased, alias-expanded) command name into its batch class.
+///
+/// Conservative: unknown or ambiguous commands default to `SessionMutation`
+/// so they are never silently batched.
+pub fn classify_batch_class(name: &str) -> BatchCommandClass {
+    // Normalise aliases to canonical names first.
+    let canonical = match name {
+        "bg"         => "background",
+        "clear"      => "reset",
+        "cancel"     => "stop",
+        "cost"       => "usage",
+        "persona"    => "personality",
+        "think"      => "reasoning",
+        "commands"   => "help",
+        "mcp_reload" => "reload_mcp",
+        other        => other,
+    };
+    match canonical {
+        // ── FireAndForget ──────────────────────────────────────────────────
+        "background" | "btw" => BatchCommandClass::FireAndForget,
+
+        // ── Control ────────────────────────────────────────────────────────
+        "stop" | "approve" | "deny" | "retry" | "undo" => BatchCommandClass::Control,
+
+        // ── ReadOnly ───────────────────────────────────────────────────────
+        // Only commands whose behaviour is *always* read-only regardless of args.
+        "status" | "usage" | "insights" | "help" => BatchCommandClass::ReadOnly,
+
+        // ── SessionMutation (everything else that the gateway handles) ─────
+        "new" | "reset" | "model" | "personality" | "compress" | "verbose"
+        | "yolo" | "sethome" | "reload_mcp" | "provider" | "profile"
+        | "branch" | "rollback" | "update" | "fast" | "reasoning"
+        | "tools" | "sessions" | "budget" => BatchCommandClass::SessionMutation,
+
+        // Unknown / not a gateway command → conservative
+        _ => BatchCommandClass::SessionMutation,
+    }
+}
+
+/// Parse a multi-line message into individual [`BatchedCommand`]s.
+///
+/// Returns a non-empty `Vec` only when **2 or more** slash commands are found.
+/// Returns an empty `Vec` when there is 0 or 1 command — caller falls through
+/// to the normal single-command path.
+///
+/// Parsing rules
+/// - Split text into lines.
+/// - A line whose first non-whitespace character is `/` starts a new command
+///   (first word = command name, rest = beginning of args).
+/// - Subsequent lines that do NOT start a new command are continuation lines
+///   appended to the current command's args (useful for multi-line prompts
+///   like `/background <first line>\n<more context>`).
+/// - Lines that appear before the first slash command are ignored.
+/// - Empty prompts are silently discarded.
+pub fn parse_batch_commands(text: &str) -> Vec<BatchedCommand> {
+    let mut commands: Vec<BatchedCommand> = Vec::new();
+    let mut cur_name: Option<String> = None;
+    let mut cur_args: Option<String> = None;
+
+    let flush = |name: Option<String>, args: Option<String>, out: &mut Vec<BatchedCommand>| {
+        if let (Some(n), Some(a)) = (name, args) {
+            let args_trimmed = a.trim().to_string();
+            // Discard fire-and-forget commands whose prompt is empty — they have
+            // no useful work to do and would just error downstream.
+            if n == "background" || n == "bg" || n == "btw" {
+                if args_trimmed.is_empty() {
+                    return;
+                }
+            }
+            let class = classify_batch_class(&n);
+            out.push(BatchedCommand {
+                name: n,
+                args: args_trimmed,
+                class,
+            });
+        }
+    };
+
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if line.starts_with('/') {
+            // Flush the previous command (if any).
+            flush(cur_name.take(), cur_args.take(), &mut commands);
+
+            // Parse the new command.
+            let parts: Vec<&str> = line.splitn(2, ' ').collect();
+            let raw_cmd = parts[0][1..].to_lowercase(); // strip leading /
+            // Reject file paths (contain '/') and empty names.
+            if raw_cmd.is_empty() || raw_cmd.contains('/') {
+                cur_name = None;
+                cur_args = None;
+                continue;
+            }
+            let raw_args = parts.get(1).copied().unwrap_or("");
+            cur_name = Some(raw_cmd);
+            cur_args = Some(normalize_command_args(raw_args));
+        } else if let Some(ref mut args_buf) = cur_args {
+            // Continuation line for the current command's args.
+            if !line.is_empty() {
+                args_buf.push('\n');
+                args_buf.push_str(line);
+            }
+        }
+        // Lines before any slash command are silently ignored.
+    }
+
+    // Flush the last command.
+    flush(cur_name, cur_args, &mut commands);
+
+    if commands.len() >= 2 {
+        commands
+    } else {
+        Vec::new()
+    }
+}
+
 /// Parse and dispatch a gateway slash command.
 pub fn handle_command(input: &str) -> GatewayCommandResult {
     let trimmed = input.trim();
@@ -709,5 +860,172 @@ mod tests {
             GatewayCommandResult::ShowInsights(s) => assert!(!s.is_empty()),
             other => panic!("Expected ShowInsights, got {:?}", other),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // BatchCommandClass / classify_batch_class tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_classify_fire_and_forget() {
+        assert_eq!(classify_batch_class("background"), BatchCommandClass::FireAndForget);
+        assert_eq!(classify_batch_class("bg"), BatchCommandClass::FireAndForget);
+        assert_eq!(classify_batch_class("btw"), BatchCommandClass::FireAndForget);
+    }
+
+    #[test]
+    fn test_classify_control() {
+        for cmd in &["stop", "cancel", "approve", "deny", "retry", "undo"] {
+            assert_eq!(
+                classify_batch_class(cmd),
+                BatchCommandClass::Control,
+                "/{} should be Control",
+                cmd
+            );
+        }
+    }
+
+    #[test]
+    fn test_classify_readonly() {
+        for cmd in &["status", "usage", "cost", "insights", "help", "commands"] {
+            assert_eq!(
+                classify_batch_class(cmd),
+                BatchCommandClass::ReadOnly,
+                "/{} should be ReadOnly",
+                cmd
+            );
+        }
+    }
+
+    #[test]
+    fn test_classify_session_mutation() {
+        for cmd in &[
+            "new", "reset", "clear", "model", "personality", "persona",
+            "compress", "verbose", "yolo", "sethome", "reload_mcp", "mcp_reload",
+            "provider", "profile", "branch", "rollback", "update", "fast",
+            "reasoning", "think", "tools", "sessions", "budget",
+        ] {
+            assert_eq!(
+                classify_batch_class(cmd),
+                BatchCommandClass::SessionMutation,
+                "/{} should be SessionMutation",
+                cmd
+            );
+        }
+    }
+
+    #[test]
+    fn test_classify_unknown_is_conservative() {
+        assert_eq!(classify_batch_class("xyzzy"), BatchCommandClass::SessionMutation);
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_batch_commands tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_batch_single_returns_empty() {
+        assert!(parse_batch_commands("").is_empty());
+        assert!(parse_batch_commands("/background single task").is_empty());
+        assert!(parse_batch_commands("/status").is_empty());
+    }
+
+    #[test]
+    fn test_batch_two_background_tasks() {
+        let text = "/background task one\n/background task two";
+        let cmds = parse_batch_commands(text);
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].name, "background");
+        assert_eq!(cmds[0].args, "task one");
+        assert_eq!(cmds[0].class, BatchCommandClass::FireAndForget);
+        assert_eq!(cmds[1].args, "task two");
+    }
+
+    #[test]
+    fn test_batch_three_mixed_ff() {
+        let text = "/background 写邮件\n/background 设定提醒\n/btw 现在几点";
+        let cmds = parse_batch_commands(text);
+        assert_eq!(cmds.len(), 3);
+        assert_eq!(cmds[0].args, "写邮件");
+        assert_eq!(cmds[1].args, "设定提醒");
+        assert_eq!(cmds[2].name, "btw");
+        assert_eq!(cmds[2].args, "现在几点");
+        assert!(cmds.iter().all(|c| c.class == BatchCommandClass::FireAndForget));
+    }
+
+    #[test]
+    fn test_batch_bg_alias_normalised() {
+        let text = "/bg task A\n/bg task B";
+        let cmds = parse_batch_commands(text);
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].name, "bg");
+        assert_eq!(cmds[0].class, BatchCommandClass::FireAndForget);
+    }
+
+    #[test]
+    fn test_batch_multiline_prompt_continuation() {
+        let text = "/background first line\nmore context here\n/background another task";
+        let cmds = parse_batch_commands(text);
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].args, "first line\nmore context here");
+        assert_eq!(cmds[1].args, "another task");
+    }
+
+    #[test]
+    fn test_batch_readonly_pair() {
+        let text = "/status\n/usage";
+        let cmds = parse_batch_commands(text);
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].name, "status");
+        assert_eq!(cmds[0].class, BatchCommandClass::ReadOnly);
+        assert_eq!(cmds[1].name, "usage");
+        assert_eq!(cmds[1].class, BatchCommandClass::ReadOnly);
+    }
+
+    #[test]
+    fn test_batch_contains_session_mutation() {
+        let text = "/background task\n/model gpt-4";
+        let cmds = parse_batch_commands(text);
+        assert_eq!(cmds.len(), 2);
+        assert!(cmds.iter().any(|c| c.class == BatchCommandClass::SessionMutation));
+    }
+
+    #[test]
+    fn test_batch_contains_control() {
+        let text = "/background task\n/stop";
+        let cmds = parse_batch_commands(text);
+        assert_eq!(cmds.len(), 2);
+        assert!(cmds.iter().any(|c| c.class == BatchCommandClass::Control));
+    }
+
+    #[test]
+    fn test_batch_empty_ff_prompt_discarded() {
+        // /background with no args should be dropped; only 1 valid command → empty
+        let text = "/background\n/background real task";
+        let cmds = parse_batch_commands(text);
+        // Only "real task" survives; count < 2 → empty
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn test_batch_ios_dash_normalisation_in_args() {
+        let em = '\u{2014}';
+        let text = format!("/background task {}provider openai\n/background another", em);
+        let cmds = parse_batch_commands(&text);
+        assert_eq!(cmds.len(), 2);
+        assert!(cmds[0].args.contains("--provider"), "em-dash should be normalised to --");
+    }
+
+    #[test]
+    fn test_batch_real_world_three_background() {
+        let text = "/background 帮我写一封邮件介绍产品\n\
+                   /background 帮我定个5分钟后的提醒\n\
+                   /background 分析桌面下的所有文件";
+        let cmds = parse_batch_commands(text);
+        assert_eq!(cmds.len(), 3);
+        assert!(cmds.iter().all(|c| c.class == BatchCommandClass::FireAndForget));
+        assert_eq!(cmds[0].args, "帮我写一封邮件介绍产品");
+        assert_eq!(cmds[1].args, "帮我定个5分钟后的提醒");
+        assert_eq!(cmds[2].args, "分析桌面下的所有文件");
     }
 }
