@@ -70,6 +70,94 @@ fn apply_weixin_env(config: &mut GatewayConfig) {
     }
 }
 
+fn extra_string_list(pc: &PlatformConfig, key: &str) -> Vec<String> {
+    pc.extra
+        .get(key)
+        .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn set_env_if_unset(key: &str, value: &str) {
+    if std::env::var(key)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .is_none_or(|s| s.is_empty())
+    {
+        // SAFETY: config load path only; mirrors Python `load_gateway_config` env bridge.
+        unsafe { std::env::set_var(key, value) };
+    }
+}
+
+fn apply_telegram_env(config: &mut GatewayConfig) {
+    let tg = config
+        .platforms
+        .entry("telegram".into())
+        .or_insert_with(PlatformConfig::default);
+
+    if tg.token.is_none() {
+        if let Some(t) = env_nonempty("TELEGRAM_BOT_TOKEN") {
+            tg.token = Some(t);
+        }
+    }
+
+    if env_nonempty("TELEGRAM_ALLOWED_USERS").is_none() {
+        let mut users = tg
+            .allowed_users
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+        if users.is_empty() {
+            users = extra_string_list(tg, "allow_from");
+        }
+        if !users.is_empty() {
+            set_env_if_unset("TELEGRAM_ALLOWED_USERS", &users.join(","));
+        }
+    }
+
+    if env_nonempty("TELEGRAM_GROUP_ALLOWED_USERS").is_none() {
+        let users = extra_string_list(tg, "group_allow_from");
+        if !users.is_empty() {
+            set_env_if_unset("TELEGRAM_GROUP_ALLOWED_USERS", &users.join(","));
+        }
+    }
+
+    if env_nonempty("TELEGRAM_GROUP_ALLOWED_CHATS").is_none() {
+        let chats = extra_string_list(tg, "group_allowed_chats");
+        if !chats.is_empty() {
+            set_env_if_unset("TELEGRAM_GROUP_ALLOWED_CHATS", &chats.join(","));
+        }
+    }
+
+    if env_nonempty("TELEGRAM_WEBHOOK_URL").is_none() {
+        if let Some(url) = tg.webhook_url.as_deref().filter(|s| !s.trim().is_empty()) {
+            set_env_if_unset("TELEGRAM_WEBHOOK_URL", url.trim());
+        }
+    }
+
+    if env_nonempty("TELEGRAM_WEBHOOK_SECRET").is_none() {
+        if let Some(secret) = tg
+            .extra
+            .get("webhook_secret")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            set_env_if_unset("TELEGRAM_WEBHOOK_SECRET", secret);
+        }
+    }
+
+    if env_nonempty("TELEGRAM_WEBHOOK_PORT").is_none() {
+        if let Some(port) = tg.extra.get("webhook_port").and_then(|v| v.as_u64()) {
+            set_env_if_unset("TELEGRAM_WEBHOOK_PORT", &port.to_string());
+        }
+    }
+}
+
 fn apply_dingtalk_env(config: &mut GatewayConfig) {
     let dt = config
         .platforms
@@ -87,10 +175,12 @@ fn apply_dingtalk_env(config: &mut GatewayConfig) {
     }
 }
 
-/// 应用与 Python 文档一致的 `WEIXIN_*` / `DINGTALK_*` 环境变量到 `platforms`。
+/// 应用与 Python 文档一致的 `WEIXIN_*` / `DINGTALK_*` / `TELEGRAM_*` 环境变量到 `platforms`，
+/// 并将 YAML 中的 Telegram 白名单 / webhook 设置桥接到进程环境（与 Python `load_gateway_config` 一致）。
 pub fn apply_python_named_platform_env(config: &mut GatewayConfig) {
     apply_weixin_env(config);
     apply_dingtalk_env(config);
+    apply_telegram_env(config);
 }
 
 #[cfg(test)]
@@ -130,6 +220,72 @@ mod tests {
             std::env::remove_var("WEIXIN_TOKEN");
             std::env::remove_var("WEIXIN_DM_POLICY");
             std::env::remove_var("WEIXIN_ALLOWED_USERS");
+        }
+    }
+
+    #[test]
+    fn telegram_yaml_bridges_allowlists_to_env() {
+        let mut cfg = GatewayConfig::default();
+        let tg = cfg
+            .platforms
+            .entry("telegram".into())
+            .or_insert_with(PlatformConfig::default);
+        tg.allowed_users = vec!["111".into(), "222".into()];
+        tg.extra.insert(
+            "group_allow_from".into(),
+            json!(["333"]),
+        );
+        tg.extra.insert(
+            "group_allowed_chats".into(),
+            json!(["-100"]),
+        );
+        tg.webhook_url = Some("https://example.com/telegram".into());
+        tg.extra.insert("webhook_secret".into(), json!("sec"));
+        tg.extra.insert("webhook_port".into(), json!(9443));
+
+        unsafe {
+            std::env::remove_var("TELEGRAM_ALLOWED_USERS");
+            std::env::remove_var("TELEGRAM_GROUP_ALLOWED_USERS");
+            std::env::remove_var("TELEGRAM_GROUP_ALLOWED_CHATS");
+            std::env::remove_var("TELEGRAM_WEBHOOK_URL");
+            std::env::remove_var("TELEGRAM_WEBHOOK_SECRET");
+            std::env::remove_var("TELEGRAM_WEBHOOK_PORT");
+        }
+
+        apply_python_named_platform_env(&mut cfg);
+
+        assert_eq!(
+            std::env::var("TELEGRAM_ALLOWED_USERS").ok().as_deref(),
+            Some("111,222")
+        );
+        assert_eq!(
+            std::env::var("TELEGRAM_GROUP_ALLOWED_USERS").ok().as_deref(),
+            Some("333")
+        );
+        assert_eq!(
+            std::env::var("TELEGRAM_GROUP_ALLOWED_CHATS").ok().as_deref(),
+            Some("-100")
+        );
+        assert_eq!(
+            std::env::var("TELEGRAM_WEBHOOK_URL").ok().as_deref(),
+            Some("https://example.com/telegram")
+        );
+        assert_eq!(
+            std::env::var("TELEGRAM_WEBHOOK_SECRET").ok().as_deref(),
+            Some("sec")
+        );
+        assert_eq!(
+            std::env::var("TELEGRAM_WEBHOOK_PORT").ok().as_deref(),
+            Some("9443")
+        );
+
+        unsafe {
+            std::env::remove_var("TELEGRAM_ALLOWED_USERS");
+            std::env::remove_var("TELEGRAM_GROUP_ALLOWED_USERS");
+            std::env::remove_var("TELEGRAM_GROUP_ALLOWED_CHATS");
+            std::env::remove_var("TELEGRAM_WEBHOOK_URL");
+            std::env::remove_var("TELEGRAM_WEBHOOK_SECRET");
+            std::env::remove_var("TELEGRAM_WEBHOOK_PORT");
         }
     }
 

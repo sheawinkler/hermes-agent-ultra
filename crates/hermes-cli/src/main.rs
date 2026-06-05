@@ -3318,6 +3318,84 @@ fn parse_csv_list(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// Persist Telegram user/chat allowlists on the platform block (YAML + gateway policy).
+fn apply_telegram_allowlists(platform: &mut PlatformConfig, allowed_users: &[String]) {
+    if allowed_users.is_empty() {
+        return;
+    }
+    platform.allowed_users = allowed_users.to_vec();
+    platform.extra.insert(
+        "allow_from".to_string(),
+        serde_json::Value::Array(
+            allowed_users
+                .iter()
+                .cloned()
+                .map(serde_json::Value::String)
+                .collect(),
+        ),
+    );
+    platform
+        .extra
+        .insert("dm_policy".to_string(), serde_json::json!("allowlist"));
+}
+
+fn telegram_platform_has_allowlist(platform: &PlatformConfig) -> bool {
+    platform
+        .allowed_users
+        .iter()
+        .any(|u| !u.trim().is_empty())
+        || platform
+            .extra
+            .get("allow_from")
+            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
+            .is_some_and(|users| users.iter().any(|u| !u.trim().is_empty()))
+}
+
+/// Resolve Telegram bot token during `hermes gateway setup` (always shows a wizard step).
+///
+/// Unlike `hermes auth login telegram`, this does not silently consume `TELEGRAM_BOT_TOKEN`
+/// from the environment without asking — matching Python `hermes gateway setup` / Discord UX.
+async fn resolve_telegram_bot_token_for_gateway_setup(
+    disk: &hermes_config::GatewayConfig,
+) -> Result<String, AgentError> {
+    let config_token = disk
+        .platforms
+        .get("telegram")
+        .and_then(platform_token_or_extra);
+    let env_token = std::env::var("TELEGRAM_BOT_TOKEN")
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
+
+    println!("Create a bot with @BotFather on Telegram (/newbot), then paste the HTTP API token.");
+
+    let prompt = if config_token.is_some() {
+        "Telegram bot token (from @BotFather; Enter to keep the token already in config): "
+    } else if env_token.is_some() {
+        "Telegram bot token (from @BotFather; Enter to use TELEGRAM_BOT_TOKEN from .env): "
+    } else {
+        "Telegram bot token (from @BotFather): "
+    };
+
+    let entered = prompt_line(prompt).await?;
+    let trimmed = entered.trim();
+    if !trimmed.is_empty() {
+        return Ok(trimmed.to_string());
+    }
+    if let Some(token) = config_token {
+        println!("Keeping existing Telegram bot token from config.");
+        return Ok(token);
+    }
+    if let Some(token) = env_token {
+        println!("Using Telegram bot token from TELEGRAM_BOT_TOKEN.");
+        return Ok(token);
+    }
+    Err(AgentError::Config(
+        "Telegram bot token is required (from @BotFather, or set TELEGRAM_BOT_TOKEN in ~/.hermes/.env)"
+            .into(),
+    ))
+}
+
 fn enabled_flag(platform: Option<&PlatformConfig>) -> &'static str {
     if platform.map(|p| p.enabled).unwrap_or(false) {
         "enabled"
@@ -3664,7 +3742,10 @@ fn gateway_platform_is_configured(key: &str, platform: Option<&PlatformConfig>) 
         return false;
     }
     match key {
-        "telegram" | "discord" | "slack" | "signal" | "matrix" | "mattermost"
+        "telegram" => {
+            platform_token_or_extra(platform).is_some() && telegram_platform_has_allowlist(platform)
+        }
+        "discord" | "slack" | "signal" | "matrix" | "mattermost"
         | "bluebubbles" | "email" | "homeassistant" => platform_token_or_extra(platform).is_some(),
         "whatsapp" => {
             platform.enabled
@@ -3803,30 +3884,104 @@ async fn configure_gateway_platform(
             }
         }
         "telegram" => {
-            run_auth(
-                cli.clone(),
-                Some("login".to_string()),
-                Some("telegram".to_string()),
-                None,
-                None,
-                None,
-                None,
-                false,
-            )
-            .await?;
-            *disk = load_user_config_file(cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
+            let token = resolve_telegram_bot_token_for_gateway_setup(disk).await?;
             let tg = disk
                 .platforms
                 .entry("telegram".to_string())
                 .or_insert_with(PlatformConfig::default);
+            tg.token = Some(token);
             tg.enabled = true;
+            println!(
+                "Telegram bot token saved (platform enabled; written on Done)."
+            );
+
+            println!(
+                "Telegram user ID: message @userinfobot on Telegram to get your numeric user ID."
+            );
+            let allowed = prompt_line(
+                "Telegram allowed user IDs (comma-separated, required; use * for any user): ",
+            )
+            .await?;
+            let allowed_users = parse_csv_list(&allowed);
+            if allowed_users.is_empty() {
+                return Err(AgentError::Config(
+                    "Telegram setup requires at least one allowed user ID (or *)".into(),
+                ));
+            }
+            apply_telegram_allowlists(tg, &allowed_users);
+
+            let group_allowed = prompt_line(
+                "Telegram group-only allowed user IDs (comma-separated, optional): ",
+            )
+            .await?;
+            let group_users = parse_csv_list(&group_allowed);
+            if !group_users.is_empty() {
+                tg.extra.insert(
+                    "group_allow_from".to_string(),
+                    serde_json::Value::Array(
+                        group_users
+                            .iter()
+                            .cloned()
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+
+            let group_chats = prompt_line(
+                "Telegram allowed group chat IDs (comma-separated, optional): ",
+            )
+            .await?;
+            let group_chat_ids = parse_csv_list(&group_chats);
+            if !group_chat_ids.is_empty() {
+                tg.extra.insert(
+                    "group_allowed_chats".to_string(),
+                    serde_json::Value::Array(
+                        group_chat_ids
+                            .iter()
+                            .cloned()
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+
             let polling = prompt_yes_no("Telegram use polling mode?", true).await?;
             tg.extra
                 .insert("polling".to_string(), serde_json::Value::Bool(polling));
             if !polling {
-                let webhook_url = prompt_line("Telegram webhook URL: ").await?;
-                if !webhook_url.trim().is_empty() {
-                    tg.webhook_url = Some(webhook_url.trim().to_string());
+                println!("Webhook mode: Telegram pushes updates to your HTTPS endpoint (HTTP API).");
+                let webhook_url = prompt_line(
+                    "Telegram webhook URL (HTTPS, e.g. https://my-app.example.com/telegram): ",
+                )
+                .await?;
+                let webhook_url = webhook_url.trim();
+                if webhook_url.is_empty() {
+                    return Err(AgentError::Config(
+                        "Telegram webhook URL is required when polling is disabled".into(),
+                    ));
+                }
+                tg.webhook_url = Some(webhook_url.to_string());
+
+                let mut webhook_secret = String::new();
+                while webhook_secret.trim().is_empty() {
+                    webhook_secret = prompt_line(
+                        "Telegram webhook secret (required; generate with: openssl rand -hex 32): ",
+                    )
+                    .await?;
+                    if webhook_secret.trim().is_empty() {
+                        println!("Webhook secret is required for Telegram HTTP API mode.");
+                    }
+                }
+                tg.extra.insert(
+                    "webhook_secret".to_string(),
+                    serde_json::json!(webhook_secret.trim()),
+                );
+
+                let port = prompt_line("Telegram webhook listen port (default 8443): ").await?;
+                if let Ok(v) = port.trim().parse::<u16>() {
+                    tg.extra
+                        .insert("webhook_port".to_string(), serde_json::Value::from(v));
                 }
             }
             let home = prompt_line("Telegram home channel (optional): ").await?;
@@ -13943,13 +14098,35 @@ mod tests {
         let entry = &GATEWAY_PLATFORM_CATALOG[0];
         assert_eq!(entry.key, "telegram");
         let mut configured = make_platform(true, Some("tg-token"));
+        configured.allowed_users = vec!["123456789".to_string()];
         let label = gateway_platform_menu_label(entry, Some(&configured));
         assert!(label.contains("Telegram"));
         assert!(label.contains("(configured)"));
 
+        configured.allowed_users.clear();
+        let label = gateway_platform_menu_label(entry, Some(&configured));
+        assert!(label.contains("(not configured)"));
+
         configured.token = None;
         let label = gateway_platform_menu_label(entry, Some(&configured));
         assert!(label.contains("(not configured)"));
+    }
+
+    #[test]
+    fn apply_telegram_allowlists_sets_policy_fields() {
+        let mut platform = PlatformConfig::default();
+        apply_telegram_allowlists(&mut platform, &["111".into(), "222".into()]);
+        assert_eq!(platform.allowed_users, vec!["111", "222"]);
+        assert_eq!(
+            platform.extra.get("dm_policy").and_then(|v| v.as_str()),
+            Some("allowlist")
+        );
+        let allow_from = platform
+            .extra
+            .get("allow_from")
+            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
+            .unwrap_or_default();
+        assert_eq!(allow_from, vec!["111", "222"]);
     }
 
     fn cli_for_temp_state_root(temp_root: &std::path::Path) -> Cli {
