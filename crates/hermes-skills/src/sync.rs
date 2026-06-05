@@ -11,6 +11,8 @@ use serde_json::Value;
 use crate::skill::SkillError;
 use crate::usage::{read_skill_name_from_dir, read_skill_name_from_file};
 
+pub const NO_BUNDLED_SKILLS_MARKER: &str = ".no-bundled-skills";
+
 #[derive(Debug, Clone)]
 pub struct SkillSyncConfig {
     pub bundled_dir: PathBuf,
@@ -28,6 +30,13 @@ impl SkillSyncConfig {
             skills_dir,
             manifest_file,
         }
+    }
+
+    pub fn hermes_home(&self) -> PathBuf {
+        self.skills_dir
+            .parent()
+            .unwrap_or(self.skills_dir.as_path())
+            .to_path_buf()
     }
 }
 
@@ -51,6 +60,8 @@ pub struct SkillSyncResult {
     pub collisions: Vec<String>,
     #[serde(default)]
     pub errors: Vec<String>,
+    #[serde(default)]
+    pub skipped_opt_out: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +80,29 @@ pub struct OfficialOptionalRestoreResult {
     pub backfilled: Vec<String>,
     pub backed_up: Vec<String>,
     pub backup_dir: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BundledSkillsOptOutResult {
+    pub ok: bool,
+    pub changed: bool,
+    pub marker: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PristineBundledSkillSkip {
+    pub name: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemovePristineBundledSkillsResult {
+    pub ok: bool,
+    pub removed: Vec<String>,
+    pub skipped: Vec<PristineBundledSkillSkip>,
+    pub dry_run: bool,
     pub message: String,
 }
 
@@ -139,6 +173,57 @@ pub fn write_manifest(path: &Path, entries: &BTreeMap<String, String>) -> Result
     }
     fs::write(path, out)?;
     Ok(())
+}
+
+pub fn bundled_skills_opt_out_marker(hermes_home: &Path) -> PathBuf {
+    hermes_home.join(NO_BUNDLED_SKILLS_MARKER)
+}
+
+pub fn is_bundled_skills_opt_out(hermes_home: &Path) -> bool {
+    bundled_skills_opt_out_marker(hermes_home).exists()
+}
+
+pub fn set_bundled_skills_opt_out(
+    hermes_home: &Path,
+    enabled: bool,
+) -> Result<BundledSkillsOptOutResult, SkillError> {
+    let marker = bundled_skills_opt_out_marker(hermes_home);
+    let existed = marker.exists();
+    if enabled {
+        fs::create_dir_all(hermes_home)?;
+        fs::write(
+            &marker,
+            "This profile opted out of bundled-skill seeding (`hermes skills opt-out`).\n\
+             Delete this file to re-enable sync on the next `hermes update`.\n",
+        )?;
+        let changed = !existed;
+        let message = if changed {
+            "Opted out of bundled skills. Future install / update / sync runs will not seed bundled skills into this profile."
+        } else {
+            "Already opted out - marker was already present."
+        };
+        return Ok(BundledSkillsOptOutResult {
+            ok: true,
+            changed,
+            marker: marker.to_string_lossy().to_string(),
+            message: message.to_string(),
+        });
+    }
+
+    if existed {
+        fs::remove_file(&marker)?;
+    }
+    let message = if existed {
+        "Opted back in. The next `hermes update` (or `hermes skills opt-in --sync`) will re-seed bundled skills."
+    } else {
+        "Not opted out - no marker to remove."
+    };
+    Ok(BundledSkillsOptOutResult {
+        ok: true,
+        changed: existed,
+        marker: marker.to_string_lossy().to_string(),
+        message: message.to_string(),
+    })
 }
 
 pub fn dir_hash(dir: &Path) -> String {
@@ -316,6 +401,19 @@ fn copy_parent_descriptions(
 }
 
 pub fn sync_skills(config: &SkillSyncConfig, quiet: bool) -> Result<SkillSyncResult, SkillError> {
+    if is_bundled_skills_opt_out(&config.hermes_home()) {
+        if !quiet {
+            println!(
+                "  (skipped - profile opted out of bundled skills via {})",
+                NO_BUNDLED_SKILLS_MARKER
+            );
+        }
+        return Ok(SkillSyncResult {
+            skipped_opt_out: true,
+            ..Default::default()
+        });
+    }
+
     if !config.bundled_dir.exists() {
         return Ok(SkillSyncResult::default());
     }
@@ -402,6 +500,90 @@ pub fn sync_skills(config: &SkillSyncConfig, quiet: bool) -> Result<SkillSyncRes
     result.user_modified.sort();
     result.cleaned.sort();
     result.collisions.sort();
+    Ok(result)
+}
+
+pub fn remove_pristine_bundled_skills(
+    config: &SkillSyncConfig,
+    dry_run: bool,
+) -> Result<RemovePristineBundledSkillsResult, SkillError> {
+    let mut manifest = read_manifest(&config.manifest_file);
+    let bundled_by_name: BTreeMap<String, BundledSkill> =
+        discover_bundled_skills(&config.bundled_dir)
+            .into_iter()
+            .map(|skill| (skill.name.clone(), skill))
+            .collect();
+
+    let mut result = RemovePristineBundledSkillsResult {
+        ok: true,
+        dry_run,
+        ..Default::default()
+    };
+    let mut manifest_changed = false;
+
+    for (name, origin_hash) in manifest.clone() {
+        let Some(skill) = bundled_by_name.get(&name) else {
+            result.skipped.push(PristineBundledSkillSkip {
+                name,
+                reason: "no bundled source (removed upstream)".to_string(),
+            });
+            continue;
+        };
+        let dest = config.skills_dir.join(&skill.relative_dest);
+        if !dest.exists() {
+            if !dry_run {
+                manifest.remove(&name);
+                manifest_changed = true;
+            }
+            continue;
+        }
+        if origin_hash.is_empty() {
+            result.skipped.push(PristineBundledSkillSkip {
+                name,
+                reason: "legacy manifest without origin hash (kept)".to_string(),
+            });
+            continue;
+        }
+        let on_disk = dir_hash(&dest);
+        if on_disk != origin_hash {
+            result.skipped.push(PristineBundledSkillSkip {
+                name,
+                reason: "user-modified (kept)".to_string(),
+            });
+            continue;
+        }
+
+        if dry_run {
+            result.removed.push(name);
+            continue;
+        }
+
+        match fs::remove_dir_all(&dest) {
+            Ok(()) => {
+                manifest.remove(&name);
+                manifest_changed = true;
+                result.removed.push(name);
+            }
+            Err(err) => result.skipped.push(PristineBundledSkillSkip {
+                name,
+                reason: format!("delete failed: {err}"),
+            }),
+        }
+    }
+
+    if manifest_changed {
+        write_manifest(&config.manifest_file, &manifest)?;
+    }
+
+    result.removed.sort();
+    result.skipped.sort_by(|a, b| a.name.cmp(&b.name));
+    let verb = if dry_run { "Would remove" } else { "Removed" };
+    result.message = format!(
+        "{} {} pristine bundled skill(s); kept {}.",
+        verb,
+        result.removed.len(),
+        result.skipped.len()
+    );
     Ok(result)
 }
 
@@ -768,6 +950,44 @@ mod tests {
     }
 
     #[test]
+    fn sync_skills_honors_bundled_skills_opt_out_marker() {
+        let dir = tempdir().unwrap();
+        let bundled = setup_bundled(dir.path());
+        let cfg = config(dir.path(), bundled);
+        set_bundled_skills_opt_out(dir.path(), true).unwrap();
+
+        let result = sync_skills(&cfg, true).unwrap();
+
+        assert!(result.skipped_opt_out);
+        assert_eq!(result.total_bundled, 0);
+        assert!(!cfg.skills_dir.join("category/new-skill/SKILL.md").exists());
+        assert!(is_bundled_skills_opt_out(dir.path()));
+
+        let disabled = set_bundled_skills_opt_out(dir.path(), false).unwrap();
+        assert!(disabled.changed);
+        assert!(!is_bundled_skills_opt_out(dir.path()));
+        let synced = sync_skills(&cfg, true).unwrap();
+        assert_eq!(synced.copied, vec!["new-skill", "old-skill"]);
+    }
+
+    #[test]
+    fn opt_out_marker_toggle_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let first = set_bundled_skills_opt_out(dir.path(), true).unwrap();
+        let second = set_bundled_skills_opt_out(dir.path(), true).unwrap();
+        assert!(first.ok);
+        assert!(first.changed);
+        assert!(!second.changed);
+        assert!(PathBuf::from(&second.marker).exists());
+
+        let third = set_bundled_skills_opt_out(dir.path(), false).unwrap();
+        let fourth = set_bundled_skills_opt_out(dir.path(), false).unwrap();
+        assert!(third.changed);
+        assert!(!fourth.changed);
+        assert!(!PathBuf::from(&fourth.marker).exists());
+    }
+
+    #[test]
     fn sync_updates_unmodified_and_preserves_user_modified() {
         let dir = tempdir().unwrap();
         let bundled = setup_bundled(dir.path());
@@ -806,6 +1026,59 @@ mod tests {
         assert!(!read_manifest(&cfg.manifest_file).contains_key("new-skill"));
         let second = sync_skills(&cfg, true).unwrap();
         assert!(!second.user_modified.contains(&"new-skill".to_string()));
+    }
+
+    #[test]
+    fn remove_pristine_bundled_skills_keeps_modified_and_local_then_opt_in_reseeds() {
+        let dir = tempdir().unwrap();
+        let bundled = setup_bundled(dir.path());
+        let cfg = config(dir.path(), bundled);
+        sync_skills(&cfg, true).unwrap();
+        fs::write(cfg.skills_dir.join("old-skill/SKILL.md"), "# customized").unwrap();
+        let local = cfg.skills_dir.join("local-only");
+        fs::create_dir_all(&local).unwrap();
+        fs::write(local.join("SKILL.md"), "# Local").unwrap();
+        set_bundled_skills_opt_out(dir.path(), true).unwrap();
+
+        let dry_run = remove_pristine_bundled_skills(&cfg, true).unwrap();
+        assert_eq!(dry_run.removed, vec!["new-skill"]);
+        assert_eq!(dry_run.skipped[0].name, "old-skill");
+        assert!(cfg.skills_dir.join("category/new-skill/SKILL.md").exists());
+
+        let removed = remove_pristine_bundled_skills(&cfg, false).unwrap();
+        assert_eq!(removed.removed, vec!["new-skill"]);
+        assert!(!cfg.skills_dir.join("category/new-skill").exists());
+        assert!(cfg.skills_dir.join("old-skill/SKILL.md").exists());
+        assert!(cfg.skills_dir.join("local-only/SKILL.md").exists());
+        let manifest = read_manifest(&cfg.manifest_file);
+        assert!(!manifest.contains_key("new-skill"));
+        assert!(manifest.contains_key("old-skill"));
+
+        assert!(sync_skills(&cfg, true).unwrap().skipped_opt_out);
+        set_bundled_skills_opt_out(dir.path(), false).unwrap();
+        let reseeded = sync_skills(&cfg, true).unwrap();
+        assert_eq!(reseeded.copied, vec!["new-skill"]);
+        assert!(cfg.skills_dir.join("category/new-skill/SKILL.md").exists());
+        assert_eq!(
+            fs::read_to_string(cfg.skills_dir.join("old-skill/SKILL.md")).unwrap(),
+            "# customized"
+        );
+    }
+
+    #[test]
+    fn remove_pristine_bundled_skills_cleans_missing_manifest_entries() {
+        let dir = tempdir().unwrap();
+        let bundled = setup_bundled(dir.path());
+        let cfg = config(dir.path(), bundled);
+        sync_skills(&cfg, true).unwrap();
+        fs::remove_dir_all(cfg.skills_dir.join("old-skill")).unwrap();
+
+        let result = remove_pristine_bundled_skills(&cfg, false).unwrap();
+
+        assert_eq!(result.removed, vec!["new-skill"]);
+        let manifest = read_manifest(&cfg.manifest_file);
+        assert!(!manifest.contains_key("old-skill"));
+        assert!(!manifest.contains_key("new-skill"));
     }
 
     #[test]

@@ -31,10 +31,12 @@ pub use provenance::{
 pub use skill::{SkillError, SkillManager, MAX_SKILL_CONTENT_CHARS};
 pub use store::{FileSkillStore, SkillStore, MAX_SKILL_NAME_LENGTH};
 pub use sync::{
-    compute_relative_dest, dir_hash, discover_bundled_skills, read_manifest, read_skill_name,
-    reset_bundled_skill, restore_official_optional_skill, sync_skills, write_manifest,
-    BundledSkill, OfficialOptionalRestoreResult, SkillResetResult, SkillSyncConfig,
-    SkillSyncResult,
+    bundled_skills_opt_out_marker, compute_relative_dest, dir_hash, discover_bundled_skills,
+    is_bundled_skills_opt_out, read_manifest, read_skill_name, remove_pristine_bundled_skills,
+    reset_bundled_skill, restore_official_optional_skill, set_bundled_skills_opt_out, sync_skills,
+    write_manifest, BundledSkill, BundledSkillsOptOutResult, OfficialOptionalRestoreResult,
+    PristineBundledSkillSkip, RemovePristineBundledSkillsResult, SkillResetResult, SkillSyncConfig,
+    SkillSyncResult, NO_BUNDLED_SKILLS_MARKER,
 };
 pub use usage::{
     agent_created_report, archive_skill, bump_patch, bump_use, bump_view, forget, get_record,

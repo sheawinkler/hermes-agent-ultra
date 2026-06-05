@@ -1022,6 +1022,33 @@ mod tests {
     }
 
     #[test]
+    fn test_honcho_initialize_is_fail_open_and_does_not_contact_network() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+        std::fs::write(
+            tmp.path().join("honcho.json"),
+            r#"{"baseUrl":"http://10.255.255.1:9","enabled":true,"timeout":60,"recallMode":"hybrid"}"#,
+        )
+        .expect("write config");
+
+        let plugin = HonchoMemoryPlugin::new();
+        let started = std::time::Instant::now();
+        plugin.initialize("session-1", &tmp.path().to_string_lossy());
+
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "initialize should only load config and must not block on Honcho network/session startup"
+        );
+        assert!(plugin.config.lock().unwrap().is_some());
+        assert_eq!(*plugin.session_key.lock().unwrap(), "session-1");
+        assert_eq!(plugin.get_tool_schemas().len(), 4);
+        assert!(plugin.system_prompt_block().contains("hybrid mode"));
+    }
+
+    #[test]
     fn test_honcho_save_config_normalizes_key_and_writes_owner_only() {
         let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
         let tmp = tempfile::tempdir().expect("tempdir");

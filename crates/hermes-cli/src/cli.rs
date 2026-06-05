@@ -560,13 +560,22 @@ pub enum CliCommand {
 
     /// Skills management.
     Skills {
-        /// Action: browse/search/install/inspect/list/check/update/audit/uninstall/publish/snapshot/tap/config/reset/subscribe
+        /// Action: browse/search/install/inspect/list/check/update/audit/uninstall/publish/snapshot/tap/config/reset/subscribe/sync/opt-out/opt-in
         action: Option<String>,
         /// Skill name or search query.
         name: Option<String>,
         /// Additional argument (e.g. tap URL, snapshot path).
         #[arg(long)]
         extra: Option<String>,
+        /// Also delete pristine bundled skills for `skills opt-out`.
+        #[arg(long)]
+        remove: bool,
+        /// Skip confirmation for destructive skills maintenance actions.
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// Re-seed bundled skills immediately for `skills opt-in`.
+        #[arg(long)]
+        sync: bool,
     },
 
     /// Plugin management.
@@ -1353,6 +1362,44 @@ mod tests {
                 assert!(!show);
             }
             _ => panic!("Expected Secrets command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_skills_blank_slate_flags() {
+        let cli =
+            Cli::try_parse_from(vec!["hermes", "skills", "opt-out", "--remove", "--yes"]).unwrap();
+        match cli.command {
+            Some(CliCommand::Skills {
+                action,
+                remove,
+                yes,
+                sync,
+                ..
+            }) => {
+                assert_eq!(action.as_deref(), Some("opt-out"));
+                assert!(remove);
+                assert!(yes);
+                assert!(!sync);
+            }
+            _ => panic!("Expected Skills opt-out command"),
+        }
+
+        let cli = Cli::try_parse_from(vec!["hermes", "skills", "opt-in", "--sync"]).unwrap();
+        match cli.command {
+            Some(CliCommand::Skills {
+                action,
+                remove,
+                yes,
+                sync,
+                ..
+            }) => {
+                assert_eq!(action.as_deref(), Some("opt-in"));
+                assert!(!remove);
+                assert!(!yes);
+                assert!(sync);
+            }
+            _ => panic!("Expected Skills opt-in command"),
         }
     }
 }
