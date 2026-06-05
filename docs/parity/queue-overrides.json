@@ -552,6 +552,10 @@
       "disposition": "ported",
       "notes": "Rust disk-cleanup auto categorization only marks cron/cronjobs output subtrees as cron-output and explicitly leaves cron/jobs.json plus .tick.lock as control-plane state; covered by hermes-tools disk_cleanup tests."
     },
+    "c14c37d46b902": {
+      "disposition": "ported",
+      "notes": "Rust OpenViking memory provider now scopes direct content-write URIs under viking://user/{user}/agent/{agent}/memories/{subdir}/..., sends X-OpenViking-Agent and bearer auth headers, maps memory-write targets to OpenViking subdirectories, and covers URI/header/body contracts in crates/hermes-agent/src/memory_plugins/openviking.rs tests."
+    },
     "7de8cd4c5f67": {
       "disposition": "ported",
       "notes": "TUI voice TTS state now flows through SlashHandlerContext into useMainApp status rendering, with createSlashHandler coverage for /voice tts state sync."

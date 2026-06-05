@@ -610,6 +610,10 @@ pub fn is_local_endpoint(base_url: &str) -> bool {
         return true;
     }
 
+    if !host_lower.is_empty() && !host_lower.contains('.') {
+        return true;
+    }
+
     if let Ok(addr) = host.parse::<IpAddr>() {
         return match addr {
             IpAddr::V4(v4) => {
@@ -766,6 +770,10 @@ mod tests {
     fn test_is_local_endpoint() {
         assert!(is_local_endpoint("http://localhost:8080"));
         assert!(is_local_endpoint("http://127.0.0.1:11434"));
+        assert!(is_local_endpoint("ollama"));
+        assert!(is_local_endpoint("ollama:11434"));
+        assert!(is_local_endpoint("hermes-litellm/v1"));
+        assert!(is_local_endpoint("http://gateway:4000/v1"));
         assert!(is_local_endpoint("http://100.64.0.0:11434"));
         assert!(is_local_endpoint("http://100.64.0.1:11434/v1"));
         assert!(is_local_endpoint("http://100.77.243.5:11434"));

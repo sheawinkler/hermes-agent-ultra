@@ -1263,6 +1263,17 @@ impl PlatformAdapter for SlackAdapter {
         Ok(())
     }
 
+    async fn send_message_threaded(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+        thread_id: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        self.post_message(chat_id, text, thread_id).await?;
+        Ok(())
+    }
+
     async fn edit_message(
         &self,
         chat_id: &str,

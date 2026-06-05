@@ -79,6 +79,20 @@ pub trait PlatformAdapter: Send + Sync {
         parse_mode: Option<ParseMode>,
     ) -> Result<(), GatewayError>;
 
+    /// Send a text message with an optional platform-native thread id.
+    ///
+    /// Adapters without threaded replies inherit the plain send behavior.
+    async fn send_message_threaded(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        thread_id: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let _ = thread_id;
+        self.send_message(chat_id, text, parse_mode).await
+    }
+
     /// Send or update a status message keyed by stable status type.
     ///
     /// Platforms that can edit messages should override this to keep noisy

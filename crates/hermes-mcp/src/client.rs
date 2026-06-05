@@ -522,12 +522,37 @@ impl McpClient {
             return Err(McpError::ConnectionError("Already connected".to_string()));
         }
 
-        let mut transport = self.create_transport().await?;
+        let transport = self.create_transport().await?;
+        self.finish_connect_with_transport(transport).await
+    }
+
+    async fn finish_connect_with_transport(
+        &mut self,
+        mut transport: Box<dyn McpTransport>,
+    ) -> Result<(), McpError> {
         transport.start().await?;
         self.transport = Some(transport);
 
-        self.initialize().await?;
-        self.discover_tools().await?;
+        let discovery = match self.initialize().await {
+            Ok(_) => self.discover_tools().await,
+            Err(err) => Err(err),
+        };
+        if let Err(err) = discovery {
+            self.connected = false;
+            self.connected_at = None;
+            self.tools.clear();
+            self.resources.clear();
+            if let Some(mut transport) = self.transport.take() {
+                if let Err(close_err) = transport.close().await {
+                    warn!(
+                        "MCP transport close after failed connect also failed: {}",
+                        close_err
+                    );
+                }
+            }
+            return Err(err);
+        }
+
         self.connected = true;
         self.connected_at = Some(Instant::now());
 
@@ -1257,10 +1282,51 @@ impl McpManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_mcp_image_block, is_stale_transport_error, McpClient};
+    use super::{cache_mcp_image_block, is_stale_transport_error, McpClient, McpServerConfig};
+    use crate::transport::McpTransport;
     use crate::McpError;
+    use async_trait::async_trait;
     use serde_json::json;
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use tempfile::TempDir;
+
+    struct FakeTransport {
+        responses: VecDeque<serde_json::Value>,
+        closed: Arc<AtomicBool>,
+    }
+
+    impl FakeTransport {
+        fn new(responses: Vec<serde_json::Value>, closed: Arc<AtomicBool>) -> Self {
+            Self {
+                responses: responses.into(),
+                closed,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl McpTransport for FakeTransport {
+        async fn start(&mut self) -> Result<(), McpError> {
+            Ok(())
+        }
+
+        async fn send(&mut self, _message: serde_json::Value) -> Result<(), McpError> {
+            Ok(())
+        }
+
+        async fn receive(&mut self) -> Result<serde_json::Value, McpError> {
+            self.responses
+                .pop_front()
+                .ok_or_else(|| McpError::ConnectionError("no fake response".to_string()))
+        }
+
+        async fn close(&mut self) -> Result<(), McpError> {
+            self.closed.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
 
     #[test]
     fn classify_protocol_error_maps_forbidden() {
@@ -1299,6 +1365,42 @@ mod tests {
         assert!(is_stale_transport_error(&err));
         let err = McpError::ConnectionError("rate limited".to_string());
         assert!(!is_stale_transport_error(&err));
+    }
+
+    #[tokio::test]
+    async fn connect_closes_transport_when_discovery_fails() {
+        let closed = Arc::new(AtomicBool::new(false));
+        let transport = FakeTransport::new(
+            vec![
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "serverInfo": {"name": "fake", "version": "0"}
+                    }
+                }),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "error": {"code": -32601, "message": "tools/list unavailable"}
+                }),
+            ],
+            closed.clone(),
+        );
+        let mut client = McpClient::new(McpServerConfig::stdio("fake", Vec::new()));
+
+        let err = client
+            .finish_connect_with_transport(Box::new(transport))
+            .await
+            .expect_err("discovery should fail");
+
+        assert!(matches!(err, McpError::MethodNotFound(_)));
+        assert!(closed.load(Ordering::SeqCst));
+        assert!(!client.is_connected());
+        assert!(client.cached_tools().is_empty());
+        assert!(client.cached_resources().is_empty());
     }
 
     #[test]

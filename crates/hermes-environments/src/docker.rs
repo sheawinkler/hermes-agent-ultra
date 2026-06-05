@@ -190,21 +190,24 @@ impl DockerBackend {
             s
         }
     }
-}
 
-#[async_trait]
-impl TerminalBackend for DockerBackend {
-    async fn execute_command(
+    fn clear_container_id(&self) {
+        *self.container_id.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn should_recreate_after_exec_output(&self, output: &CommandOutput) -> bool {
+        self.container_persistent && output_indicates_container_gone(output)
+    }
+
+    async fn execute_in_container(
         &self,
+        container_id: &str,
         command: &str,
-        timeout: Option<u64>,
+        timeout_secs: u64,
         workdir: Option<&str>,
         background: bool,
         pty: bool,
     ) -> Result<CommandOutput, AgentError> {
-        let container_id = self.ensure_container().await?;
-        let timeout_secs = timeout.unwrap_or(self.default_timeout);
-
         let mut args = vec!["exec".to_string()];
 
         if pty {
@@ -253,6 +256,64 @@ impl TerminalBackend for DockerBackend {
                 timeout_secs
             ))),
         }
+    }
+}
+
+fn container_gone_message(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("no such container")
+        || lower.contains("no such object")
+        || lower.contains("is not running")
+}
+
+fn output_indicates_container_gone(output: &CommandOutput) -> bool {
+    output.exit_code != 0
+        && (container_gone_message(&output.stderr) || container_gone_message(&output.stdout))
+}
+
+#[async_trait]
+impl TerminalBackend for DockerBackend {
+    async fn execute_command(
+        &self,
+        command: &str,
+        timeout: Option<u64>,
+        workdir: Option<&str>,
+        background: bool,
+        pty: bool,
+    ) -> Result<CommandOutput, AgentError> {
+        let timeout_secs = timeout.unwrap_or(self.default_timeout);
+        let mut container_id = self.ensure_container().await?;
+        let mut output = self
+            .execute_in_container(
+                &container_id,
+                command,
+                timeout_secs,
+                workdir,
+                background,
+                pty,
+            )
+            .await?;
+
+        if self.should_recreate_after_exec_output(&output) {
+            tracing::warn!(
+                container_id = container_id,
+                "Docker persistent container disappeared; recreating and retrying command once"
+            );
+            self.clear_container_id();
+            container_id = self.ensure_container().await?;
+            output = self
+                .execute_in_container(
+                    &container_id,
+                    command,
+                    timeout_secs,
+                    workdir,
+                    background,
+                    pty,
+                )
+                .await?;
+        }
+
+        Ok(output)
     }
 
     async fn read_file(
@@ -454,5 +515,78 @@ mod tests {
         assert_eq!(shlex_quote(""), "''");
         assert_eq!(shlex_quote("/path/with spaces"), "'/path/with spaces'");
         assert_eq!(shlex_quote("/path/with'quote"), "'/path/with'\\''quote'");
+    }
+
+    #[test]
+    fn detects_docker_container_removed_or_stopped_messages() {
+        let missing = CommandOutput {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "Error response from daemon: No such container: abc".to_string(),
+        };
+        assert!(output_indicates_container_gone(&missing));
+
+        let stopped = CommandOutput {
+            exit_code: 1,
+            stdout: "Container abc is not running".to_string(),
+            stderr: String::new(),
+        };
+        assert!(output_indicates_container_gone(&stopped));
+
+        let normal_failure = CommandOutput {
+            exit_code: 2,
+            stdout: String::new(),
+            stderr: "command not found".to_string(),
+        };
+        assert!(!output_indicates_container_gone(&normal_failure));
+
+        let successful_text_match = CommandOutput {
+            exit_code: 0,
+            stdout: "No such container appeared in command output".to_string(),
+            stderr: String::new(),
+        };
+        assert!(!output_indicates_container_gone(&successful_text_match));
+    }
+
+    #[test]
+    fn retry_after_missing_container_is_persistent_only() {
+        let gone = CommandOutput {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "No such object: abc".to_string(),
+        };
+        let persistent = DockerBackend::new(
+            None,
+            Some("ubuntu:22.04".to_string()),
+            false,
+            false,
+            None,
+            None,
+            None,
+            true,
+            None,
+            Vec::new(),
+            Vec::new(),
+            30,
+            1024,
+        );
+        assert!(persistent.should_recreate_after_exec_output(&gone));
+
+        let ephemeral = DockerBackend::new(
+            None,
+            Some("ubuntu:22.04".to_string()),
+            false,
+            false,
+            None,
+            None,
+            None,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
+            30,
+            1024,
+        );
+        assert!(!ephemeral.should_recreate_after_exec_output(&gone));
     }
 }
