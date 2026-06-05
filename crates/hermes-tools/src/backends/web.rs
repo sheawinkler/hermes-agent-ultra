@@ -10,7 +10,8 @@ use url::Url;
 
 use crate::tools::web::{WebCrawlBackend, WebExtractBackend, WebSearchBackend};
 use hermes_config::managed_gateway::{
-    resolve_managed_tool_gateway, ManagedToolGatewayConfig, ResolveOptions,
+    is_managed_tool_gateway_ready, resolve_managed_tool_gateway, ManagedToolGatewayConfig,
+    ResolveOptions,
 };
 use hermes_core::ToolError;
 
@@ -1757,7 +1758,7 @@ fn firecrawl_direct_config_present() -> bool {
 }
 
 fn firecrawl_managed_config_present() -> bool {
-    resolve_managed_tool_gateway("firecrawl", ResolveOptions::default()).is_some()
+    is_managed_tool_gateway_ready("firecrawl", ResolveOptions::default())
 }
 
 fn firecrawl_transport_from_env_or_managed() -> Result<FirecrawlTransport, ToolError> {
@@ -2414,6 +2415,7 @@ mod web_search_env_tests {
 mod firecrawl_managed_tests {
     use super::*;
     use hermes_config::managed_gateway::test_lock;
+    use serde_json::json;
 
     /// Hermetic env scope: HERMES_HOME → tempdir + flag/token cleared.
     struct EnvScope {
@@ -2459,6 +2461,14 @@ mod firecrawl_managed_tests {
         }
     }
 
+    fn write_auth_json(home: &std::path::Path, payload: serde_json::Value) {
+        std::fs::write(
+            home.join("auth.json"),
+            serde_json::to_vec_pretty(&payload).expect("auth json serializes"),
+        )
+        .expect("write auth.json");
+    }
+
     #[test]
     fn from_env_or_managed_prefers_direct_key() {
         let _g = EnvScope::new();
@@ -2475,6 +2485,25 @@ mod firecrawl_managed_tests {
         std::env::set_var("TOOL_GATEWAY_USER_TOKEN", "nous-tok");
         let b = FirecrawlExtractBackend::from_env_or_managed().unwrap();
         assert_eq!(b.transport_label(), "managed");
+    }
+
+    #[test]
+    fn availability_accepts_expired_cached_nous_token_without_refresh() {
+        let scope = EnvScope::new();
+        write_auth_json(
+            scope._tmp.path(),
+            json!({
+                "providers": {"nous": {
+                    "access_token": "expired-but-present",
+                    "expires_at": "2000-01-01T00:00:00Z",
+                }}
+            }),
+        );
+        std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+
+        assert!(firecrawl_managed_config_present());
+        assert_eq!(search_backend_choice_from_env(), "firecrawl");
+        assert_eq!(extract_backend_choice_from_env(), "firecrawl");
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! Mirrors Python's `tools.managed_tool_gateway.resolve_managed_tool_gateway`
 //! and `is_managed_tool_gateway_ready`.
 
-use super::auth::{read_nous_access_token, TokenReader};
+use super::auth::{peek_nous_access_token, read_nous_access_token, TokenReader};
 use super::config::{build_vendor_gateway_url, GatewayBuilder, ManagedToolGatewayConfig};
 use super::selection::managed_nous_tools_enabled;
 
@@ -30,6 +30,14 @@ pub fn resolve_managed_tool_gateway(
     vendor: &str,
     opts: ResolveOptions<'_>,
 ) -> Option<ManagedToolGatewayConfig> {
+    resolve_managed_tool_gateway_with_token(vendor, opts, read_nous_access_token)
+}
+
+fn resolve_managed_tool_gateway_with_token(
+    vendor: &str,
+    opts: ResolveOptions<'_>,
+    token_reader_fn: impl FnOnce(Option<&dyn TokenReader>) -> Option<String>,
+) -> Option<ManagedToolGatewayConfig> {
     if !managed_nous_tools_enabled() {
         return None;
     }
@@ -42,7 +50,7 @@ pub fn resolve_managed_tool_gateway(
         return None;
     }
 
-    let token = read_nous_access_token(opts.token_reader)?;
+    let token = token_reader_fn(opts.token_reader)?;
     if token.is_empty() {
         return None;
     }
@@ -57,7 +65,7 @@ pub fn resolve_managed_tool_gateway(
 
 /// Convenience predicate. Mirrors Python's `is_managed_tool_gateway_ready`.
 pub fn is_managed_tool_gateway_ready(vendor: &str, opts: ResolveOptions<'_>) -> bool {
-    resolve_managed_tool_gateway(vendor, opts).is_some()
+    resolve_managed_tool_gateway_with_token(vendor, opts, |_| peek_nous_access_token()).is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +264,30 @@ mod tests {
             "firecrawl",
             ResolveOptions::default()
         ));
+    }
+
+    #[test]
+    fn is_ready_peeks_expired_cached_token_without_refreshing() {
+        struct PanickingReader;
+        impl TokenReader for PanickingReader {
+            fn refresh(&self, _: i64) -> Option<String> {
+                panic!("availability checks must not refresh Nous OAuth tokens");
+            }
+        }
+
+        let payload = json!({
+            "providers": {"nous": {
+                "access_token": "expired-but-present",
+                "expires_at": iso_in(-3600),
+            }}
+        });
+        let _g = Guard::new(Some(&payload));
+        std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+        let opts = ResolveOptions {
+            gateway_builder: None,
+            token_reader: Some(&PanickingReader),
+        };
+        assert!(is_managed_tool_gateway_ready("firecrawl", opts));
     }
 
     #[test]

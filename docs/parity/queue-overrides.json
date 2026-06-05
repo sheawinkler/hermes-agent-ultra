@@ -587,6 +587,22 @@
     "3f7d1c801ddf": {
       "disposition": "ported",
       "notes": "Rust /undo [N] and /rewind [N] clamp to active user turns, truncate in-memory context, soft-delete persisted rows, preserve inactive audit rows, and stage the backed-up prompt for editing."
+    },
+    "6a72af044c44": {
+      "disposition": "ported",
+      "notes": "Rust managed gateway availability now uses peek_nous_access_token/is_managed_tool_gateway_ready so Firecrawl and Browser Use availability checks do not run refresh-capable Nous OAuth readers; actual request resolution remains refresh-aware and tests cover expired cached token availability."
+    },
+    "6d2727ef1ce1": {
+      "disposition": "ported",
+      "notes": "Rust config loading normalizes Discord allow_from aliases from platforms.discord.allow_from and platforms.discord.extra.allow_from into allowed_users while preserving DISCORD_ALLOWED_USERS/env precedence, with loader regression coverage."
+    },
+    "8bd00607dc53": {
+      "disposition": "superseded",
+      "notes": "Gmail header casing delta applies to upstream Python Google Workspace bridge; this Rust workspace has no Gmail/Google Workspace runtime tool surface in crates beyond bundled skill synchronization/reference content, so there is no Rust header parser/sender to port."
+    },
+    "cbf851ae1d72": {
+      "disposition": "superseded",
+      "notes": "Upstream patch bounds Python TUI startup MCP discovery; Rust TUI startup does not connect/discover configured MCP servers on App::new, and hermes-mcp discovery remains explicit client/CLI behavior with transport/call timeouts, so the freeze path is absent in current Rust runtime."
     }
   },
   "subject_patterns": [

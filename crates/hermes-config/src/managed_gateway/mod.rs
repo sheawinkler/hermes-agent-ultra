@@ -50,7 +50,7 @@ pub mod test_lock {
     }
 }
 
-pub use auth::{read_nous_access_token, NousProviderState, TokenReader};
+pub use auth::{peek_nous_access_token, read_nous_access_token, NousProviderState, TokenReader};
 pub use config::{
     build_vendor_gateway_url, get_tool_gateway_scheme, GatewayBuilder, GatewaySchemeError,
     ManagedToolGatewayConfig, DEFAULT_TOOL_GATEWAY_DOMAIN,

@@ -313,6 +313,7 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
 
     // Layer 3: environment variables (highest priority)
     apply_env_overrides(&mut config);
+    normalize_platform_aliases(&mut config);
     normalize_provider_secrets(&mut config);
 
     // Record the effective home dir
@@ -349,7 +350,8 @@ fn load_from_yaml_inner(path: &Path, expand_env_refs: bool) -> Result<GatewayCon
     }
     mark_platform_enabled_explicit(&mut root, "slack");
     mark_platform_enabled_explicit(&mut root, "ntfy");
-    let config: GatewayConfig = serde_yaml::from_value(root).map_err(yaml_to_config_error)?;
+    let mut config: GatewayConfig = serde_yaml::from_value(root).map_err(yaml_to_config_error)?;
+    normalize_platform_aliases(&mut config);
     Ok(config)
 }
 
@@ -435,10 +437,72 @@ fn mark_platform_enabled_explicit(root: &mut serde_yaml::Value, platform: &str) 
     }
 }
 
+fn normalize_platform_aliases(config: &mut GatewayConfig) {
+    normalize_discord_allow_from_alias(config);
+}
+
+fn normalize_discord_allow_from_alias(config: &mut GatewayConfig) {
+    let Some(discord) = config.platforms.get_mut("discord") else {
+        return;
+    };
+    if !discord.allowed_users.is_empty() {
+        return;
+    }
+
+    let alias_users = {
+        let direct = discord.extra.get("allow_from");
+        let nested = discord
+            .extra
+            .get("extra")
+            .and_then(|value| value.get("allow_from"));
+        direct
+            .and_then(json_value_to_string_list)
+            .or_else(|| nested.and_then(json_value_to_string_list))
+            .filter(|users| !users.is_empty())
+    };
+
+    if let Some(users) = alias_users {
+        discord.allowed_users = users;
+    }
+}
+
+fn json_value_to_string_list(value: &serde_json::Value) -> Option<Vec<String>> {
+    match value {
+        serde_json::Value::String(raw) => Some(comma_separated_values(raw)),
+        serde_json::Value::Array(items) => {
+            let values = items
+                .iter()
+                .filter_map(json_scalar_to_string)
+                .flat_map(|raw| comma_separated_values(&raw))
+                .collect::<Vec<_>>();
+            Some(values)
+        }
+        _ => json_scalar_to_string(value).map(|raw| comma_separated_values(&raw)),
+    }
+}
+
+fn json_scalar_to_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(raw) => Some(raw.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+fn comma_separated_values(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 /// Load `config.yaml` from disk if it exists; otherwise return defaults (no env merge).
 pub fn load_user_config_file(path: &Path) -> Result<GatewayConfig, ConfigError> {
     if path.exists() {
         let mut cfg = load_from_yaml_preserving_env_refs(path)?;
+        normalize_platform_aliases(&mut cfg);
         normalize_provider_secrets(&mut cfg);
         validate_config(&cfg)?;
         Ok(cfg)
@@ -1247,6 +1311,7 @@ fn validate_user_config_value(root: &serde_yaml::Value) -> Result<(), ConfigErro
     mark_platform_enabled_explicit(&mut normalized, "ntfy");
     let mut cfg: GatewayConfig =
         serde_yaml::from_value(normalized).map_err(yaml_to_config_error)?;
+    normalize_platform_aliases(&mut cfg);
     normalize_provider_secrets(&mut cfg);
     validate_config(&cfg)
 }
@@ -1355,7 +1420,9 @@ fn save_env_key_value(path: &Path, key: &str, value: &str) -> Result<(), ConfigE
 /// Load a GatewayConfig from a JSON file.
 pub fn load_from_json(path: &Path) -> Result<GatewayConfig, ConfigError> {
     let contents = std::fs::read_to_string(path).map_err(io_to_config_error)?;
-    let config: GatewayConfig = serde_json::from_str(&contents).map_err(json_to_config_error)?;
+    let mut config: GatewayConfig =
+        serde_json::from_str(&contents).map_err(json_to_config_error)?;
+    normalize_platform_aliases(&mut config);
     Ok(config)
 }
 
@@ -2370,6 +2437,66 @@ terminal:
             "false"
         );
         clear_terminal_env_bridge_vars();
+    }
+
+    #[test]
+    fn load_config_bridges_discord_allow_from_alias_to_allowed_users() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            std::env::remove_var("DISCORD_ALLOWED_USERS");
+            std::env::remove_var("DISCORD_BOT_TOKEN");
+        }
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            r#"
+platforms:
+  discord:
+    enabled: true
+    allow_from:
+      - "100"
+      - 200
+"#,
+        )
+        .unwrap();
+
+        let cfg = load_config(Some(dir.path().to_string_lossy().as_ref())).unwrap();
+        let discord = cfg.platforms.get("discord").expect("discord config");
+        assert_eq!(discord.allowed_users, vec!["100", "200"]);
+        assert!(discord.extra.contains_key("allow_from"));
+    }
+
+    #[test]
+    fn load_config_bridges_discord_extra_allow_from_and_preserves_env_precedence() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            std::env::set_var("DISCORD_ALLOWED_USERS", "env-user");
+            std::env::remove_var("DISCORD_BOT_TOKEN");
+        }
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            r#"
+platforms:
+  discord:
+    enabled: true
+    extra:
+      allow_from: cfg-user-1,cfg-user-2
+"#,
+        )
+        .unwrap();
+
+        let cfg = load_config(Some(dir.path().to_string_lossy().as_ref())).unwrap();
+        let discord = cfg.platforms.get("discord").expect("discord config");
+        assert_eq!(discord.allowed_users, vec!["env-user"]);
+
+        unsafe {
+            std::env::remove_var("DISCORD_ALLOWED_USERS");
+        }
     }
 
     #[test]

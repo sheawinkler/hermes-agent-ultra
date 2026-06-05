@@ -5,8 +5,8 @@
 
 use async_trait::async_trait;
 use hermes_config::{
-    cli_config_path, config_path, managed_nous_tools_enabled, resolve_managed_tool_gateway,
-    ManagedToolGatewayConfig, ResolveOptions,
+    cli_config_path, config_path, is_managed_tool_gateway_ready, managed_nous_tools_enabled,
+    resolve_managed_tool_gateway, ManagedToolGatewayConfig, ResolveOptions,
 };
 use regex::Regex;
 use serde_json::{json, Value};
@@ -681,7 +681,7 @@ impl BrowserUseConfig {
 
     pub fn is_configured_from_env_or_managed() -> bool {
         env_optional_nonempty("BROWSER_USE_API_KEY").is_some()
-            || resolve_managed_tool_gateway("browser-use", ResolveOptions::default()).is_some()
+            || is_managed_tool_gateway_ready("browser-use", ResolveOptions::default())
     }
 
     pub fn base_url(&self) -> &str {
@@ -2093,6 +2093,28 @@ mod tests {
         assert_eq!(cfg.api_key, "nous-token");
         assert_eq!(cfg.base_url(), "http://127.0.0.1:3009");
         assert!(cfg.managed_mode());
+    }
+
+    #[test]
+    fn browser_use_availability_accepts_expired_cached_nous_token() {
+        let _scope = EnvScope::new();
+        let home = tempfile::tempdir().expect("temp hermes home");
+        std::fs::write(
+            home.path().join("auth.json"),
+            serde_json::to_vec_pretty(&json!({
+                "providers": {"nous": {
+                    "access_token": "expired-but-present",
+                    "expires_at": "2000-01-01T00:00:00Z",
+                }}
+            }))
+            .expect("auth json serializes"),
+        )
+        .expect("write auth.json");
+        std::env::set_var("HERMES_HOME", home.path());
+        std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+
+        assert!(BrowserUseConfig::is_configured_from_env_or_managed());
+        assert_eq!(browser_backend_choice_from_env(), "browser-use");
     }
 
     #[test]
