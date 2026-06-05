@@ -4805,6 +4805,16 @@ mod tests {
     }
 
     #[test]
+    fn test_build_agent_config_maps_agent_api_max_retries() {
+        let mut cfg = GatewayConfig::default();
+        cfg.agent.api_max_retries = Some(11);
+
+        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5");
+
+        assert_eq!(agent_cfg.retry.max_retries, 11);
+    }
+
+    #[test]
     fn test_resolve_provider_and_model_uses_single_provider_fallback() {
         let mut cfg = GatewayConfig::default();
         cfg.llm_providers
@@ -5881,6 +5891,9 @@ mod tests {
 
 fn build_retry_config(config: &GatewayConfig) -> hermes_agent::agent_loop::RetryConfig {
     let mut retry_cfg = hermes_agent::agent_loop::RetryConfig::default();
+    if let Some(max_retries) = config.agent.api_max_retries {
+        retry_cfg.max_retries = max_retries;
+    }
     let mut seen = std::collections::HashSet::new();
 
     let mut push_candidate =

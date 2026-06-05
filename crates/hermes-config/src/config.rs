@@ -672,6 +672,13 @@ pub struct AgentLoopBehaviorConfig {
     /// Optional provider request service tier. `fast` maps to provider `priority`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
+    /// Upstream-compatible API retry count for provider calls.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "apiMaxRetries"
+    )]
+    pub api_max_retries: Option<u32>,
 }
 
 fn default_agent_memory_nudge_interval() -> u32 {
@@ -723,6 +730,7 @@ impl Default for AgentLoopBehaviorConfig {
             lsp_context_enabled: default_agent_lsp_context_enabled(),
             lsp_context_max_chars: default_agent_lsp_context_max_chars(),
             service_tier: None,
+            api_max_retries: None,
         }
     }
 }

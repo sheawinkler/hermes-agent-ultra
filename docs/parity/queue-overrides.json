@@ -647,6 +647,14 @@
     "a5aecf26fa21": {
       "disposition": "ported",
       "notes": "Rust config/runtime gateway surface now exposes kanban.dispatch_in_gateway with HERMES_KANBAN_DISPATCH_IN_GATEWAY env override, propagates it into GatewayConfig, and includes it in gateway agent cache-busting signatures; Rust has no separate Kanban DB notifier loop to gate."
+    },
+    "165b2e481afa": {
+      "disposition": "ported",
+      "notes": "Rust config/runtime now exposes agent.api_max_retries with apiMaxRetries alias, config patch/display support, HERMES_AGENT_API_MAX_RETRIES env override, and build_agent_config propagation into RetryConfig.max_retries with focused hermes-config/hermes-cli regression coverage."
+    },
+    "9ff21437a03a": {
+      "disposition": "ported",
+      "notes": "Rust MCP tools/call now coerces stringified object/array arguments before dispatch in both exported MCP server paths, leaves non-object scalar strings untouched, and has focused helper plus JSON-RPC runtime regression coverage."
     }
   },
   "subject_patterns": [
