@@ -619,6 +619,18 @@
     "fabca0bdd82b": {
       "disposition": "ported",
       "notes": "Rust TUI already drives model selection through canonical /model provider/model modals; this batch added /session and /switch aliases to the existing /sessions surface while preserving /provider as a distinct provider-status command rather than the removed Python /model alias."
+    },
+    "2ed96372ade3": {
+      "disposition": "ported",
+      "notes": "ported in Rust: hermes-skills sync honors .no-bundled-skills, exposes marker toggle and safe pristine bundled-skill removal; hermes-cli adds skills sync/opt-out/opt-in CLI and slash surfaces with tier-gated destructive removal tests."
+    },
+    "f24b7ed9d953": {
+      "disposition": "ported",
+      "notes": "ported/superseded by Rust Honcho architecture: initialize only loads config and never blocks on network session startup; regression test proves fail-open startup while tools/context remain available."
+    },
+    "32032e1e2d9b": {
+      "disposition": "superseded",
+      "notes": "upstream SimpleX websocket reconnect delta is Python plugin-only in this fork; no Rust SimpleX platform adapter exists under crates, so there is no Rust runtime surface to port under the Rust-only parity policy."
     }
   },
   "subject_patterns": [

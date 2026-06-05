@@ -615,7 +615,10 @@ async fn main() {
             action,
             name,
             extra,
-        } => hermes_cli::commands::handle_cli_skills(action, name, extra).await,
+            remove,
+            yes,
+            sync,
+        } => hermes_cli::commands::handle_cli_skills(action, name, extra, remove, yes, sync).await,
         CliCommand::Plugins {
             action,
             name,

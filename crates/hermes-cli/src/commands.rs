@@ -5308,6 +5308,16 @@ fn parse_skills_slash_invocation(args: &[&str]) -> Result<SkillsSlashInvocation,
             name: build_joined(rest),
             extra: None,
         },
+        "sync" => SkillsSlashInvocation {
+            action: Some(action),
+            name: None,
+            extra: None,
+        },
+        "opt-out" | "opt-in" => SkillsSlashInvocation {
+            action: Some(action),
+            name: None,
+            extra: build_joined(rest),
+        },
         "check" => SkillsSlashInvocation {
             action: Some(action),
             name: rest.first().map(|s| s.to_string()),
@@ -5344,7 +5354,7 @@ fn parse_skills_slash_invocation(args: &[&str]) -> Result<SkillsSlashInvocation,
         },
         _ => {
             return Err(format!(
-                "Unknown /skills subcommand '{}'. Use `/skills list`, `/skills quality`, or `/skills search <query>`.",
+                "Unknown /skills subcommand '{}'. Use `/skills list`, `/skills sync`, `/skills opt-out`, `/skills opt-in`, `/skills quality`, or `/skills search <query>`.",
                 action
             ))
         }
@@ -5367,7 +5377,13 @@ async fn run_skills_subcommand_via_cli(
         cmd.arg(name);
     }
     if let Some(extra) = invocation.extra.as_deref() {
-        cmd.arg("--extra").arg(extra);
+        if matches!(invocation.action.as_deref(), Some("opt-out" | "opt-in")) {
+            for arg in extra.split_whitespace() {
+                cmd.arg(arg);
+            }
+        } else {
+            cmd.arg("--extra").arg(extra);
+        }
     }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -6711,12 +6727,15 @@ fn skills_action_blocked_by_tier(
         SkillsExecutionTier::Trusted => {
             matches!(
                 action,
-                "install" | "update" | "publish" | "uninstall" | "reset" | "subscribe"
+                "install" | "update" | "sync" | "publish" | "uninstall" | "reset" | "subscribe"
             ) || (action == "tap" && matches!(name_lc.as_deref(), Some("add" | "remove")))
+                || (action == "opt-in" && matches!(name_lc.as_deref(), Some("--sync")))
+                || (action == "opt-out" && matches!(name_lc.as_deref(), Some("--remove")))
                 || (action == "snapshot" && matches!(name_lc.as_deref(), Some("import")))
         }
         SkillsExecutionTier::Balanced => {
             matches!(action, "publish" | "reset")
+                || (action == "opt-out" && matches!(name_lc.as_deref(), Some("--remove")))
                 || (action == "snapshot" && matches!(name_lc.as_deref(), Some("import")))
         }
         SkillsExecutionTier::Open => false,
@@ -21320,15 +21339,108 @@ pub async fn handle_cli_chat(
 }
 
 /// Handle `hermes skills [action] [name] [--extra ...]`.
+fn repo_root_for_skill_sync() -> PathBuf {
+    discover_repo_root_for_about().unwrap_or_else(|| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    })
+}
+
+fn env_path_or_default(env_key: &str, default: PathBuf) -> PathBuf {
+    std::env::var(env_key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or(default)
+}
+
+fn skill_sync_config_for(skills_dir: &Path) -> hermes_skills::SkillSyncConfig {
+    let repo_root = repo_root_for_skill_sync();
+    let bundled_dir = env_path_or_default("HERMES_BUNDLED_SKILLS", repo_root.join("skills"));
+    let optional_dir =
+        env_path_or_default("HERMES_OPTIONAL_SKILLS", repo_root.join("optional-skills"));
+    hermes_skills::SkillSyncConfig::new(bundled_dir, optional_dir, skills_dir.to_path_buf())
+}
+
+fn skills_extra_has_flag(extra: Option<&str>, flag: &str) -> bool {
+    extra
+        .unwrap_or_default()
+        .split_whitespace()
+        .any(|part| part == flag)
+}
+
+fn print_skill_sync_summary(result: &hermes_skills::SkillSyncResult) {
+    if result.skipped_opt_out {
+        println!(
+            "Skipped bundled skill sync: profile opted out via {}.",
+            hermes_skills::NO_BUNDLED_SKILLS_MARKER
+        );
+        return;
+    }
+    println!(
+        "Skills sync complete: {} new, {} updated, {} unchanged, {} user-modified kept, {} manifest entries cleaned, {} total bundled.",
+        result.copied.len(),
+        result.updated.len(),
+        result.skipped,
+        result.user_modified.len(),
+        result.cleaned.len(),
+        result.total_bundled
+    );
+    if !result.copied.is_empty() {
+        println!("  Copied: {}", result.copied.join(", "));
+    }
+    if !result.updated.is_empty() {
+        println!("  Updated: {}", result.updated.join(", "));
+    }
+    if !result.user_modified.is_empty() {
+        println!("  User-modified kept: {}", result.user_modified.join(", "));
+    }
+    if !result.collisions.is_empty() {
+        println!("  Collisions kept: {}", result.collisions.join(", "));
+    }
+    if !result.errors.is_empty() {
+        println!("  Errors: {}", result.errors.join("; "));
+    }
+}
+
+fn confirm_pristine_skill_removal(count: usize) -> bool {
+    print!(
+        "Delete {} pristine bundled skill(s)? User-modified and local/hub skills are kept. [y/N]: ",
+        count
+    );
+    let _ = std::io::stdout().flush();
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return false;
+    }
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
 pub async fn handle_cli_skills(
     action: Option<String>,
     name: Option<String>,
     extra: Option<String>,
+    remove: bool,
+    yes: bool,
+    sync_now: bool,
 ) -> Result<(), hermes_core::AgentError> {
     let requested_action = action.as_deref().unwrap_or("list");
     if !skills_tier_bypass_enabled() {
         let tier = skills_execution_tier();
-        let denied = skills_action_blocked_by_tier(tier, requested_action, name.as_deref());
+        let tier_name = match requested_action {
+            "opt-out" if remove || skills_extra_has_flag(extra.as_deref(), "--remove") => {
+                Some("--remove")
+            }
+            "opt-in" if sync_now || skills_extra_has_flag(extra.as_deref(), "--sync") => {
+                Some("--sync")
+            }
+            _ => name.as_deref(),
+        };
+        let denied = skills_action_blocked_by_tier(tier, requested_action, tier_name);
 
         if denied {
             return Err(hermes_core::AgentError::Config(format!(
@@ -21373,6 +21485,84 @@ pub async fn handle_cli_skills(
             }
             if count == 0 {
                 println!("  (no skills installed)");
+            }
+        }
+        "sync" => {
+            let cfg = skill_sync_config_for(&skills_dir);
+            let result = hermes_skills::sync_skills(&cfg, true)?;
+            print_skill_sync_summary(&result);
+        }
+        "opt-out" => {
+            let cfg = skill_sync_config_for(&skills_dir);
+            let remove_pristine = remove || skills_extra_has_flag(extra.as_deref(), "--remove");
+            let skip_confirm = yes
+                || skills_extra_has_flag(extra.as_deref(), "--yes")
+                || skills_extra_has_flag(extra.as_deref(), "-y");
+            let marker = hermes_skills::set_bundled_skills_opt_out(&cfg.hermes_home(), true)?;
+            println!("{}", marker.message);
+            println!("Marker: {}", marker.marker);
+
+            if !remove_pristine {
+                println!(
+                    "Existing skills on disk were left in place. Re-run with `--remove` to delete only unmodified bundled skills."
+                );
+                return Ok(());
+            }
+
+            let preview = hermes_skills::remove_pristine_bundled_skills(&cfg, true)?;
+            if preview.removed.is_empty() {
+                println!(
+                    "No pristine bundled skills to remove (nothing tracked, or all are user-modified/local)."
+                );
+                if !preview.skipped.is_empty() {
+                    println!("Kept {} skill(s).", preview.skipped.len());
+                }
+                return Ok(());
+            }
+
+            println!(
+                "Will remove {} unmodified bundled skill(s): {}",
+                preview.removed.len(),
+                preview.removed.join(", ")
+            );
+            if !preview.skipped.is_empty() {
+                let kept = preview
+                    .skipped
+                    .iter()
+                    .map(|item| format!("{} ({})", item.name, item.reason))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("Keeping {} skill(s): {}", preview.skipped.len(), kept);
+            }
+            if !skip_confirm && !confirm_pristine_skill_removal(preview.removed.len()) {
+                println!("Marker kept; no skills deleted.");
+                return Ok(());
+            }
+
+            let removed = hermes_skills::remove_pristine_bundled_skills(&cfg, false)?;
+            println!("{}", removed.message);
+            if !removed.removed.is_empty() {
+                println!("Removed: {}", removed.removed.join(", "));
+            }
+            if !removed.skipped.is_empty() {
+                let kept = removed
+                    .skipped
+                    .iter()
+                    .map(|item| format!("{} ({})", item.name, item.reason))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("Kept: {}", kept);
+            }
+        }
+        "opt-in" => {
+            let cfg = skill_sync_config_for(&skills_dir);
+            let sync_requested = sync_now || skills_extra_has_flag(extra.as_deref(), "--sync");
+            let marker = hermes_skills::set_bundled_skills_opt_out(&cfg.hermes_home(), false)?;
+            println!("{}", marker.message);
+            println!("Marker: {}", marker.marker);
+            if sync_requested {
+                let result = hermes_skills::sync_skills(&cfg, true)?;
+                print_skill_sync_summary(&result);
             }
         }
         "browse" => {
@@ -22860,7 +23050,7 @@ pub async fn handle_cli_skills(
         }
         other => {
             println!("Skills action '{}' is not recognized.", other);
-            println!("Available actions: list, browse, search, install, inspect, uninstall, check, update, publish, snapshot, tap, config, quality, audit");
+            println!("Available actions: list, browse, search, install, inspect, uninstall, check, update, sync, opt-out, opt-in, publish, snapshot, tap, config, quality, audit");
         }
     }
     Ok(())
@@ -29814,6 +30004,43 @@ install_command: "uv pip install -r requirements.txt"
             "publish",
             None
         ));
+        assert!(skills_action_blocked_by_tier(
+            SkillsExecutionTier::Trusted,
+            "sync",
+            None
+        ));
+        assert!(skills_action_blocked_by_tier(
+            SkillsExecutionTier::Trusted,
+            "opt-in",
+            Some("--sync")
+        ));
+        assert!(skills_action_blocked_by_tier(
+            SkillsExecutionTier::Balanced,
+            "opt-out",
+            Some("--remove")
+        ));
+        assert!(!skills_action_blocked_by_tier(
+            SkillsExecutionTier::Balanced,
+            "opt-out",
+            None
+        ));
+    }
+
+    #[test]
+    fn parse_skills_slash_invocation_supports_blank_slate_commands() {
+        let sync = parse_skills_slash_invocation(&["sync"]).expect("sync");
+        assert_eq!(sync.action.as_deref(), Some("sync"));
+        assert_eq!(sync.name, None);
+
+        let opt_out =
+            parse_skills_slash_invocation(&["opt-out", "--remove", "--yes"]).expect("opt-out");
+        assert_eq!(opt_out.action.as_deref(), Some("opt-out"));
+        assert_eq!(opt_out.name, None);
+        assert_eq!(opt_out.extra.as_deref(), Some("--remove --yes"));
+
+        let opt_in = parse_skills_slash_invocation(&["opt-in", "--sync"]).expect("opt-in");
+        assert_eq!(opt_in.action.as_deref(), Some("opt-in"));
+        assert_eq!(opt_in.extra.as_deref(), Some("--sync"));
     }
 
     #[test]
