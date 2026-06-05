@@ -1022,7 +1022,7 @@ mod tests {
         std::fs::create_dir_all(&ssh_dir).unwrap();
         std::fs::create_dir_all(&hermes_home).unwrap();
         let key = ssh_dir.join("id_rsa");
-        std::fs::write(&key, b"-----BEGIN OPENSSH PRIVATE KEY-----").unwrap();
+        std::fs::write(&key, b"test fixture credential marker").unwrap();
         let policy = test_media_policy(&fake_home, &hermes_home, vec![fake_home.clone()]);
 
         assert!(
@@ -1081,7 +1081,7 @@ mod tests {
         std::fs::create_dir_all(&workdir).unwrap();
         std::fs::create_dir_all(&hermes_home).unwrap();
         let key = ssh_dir.join("id_rsa");
-        std::fs::write(&key, b"-----BEGIN OPENSSH PRIVATE KEY-----").unwrap();
+        std::fs::write(&key, b"test fixture credential marker").unwrap();
         let link = workdir.join("innocent.pdf");
         std::os::unix::fs::symlink(&key, &link).unwrap();
         let policy = test_media_policy(&fake_home, &hermes_home, vec![fake_home.clone()]);
