@@ -57,6 +57,22 @@ pub struct AutoMaintenanceResult {
     pub error: Option<String>,
 }
 
+/// Result of a soft rewind operation against persisted session rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RewindOutcome {
+    pub target_message_id: i64,
+    pub target_content: Option<String>,
+    pub inactive_count: u64,
+    pub active_message_count: u64,
+    pub rewind_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserMessageRef {
+    pub id: i64,
+    pub content: Option<String>,
+}
+
 impl SessionPersistence {
     fn is_fts5_unavailable_message(message: &str) -> bool {
         let lower = message.to_ascii_lowercase();
@@ -158,6 +174,33 @@ impl SessionPersistence {
         }
     }
 
+    fn ensure_integer_column(
+        conn: &rusqlite::Connection,
+        table: &str,
+        column: &str,
+        default_value: i64,
+        not_null: bool,
+    ) -> Result<(), AgentError> {
+        let mut sql = format!("ALTER TABLE {table} ADD COLUMN {column} INTEGER");
+        if not_null {
+            sql.push_str(" NOT NULL");
+        }
+        sql.push_str(&format!(" DEFAULT {default_value}"));
+        match conn.execute(&sql, []) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("duplicate column") {
+                    Ok(())
+                } else {
+                    Err(AgentError::Io(format!(
+                        "Failed to migrate {table}.{column}: {e}"
+                    )))
+                }
+            }
+        }
+    }
+
     /// Create a new persistence manager rooted at the given hermes home directory.
     pub fn new(hermes_home: impl AsRef<Path>) -> Self {
         let home = hermes_home.as_ref();
@@ -217,7 +260,8 @@ impl SessionPersistence {
                 parent_session_id TEXT,
                 model_config TEXT,
                 end_reason TEXT,
-                ended_at TEXT
+                ended_at TEXT,
+                rewind_count INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -229,6 +273,7 @@ impl SessionPersistence {
                 tool_calls TEXT,
                 reasoning_content TEXT,
                 created_at TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
@@ -259,6 +304,14 @@ impl SessionPersistence {
                 )));
             }
         }
+        Self::ensure_integer_column(&conn, "sessions", "rewind_count", 0, true)?;
+        Self::ensure_integer_column(&conn, "messages", "active", 1, true)?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_session_active
+                ON messages(session_id, active, id)",
+            [],
+        )
+        .map_err(|e| AgentError::Io(format!("Failed to create active message index: {e}")))?;
         Self::ensure_fts_schema(&conn, &self.db_path)?;
 
         Ok(())
@@ -513,6 +566,182 @@ impl SessionPersistence {
         }
     }
 
+    /// Soft-delete the target user turn and all later active rows.
+    ///
+    /// `user_turns_back = 1` targets the latest active user message. Larger
+    /// counts walk farther back and clamp to the oldest active user turn.
+    pub fn rewind_active_user_turns(
+        &self,
+        session_id: &str,
+        user_turns_back: usize,
+    ) -> Result<Option<RewindOutcome>, AgentError> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() || !self.db_path.exists() {
+            return Ok(None);
+        }
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+
+        let active_user_rows = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, content FROM messages
+                     WHERE session_id = ?1 AND role = 'user' AND active = 1
+                     ORDER BY id ASC",
+                )
+                .map_err(|e| {
+                    AgentError::Io(format!("Failed to prepare rewind target query: {e}"))
+                })?;
+            let rows = stmt
+                .query_map(rusqlite::params![session_id], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+                })
+                .map_err(|e| AgentError::Io(format!("Failed to query rewind targets: {e}")))?;
+            let mut rows_out = Vec::new();
+            for row in rows {
+                rows_out.push(row.map_err(|e| {
+                    AgentError::Io(format!("Failed to read rewind target row: {e}"))
+                })?);
+            }
+            rows_out
+        };
+        if active_user_rows.is_empty() {
+            return Ok(None);
+        }
+        let count = user_turns_back.max(1);
+        let target_index = active_user_rows.len().saturating_sub(count);
+        let (target_message_id, target_content) = active_user_rows[target_index].clone();
+
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| AgentError::Io(format!("Failed to open rewind transaction: {e}")))?;
+        let inactive_count = tx
+            .execute(
+                "UPDATE messages
+                 SET active = 0
+                 WHERE session_id = ?1 AND active = 1 AND id >= ?2",
+                rusqlite::params![session_id, target_message_id],
+            )
+            .map_err(|e| AgentError::Io(format!("Failed to soft-delete rewound rows: {e}")))?
+            as u64;
+        let active_message_count: u64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND active = 1",
+                rusqlite::params![session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| AgentError::Io(format!("Failed to count active messages: {e}")))?
+            .max(0) as u64;
+        let rewind_count: u64 = tx
+            .query_row(
+                "SELECT COALESCE(rewind_count, 0) + 1 FROM sessions WHERE id = ?1",
+                rusqlite::params![session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(1)
+            .max(0) as u64;
+        tx.execute(
+            "UPDATE sessions
+             SET rewind_count = ?1, message_count = ?2, updated_at = ?3
+             WHERE id = ?4",
+            rusqlite::params![
+                rewind_count as i64,
+                active_message_count as i64,
+                Utc::now().to_rfc3339(),
+                session_id
+            ],
+        )
+        .map_err(|e| AgentError::Io(format!("Failed to update rewound session row: {e}")))?;
+        tx.commit()
+            .map_err(|e| AgentError::Io(format!("Failed to commit rewind transaction: {e}")))?;
+
+        Ok(Some(RewindOutcome {
+            target_message_id,
+            target_content,
+            inactive_count,
+            active_message_count,
+            rewind_count,
+        }))
+    }
+
+    /// List active user messages newest-first for rewind picker surfaces.
+    pub fn list_recent_user_messages(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<UserMessageRef>, AgentError> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() || limit == 0 || !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, content FROM messages
+                 WHERE session_id = ?1 AND role = 'user' AND active = 1
+                 ORDER BY id DESC
+                 LIMIT ?2",
+            )
+            .map_err(|e| AgentError::Io(format!("Failed to prepare recent user query: {e}")))?;
+        let rows = stmt
+            .query_map(rusqlite::params![session_id, limit as i64], |row| {
+                Ok(UserMessageRef {
+                    id: row.get(0)?,
+                    content: row.get(1)?,
+                })
+            })
+            .map_err(|e| AgentError::Io(format!("Failed to query recent user messages: {e}")))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(
+                row.map_err(|e| {
+                    AgentError::Io(format!("Failed to read recent user message: {e}"))
+                })?,
+            );
+        }
+        Ok(out)
+    }
+
+    /// Restore inactive rows at or after a message id.
+    pub fn restore_rewound_since(
+        &self,
+        session_id: &str,
+        since_message_id: i64,
+    ) -> Result<u64, AgentError> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() || since_message_id <= 0 || !self.db_path.exists() {
+            return Ok(0);
+        }
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let restored = conn
+            .execute(
+                "UPDATE messages
+                 SET active = 1
+                 WHERE session_id = ?1 AND active = 0 AND id >= ?2",
+                rusqlite::params![session_id, since_message_id],
+            )
+            .map_err(|e| AgentError::Io(format!("Failed to restore rewound rows: {e}")))?
+            as u64;
+        let active_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND active = 1",
+                rusqlite::params![session_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        conn.execute(
+            "UPDATE sessions SET message_count = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![active_count, Utc::now().to_rfc3339(), session_id],
+        )
+        .map_err(|e| AgentError::Io(format!("Failed to update restored session row: {e}")))?;
+        Ok(restored)
+    }
+
     /// Batch insert messages into the database for FTS5 indexing.
     fn flush_messages_to_session_db(
         &self,
@@ -520,10 +749,10 @@ impl SessionPersistence {
         session_id: &str,
         messages: &[Message],
     ) -> Result<(), AgentError> {
-        // Delete existing messages for this session (full replace)
+        // Replace the live transcript while preserving inactive rewind audit rows.
         Self::delete_fts_rows_for_session(conn, session_id)?;
         conn.execute(
-            "DELETE FROM messages WHERE session_id = ?1",
+            "DELETE FROM messages WHERE session_id = ?1 AND active = 1",
             rusqlite::params![session_id],
         )
         .map_err(|e| AgentError::Io(format!("Failed to clear old messages: {e}")))?;
@@ -532,8 +761,8 @@ impl SessionPersistence {
 
         let mut stmt = conn
             .prepare(
-                "INSERT INTO messages (session_id, role, content, tool_call_id, tool_calls, reasoning_content, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO messages (session_id, role, content, tool_call_id, tool_calls, reasoning_content, created_at, active)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
             )
             .map_err(|e| AgentError::Io(format!("Failed to prepare insert: {e}")))?;
 
@@ -672,6 +901,7 @@ impl SessionPersistence {
 
     /// Load a previous session from SQLite.
     pub fn load_session(&self, session_id: &str) -> Result<Vec<Message>, AgentError> {
+        self.ensure_db()?;
         let conn = rusqlite::Connection::open(&self.db_path)
             .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
 
@@ -679,7 +909,7 @@ impl SessionPersistence {
             .prepare(
                 "SELECT role, content, tool_call_id, tool_calls, reasoning_content
                  FROM messages
-                 WHERE session_id = ?1
+                 WHERE session_id = ?1 AND active = 1
                  ORDER BY id ASC",
             )
             .map_err(|e| AgentError::Io(format!("Failed to prepare query: {e}")))?;
@@ -985,6 +1215,110 @@ mod tests {
             )
             .unwrap();
         assert_eq!(model, "anthropic:claude-sonnet");
+    }
+
+    #[test]
+    fn test_rewind_soft_deletes_n_user_turns_and_loads_only_active_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let messages = vec![
+            Message::system("sys"),
+            Message::user("question 1"),
+            Message::assistant("answer 1"),
+            Message::user("question 2"),
+            Message::assistant("answer 2"),
+            Message::user("question 3"),
+            Message::assistant("answer 3"),
+        ];
+        sp.persist_session("rewind-n", &messages, None, None, None, None)
+            .unwrap();
+
+        let recent = sp.list_recent_user_messages("rewind-n", 2).unwrap();
+        assert_eq!(
+            recent
+                .iter()
+                .filter_map(|row| row.content.as_deref())
+                .collect::<Vec<_>>(),
+            vec!["question 3", "question 2"]
+        );
+
+        let outcome = sp.rewind_active_user_turns("rewind-n", 2).unwrap().unwrap();
+        assert_eq!(outcome.target_content.as_deref(), Some("question 2"));
+        assert_eq!(outcome.inactive_count, 4);
+        assert_eq!(outcome.active_message_count, 3);
+        assert_eq!(outcome.rewind_count, 1);
+
+        let loaded = sp.load_session("rewind-n").unwrap();
+        assert_eq!(
+            loaded
+                .iter()
+                .filter_map(|m| m.content.as_deref())
+                .collect::<Vec<_>>(),
+            vec!["sys", "question 1", "answer 1"]
+        );
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let inactive: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id='rewind-n' AND active=0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(inactive, 4);
+        let rewind_count: i64 = conn
+            .query_row(
+                "SELECT rewind_count FROM sessions WHERE id='rewind-n'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rewind_count, 1);
+
+        assert_eq!(
+            sp.restore_rewound_since("rewind-n", outcome.target_message_id)
+                .unwrap(),
+            4
+        );
+        assert_eq!(sp.load_session("rewind-n").unwrap().len(), messages.len());
+    }
+
+    #[test]
+    fn test_persist_session_preserves_inactive_rewind_audit_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let messages = vec![
+            Message::user("keep"),
+            Message::assistant("kept"),
+            Message::user("rewind me"),
+            Message::assistant("rewound"),
+        ];
+        sp.persist_session("audit-preserve", &messages, None, None, None, None)
+            .unwrap();
+        sp.rewind_active_user_turns("audit-preserve", 1)
+            .unwrap()
+            .unwrap();
+
+        sp.persist_session(
+            "audit-preserve",
+            &[Message::user("keep"), Message::assistant("replacement")],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let inactive: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id='audit-preserve' AND active=0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(inactive, 2);
+        assert_eq!(sp.load_session("audit-preserve").unwrap().len(), 2);
     }
 
     #[test]

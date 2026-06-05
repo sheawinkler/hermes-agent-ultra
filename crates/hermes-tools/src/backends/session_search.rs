@@ -132,6 +132,33 @@ impl SqliteSessionSearchBackend {
         }
     }
 
+    fn ensure_integer_column(
+        conn: &Connection,
+        table: &str,
+        column: &str,
+        default_value: i64,
+        not_null: bool,
+    ) -> Result<(), ToolError> {
+        let mut sql = format!("ALTER TABLE {table} ADD COLUMN {column} INTEGER");
+        if not_null {
+            sql.push_str(" NOT NULL");
+        }
+        sql.push_str(&format!(" DEFAULT {default_value}"));
+        match conn.execute(&sql, []) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("duplicate column name") {
+                    Ok(())
+                } else {
+                    Err(ToolError::ExecutionFailed(format!(
+                        "Failed to ensure {table}.{column}: {e}"
+                    )))
+                }
+            }
+        }
+    }
+
     fn ensure_session_compat_columns(conn: &Connection) -> Result<(), ToolError> {
         for column in [
             "parent_session_id",
@@ -141,6 +168,16 @@ impl SqliteSessionSearchBackend {
         ] {
             Self::ensure_text_column(conn, "sessions", column)?;
         }
+        Self::ensure_integer_column(conn, "sessions", "rewind_count", 0, true)?;
+        Self::ensure_integer_column(conn, "messages", "active", 1, true)?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_session_active
+                ON messages(session_id, active, id)",
+            [],
+        )
+        .map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to ensure active message index: {e}"))
+        })?;
         Ok(())
     }
 
@@ -513,7 +550,9 @@ impl SqliteSessionSearchBackend {
         let mut msg_stmt = conn
             .prepare(
                 "SELECT role, COALESCE(content, ''), tool_calls
-                 FROM messages WHERE session_id = ?1 ORDER BY id ASC",
+                 FROM messages
+                 WHERE session_id = ?1 AND active = 1
+                 ORDER BY id ASC",
             )
             .map_err(|e| {
                 ToolError::ExecutionFailed(format!("Failed to prepare messages query: {e}"))
@@ -829,7 +868,8 @@ impl SqliteSessionSearchBackend {
                 parent_session_id TEXT,
                 model_config TEXT,
                 end_reason TEXT,
-                ended_at TEXT
+                ended_at TEXT,
+                rewind_count INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -839,6 +879,7 @@ impl SqliteSessionSearchBackend {
                 tool_call_id TEXT,
                 tool_calls TEXT,
                 created_at TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);",
@@ -1003,6 +1044,7 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                         .query_row(
                             "SELECT COALESCE(content, '') FROM messages
                              WHERE session_id = ?1 AND content IS NOT NULL
+                               AND active = 1
                              ORDER BY id DESC LIMIT 1",
                             rusqlite::params![session_id.clone()],
                             |r| r.get::<_, String>(0),
@@ -1098,6 +1140,7 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                          WHERE messages_fts MATCH ?1
                            AND m.content IS NOT NULL
                            AND m.content != ''
+                           AND m.active = 1
                            AND COALESCE(s.platform, '') NOT IN (",
                     );
                     sql.push_str(&hidden_placeholders);
@@ -1333,7 +1376,8 @@ mod tests {
                 parent_session_id TEXT,
                 model_config TEXT,
                 end_reason TEXT,
-                ended_at TEXT
+                ended_at TEXT,
+                rewind_count INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1342,7 +1386,8 @@ mod tests {
                 content TEXT,
                 tool_call_id TEXT,
                 tool_calls TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1
             );
             CREATE INDEX idx_messages_session ON messages(session_id);",
         )
@@ -1397,11 +1442,28 @@ mod tests {
         .expect("insert message");
         conn.execute(
             "UPDATE sessions SET message_count = (
-                SELECT COUNT(*) FROM messages WHERE session_id = ?1
+                SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND active = 1
              ) WHERE id = ?1",
             rusqlite::params![session_id],
         )
         .expect("update message count");
+    }
+
+    fn insert_inactive_message(conn: &Connection, session_id: &str, role: &str, content: &str) {
+        insert_message(conn, session_id, role, content);
+        conn.execute(
+            "UPDATE messages SET active = 0
+             WHERE id = (SELECT MAX(id) FROM messages WHERE session_id = ?1)",
+            rusqlite::params![session_id],
+        )
+        .expect("mark inactive");
+        conn.execute(
+            "UPDATE sessions SET message_count = (
+                SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND active = 1
+             ) WHERE id = ?1",
+            rusqlite::params![session_id],
+        )
+        .expect("update active count");
     }
 
     fn result_ids(output: &str) -> Vec<String> {
@@ -1646,6 +1708,65 @@ mod tests {
         assert_eq!(value["success"], true);
         assert_eq!(value["count"], 0);
         assert_eq!(value["search_degraded"], "fts5_unavailable");
+    }
+
+    #[tokio::test]
+    async fn search_ignores_inactive_rewound_messages() {
+        let (_tmp, backend) = backend_with_db();
+        {
+            let conn = backend.conn.lock().unwrap();
+            insert_session(
+                &conn,
+                "rewound-search",
+                None,
+                None,
+                None,
+                None,
+                "2026-01-01T00:00:00Z",
+            );
+            insert_message(&conn, "rewound-search", "user", "visible active phrase");
+            insert_inactive_message(&conn, "rewound-search", "user", "hiddenrewoundphrase");
+        }
+
+        let output = backend
+            .search(Some("hiddenrewoundphrase"), None, 5, None)
+            .await
+            .expect("search");
+        let value = parsed(&output);
+
+        assert_eq!(value["success"], true);
+        assert_eq!(value["count"], 0);
+    }
+
+    #[tokio::test]
+    async fn recent_preview_uses_latest_active_message() {
+        let (_tmp, backend) = backend_with_db();
+        {
+            let conn = backend.conn.lock().unwrap();
+            insert_session(
+                &conn,
+                "rewound-recent",
+                None,
+                None,
+                None,
+                None,
+                "2026-01-01T00:00:00Z",
+            );
+            insert_message(&conn, "rewound-recent", "user", "visible preview");
+            insert_inactive_message(&conn, "rewound-recent", "user", "hidden preview");
+        }
+
+        let output = backend.search(None, None, 5, None).await.expect("recent");
+        let value = parsed(&output);
+        let preview = value["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session_id"] == "rewound-recent")
+            .and_then(|row| row["preview"].as_str())
+            .unwrap();
+
+        assert_eq!(preview, "visible preview");
     }
 
     #[tokio::test]
