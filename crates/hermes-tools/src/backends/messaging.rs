@@ -29,14 +29,18 @@ impl MessagingBackend for SignalMessagingBackend {
         platform: &str,
         recipient: &str,
         message: &str,
+        thread_id: Option<&str>,
     ) -> Result<String, ToolError> {
-        Ok(json!({
+        let mut response = json!({
             "type": "messaging_request",
             "platform": platform,
             "recipient": recipient,
             "message": message,
             "status": "pending",
-        })
-        .to_string())
+        });
+        if let Some(thread_id) = thread_id {
+            response["thread_id"] = json!(thread_id);
+        }
+        Ok(response.to_string())
     }
 }

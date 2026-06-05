@@ -2446,17 +2446,33 @@ impl Gateway {
         text: &str,
         parse_mode: Option<ParseMode>,
     ) -> Result<(), GatewayError> {
+        self.send_message_threaded(platform, chat_id, text, parse_mode, None)
+            .await
+    }
+
+    /// Send a text message to a specific platform chat, optionally preserving
+    /// the platform-native thread id for threaded platforms such as Slack.
+    pub async fn send_message_threaded(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        thread_id: Option<&str>,
+    ) -> Result<(), GatewayError> {
         let adapter = self.get_adapter(platform).await.ok_or_else(|| {
             GatewayError::Platform(format!("No adapter registered for platform: {}", platform))
         })?;
         let (cleaned, images) = extract_inline_images(text);
         if images.is_empty() {
-            return adapter.send_message(chat_id, text, parse_mode).await;
+            return adapter
+                .send_message_threaded(chat_id, text, parse_mode, thread_id)
+                .await;
         }
 
         if !cleaned.is_empty() {
             adapter
-                .send_message(chat_id, &cleaned, parse_mode.clone())
+                .send_message_threaded(chat_id, &cleaned, parse_mode.clone(), thread_id)
                 .await?;
         }
 
@@ -2478,7 +2494,7 @@ impl Gateway {
                     _ => image.url.clone(),
                 };
                 adapter
-                    .send_message(chat_id, &fallback, Some(ParseMode::Plain))
+                    .send_message_threaded(chat_id, &fallback, Some(ParseMode::Plain), thread_id)
                     .await?;
             }
         }

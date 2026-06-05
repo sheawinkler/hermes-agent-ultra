@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 use crate::memory_manager::MemoryProviderPlugin;
 
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:1933";
+const DEFAULT_AGENT: &str = "hermes";
+const DEFAULT_MEMORY_SUBDIR: &str = "preferences";
 
 fn search_schema() -> Value {
     json!({
@@ -62,7 +64,7 @@ fn browse_schema() -> Value {
 fn remember_schema() -> Value {
     json!({
         "name": "viking_remember",
-        "description": "Store a fact as a session message for later extraction.",
+        "description": "Store a fact directly in the OpenViking memory tree.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -96,6 +98,7 @@ struct VikingState {
     api_key: String,
     account: String,
     user: String,
+    agent: String,
     session_id: String,
     turn_count: u32,
 }
@@ -110,10 +113,69 @@ fn viking_headers(st: &VikingState) -> reqwest::header::HeaderMap {
     h.insert("Content-Type", "application/json".parse().expect("mime"));
     h.insert("X-OpenViking-Account", st.account.parse().expect("account"));
     h.insert("X-OpenViking-User", st.user.parse().expect("user"));
+    h.insert("X-OpenViking-Agent", st.agent.parse().expect("agent"));
     if !st.api_key.is_empty() {
         h.insert("X-API-Key", st.api_key.parse().expect("key"));
+        h.insert(
+            "Authorization",
+            format!("Bearer {}", st.api_key).parse().expect("bearer"),
+        );
     }
     h
+}
+
+fn viking_uri_segment(raw: &str) -> String {
+    let sanitized = raw
+        .trim()
+        .chars()
+        .map(|ch| match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '.' | '_' | '-' => ch,
+            _ => '_',
+        })
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "default".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn memory_subdir_for_category(category: &str) -> &'static str {
+    match category.trim().to_ascii_lowercase().as_str() {
+        "preference" | "preferences" => "preferences",
+        "entity" | "entities" => "entities",
+        "event" | "events" => "events",
+        "case" | "cases" => "cases",
+        "pattern" | "patterns" => "patterns",
+        _ => DEFAULT_MEMORY_SUBDIR,
+    }
+}
+
+fn memory_subdir_for_target(target: &str) -> &'static str {
+    match target.trim().to_ascii_lowercase().as_str() {
+        "memory" | "memories" => "patterns",
+        "user" | "preferences" => "preferences",
+        _ => DEFAULT_MEMORY_SUBDIR,
+    }
+}
+
+fn build_memory_uri(user: &str, agent: &str, subdir: &str) -> String {
+    let slug = uuid::Uuid::new_v4().simple().to_string();
+    format!(
+        "viking://user/{}/agent/{}/memories/{}/mem_{}.md",
+        viking_uri_segment(user),
+        viking_uri_segment(agent),
+        viking_uri_segment(subdir),
+        &slug[..12]
+    )
+}
+
+fn content_write_body(st: &VikingState, subdir: &str, content: &str) -> Value {
+    json!({
+        "uri": build_memory_uri(&st.user, &st.agent, subdir),
+        "content": content,
+        "mode": "create",
+    })
 }
 
 impl OpenVikingMemoryPlugin {
@@ -144,6 +206,7 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         let api_key = std::env::var("OPENVIKING_API_KEY").unwrap_or_default();
         let account = std::env::var("OPENVIKING_ACCOUNT").unwrap_or_else(|_| "root".into());
         let user = std::env::var("OPENVIKING_USER").unwrap_or_else(|_| "default".into());
+        let agent = std::env::var("OPENVIKING_AGENT").unwrap_or_else(|_| DEFAULT_AGENT.into());
         let client = match Client::builder().timeout(Duration::from_secs(45)).build() {
             Ok(c) => c,
             Err(e) => {
@@ -157,6 +220,7 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
             api_key,
             account,
             user,
+            agent,
             session_id: session_id.to_string(),
             turn_count: 0,
         };
@@ -267,6 +331,22 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         let _ = st.client.post(&url).headers(h).send();
     }
 
+    fn on_memory_write(&self, action: &str, target: &str, content: &str) {
+        if !action.trim().eq_ignore_ascii_case("add") || content.trim().is_empty() {
+            return;
+        }
+        let st = match self.state.lock().unwrap().clone() {
+            Some(s) => s,
+            None => return,
+        };
+        let h = viking_headers(&st);
+        let url = format!("{}/api/v1/content/write", st.endpoint);
+        let body = content_write_body(&st, memory_subdir_for_target(target), content);
+        std::thread::spawn(move || {
+            let _ = st.client.post(&url).headers(h).json(&body).send();
+        });
+    }
+
     fn get_tool_schemas(&self) -> Vec<Value> {
         vec![
             search_schema(),
@@ -364,15 +444,13 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
                     return json!({"error": "content is required"}).to_string();
                 }
                 let cat = args.get("category").and_then(|v| v.as_str()).unwrap_or("");
-                let text = if cat.is_empty() {
-                    format!("[Remember] {}", content)
-                } else {
-                    format!("[Remember — {}] {}", cat, content)
-                };
-                let url = format!("{}/api/v1/sessions/{}/messages", st.endpoint, st.session_id);
-                let body = json!({"role": "user", "parts": [{"type": "text", "text": text}]});
+                let body = content_write_body(&st, memory_subdir_for_category(cat), content);
+                let uri = body.get("uri").cloned().unwrap_or(Value::Null);
+                let url = format!("{}/api/v1/content/write", st.endpoint);
                 match st.client.post(&url).headers(h).json(&body).send() {
-                    Ok(r) if r.status().is_success() => json!({"status": "stored"}).to_string(),
+                    Ok(r) if r.status().is_success() => {
+                        json!({"status": "stored", "uri": uri}).to_string()
+                    }
                     Ok(r) => json!({"error": format!("HTTP {}", r.status())}).to_string(),
                     Err(e) => json!({"error": e.to_string()}).to_string(),
                 }
@@ -407,7 +485,8 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
     fn get_config_schema(&self) -> Option<Value> {
         Some(json!([
             {"key": "endpoint", "description": "OpenViking server URL", "env_var": "OPENVIKING_ENDPOINT", "default": DEFAULT_ENDPOINT},
-            {"key": "api_key", "description": "API key", "secret": true, "env_var": "OPENVIKING_API_KEY"}
+            {"key": "api_key", "description": "API key", "secret": true, "env_var": "OPENVIKING_API_KEY"},
+            {"key": "agent", "description": "OpenViking agent namespace", "env_var": "OPENVIKING_AGENT", "default": DEFAULT_AGENT}
         ]))
     }
 }
@@ -419,16 +498,7 @@ struct OpenVikingPrefetch {
 
 impl OpenVikingPrefetch {
     fn run(self) -> Result<String, ()> {
-        let h = {
-            let mut hm = reqwest::header::HeaderMap::new();
-            hm.insert("Content-Type", "application/json".parse().unwrap());
-            hm.insert("X-OpenViking-Account", self.st.account.parse().unwrap());
-            hm.insert("X-OpenViking-User", self.st.user.parse().unwrap());
-            if !self.st.api_key.is_empty() {
-                hm.insert("X-API-Key", self.st.api_key.parse().unwrap());
-            }
-            hm
-        };
+        let h = viking_headers(&self.st);
         let url = format!("{}/api/v1/search/find", self.st.endpoint);
         let body = json!({"query": self.q, "top_k": 5u64});
         let resp = self
@@ -473,5 +543,62 @@ mod tests {
     fn name() {
         let p = OpenVikingMemoryPlugin::new();
         assert_eq!(p.name(), "openviking");
+    }
+
+    #[test]
+    fn memory_uri_includes_agent_and_sanitizes_tenant_segments() {
+        let uri = build_memory_uri("user/name", "agent one", "patterns");
+        assert!(uri.starts_with("viking://user/user_name/agent/agent_one/memories/patterns/mem_"));
+        assert!(uri.ends_with(".md"));
+        assert!(!uri.contains("user/name"));
+        assert!(!uri.contains("agent one"));
+    }
+
+    #[test]
+    fn memory_subdir_mapping_matches_write_targets_and_categories() {
+        assert_eq!(memory_subdir_for_category("entity"), "entities");
+        assert_eq!(memory_subdir_for_category("event"), "events");
+        assert_eq!(memory_subdir_for_category("case"), "cases");
+        assert_eq!(memory_subdir_for_category("pattern"), "patterns");
+        assert_eq!(memory_subdir_for_category("unknown"), "preferences");
+        assert_eq!(memory_subdir_for_target("memory"), "patterns");
+        assert_eq!(memory_subdir_for_target("user"), "preferences");
+    }
+
+    #[test]
+    fn headers_include_agent_and_bearer_key() {
+        let st = VikingState {
+            client: Client::new(),
+            endpoint: DEFAULT_ENDPOINT.to_string(),
+            api_key: "secret".to_string(),
+            account: "acct".to_string(),
+            user: "user".to_string(),
+            agent: "agent".to_string(),
+            session_id: "session".to_string(),
+            turn_count: 0,
+        };
+        let headers = viking_headers(&st);
+        assert_eq!(headers["X-OpenViking-Agent"], "agent");
+        assert_eq!(headers["X-API-Key"], "secret");
+        assert_eq!(headers["Authorization"], "Bearer secret");
+    }
+
+    #[test]
+    fn content_write_body_uses_agent_scoped_create_uri() {
+        let st = VikingState {
+            client: Client::new(),
+            endpoint: DEFAULT_ENDPOINT.to_string(),
+            api_key: String::new(),
+            account: "acct".to_string(),
+            user: "she/a".to_string(),
+            agent: "hermes ultra".to_string(),
+            session_id: "session".to_string(),
+            turn_count: 0,
+        };
+        let body = content_write_body(&st, "patterns", "fact");
+        let uri = body["uri"].as_str().expect("uri");
+        assert!(uri.starts_with("viking://user/she_a/agent/hermes_ultra/memories/patterns/"));
+        assert_eq!(body["content"], "fact");
+        assert_eq!(body["mode"], "create");
     }
 }

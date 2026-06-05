@@ -220,8 +220,10 @@ mod tests {
     use hermes_gateway::{gateway::GatewayConfig, DmManager, SessionManager};
     use tempfile::TempDir;
 
+    type SentRecord = (String, String, Option<String>);
+
     struct RecordingAdapter {
-        sent: Arc<Mutex<Vec<(String, String)>>>,
+        sent: Arc<Mutex<Vec<SentRecord>>>,
         running: bool,
         platform: String,
     }
@@ -255,7 +257,25 @@ mod tests {
             self.sent
                 .lock()
                 .expect("recording adapter lock poisoned")
-                .push((chat_id.to_string(), text.to_string()));
+                .push((chat_id.to_string(), text.to_string(), None));
+            Ok(())
+        }
+
+        async fn send_message_threaded(
+            &self,
+            chat_id: &str,
+            text: &str,
+            _parse_mode: Option<ParseMode>,
+            thread_id: Option<&str>,
+        ) -> Result<(), GatewayError> {
+            self.sent
+                .lock()
+                .expect("recording adapter lock poisoned")
+                .push((
+                    chat_id.to_string(),
+                    text.to_string(),
+                    thread_id.map(ToOwned::to_owned),
+                ));
             Ok(())
         }
 
@@ -318,6 +338,48 @@ mod tests {
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].0, "12345");
         assert_eq!(sent[0].1, "hello");
+        assert_eq!(sent[0].2, None);
+    }
+
+    #[tokio::test]
+    async fn gateway_messaging_backend_preserves_slack_thread_id() {
+        let session_manager = Arc::new(SessionManager::new(
+            hermes_config::session::SessionConfig::default(),
+        ));
+        let dm = DmManager::with_pair_behavior();
+        let gateway = Arc::new(Gateway::new(session_manager, dm, GatewayConfig::default()));
+        let adapter = Arc::new(RecordingAdapter::new("slack"));
+        let recorder = adapter.sent.clone();
+        gateway.register_adapter("slack", adapter).await;
+
+        let registry = Arc::new(ToolRegistry::new());
+        wire_gateway_messaging_backend(&registry, gateway.clone());
+
+        let out = registry
+            .dispatch_async(
+                "send_message",
+                json!({
+                    "platform": "slack",
+                    "recipient": "C123",
+                    "message": "reply",
+                    "thread_ts": "171234.5"
+                }),
+            )
+            .await;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&out).expect("send_message output should be json");
+        assert_eq!(parsed["status"], "sent");
+        assert_eq!(parsed["thread_id"], "171234.5");
+
+        let sent = recorder.lock().expect("recording lock poisoned");
+        assert_eq!(
+            sent.as_slice(),
+            [(
+                "C123".to_string(),
+                "reply".to_string(),
+                Some("171234.5".to_string())
+            )]
+        );
     }
 
     #[tokio::test]

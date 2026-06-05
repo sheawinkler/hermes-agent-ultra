@@ -427,8 +427,10 @@ async fn memory_contract_validates_targets_and_dispatches_actions() {
 
 #[derive(Default)]
 struct CaptureMessagingBackend {
-    calls: Mutex<Vec<(String, String, String)>>,
+    calls: Mutex<Vec<CapturedMessageSend>>,
 }
+
+type CapturedMessageSend = (String, String, String, Option<String>);
 
 #[async_trait]
 impl MessagingBackend for CaptureMessagingBackend {
@@ -437,11 +439,13 @@ impl MessagingBackend for CaptureMessagingBackend {
         platform: &str,
         recipient: &str,
         message: &str,
+        thread_id: Option<&str>,
     ) -> Result<String, ToolError> {
         self.calls.lock().expect("calls").push((
             platform.to_string(),
             recipient.to_string(),
             message.to_string(),
+            thread_id.map(ToOwned::to_owned),
         ));
         Ok("sent".to_string())
     }
@@ -497,8 +501,27 @@ async fn messaging_contract_accepts_all_gateway_platform_schema_names() {
         [(
             "matrix".to_string(),
             "!room:example".to_string(),
-            "hello".to_string()
+            "hello".to_string(),
+            None
         )]
+    );
+    handler
+        .execute(json!({
+            "platform": "slack",
+            "recipient": "C123",
+            "message": "threaded",
+            "thread_id": "171234.5"
+        }))
+        .await
+        .expect("threaded send");
+    assert_eq!(
+        backend.calls.lock().expect("calls").last(),
+        Some(&(
+            "slack".to_string(),
+            "C123".to_string(),
+            "threaded".to_string(),
+            Some("171234.5".to_string())
+        ))
     );
     assert_err_contains(
         handler

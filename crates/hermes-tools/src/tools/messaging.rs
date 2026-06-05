@@ -44,6 +44,7 @@ pub trait MessagingBackend: Send + Sync {
         platform: &str,
         recipient: &str,
         message: &str,
+        thread_id: Option<&str>,
     ) -> Result<String, ToolError>;
 }
 
@@ -80,7 +81,16 @@ impl ToolHandler for SendMessageHandler {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'message' parameter".into()))?;
 
-        self.backend.send(platform, recipient, message).await
+        let thread_id = params
+            .get("thread_id")
+            .or_else(|| params.get("thread_ts"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        self.backend
+            .send(platform, recipient, message, thread_id)
+            .await
     }
 
     fn schema(&self) -> ToolSchema {
@@ -107,6 +117,13 @@ impl ToolHandler for SendMessageHandler {
                 "description": "Message content to send"
             }),
         );
+        props.insert(
+            "thread_id".into(),
+            json!({
+                "type": "string",
+                "description": "Optional platform-native thread id (for Slack this maps to thread_ts)"
+            }),
+        );
 
         tool_schema(
             "send_message",
@@ -131,10 +148,14 @@ mod tests {
             platform: &str,
             recipient: &str,
             message: &str,
+            thread_id: Option<&str>,
         ) -> Result<String, ToolError> {
+            let thread_suffix = thread_id
+                .map(|thread| format!(" in thread {}", thread))
+                .unwrap_or_default();
             Ok(format!(
-                "Sent to {} on {}: {}",
-                recipient, platform, message
+                "Sent to {} on {}{}: {}",
+                recipient, platform, thread_suffix, message
             ))
         }
     }
@@ -158,5 +179,21 @@ mod tests {
             .unwrap();
         assert!(result.contains("telegram"));
         assert!(result.contains("12345"));
+    }
+
+    #[tokio::test]
+    async fn test_send_message_execute_accepts_thread_id_alias() {
+        let handler = SendMessageHandler::new(Arc::new(MockMessagingBackend));
+        let result = handler
+            .execute(json!({
+                "platform": "slack",
+                "recipient": "C123",
+                "message": "Hello!",
+                "thread_ts": "171234.5"
+            }))
+            .await
+            .unwrap();
+        assert!(result.contains("slack"));
+        assert!(result.contains("171234.5"));
     }
 }
