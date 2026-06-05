@@ -568,7 +568,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -578,6 +578,16 @@ fn mask_secret(s: &str) -> String {
         "***".to_string()
     } else {
         format!("***{}", &s[s.len() - 4..])
+    }
+}
+
+fn parse_config_bool(key: &str, value: &str) -> Result<bool, ConfigError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(ConfigError::ValidationError(format!(
+            "{key} must be a boolean: {value}"
+        ))),
     }
 }
 
@@ -746,6 +756,10 @@ fn apply_user_config_patch_dotted(
                     value
                 ))
             })?;
+        }
+        ["kanban", "dispatch_in_gateway"] => {
+            config.kanban.dispatch_in_gateway =
+                parse_config_bool("kanban.dispatch_in_gateway", value)?;
         }
         ["auxiliary", task, field] => {
             let entry = config
@@ -938,6 +952,7 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
         ["sessions", "retention_days"] => Ok(config.sessions.retention_days.to_string()),
         ["sessions", "vacuum_after_prune"] => Ok(config.sessions.vacuum_after_prune.to_string()),
         ["sessions", "min_interval_hours"] => Ok(config.sessions.min_interval_hours.to_string()),
+        ["kanban", "dispatch_in_gateway"] => Ok(config.kanban.dispatch_in_gateway.to_string()),
         ["llm", provider, "api_key"] => Ok(
             match config
                 .llm_providers
@@ -1776,6 +1791,11 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
     }
     if let Ok(v) = std::env::var("HERMES_SYSTEM_PROMPT") {
         config.system_prompt = Some(v);
+    }
+    if let Ok(v) = std::env::var("HERMES_KANBAN_DISPATCH_IN_GATEWAY") {
+        if let Some(parsed) = parse_bool_env("HERMES_KANBAN_DISPATCH_IN_GATEWAY", &v) {
+            config.kanban.dispatch_in_gateway = parsed;
+        }
     }
     if env_truthy("HERMES_AGENT_SKIP_CONTEXT_FILES") || env_truthy("HERMES_IGNORE_RULES") {
         config.agent.skip_context_files = true;
@@ -2715,6 +2735,21 @@ llm_providers:
     }
 
     #[test]
+    fn apply_patch_dotted_kanban_dispatch_gate() {
+        let mut c = GatewayConfig::default();
+        assert!(c.kanban.dispatch_in_gateway);
+
+        apply_user_config_patch(&mut c, "kanban.dispatch_in_gateway", "false").unwrap();
+
+        assert!(!c.kanban.dispatch_in_gateway);
+        assert_eq!(
+            user_config_field_display(&c, "kanban.dispatch_in_gateway").unwrap(),
+            "false"
+        );
+        assert!(apply_user_config_patch(&mut c, "kanban.dispatch_in_gateway", "maybe").is_err());
+    }
+
+    #[test]
     fn apply_patch_dotted_auxiliary_values() {
         let mut c = GatewayConfig::default();
         apply_user_config_patch(&mut c, "auxiliary.vision.provider", "openrouter").unwrap();
@@ -2873,6 +2908,23 @@ llm_providers:
         unsafe {
             std::env::remove_var("OPENROUTER_API_KEY");
             std::env::remove_var("MINIMAX_API_KEY");
+        }
+    }
+
+    #[test]
+    fn apply_env_overrides_supports_kanban_dispatch_gate() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        unsafe {
+            std::env::set_var("HERMES_KANBAN_DISPATCH_IN_GATEWAY", "false");
+        }
+
+        let mut cfg = GatewayConfig::default();
+        apply_env_overrides(&mut cfg);
+        assert!(!cfg.kanban.dispatch_in_gateway);
+
+        unsafe {
+            std::env::remove_var("HERMES_KANBAN_DISPATCH_IN_GATEWAY");
         }
     }
 

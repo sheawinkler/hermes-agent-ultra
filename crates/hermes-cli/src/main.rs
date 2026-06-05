@@ -2767,6 +2767,7 @@ async fn run_gateway(
                 display: config.display.clone(),
                 service_tier: config.agent.normalized_service_tier(),
                 quick_commands: config.quick_commands.clone(),
+                kanban_dispatch_in_gateway: config.kanban.dispatch_in_gateway,
                 ..RuntimeGatewayConfig::default()
             };
             let session_manager = Arc::new(SessionManager::new(config.session.clone()));

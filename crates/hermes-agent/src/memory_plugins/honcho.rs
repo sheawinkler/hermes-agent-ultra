@@ -105,6 +105,7 @@ struct HonchoConfig {
     runtime_peer_prefix: String,
     timeout_secs: f64,
     endpoints: HashMap<String, String>,
+    host_had_explicit_api_key: bool,
 }
 
 impl HonchoConfig {
@@ -153,6 +154,7 @@ impl HonchoConfig {
             runtime_peer_prefix: String::new(),
             timeout_secs,
             endpoints,
+            host_had_explicit_api_key: false,
         }
     }
 
@@ -165,14 +167,21 @@ impl HonchoConfig {
         if let Ok(content) = std::fs::read_to_string(&config_path) {
             if let Ok(raw) = serde_json::from_str::<Value>(&content) {
                 Self::apply_config_value(&mut config, &raw);
-                if let Some(host_block) = raw.get("hosts").and_then(|v| v.get(&host)) {
+                if let Some(host_block) = honcho_host_block(&raw, &host) {
+                    config.host_had_explicit_api_key = value_has_nonempty_api_key(host_block);
                     Self::apply_config_value(&mut config, host_block);
                 }
             }
         }
-        config.base_url = config.base_url.trim_end_matches('/').to_string();
+        config.base_url = strip_honcho_base_url_version(&config.base_url);
         if config.base_url.is_empty() {
             config.base_url = DEFAULT_BASE_URL.to_string();
+        }
+        if honcho_base_url_is_loopback(&config.base_url) && !config.host_had_explicit_api_key {
+            // Top-level API keys are usually cloud credentials. Do not send
+            // them to a no-auth loopback Honcho unless hosts.<host>.apiKey
+            // opted into local JWT/bearer auth.
+            config.api_key.clear();
         }
         config
     }
@@ -278,14 +287,83 @@ fn active_host() -> String {
         }
     }
     let profile = std::env::var("HERMES_PROFILE").unwrap_or_default();
-    let profile = profile.trim();
-    if profile.is_empty() || matches!(profile, "default" | "custom") {
-        HOST.to_string()
-    } else if profile == HOST || profile.starts_with("hermes.") {
-        profile.to_string()
-    } else {
-        format!("{HOST}.{profile}")
+    profile_host_key(Some(profile.trim()))
+}
+
+fn profile_host_key(profile: Option<&str>) -> String {
+    let Some(profile) = profile.map(str::trim).filter(|profile| !profile.is_empty()) else {
+        return HOST.to_string();
+    };
+    if matches!(profile, "default" | "custom" | HOST) {
+        return HOST.to_string();
     }
+    let sanitized = profile
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    format!(
+        "{HOST}_{}",
+        if sanitized.is_empty() {
+            "profile"
+        } else {
+            &sanitized
+        }
+    )
+}
+
+fn legacy_profile_host_key(host: &str) -> Option<String> {
+    let suffix = host.strip_prefix(&format!("{HOST}_"))?;
+    if suffix.trim().is_empty() {
+        None
+    } else {
+        Some(format!("{HOST}.{suffix}"))
+    }
+}
+
+fn honcho_host_block<'a>(raw: &'a Value, host: &str) -> Option<&'a Value> {
+    let hosts = raw.get("hosts").and_then(Value::as_object)?;
+    if let Some(block) = hosts.get(host) {
+        return Some(block);
+    }
+    legacy_profile_host_key(host).and_then(|legacy| hosts.get(&legacy))
+}
+
+fn value_has_nonempty_api_key(raw: &Value) -> bool {
+    raw.get("apiKey")
+        .or_else(|| raw.get("api_key"))
+        .and_then(Value::as_str)
+        .is_some_and(|key| !key.trim().is_empty())
+}
+
+fn strip_honcho_base_url_version(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    let Some((prefix, tail)) = trimmed.rsplit_once('/') else {
+        return trimmed.to_string();
+    };
+    let Some(digits) = tail.strip_prefix('v') else {
+        return trimmed.to_string();
+    };
+    if !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()) {
+        prefix.trim_end_matches('/').to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn honcho_base_url_is_loopback(base_url: &str) -> bool {
+    let normalized = base_url.trim().to_ascii_lowercase();
+    normalized.contains("localhost")
+        || normalized.contains("127.0.0.1")
+        || normalized.contains("[::1]")
+        || normalized.contains("://::1")
 }
 
 // ---------------------------------------------------------------------------
@@ -1141,7 +1219,80 @@ mod tests {
             runtime_peer_prefix: String::new(),
             timeout_secs: 12.0,
             endpoints: HashMap::new(),
+            host_had_explicit_api_key: false,
         }
+    }
+
+    #[test]
+    fn test_honcho_profile_host_key_uses_safe_underscore_form() {
+        assert_eq!(profile_host_key(None), "hermes");
+        assert_eq!(profile_host_key(Some("default")), "hermes");
+        assert_eq!(profile_host_key(Some("coder")), "hermes_coder");
+        assert_eq!(
+            profile_host_key(Some("research.team/v1")),
+            "hermes_research_team_v1"
+        );
+        assert_eq!(
+            legacy_profile_host_key("hermes_research_team").as_deref(),
+            Some("hermes.research_team")
+        );
+    }
+
+    #[test]
+    fn test_honcho_config_reads_legacy_dot_host_and_strips_version_suffix() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _profile = EnvGuard::set("HERMES_PROFILE", "coder");
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+        std::fs::write(
+            tmp.path().join("honcho.json"),
+            r#"{
+                "baseUrl":"https://honcho.internal/v3/",
+                "enabled":true,
+                "hosts":{
+                    "hermes.coder":{
+                        "apiKey":"local-jwt",
+                        "aiPeer":"coder-ai",
+                        "peerName":"operator"
+                    }
+                }
+            }"#,
+        )
+        .expect("write config");
+
+        let cfg = HonchoConfig::from_config_file(&tmp.path().to_string_lossy());
+        assert_eq!(cfg.base_url, "https://honcho.internal");
+        assert_eq!(cfg.api_key, "local-jwt");
+        assert_eq!(cfg.ai_peer, "coder-ai");
+        assert_eq!(cfg.peer_name.as_deref(), Some("operator"));
+        assert!(cfg.host_had_explicit_api_key);
+    }
+
+    #[test]
+    fn test_honcho_loopback_config_skips_top_level_cloud_key_without_host_jwt() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _profile = EnvGuard::remove("HERMES_PROFILE");
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+        std::fs::write(
+            tmp.path().join("honcho.json"),
+            r#"{
+                "baseUrl":"http://localhost:8000/v3",
+                "apiKey":"cloud-key",
+                "enabled":true,
+                "hosts":{"hermes":{"enabled":true}}
+            }"#,
+        )
+        .expect("write config");
+
+        let cfg = HonchoConfig::from_config_file(&tmp.path().to_string_lossy());
+        assert_eq!(cfg.base_url, "http://localhost:8000");
+        assert_eq!(cfg.api_key, "");
+        assert!(!cfg.host_had_explicit_api_key);
     }
 
     #[test]

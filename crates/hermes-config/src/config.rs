@@ -105,6 +105,10 @@ pub struct GatewayConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub quick_commands: BTreeMap<String, QuickCommandConfig>,
 
+    /// Kanban dispatcher/notifier behavior for multi-gateway deployments.
+    #[serde(default)]
+    pub kanban: KanbanConfig,
+
     /// Upstream-compatible TTS configuration block.
     ///
     /// Kept as structured JSON because upstream accepts provider-specific
@@ -176,6 +180,7 @@ impl Default for GatewayConfig {
             smart_model_routing: SmartModelRoutingConfig::default(),
             auxiliary: BTreeMap::new(),
             quick_commands: BTreeMap::new(),
+            kanban: KanbanConfig::default(),
             tts: serde_json::Value::Null,
             proxy: None,
             approval: ApprovalConfig::default(),
@@ -186,6 +191,21 @@ impl Default for GatewayConfig {
             profile: ProfileConfig::default(),
             agent: AgentLoopBehaviorConfig::default(),
             home_dir: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KanbanConfig {
+    /// When false, this process must not own Kanban dispatch/notifier polling.
+    #[serde(default = "default_true")]
+    pub dispatch_in_gateway: bool,
+}
+
+impl Default for KanbanConfig {
+    fn default() -> Self {
+        Self {
+            dispatch_in_gateway: true,
         }
     }
 }
@@ -1177,6 +1197,10 @@ fn is_false(value: &bool) -> bool {
 
 fn is_true(value: &bool) -> bool {
     *value
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_terminal_timeout() -> u64 {

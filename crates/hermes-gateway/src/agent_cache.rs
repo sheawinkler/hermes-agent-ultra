@@ -19,6 +19,8 @@ pub const CACHE_BUSTING_CONFIG_KEYS: &[(&str, &str)] = &[
     ("compression", "threshold"),
     ("compression", "target_ratio"),
     ("compression", "protect_last_n"),
+    ("memory", "provider"),
+    ("kanban", "dispatch_in_gateway"),
 ];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -429,7 +431,9 @@ mod tests {
     fn cache_busting_config_reads_documented_keys_and_missing_nulls() {
         let cfg = serde_json::json!({
             "model": {"context_length": 272000, "max_tokens": 4096},
-            "compression": {"enabled": false, "threshold": 0.6, "target_ratio": 0.3, "protect_last_n": 25, "ignored": true}
+            "compression": {"enabled": false, "threshold": 0.6, "target_ratio": 0.3, "protect_last_n": 25, "ignored": true},
+            "memory": {"provider": "honcho"},
+            "kanban": {"dispatch_in_gateway": false}
         });
         let out = extract_cache_busting_config(Some(&cfg), Some(123));
         assert_eq!(out["model.context_length"], Value::from(272000));
@@ -438,6 +442,8 @@ mod tests {
         assert_eq!(out["compression.threshold"], Value::from(0.6));
         assert_eq!(out["compression.target_ratio"], Value::from(0.3));
         assert_eq!(out["compression.protect_last_n"], Value::from(25));
+        assert_eq!(out["memory.provider"], Value::from("honcho"));
+        assert_eq!(out["kanban.dispatch_in_gateway"], Value::from(false));
         assert_eq!(out["tools.registry_generation"], Value::from(123));
 
         let missing = extract_cache_busting_config(None, None);

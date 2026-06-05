@@ -12,6 +12,8 @@ const KANBAN_SCHEMA_VERSION: u32 = 1;
 const DEFAULT_BOARD_ID: &str = "main";
 const CONTEXTLATTICE_DEFAULT_ORCHESTRATOR_URL: &str = "http://127.0.0.1:8075";
 const CONTEXTLATTICE_KANBAN_FILE: &str = "notes/hermes-kanban.md";
+const KANBAN_ATTACHMENTS_ENV: &str = "HERMES_KANBAN_ATTACHMENTS_ROOT";
+const DEFAULT_GOAL_MAX_TURNS: u32 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -63,6 +65,25 @@ pub struct KanbanTask {
     pub updated_at: String,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<KanbanAttachment>,
+    #[serde(default)]
+    pub goal_mode: bool,
+    #[serde(default)]
+    pub goal_max_turns: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KanbanAttachment {
+    pub id: String,
+    pub filename: String,
+    pub stored_path: String,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    pub size: u64,
+    #[serde(default)]
+    pub uploaded_by: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +128,8 @@ pub struct NewKanbanTaskInput {
     pub assignee: Option<String>,
     pub description: Option<String>,
     pub depends_on: Vec<String>,
+    pub goal_mode: bool,
+    pub goal_max_turns: Option<u32>,
 }
 
 impl Default for KanbanStore {
@@ -264,6 +287,9 @@ pub fn add_task(board: &mut KanbanBoard, input: NewKanbanTaskInput) -> KanbanTas
         updated_at: now.clone(),
         started_at: (input.lane == KanbanLane::Doing).then_some(now.clone()),
         completed_at: (input.lane == KanbanLane::Done).then_some(now),
+        attachments: Vec::new(),
+        goal_mode: input.goal_mode,
+        goal_max_turns: input.goal_max_turns,
     };
     board.updated_at = now_rfc3339();
     board.tasks.push(task.clone());
@@ -324,6 +350,302 @@ pub fn claim_task(task: &mut KanbanTask, assignee: Option<String>) {
         task.started_at = Some(now_rfc3339());
     }
     task.updated_at = now_rfc3339();
+}
+
+pub fn attachments_root(board: &KanbanBoard) -> PathBuf {
+    if let Ok(override_root) = std::env::var(KANBAN_ATTACHMENTS_ENV) {
+        let trimmed = override_root.trim();
+        if !trimmed.is_empty() {
+            return expand_tilde_path(trimmed);
+        }
+    }
+    hermes_config::hermes_home()
+        .join(KANBAN_STATE_DIR)
+        .join("attachments")
+        .join(slugify_board_id(&board.id))
+}
+
+pub fn task_attachments_dir(board: &KanbanBoard, task_id: &str) -> PathBuf {
+    attachments_root(board).join(sanitize_path_segment(task_id))
+}
+
+pub fn add_attachment_to_task(
+    board: &mut KanbanBoard,
+    task_ref: &str,
+    source_path: impl AsRef<Path>,
+    uploaded_by: Option<String>,
+) -> Result<KanbanAttachment, AgentError> {
+    let task_idx = board
+        .tasks
+        .iter()
+        .position(|task| {
+            task.id.eq_ignore_ascii_case(task_ref) || task.title.eq_ignore_ascii_case(task_ref)
+        })
+        .ok_or_else(|| AgentError::Config(format!("Task not found: {task_ref}")))?;
+    let source = expand_tilde_path(source_path.as_ref().to_string_lossy().as_ref());
+    let metadata = std::fs::metadata(&source).map_err(|e| {
+        AgentError::Io(format!(
+            "read attachment {} failed: {}",
+            source.display(),
+            e
+        ))
+    })?;
+    if !metadata.is_file() {
+        return Err(AgentError::Config(format!(
+            "Attachment source is not a file: {}",
+            source.display()
+        )));
+    }
+    let raw_name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| AgentError::Config("attachment filename is required".to_string()))?;
+    let safe_name = sanitize_filename(raw_name);
+    if safe_name.is_empty() {
+        return Err(AgentError::Config(
+            "attachment filename is required".to_string(),
+        ));
+    }
+
+    let task_id = board.tasks[task_idx].id.clone();
+    let dest_dir = task_attachments_dir(board, &task_id);
+    std::fs::create_dir_all(&dest_dir)
+        .map_err(|e| AgentError::Io(format!("create {} failed: {}", dest_dir.display(), e)))?;
+    let dest = unique_attachment_path(&dest_dir, &safe_name);
+    std::fs::copy(&source, &dest).map_err(|e| {
+        AgentError::Io(format!(
+            "copy attachment {} -> {} failed: {}",
+            source.display(),
+            dest.display(),
+            e
+        ))
+    })?;
+    let stored_path = dest.canonicalize().unwrap_or(dest);
+    let stored_name = stored_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&safe_name)
+        .to_string();
+    let attachment = KanbanAttachment {
+        id: next_attachment_id(&board.tasks[task_idx]),
+        filename: stored_name,
+        stored_path: stored_path.display().to_string(),
+        content_type: guess_content_type(&source),
+        size: metadata.len(),
+        uploaded_by: normalize_optional(uploaded_by),
+        created_at: now_rfc3339(),
+    };
+    let now = now_rfc3339();
+    board.tasks[task_idx].attachments.push(attachment.clone());
+    board.tasks[task_idx].updated_at = now.clone();
+    board.updated_at = now;
+    Ok(attachment)
+}
+
+pub fn remove_attachment_from_task(
+    board: &mut KanbanBoard,
+    task_ref: &str,
+    attachment_ref: &str,
+) -> Result<Option<KanbanAttachment>, AgentError> {
+    let Some(task_idx) = board.tasks.iter().position(|task| {
+        task.id.eq_ignore_ascii_case(task_ref) || task.title.eq_ignore_ascii_case(task_ref)
+    }) else {
+        return Ok(None);
+    };
+    let Some(att_idx) = board.tasks[task_idx]
+        .attachments
+        .iter()
+        .position(|attachment| {
+            attachment.id.eq_ignore_ascii_case(attachment_ref)
+                || attachment.filename.eq_ignore_ascii_case(attachment_ref)
+        })
+    else {
+        return Ok(None);
+    };
+    let attachment = board.tasks[task_idx].attachments.remove(att_idx);
+    let stored = PathBuf::from(&attachment.stored_path);
+    if stored.is_file() {
+        let _ = std::fs::remove_file(&stored);
+    }
+    let now = now_rfc3339();
+    board.tasks[task_idx].updated_at = now.clone();
+    board.updated_at = now;
+    Ok(Some(attachment))
+}
+
+pub fn build_worker_context(task: &KanbanTask) -> String {
+    let mut lines = vec![format!("Execute Kanban task {}: {}", task.id, task.title)];
+    if let Some(desc) = task
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        lines.push(format!("Details: {desc}"));
+    }
+    if !task.depends_on.is_empty() {
+        lines.push(format!("Dependencies: {}", task.depends_on.join(", ")));
+    }
+    if !task.attachments.is_empty() {
+        lines.push("Attachments:".to_string());
+        lines.push(
+            "Read attached files with file or terminal tools at these absolute paths:".to_string(),
+        );
+        for attachment in &task.attachments {
+            let size_kb = attachment.size.div_ceil(1024);
+            let content_type = attachment
+                .content_type
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!(", {s}"))
+                .unwrap_or_default();
+            let size = if size_kb == 0 {
+                String::new()
+            } else {
+                format!(", {size_kb} KB")
+            };
+            lines.push(format!(
+                "- {}{}{} -> {}",
+                attachment.filename, content_type, size, attachment.stored_path
+            ));
+        }
+    }
+    if task.goal_mode {
+        let max_turns = task.goal_max_turns.unwrap_or(DEFAULT_GOAL_MAX_TURNS);
+        lines.push(format!(
+            "Goal mode: enabled (max {max_turns} turns). Continue in this same work session until the task is genuinely done, then mark it done with a summary; if blocked, mark it blocked with the reason. Do not silently stop while work remains."
+        ));
+    }
+    lines.join("\n")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KanbanGoalLoopOutcome {
+    CompletedByWorker,
+    BlockedByWorker,
+    BlockedBudget,
+    Stopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KanbanGoalLoopResult {
+    pub outcome: KanbanGoalLoopOutcome,
+    pub turns_used: u32,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KanbanGoalJudgment {
+    Done(String),
+    Continue(String),
+}
+
+pub type KanbanGoalStatusFn<'a> = Box<dyn FnMut() -> KanbanLane + 'a>;
+pub type KanbanGoalJudgeFn<'a> = Box<dyn FnMut(&str, &str) -> KanbanGoalJudgment + 'a>;
+pub type KanbanGoalRunTurnFn<'a> = Box<dyn FnMut(&str) -> String + 'a>;
+pub type KanbanGoalBlockFn<'a> = Box<dyn FnMut(&str) + 'a>;
+
+pub struct KanbanGoalLoopCallbacks<'a> {
+    pub task_status: KanbanGoalStatusFn<'a>,
+    pub judge: KanbanGoalJudgeFn<'a>,
+    pub run_turn: KanbanGoalRunTurnFn<'a>,
+    pub block_task: KanbanGoalBlockFn<'a>,
+}
+
+pub fn run_kanban_goal_loop(
+    task_id: &str,
+    goal_text: &str,
+    first_response: &str,
+    max_turns: u32,
+    callbacks: KanbanGoalLoopCallbacks<'_>,
+) -> KanbanGoalLoopResult {
+    let KanbanGoalLoopCallbacks {
+        mut task_status,
+        mut judge,
+        mut run_turn,
+        mut block_task,
+    } = callbacks;
+    let max_turns = max_turns.max(1);
+    let mut turns_used = 1u32;
+    let mut last_response = first_response.to_string();
+    let mut nudged_to_finalize = false;
+
+    loop {
+        match task_status() {
+            KanbanLane::Done => {
+                return KanbanGoalLoopResult {
+                    outcome: KanbanGoalLoopOutcome::CompletedByWorker,
+                    turns_used,
+                    reason: "worker completed the task".to_string(),
+                };
+            }
+            KanbanLane::Blocked => {
+                return KanbanGoalLoopResult {
+                    outcome: KanbanGoalLoopOutcome::BlockedByWorker,
+                    turns_used,
+                    reason: "worker blocked the task".to_string(),
+                };
+            }
+            KanbanLane::Todo | KanbanLane::Doing => {}
+        }
+
+        let (prompt, reason) = match judge(goal_text, &last_response) {
+            KanbanGoalJudgment::Done(reason) => {
+                if nudged_to_finalize {
+                    let reason = format!(
+                        "Goal-mode worker output looked complete but task {task_id} never moved to done after finalize nudge: {reason}"
+                    );
+                    block_task(&reason);
+                    return KanbanGoalLoopResult {
+                        outcome: KanbanGoalLoopOutcome::BlockedBudget,
+                        turns_used,
+                        reason,
+                    };
+                }
+                nudged_to_finalize = true;
+                (
+                    format!(
+                        "[The kanban task appears complete, but it is still open]\nReason: {}\n\nMark task {} done with a concise summary, or block it with the remaining blocker.",
+                        truncate_for_prompt(&reason, 400),
+                        task_id
+                    ),
+                    reason,
+                )
+            }
+            KanbanGoalJudgment::Continue(reason) => (
+                format!(
+                    "[Continuing kanban goal-mode task {}]\nReason: {}\n\nTake the next concrete step toward completing the task. When finished, mark it done; if blocked, mark it blocked. Do not stop without changing task state.",
+                    task_id,
+                    truncate_for_prompt(&reason, 400)
+                ),
+                reason,
+            ),
+        };
+
+        if turns_used >= max_turns {
+            let reason = format!(
+                "Goal-mode worker exhausted its turn budget ({turns_used}/{max_turns}) without completing task {task_id}. Last judge reason: {}",
+                truncate_for_prompt(&reason, 300)
+            );
+            block_task(&reason);
+            return KanbanGoalLoopResult {
+                outcome: KanbanGoalLoopOutcome::BlockedBudget,
+                turns_used,
+                reason,
+            };
+        }
+
+        last_response = run_turn(&prompt);
+        turns_used = turns_used.saturating_add(1);
+
+        if last_response.trim().is_empty() {
+            return KanbanGoalLoopResult {
+                outcome: KanbanGoalLoopOutcome::Stopped,
+                turns_used,
+                reason: "worker returned empty response".to_string(),
+            };
+        }
+    }
 }
 
 pub fn archive_done(board: &mut KanbanBoard) -> usize {
@@ -477,6 +799,112 @@ fn slugify_board_id(raw: &str) -> String {
         }
     }
     out.trim_matches('-').to_string()
+}
+
+fn expand_tilde_path(raw: &str) -> PathBuf {
+    if raw == "~" {
+        return std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(raw));
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(raw)
+}
+
+fn sanitize_path_segment(raw: &str) -> String {
+    let sanitized = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('.')
+        .trim_matches('_')
+        .to_string();
+    if sanitized.is_empty() {
+        "item".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn sanitize_filename(raw: &str) -> String {
+    sanitize_path_segment(
+        Path::new(raw)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(raw),
+    )
+}
+
+fn unique_attachment_path(dir: &Path, filename: &str) -> PathBuf {
+    let base = Path::new(filename);
+    let stem = base
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("attachment");
+    let ext = base.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let first = dir.join(filename);
+    if !first.exists() {
+        return first;
+    }
+    for idx in 1..10_000 {
+        let candidate_name = if ext.is_empty() {
+            format!("{stem}-{idx}")
+        } else {
+            format!("{stem}-{idx}.{ext}")
+        };
+        let candidate = dir.join(candidate_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!("{}-{}", stem, uuid::Uuid::new_v4().simple()))
+}
+
+fn next_attachment_id(task: &KanbanTask) -> String {
+    let mut max_seen = 0u64;
+    for attachment in &task.attachments {
+        if let Some(raw) = attachment.id.strip_prefix("A-") {
+            if let Ok(value) = raw.parse::<u64>() {
+                max_seen = max_seen.max(value);
+            }
+        }
+    }
+    format!("A-{:04}", max_seen.saturating_add(1))
+}
+
+fn guess_content_type(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    let content_type = match ext.as_str() {
+        "txt" | "md" | "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "json" | "yaml" | "yml"
+        | "toml" => "text/plain",
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "csv" => "text/csv",
+        "html" | "htm" => "text/html",
+        _ => return None,
+    };
+    Some(content_type.to_string())
+}
+
+fn truncate_for_prompt(raw: &str, max_chars: usize) -> String {
+    let mut out = raw.chars().take(max_chars).collect::<String>();
+    if raw.chars().count() > max_chars {
+        out.push_str("...");
+    }
+    out
 }
 
 fn dedupe_strings(values: Vec<String>) -> Vec<String> {
@@ -651,6 +1079,8 @@ mod tests {
                     assignee: None,
                     description: None,
                     depends_on: vec![],
+                    goal_mode: false,
+                    goal_max_turns: None,
                 },
             );
             assert_eq!(task.id, "K-0001");
@@ -694,6 +1124,148 @@ mod tests {
             assert!(!res.attempted);
             std::env::remove_var("HERMES_KANBAN_CONTEXTLATTICE_SYNC");
         });
+    }
+
+    #[test]
+    fn attachments_copy_with_safe_unique_names_and_surface_in_worker_context() {
+        with_temp_home(|| {
+            let mut store = load_store().expect("load");
+            let board = ensure_board(&mut store, None);
+            let task = add_task(
+                board,
+                NewKanbanTaskInput {
+                    title: "Read source".to_string(),
+                    lane: KanbanLane::Todo,
+                    priority: 3,
+                    assignee: Some("worker".to_string()),
+                    description: Some("summarize attached file".to_string()),
+                    depends_on: vec![],
+                    goal_mode: false,
+                    goal_max_turns: None,
+                },
+            );
+            let source_dir = tempfile::tempdir().expect("source tempdir");
+            let source = source_dir.path().join("notes.txt");
+            std::fs::write(&source, "hello attachment").expect("write source");
+
+            let first =
+                add_attachment_to_task(board, &task.id, &source, Some("tester".to_string()))
+                    .expect("attach first");
+            let second =
+                add_attachment_to_task(board, &task.id, &source, None).expect("attach second");
+
+            assert_eq!(first.id, "A-0001");
+            assert_eq!(second.id, "A-0002");
+            assert_eq!(first.filename, "notes.txt");
+            assert_eq!(second.filename, "notes-1.txt");
+            assert!(Path::new(&first.stored_path).is_file());
+            assert!(Path::new(&second.stored_path).is_file());
+
+            let task = find_task_mut(board, &task.id).expect("task");
+            let context = build_worker_context(task);
+            assert!(context.contains("Attachments:"));
+            assert!(context.contains(&first.stored_path));
+            assert!(context.contains("notes-1.txt"));
+        });
+    }
+
+    #[test]
+    fn remove_attachment_deletes_row_and_blob() {
+        with_temp_home(|| {
+            let mut store = load_store().expect("load");
+            let board = ensure_board(&mut store, None);
+            let task = add_task(
+                board,
+                NewKanbanTaskInput {
+                    title: "Task".to_string(),
+                    lane: KanbanLane::Todo,
+                    priority: 3,
+                    assignee: None,
+                    description: None,
+                    depends_on: vec![],
+                    goal_mode: false,
+                    goal_max_turns: None,
+                },
+            );
+            let source_dir = tempfile::tempdir().expect("source tempdir");
+            let source = source_dir.path().join("data.pdf");
+            std::fs::write(&source, b"%PDF-1.4").expect("write source");
+            let attachment =
+                add_attachment_to_task(board, &task.id, &source, None).expect("attach");
+            let stored = PathBuf::from(&attachment.stored_path);
+
+            let removed =
+                remove_attachment_from_task(board, &task.id, &attachment.id).expect("remove");
+            assert_eq!(removed.expect("removed").id, attachment.id);
+            assert!(!stored.exists());
+            assert!(find_task_mut(board, &task.id)
+                .expect("task")
+                .attachments
+                .is_empty());
+        });
+    }
+
+    #[test]
+    fn goal_mode_context_and_loop_cover_continue_complete_and_budget() {
+        let task = KanbanTask {
+            id: "K-0007".to_string(),
+            title: "Ship feature".to_string(),
+            lane: KanbanLane::Doing,
+            priority: 1,
+            assignee: Some("worker".to_string()),
+            description: Some("must pass tests".to_string()),
+            depends_on: vec!["K-0001".to_string()],
+            blocked_reason: None,
+            background_job_id: None,
+            run_summary: None,
+            created_at: now_rfc3339(),
+            updated_at: now_rfc3339(),
+            started_at: Some(now_rfc3339()),
+            completed_at: None,
+            attachments: Vec::new(),
+            goal_mode: true,
+            goal_max_turns: Some(3),
+        };
+        let context = build_worker_context(&task);
+        assert!(context.contains("Goal mode: enabled (max 3 turns)"));
+        assert!(context.contains("Dependencies: K-0001"));
+
+        let mut statuses = [KanbanLane::Doing, KanbanLane::Done].into_iter();
+        let mut prompts = Vec::new();
+        let result = run_kanban_goal_loop(
+            &task.id,
+            "Ship feature",
+            "started",
+            5,
+            KanbanGoalLoopCallbacks {
+                task_status: Box::new(|| statuses.next().unwrap_or(KanbanLane::Done)),
+                judge: Box::new(|_, _| KanbanGoalJudgment::Continue("needs more work".to_string())),
+                run_turn: Box::new(|prompt: &str| {
+                    prompts.push(prompt.to_string());
+                    "continued".to_string()
+                }),
+                block_task: Box::new(|_| panic!("should not block")),
+            },
+        );
+        assert_eq!(result.outcome, KanbanGoalLoopOutcome::CompletedByWorker);
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains("Continuing kanban goal-mode task"));
+
+        let mut blocked_reason = String::new();
+        let budget = run_kanban_goal_loop(
+            &task.id,
+            "Ship feature",
+            "started",
+            2,
+            KanbanGoalLoopCallbacks {
+                task_status: Box::new(|| KanbanLane::Doing),
+                judge: Box::new(|_, _| KanbanGoalJudgment::Continue("not done".to_string())),
+                run_turn: Box::new(|_| "still going".to_string()),
+                block_task: Box::new(|reason: &str| blocked_reason = reason.to_string()),
+            },
+        );
+        assert_eq!(budget.outcome, KanbanGoalLoopOutcome::BlockedBudget);
+        assert!(blocked_reason.contains("turn budget"));
     }
 
     fn corrupt_store_backups(parent: &Path) -> Vec<PathBuf> {

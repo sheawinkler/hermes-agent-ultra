@@ -130,6 +130,7 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
                 smart_model_routing: SmartModelRoutingConfig::default(),
                 auxiliary: Default::default(),
                 quick_commands: Default::default(),
+                kanban: Default::default(),
                 tts: serde_json::Value::Null,
                 proxy: None,
                 approval: ApprovalConfig::default(),

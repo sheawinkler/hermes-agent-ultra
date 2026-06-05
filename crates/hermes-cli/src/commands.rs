@@ -49,8 +49,9 @@ use crate::alpha_runtime::{
 };
 use crate::app::{build_runtime_cron_scheduler, App, PetDock, PetSettings};
 use crate::kanban::{
-    add_task, archive_done, claim_task, create_or_select_board, ensure_board, find_task_mut,
-    lane_counts, load_store, maybe_checkpoint_to_contextlattice, move_task, save_store,
+    add_attachment_to_task, add_task, archive_done, build_worker_context, claim_task,
+    create_or_select_board, ensure_board, find_task_mut, lane_counts, load_store,
+    maybe_checkpoint_to_contextlattice, move_task, remove_attachment_from_task, save_store,
     set_blocked, KanbanActionInput, KanbanBoard, KanbanLane, NewKanbanTaskInput,
 };
 use crate::model_switch::{
@@ -14775,7 +14776,7 @@ fn render_kanban_status(board: &KanbanBoard) -> String {
 fn parse_kanban_add(args: &[&str]) -> Result<NewKanbanTaskInput, AgentError> {
     if args.is_empty() {
         return Err(AgentError::Config(
-            "Usage: /kanban add <title> [--lane <todo|doing|blocked|done>] [--priority <1..5>] [--assignee <name>] [--depends K-0001,K-0002] [--desc <text>]".to_string(),
+            "Usage: /kanban add <title> [--lane <todo|doing|blocked|done>] [--priority <1..5>] [--assignee <name>] [--depends K-0001,K-0002] [--desc <text>] [--goal] [--goal-max-turns N]".to_string(),
         ));
     }
     let mut lane = KanbanLane::Todo;
@@ -14783,6 +14784,8 @@ fn parse_kanban_add(args: &[&str]) -> Result<NewKanbanTaskInput, AgentError> {
     let mut assignee: Option<String> = None;
     let mut depends_on: Vec<String> = Vec::new();
     let mut description: Option<String> = None;
+    let mut goal_mode = false;
+    let mut goal_max_turns: Option<u32> = None;
     let mut title_parts: Vec<String> = Vec::new();
 
     let mut idx = 0usize;
@@ -14829,6 +14832,26 @@ fn parse_kanban_add(args: &[&str]) -> Result<NewKanbanTaskInput, AgentError> {
         } else if token == "--desc" || token == "--description" {
             idx = idx.saturating_add(1);
             description = args.get(idx).map(|s| s.to_string());
+        } else if token == "--goal" || token == "--goal-mode" {
+            goal_mode = true;
+        } else if token == "--goal-max-turns" {
+            idx = idx.saturating_add(1);
+            let Some(raw) = args.get(idx) else {
+                return Err(AgentError::Config(
+                    "Missing value for --goal-max-turns".to_string(),
+                ));
+            };
+            let turns = raw.parse::<u32>().map_err(|_| {
+                AgentError::Config(format!(
+                    "Invalid goal max turns `{raw}`. Expected positive integer."
+                ))
+            })?;
+            if turns == 0 {
+                return Err(AgentError::Config(
+                    "Invalid goal max turns `0`. Expected positive integer.".to_string(),
+                ));
+            }
+            goal_max_turns = Some(turns);
         } else {
             title_parts.push(token.to_string());
         }
@@ -14847,6 +14870,8 @@ fn parse_kanban_add(args: &[&str]) -> Result<NewKanbanTaskInput, AgentError> {
         assignee,
         description,
         depends_on,
+        goal_mode,
+        goal_max_turns,
     })
 }
 
@@ -14921,7 +14946,7 @@ pub fn run_kanban_command(args: &[&str]) -> Result<String, AgentError> {
         }
         "add" => {
             let input = parse_kanban_add(args.get(1..).unwrap_or_default())?;
-            let (task_id, task_lane, task_priority, task_title, board_snapshot) = {
+            let (task_id, task_lane, task_priority, task_title, task_goal_mode, board_snapshot) = {
                 let board = ensure_board(&mut store, None);
                 let task = add_task(board, input);
                 (
@@ -14929,6 +14954,7 @@ pub fn run_kanban_command(args: &[&str]) -> Result<String, AgentError> {
                     task.lane,
                     task.priority,
                     task.title.clone(),
+                    task.goal_mode,
                     board.clone(),
                 )
             };
@@ -14943,13 +14969,121 @@ pub fn run_kanban_command(args: &[&str]) -> Result<String, AgentError> {
                 },
             );
             Ok(format!(
-                "Added task {} [{}] p{}: {}\n{}",
+                "Added task {} [{}] p{}{}: {}\n{}",
                 task_id,
                 task_lane.as_str(),
                 task_priority,
+                if task_goal_mode { " goal" } else { "" },
                 task_title,
                 checkpoint.detail
             ))
+        }
+        "attach" | "attachment" => {
+            let Some(task_ref) = args.get(1).copied() else {
+                return Ok("Usage: kanban attach <task-id|title> <file-path>".to_string());
+            };
+            let Some(path) = args.get(2).copied() else {
+                return Ok("Usage: kanban attach <task-id|title> <file-path>".to_string());
+            };
+            let (task_id, attachment, board_snapshot) = {
+                let board = ensure_board(&mut store, None);
+                let attachment = add_attachment_to_task(
+                    board,
+                    task_ref,
+                    path,
+                    std::env::var("HERMES_PROFILE").ok(),
+                )?;
+                let task_id = find_task_mut(board, task_ref)
+                    .map(|task| task.id.clone())
+                    .unwrap_or_else(|| task_ref.to_string());
+                (task_id, attachment, board.clone())
+            };
+            save_store(&store)?;
+            let checkpoint = maybe_checkpoint_to_contextlattice(
+                &board_snapshot,
+                KanbanActionInput {
+                    action: "attach".to_string(),
+                    task_id: Some(task_id.clone()),
+                    lane: None,
+                    summary: format!(
+                        "attachment_id={} filename={} path={}",
+                        attachment.id, attachment.filename, attachment.stored_path
+                    ),
+                },
+            );
+            Ok(format!(
+                "Attached {} to {} as {} ({})\nPath: {}\n{}",
+                attachment.filename,
+                task_id,
+                attachment.id,
+                attachment.size,
+                attachment.stored_path,
+                checkpoint.detail
+            ))
+        }
+        "attachments" => {
+            let Some(task_ref) = args.get(1).copied() else {
+                return Ok("Usage: kanban attachments <task-id|title>".to_string());
+            };
+            let board = ensure_board(&mut store, None);
+            let Some(task) = board.tasks.iter().find(|task| {
+                task.id.eq_ignore_ascii_case(task_ref) || task.title.eq_ignore_ascii_case(task_ref)
+            }) else {
+                return Ok(format!("Task not found: {task_ref}"));
+            };
+            if task.attachments.is_empty() {
+                return Ok(format!("No attachments for {}.", task.id));
+            }
+            let mut out = format!("Attachments for {}:\n", task.id);
+            for attachment in &task.attachments {
+                let _ = writeln!(
+                    &mut out,
+                    "- {} {} size={} path={}",
+                    attachment.id, attachment.filename, attachment.size, attachment.stored_path
+                );
+            }
+            Ok(out.trim_end().to_string())
+        }
+        "detach" | "remove-attachment" => {
+            let Some(task_ref) = args.get(1).copied() else {
+                return Ok(
+                    "Usage: kanban detach <task-id|title> <attachment-id|filename>".to_string(),
+                );
+            };
+            let Some(attachment_ref) = args.get(2).copied() else {
+                return Ok(
+                    "Usage: kanban detach <task-id|title> <attachment-id|filename>".to_string(),
+                );
+            };
+            let removed = {
+                let board = ensure_board(&mut store, None);
+                remove_attachment_from_task(board, task_ref, attachment_ref)?
+                    .map(|attachment| (attachment, board.clone()))
+            };
+            if let Some((attachment, board_snapshot)) = removed {
+                save_store(&store)?;
+                let checkpoint = maybe_checkpoint_to_contextlattice(
+                    &board_snapshot,
+                    KanbanActionInput {
+                        action: "detach".to_string(),
+                        task_id: Some(task_ref.to_string()),
+                        lane: None,
+                        summary: format!(
+                            "attachment_id={} filename={}",
+                            attachment.id, attachment.filename
+                        ),
+                    },
+                );
+                Ok(format!(
+                    "Removed attachment {} ({})\n{}",
+                    attachment.id, attachment.filename, checkpoint.detail
+                ))
+            } else {
+                Ok(format!(
+                    "Attachment not found: task={} attachment={}",
+                    task_ref, attachment_ref
+                ))
+            }
         }
         "move" => {
             let Some(task_ref) = args.get(1).copied() else {
@@ -15148,18 +15282,7 @@ pub fn run_kanban_command(args: &[&str]) -> Result<String, AgentError> {
                 let board = ensure_board(&mut store, None);
                 if let Some(task) = find_task_mut(board, task_ref) {
                     let task_message = if override_msg.trim().is_empty() {
-                        let mut prompt = format!("Execute Kanban task {}: {}", task.id, task.title);
-                        if let Some(desc) = task.description.as_deref() {
-                            let _ = write!(&mut prompt, "\nDetails: {}", desc.trim());
-                        }
-                        if !task.depends_on.is_empty() {
-                            let _ = write!(
-                                &mut prompt,
-                                "\nDependencies: {}",
-                                task.depends_on.join(", ")
-                            );
-                        }
-                        prompt
+                        build_worker_context(task)
                     } else {
                         override_msg.clone()
                     };
@@ -15225,7 +15348,7 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
 }
 
 fn kanban_help_text() -> &'static str {
-    "Kanban commands:\n  hermes kanban status [board]\n  hermes kanban boards\n  hermes kanban init <name> [project-path]\n  hermes kanban use <name-or-id>\n  hermes kanban add <title> [--lane <todo|doing|blocked|done>] [--priority <1..5>] [--assignee <name>] [--depends K-0001,K-0002] [--desc <text>]\n  hermes kanban move <task-id|title> <todo|doing|blocked|done> [summary]\n  hermes kanban claim <task-id|title> [assignee]\n  hermes kanban block <task-id|title> <reason>\n  hermes kanban done <task-id|title> [summary]\n  hermes kanban archive-done\n  hermes kanban dispatch <task-id|title> [background-task-override]\n  hermes kanban sync\n\nInteractive alias: /kanban <command>"
+    "Kanban commands:\n  hermes kanban status [board]\n  hermes kanban boards\n  hermes kanban init <name> [project-path]\n  hermes kanban use <name-or-id>\n  hermes kanban add <title> [--lane <todo|doing|blocked|done>] [--priority <1..5>] [--assignee <name>] [--depends K-0001,K-0002] [--desc <text>] [--goal] [--goal-max-turns N]\n  hermes kanban attach <task-id|title> <file-path>\n  hermes kanban attachments <task-id|title>\n  hermes kanban detach <task-id|title> <attachment-id|filename>\n  hermes kanban move <task-id|title> <todo|doing|blocked|done> [summary]\n  hermes kanban claim <task-id|title> [assignee]\n  hermes kanban block <task-id|title> <reason>\n  hermes kanban done <task-id|title> [summary]\n  hermes kanban archive-done\n  hermes kanban dispatch <task-id|title> [background-task-override]\n  hermes kanban sync\n\nInteractive alias: /kanban <command>"
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24203,15 +24326,33 @@ fn active_honcho_host_key_for_cli() -> String {
     let profile = profile.trim();
     if profile.is_empty() || matches!(profile, "default" | "custom") {
         "hermes".to_string()
-    } else if profile == "hermes" || profile.starts_with("hermes.") {
-        profile.to_string()
     } else {
-        format!("hermes.{profile}")
+        let sanitized = profile
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+            .trim_matches('_')
+            .to_string();
+        format!(
+            "hermes_{}",
+            if sanitized.is_empty() {
+                "profile"
+            } else {
+                sanitized.as_str()
+            }
+        )
     }
 }
 
 fn honcho_ai_peer_for_host(host: &str) -> String {
     host.strip_prefix("hermes.")
+        .or_else(|| host.strip_prefix("hermes_"))
         .filter(|profile| !profile.trim().is_empty())
         .unwrap_or(host)
         .to_string()
@@ -27053,7 +27194,7 @@ mod tests {
     fn memory_honcho_setup_config_keeps_gateway_aliases_for_hybrid_shape() {
         let aliases = parse_honcho_aliases("telegram-1=operator, discord-2=operator");
         let cfg = build_honcho_setup_config(HonchoSetupConfigInput {
-            host: "hermes.coder",
+            host: "hermes_coder",
             deployment: "cloud",
             api_key: "cloud-key",
             base_url: "",
@@ -27064,16 +27205,40 @@ mod tests {
         });
 
         assert_eq!(cfg["apiKey"], "cloud-key");
-        assert_eq!(cfg["hosts"]["hermes.coder"]["aiPeer"], "coder");
-        assert_eq!(cfg["hosts"]["hermes.coder"]["pinUserPeer"], false);
+        assert_eq!(cfg["hosts"]["hermes_coder"]["aiPeer"], "coder");
+        assert_eq!(cfg["hosts"]["hermes_coder"]["pinUserPeer"], false);
         assert_eq!(
-            cfg["hosts"]["hermes.coder"]["userPeerAliases"]["telegram-1"],
+            cfg["hosts"]["hermes_coder"]["userPeerAliases"]["telegram-1"],
             "operator"
         );
         assert_eq!(
-            cfg["hosts"]["hermes.coder"]["runtimePeerPrefix"],
+            cfg["hosts"]["hermes_coder"]["runtimePeerPrefix"],
             "gateway_"
         );
+    }
+
+    #[test]
+    fn memory_honcho_profile_host_key_is_honcho_safe() {
+        let _guard = env_test_lock();
+        let prev_profile = std::env::var("HERMES_PROFILE").ok();
+        let prev_host = std::env::var("HERMES_HONCHO_HOST").ok();
+        std::env::set_var("HERMES_PROFILE", "research.team/v1");
+        std::env::remove_var("HERMES_HONCHO_HOST");
+
+        assert_eq!(active_honcho_host_key_for_cli(), "hermes_research_team_v1");
+        assert_eq!(
+            honcho_ai_peer_for_host("hermes_research_team_v1"),
+            "research_team_v1"
+        );
+
+        match prev_profile {
+            Some(value) => std::env::set_var("HERMES_PROFILE", value),
+            None => std::env::remove_var("HERMES_PROFILE"),
+        }
+        match prev_host {
+            Some(value) => std::env::set_var("HERMES_HONCHO_HOST", value),
+            None => std::env::remove_var("HERMES_HONCHO_HOST"),
+        }
     }
 
     #[test]
@@ -27742,6 +27907,8 @@ mod tests {
         assert_eq!(input.title, "Ship kanban");
         assert_eq!(input.lane, KanbanLane::Todo);
         assert_eq!(input.priority, 3);
+        assert!(!input.goal_mode);
+        assert_eq!(input.goal_max_turns, None);
     }
 
     #[test]
@@ -27758,6 +27925,9 @@ mod tests {
             "K-0001,K-0002",
             "--desc",
             "note",
+            "--goal",
+            "--goal-max-turns",
+            "7",
         ])
         .expect("parse");
         assert_eq!(input.title, "Task");
@@ -27766,6 +27936,8 @@ mod tests {
         assert_eq!(input.assignee.as_deref(), Some("runner"));
         assert_eq!(input.depends_on, vec!["K-0001", "K-0002"]);
         assert_eq!(input.description.as_deref(), Some("note"));
+        assert!(input.goal_mode);
+        assert_eq!(input.goal_max_turns, Some(7));
     }
 
     #[test]

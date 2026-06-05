@@ -631,6 +631,22 @@
     "32032e1e2d9b": {
       "disposition": "superseded",
       "notes": "upstream SimpleX websocket reconnect delta is Python plugin-only in this fork; no Rust SimpleX platform adapter exists under crates, so there is no Rust runtime surface to port under the Rust-only parity policy."
+    },
+    "827ce602dbed": {
+      "disposition": "ported",
+      "notes": "Rust Honcho runtime now strips trailing /vN baseUrl suffixes, derives underscore-safe profile host keys while reading legacy dot-form host blocks, skips loopback auth unless hosts.<host>.apiKey explicitly opts in, and setup/config writes remain owner-only with targeted regression coverage."
+    },
+    "b47cb1bbf279": {
+      "disposition": "ported",
+      "notes": "Rust Kanban JSON store now supports per-task file attachments with path-safe copy, unique filenames, metadata, list/remove commands, worker-context absolute path surfacing, and regression tests for copy/collision/delete/context behavior."
+    },
+    "0cd7d54b0010": {
+      "disposition": "ported",
+      "notes": "Rust Kanban tasks now carry goal_mode and goal_max_turns, CLI add parses --goal/--goal-max-turns, dispatch worker context emits goal-loop instructions, and a callback-injected Rust goal loop covers continue, completion, finalize, and budget-block behavior."
+    },
+    "a5aecf26fa21": {
+      "disposition": "ported",
+      "notes": "Rust config/runtime gateway surface now exposes kanban.dispatch_in_gateway with HERMES_KANBAN_DISPATCH_IN_GATEWAY env override, propagates it into GatewayConfig, and includes it in gateway agent cache-busting signatures; Rust has no separate Kanban DB notifier loop to gate."
     }
   },
   "subject_patterns": [

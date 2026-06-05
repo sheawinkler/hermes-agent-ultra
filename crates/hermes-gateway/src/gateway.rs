@@ -72,6 +72,10 @@ pub struct GatewayConfig {
     /// User-defined slash commands that bypass the agent loop.
     #[serde(default)]
     pub quick_commands: BTreeMap<String, QuickCommandConfig>,
+
+    /// Whether this gateway process owns Kanban dispatch/notifier duties.
+    #[serde(default = "default_true")]
+    pub kanban_dispatch_in_gateway: bool,
 }
 
 impl Default for GatewayConfig {
@@ -85,6 +89,7 @@ impl Default for GatewayConfig {
             display: DisplayConfig::default(),
             service_tier: None,
             quick_commands: BTreeMap::new(),
+            kanban_dispatch_in_gateway: true,
         }
     }
 }
