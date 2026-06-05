@@ -29,7 +29,7 @@ mod default_models {
     pub const ZAI: &str = "glm-4.5-flash";
     pub const KIMI: &str = "kimi-k2-turbo-preview";
     pub const MINIMAX: &str = "MiniMax-M2.7";
-    pub const GEMINI: &str = "gemini-3-flash-preview";
+    pub const GEMINI: &str = "gemini-3.5-flash";
     pub const GMI: &str = "google/gemini-3.1-flash-lite-preview";
     pub const TENCENT_TOKENHUB: &str = "hy3-preview";
 }
@@ -729,7 +729,20 @@ mod tests {
         std::env::remove_var("DEEPSEEK_API_KEY");
         std::env::remove_var("OPENROUTER_API_KEY");
 
-        // Scenario 6: full chain, deterministic order.
+        // Scenario 6: Gemini direct-key auxiliary default uses the renamed model.
+        std::env::set_var("GEMINI_API_KEY", "sk-gemini");
+        {
+            let (client, summary) = build_default_auxiliary_client(AuxiliaryConfig::default());
+            assert_eq!(client.chain_labels(), vec!["gemini"]);
+            assert_eq!(
+                client.chain_entries(),
+                vec![("gemini".to_string(), "gemini-3.5-flash".to_string(), true,)]
+            );
+            assert_eq!(summary.registered, vec!["gemini"]);
+        }
+        std::env::remove_var("GEMINI_API_KEY");
+
+        // Scenario 7: full chain, deterministic order.
         std::env::set_var("OPENROUTER_API_KEY", "sk-or");
         std::env::set_var("HERMES_OPENAI_API_KEY", "sk-hermes-oa");
         std::env::set_var("OPENAI_API_KEY", "sk-oa-legacy");

@@ -603,6 +603,22 @@
     "cbf851ae1d72": {
       "disposition": "superseded",
       "notes": "Upstream patch bounds Python TUI startup MCP discovery; Rust TUI startup does not connect/discover configured MCP servers on App::new, and hermes-mcp discovery remains explicit client/CLI behavior with transport/call timeouts, so the freeze path is absent in current Rust runtime."
+    },
+    "47d2d05892ef": {
+      "disposition": "ported",
+      "notes": "Rust provider picker copy now has provider_picker_description wired into hermes model output, setup provider labels, and the TUI provider modal; tests pin refreshed Nous/OpenRouter/Gemini/xAI/Qwen descriptions."
+    },
+    "e946f49ab550": {
+      "disposition": "ported",
+      "notes": "Rust Gemini API-key and google-gemini-cli OAuth model catalogs now expose gemini-3.5-flash and stop offering retired gemini-3-flash-preview; Gemini auxiliary direct-key default also uses gemini-3.5-flash with regression coverage."
+    },
+    "8104b202691": {
+      "disposition": "ported",
+      "notes": "Rust xAI video generation routes default text vs image models by modality, honors explicit overrides, normalizes local image files to data:image URLs, and has focused video_gen regression coverage for those contracts."
+    },
+    "fabca0bdd82b": {
+      "disposition": "ported",
+      "notes": "Rust TUI already drives model selection through canonical /model provider/model modals; this batch added /session and /switch aliases to the existing /sessions surface while preserving /provider as a distinct provider-status command rather than the removed Python /model alias."
     }
   },
   "subject_patterns": [

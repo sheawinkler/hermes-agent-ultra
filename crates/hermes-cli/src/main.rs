@@ -38,7 +38,7 @@ use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
 use hermes_cli::model_switch::{
     cached_provider_catalog_status, curated_provider_slugs, normalize_provider_model,
-    provider_catalog_entries, provider_model_ids,
+    provider_catalog_entries, provider_model_ids, provider_picker_description,
 };
 use hermes_cli::platform_toolsets::{resolve_platform_tool_schemas, tool_definition_summary};
 use hermes_cli::providers::provider_capability_for;
@@ -1675,9 +1675,10 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
                     } else {
                         format!(" [{}]", caps.join(", "))
                     };
+                    let description = provider_picker_description(&entry.provider);
                     println!(
-                        "  {:<12} — {}{}{}",
-                        entry.provider, preview, suffix, cap_suffix
+                        "  {:<18} - {} - {}{}{}",
+                        entry.provider, description, preview, suffix, cap_suffix
                     );
                 }
             }
@@ -10579,9 +10580,10 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
                 "API key"
             };
             format!(
-                "{:<22} {:<18} {}",
+                "{:<22} {:<18} {} | default {}",
                 setup_provider_display(option.provider),
                 format!("({auth_label})"),
+                provider_picker_description(option.provider),
                 option.label
             )
         })
