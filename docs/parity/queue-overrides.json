@@ -655,6 +655,26 @@
     "9ff21437a03a": {
       "disposition": "ported",
       "notes": "Rust MCP tools/call now coerces stringified object/array arguments before dispatch in both exported MCP server paths, leaves non-object scalar strings untouched, and has focused helper plus JSON-RPC runtime regression coverage."
+    },
+    "e02a6038a420": {
+      "disposition": "ported",
+      "notes": "Rust hermes dump now resolves real session snapshots, defaults exports under HERMES_HOME/sessions/saved/hermes_conversation_<timestamp>.json, and includes system_prompt, session_id, session_start, source_path, model/personality, exported_at, and messages with regression coverage."
+    },
+    "e76d8bf5aaa9": {
+      "disposition": "ported",
+      "notes": "Rust TUI tool-output rendering now defaults to a small 16-line/1KiB retained preview while preserving full agent context/session storage; regression coverage pins truncation and preview-size behavior."
+    },
+    "98903d03139d": {
+      "disposition": "superseded",
+      "notes": "Upstream Python/Node TUI gateway live-session reuse fix targets a separate gateway/socket runtime; Rust resume restores persisted snapshots directly into a single App under the interactive-session lock with existing load_resume_payload/run_resume coverage."
+    },
+    "bd6d0987629e": {
+      "disposition": "superseded",
+      "notes": "Upstream Python TUI gateway live-history hydration race is absent in Rust's direct resume path: resumed messages become App.messages before the TUI loop starts, and subsequent turns append to the same Rust state vector."
+    },
+    "8077e7d2fbbb": {
+      "disposition": "superseded",
+      "notes": "Upstream _session_resume_lock narrowing applies to Python TUI gateway concurrent live-agent construction; Rust interactive resume is guarded by the process-level interactive session lock and has no session.close RPC lock path to port."
     }
   },
   "subject_patterns": [

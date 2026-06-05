@@ -1522,9 +1522,9 @@ const TRANSCRIPT_CONTENT_WRAP_COLS: usize = 76;
 const OFFSET_ANCHOR_SEARCH_RADIUS: usize = 1200;
 const DEFAULT_MAX_ASSISTANT_RENDER_LINES: usize = 260;
 const MAX_STREAM_RENDER_LINES: usize = 140;
-const DEFAULT_TOOL_OUTPUT_MAX_LINES: usize = 180;
+const DEFAULT_TOOL_OUTPUT_MAX_LINES: usize = 16;
 const DEFAULT_TOOL_OUTPUT_MAX_LINE_CHARS: usize = 600;
-const DEFAULT_TOOL_OUTPUT_MAX_TOTAL_CHARS: usize = 48_000;
+const DEFAULT_TOOL_OUTPUT_MAX_TOTAL_CHARS: usize = 1_024;
 
 fn env_usize_with_bounds(key: &str, default: usize, min: usize, max: usize) -> usize {
     std::env::var(key)
@@ -6280,6 +6280,23 @@ mod tests {
         let joined = lines.join("\n");
         assert!(joined.contains("tool output truncated"));
         assert!(lines.len() <= cap + 8);
+    }
+
+    #[test]
+    fn test_format_tool_message_lines_keeps_verbose_preview_small() {
+        let long = (0..80)
+            .map(|idx| format!("row-{idx}-{}", "x".repeat(120)))
+            .collect::<Vec<_>>()
+            .join("\\n");
+        let payload = format!(r#"{{"result":"{}"}}"#, long);
+        let lines = format_tool_message_lines(&payload);
+        let joined = lines.join("\n");
+
+        assert!(joined.contains("tool output truncated"));
+        assert!(
+            joined.chars().count() < 2_000,
+            "tool preview should stay small enough for retained TUI transcript lines"
+        );
     }
 
     #[test]

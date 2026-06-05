@@ -1162,6 +1162,8 @@ struct ResumeSessionPayload {
     session_id: String,
     model: Option<String>,
     personality: Option<String>,
+    system_prompt: Option<String>,
+    session_start: Option<String>,
     messages: Vec<hermes_core::Message>,
 }
 
@@ -1287,6 +1289,20 @@ fn parse_resume_payload_file(
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
         });
+    let system_prompt = doc
+        .get("system_prompt")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let session_start = doc
+        .get("session_start")
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            info.and_then(|v| v.get("created_at"))
+                .and_then(|v| v.as_str())
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
     let messages_value = doc
         .get("messages")
@@ -1306,6 +1322,8 @@ fn parse_resume_payload_file(
         session_id,
         model,
         personality,
+        system_prompt,
+        session_start,
         messages,
     })
 }
@@ -9739,20 +9757,44 @@ async fn run_dump(
         .as_deref()
         .map(std::path::PathBuf::from)
         .unwrap_or_else(hermes_config::hermes_home);
-    let sessions_dir = home.join("sessions");
-    let session = session.unwrap_or_else(|| "latest".to_string());
-    let out = output.unwrap_or_else(|| format!("{}.dump.json", session));
+    let requested = session.as_deref();
+    let payload = load_resume_payload(&cli, requested)?;
+    let out = output.map(PathBuf::from).unwrap_or_else(|| {
+        home.join("sessions").join("saved").join(format!(
+            "hermes_conversation_{}.json",
+            chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ")
+        ))
+    });
+    if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            AgentError::Io(format!(
+                "Failed to create dump output directory {}: {}",
+                parent.display(),
+                e
+            ))
+        })?;
+    }
+    let system_prompt = payload
+        .system_prompt
+        .clone()
+        .or_else(|| leading_system_prompt_for_persist(&payload.messages));
     let payload = serde_json::json!({
-        "session": session,
-        "source_dir": sessions_dir,
-        "note": "Session export scaffold"
+        "session_id": payload.session_id,
+        "resolved_id": payload.resolved_id,
+        "source_path": payload.source_path,
+        "model": payload.model,
+        "personality": payload.personality,
+        "system_prompt": system_prompt,
+        "session_start": payload.session_start,
+        "exported_at": chrono::Utc::now().to_rfc3339(),
+        "messages": payload.messages,
     });
     std::fs::write(
         &out,
         serde_json::to_string_pretty(&payload).unwrap_or_default(),
     )
     .map_err(|e| AgentError::Io(format!("Failed to write dump: {}", e)))?;
-    println!("Wrote dump to {}", out);
+    println!("Wrote dump to {}", out.display());
     Ok(())
 }
 
@@ -16939,6 +16981,61 @@ max_turns: 50
             Some(home) => std::env::set_var("HOME", home),
             None => std::env::remove_var("HOME"),
         }
+    }
+
+    #[tokio::test]
+    async fn run_dump_writes_real_saved_session_export_with_system_prompt() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let sessions_dir = hermes_state_root(&cli).join("sessions");
+        std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+        std::fs::write(
+            sessions_dir.join("abc123.json"),
+            r#"{
+  "session_info": {
+    "session_id": "session-xyz",
+    "model": "nous:openai/gpt-5.5",
+    "personality": "technical",
+    "created_at": "2026-06-05T09:00:00Z"
+  },
+  "system_prompt": "persisted system prompt",
+  "messages": [
+    {"role":"User","content":"hello"},
+    {"role":"Assistant","content":"world"}
+  ]
+}"#,
+        )
+        .expect("write session");
+
+        run_dump(cli, Some("abc123".to_string()), None)
+            .await
+            .expect("dump session");
+
+        let saved_dir = tmp.path().join("sessions").join("saved");
+        let entries = std::fs::read_dir(&saved_dir)
+            .expect("saved dir")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("saved entries");
+        assert_eq!(entries.len(), 1);
+        let path = entries[0].path();
+        assert!(path
+            .file_name()
+            .and_then(|v| v.to_str())
+            .is_some_and(|name| name.starts_with("hermes_conversation_")));
+
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read dump"))
+                .expect("parse dump");
+        assert_eq!(doc["session_id"], "session-xyz");
+        assert_eq!(doc["resolved_id"], "abc123");
+        assert_eq!(doc["model"], "nous:openai/gpt-5.5");
+        assert_eq!(doc["personality"], "technical");
+        assert_eq!(doc["system_prompt"], "persisted system prompt");
+        assert_eq!(doc["session_start"], "2026-06-05T09:00:00Z");
+        assert_eq!(doc["messages"].as_array().map(Vec::len), Some(2));
+        assert!(doc["source_path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("abc123.json")));
     }
 
     #[test]
