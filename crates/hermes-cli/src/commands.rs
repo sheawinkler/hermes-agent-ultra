@@ -369,6 +369,8 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "/sessions",
         "Browse saved sessions, or resume one by name (`/sessions [name]`)",
     ),
+    ("/session", "Alias for /sessions"),
+    ("/switch", "Alias for /sessions"),
     (
         "/background",
         "Run a task in the background (`status|tail <job-id> [N]`)",
@@ -3389,6 +3391,8 @@ fn canonical_command(cmd: &str) -> &str {
         "/skins" => "/skin",
         "/summary" => "/recap",
         "/whoami" => "/profile",
+        "/session" => "/sessions",
+        "/switch" => "/sessions",
         "/sb" => "/statusbar",
         "/pilot" => "/autopilot",
         "/rb" => "/runbook",
@@ -20045,6 +20049,8 @@ const COMMAND_CATALOG_SECTIONS: &[CommandCatalogSection] = &[
             "/load",
             "/resume",
             "/sessions",
+            "/session",
+            "/switch",
         ],
     },
     CommandCatalogSection {
@@ -27734,6 +27740,10 @@ mod tests {
         assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/sessions"));
         let results = autocomplete("/sess");
         assert!(results.contains(&"/sessions"));
+        assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/session"));
+        assert_eq!(canonical_command("/session"), "/sessions");
+        assert_eq!(canonical_command("/switch"), "/sessions");
+        assert!(autocomplete("/sw").contains(&"/switch"));
     }
 
     #[test]

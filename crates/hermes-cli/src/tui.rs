@@ -4489,19 +4489,24 @@ async fn open_model_provider_modal(state: &mut TuiState, app: &App) {
             .iter()
             .find(|entry| entry.provider.eq_ignore_ascii_case(provider));
         let auth_detail = provider_auth_detail(provider, &token_store_providers);
+        let description = crate::model_switch::provider_picker_description(provider);
         let detail = if let Some(entry) = entry {
             if entry.models.is_empty() {
-                format!("{} models • {}", entry.total_models, auth_detail)
+                format!(
+                    "{} • {} models • {}",
+                    description, entry.total_models, auth_detail
+                )
             } else {
                 format!(
-                    "{} models • {} • {}",
+                    "{} • {} models • {} • {}",
+                    description,
                     entry.total_models,
                     entry.models.join(", "),
                     auth_detail
                 )
             }
         } else {
-            format!("catalog unavailable • {}", auth_detail)
+            format!("{} • catalog unavailable • {}", description, auth_detail)
         };
         items.push(PickerItem {
             label: provider.to_string(),

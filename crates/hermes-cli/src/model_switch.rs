@@ -258,13 +258,26 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
         "gemini",
         &[
             "gemini-3.1-pro-preview",
-            "gemini-3-flash-preview",
+            "gemini-3-pro-preview",
+            "gemini-3.5-flash",
             "gemini-3.1-flash-lite-preview",
         ],
     ),
     (
+        "google-gemini-cli",
+        &[
+            "gemini-3.1-pro-preview",
+            "gemini-3-pro-preview",
+            "gemini-3.5-flash",
+        ],
+    ),
+    (
         "google",
-        &["gemini-3.1-pro-preview", "gemini-3-flash-preview"],
+        &[
+            "gemini-3.1-pro-preview",
+            "gemini-3-pro-preview",
+            "gemini-3.5-flash",
+        ],
     ),
 ];
 
@@ -505,6 +518,66 @@ pub fn curated_provider_slugs() -> Vec<&'static str> {
         .iter()
         .map(|(provider, _)| *provider)
         .collect()
+}
+
+pub fn provider_picker_description(provider: &str) -> &'static str {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "alibaba-coding-plan" => {
+            "Alibaba Coding Plan (coding models via DashScope Coding Plan API)"
+        }
+        "google-gemini-cli" | "gemini-cli" | "gemini-oauth" => {
+            "Google Gemini via OAuth + Code Assist (Code Assist OAuth flow)"
+        }
+        "kimi-coding" => "Kimi Coding Plan (api.kimi.com & Moonshot API)",
+        "kimi-coding-cn" => "Kimi / Moonshot China (Domestic direct API)",
+        "lmstudio" | "lm-studio" => "LM Studio (Local desktop app with built-in model server)",
+        "minimax-cn" | "minimax_cn" => "MiniMax China (Domestic direct API)",
+        "xai-oauth" => "xAI Grok OAuth (SuperGrok / Premium+ subscription)",
+        raw => match canonical_provider_id(raw).as_str() {
+            "nous" => {
+                "Nous Portal (Everything your agent needs, 300+ models with bundled tool use)"
+            }
+            "openrouter" => "OpenRouter (Pay-per-use API aggregator)",
+            "novita" => "NovitaAI (Cloud: Model API, Agent Sandbox, GPU Cloud)",
+            "anthropic" => "Anthropic (Claude models via API key or Claude Code)",
+            "openai-codex" => "OpenAI Codex (Codex CLI via ChatGPT subscription or API key)",
+            "openai" => "OpenAI API (api.openai.com, API key)",
+            "qwen" => "Qwen Cloud / DashScope (Qwen + multi-provider)",
+            "qwen-oauth" => "Qwen OAuth (Reuses local Qwen CLI login)",
+            "xiaomi" => "Xiaomi MiMo (MiMo-V2.5 and V2 models: pro, omni, flash)",
+            "tencent-tokenhub" => "Tencent TokenHub (Hy3 Preview via tokenhub.tencentmaas.com)",
+            "nvidia" => "NVIDIA NIM (Nemotron models via build.nvidia.com or local NIM)",
+            "copilot" => "GitHub Copilot (Uses GITHUB_TOKEN or gh auth token)",
+            "copilot-acp" => "GitHub Copilot ACP (Spawns copilot --acp --stdio)",
+            "huggingface" => "Hugging Face Inference Providers",
+            "gemini" => "Google AI Studio (Native Gemini API)",
+            "deepseek" => "DeepSeek (V3, R1, coder, direct API)",
+            "xai" => "xAI Grok (Direct API)",
+            "zai" => "Z.AI / GLM (Zhipu direct API)",
+            "kimi" => "Kimi Coding Plan (api.kimi.com & Moonshot API)",
+            "stepfun" => "StepFun Step Plan (Agent / coding models via Step Plan API)",
+            "minimax" => "MiniMax (Global direct API)",
+            "ollama-cloud" => "Ollama Cloud (Cloud-hosted open models, ollama.com)",
+            "arcee" => "Arcee AI (Trinity models, direct API)",
+            "gmi" => "GMI Cloud (Multi-model direct API)",
+            "kilocode" => "Kilo Code (Kilo Gateway API)",
+            "opencode-zen" => "OpenCode Zen (Curated models, pay-as-you-go)",
+            "opencode-go" => "OpenCode Go (Open models subscription)",
+            "bedrock" => "AWS Bedrock (Claude, Nova, Llama, DeepSeek; IAM or API key)",
+            "azure-foundry" => {
+                "Azure Foundry (OpenAI-style or Anthropic-style endpoint, your Azure AI deployment)"
+            }
+            "ai-gateway" => "Vercel AI Gateway (OpenAI-compatible gateway)",
+            "ollama-local" => "Ollama Local (local OpenAI-compatible server)",
+            "llama-cpp" => "llama.cpp Server (local OpenAI-compatible endpoint)",
+            "vllm" => "vLLM Server (local/self-host OpenAI-compatible endpoint)",
+            "mlx" => "MLX Server (Apple Silicon local endpoint)",
+            "apple-ane" => "Apple ANE Endpoint (private local endpoint)",
+            "sglang" => "SGLang Server (local/self-host OpenAI-compatible endpoint)",
+            "tgi" => "Text Generation Inference (local/self-host endpoint)",
+            _ => "Provider catalog entry",
+        },
+    }
 }
 
 pub fn is_models_dev_preferred_provider(provider: &str) -> bool {
@@ -1050,7 +1123,7 @@ mod tests {
         cached_provider_catalog_status, is_models_dev_preferred_provider,
         load_provider_catalog_cache, merge_with_models_dev, normalize_provider_model,
         persist_provider_catalog_cache, provider_catalog_cache_path, provider_catalog_entries,
-        provider_curated_models, provider_model_ids_with_client,
+        provider_curated_models, provider_model_ids_with_client, provider_picker_description,
         resolve_huggingface_catalog_endpoint_and_token,
     };
 
@@ -1204,6 +1277,30 @@ mod tests {
         assert!(provider_curated_models("arcee-ai").contains(&"trinity-mini"));
         assert!(provider_curated_models("mimo").contains(&"mimo-v2.5-pro"));
         assert!(provider_curated_models("tokenhub").contains(&"hy3-preview"));
+    }
+
+    #[test]
+    fn gemini_curated_models_expose_35_flash_for_api_key_and_oauth_pickers() {
+        for provider in ["gemini", "google-gemini-cli"] {
+            let models = provider_curated_models(provider);
+            assert!(
+                models.contains(&"gemini-3.5-flash"),
+                "{provider} picker should include gemini-3.5-flash"
+            );
+            assert!(
+                !models.contains(&"gemini-3-flash-preview"),
+                "{provider} picker should not offer retired gemini-3-flash-preview"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_picker_descriptions_match_refreshed_upstream_copy() {
+        assert!(provider_picker_description("nous").contains("300+ models"));
+        assert!(provider_picker_description("openrouter").contains("Pay-per-use API aggregator"));
+        assert!(provider_picker_description("google-gemini-cli").contains("Code Assist OAuth flow"));
+        assert!(provider_picker_description("xai").contains("Grok"));
+        assert!(provider_picker_description("qwen-oauth").contains("Reuses local Qwen CLI login"));
     }
 
     #[tokio::test]
