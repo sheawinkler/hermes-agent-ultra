@@ -568,7 +568,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -760,6 +760,13 @@ fn apply_user_config_patch_dotted(
         ["kanban", "dispatch_in_gateway"] => {
             config.kanban.dispatch_in_gateway =
                 parse_config_bool("kanban.dispatch_in_gateway", value)?;
+        }
+        ["agent", "api_max_retries"] | ["agent", "apiMaxRetries"] => {
+            config.agent.api_max_retries = Some(value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "agent.api_max_retries must be a non-negative integer: {value}"
+                ))
+            })?);
         }
         ["auxiliary", task, field] => {
             let entry = config
@@ -953,6 +960,11 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
         ["sessions", "vacuum_after_prune"] => Ok(config.sessions.vacuum_after_prune.to_string()),
         ["sessions", "min_interval_hours"] => Ok(config.sessions.min_interval_hours.to_string()),
         ["kanban", "dispatch_in_gateway"] => Ok(config.kanban.dispatch_in_gateway.to_string()),
+        ["agent", "api_max_retries"] | ["agent", "apiMaxRetries"] => Ok(config
+            .agent
+            .api_max_retries
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
         ["llm", provider, "api_key"] => Ok(
             match config
                 .llm_providers
@@ -1797,6 +1809,13 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
             config.kanban.dispatch_in_gateway = parsed;
         }
     }
+    if let Ok(v) = std::env::var("HERMES_AGENT_API_MAX_RETRIES") {
+        if let Ok(parsed) = v.parse::<u32>() {
+            config.agent.api_max_retries = Some(parsed);
+        } else {
+            tracing::warn!("HERMES_AGENT_API_MAX_RETRIES is not a valid u32: {v}");
+        }
+    }
     if env_truthy("HERMES_AGENT_SKIP_CONTEXT_FILES") || env_truthy("HERMES_IGNORE_RULES") {
         config.agent.skip_context_files = true;
     }
@@ -2578,6 +2597,36 @@ custom_providers:
     }
 
     #[test]
+    fn load_user_config_file_parses_agent_api_max_retries_aliases() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let snake_path = dir.path().join("snake.yaml");
+        std::fs::write(
+            &snake_path,
+            r#"
+agent:
+  api_max_retries: 6
+"#,
+        )
+        .unwrap();
+        let snake = load_user_config_file(&snake_path).unwrap();
+        assert_eq!(snake.agent.api_max_retries, Some(6));
+
+        let camel_path = dir.path().join("camel.yaml");
+        std::fs::write(
+            &camel_path,
+            r#"
+agent:
+  apiMaxRetries: 8
+"#,
+        )
+        .unwrap();
+        let camel = load_user_config_file(&camel_path).unwrap();
+        assert_eq!(camel.agent.api_max_retries, Some(8));
+    }
+
+    #[test]
     fn load_user_config_file_parses_auxiliary_task_overrides() {
         use tempfile::tempdir;
 
@@ -2747,6 +2796,21 @@ llm_providers:
             "false"
         );
         assert!(apply_user_config_patch(&mut c, "kanban.dispatch_in_gateway", "maybe").is_err());
+    }
+
+    #[test]
+    fn apply_patch_dotted_agent_api_max_retries() {
+        let mut c = GatewayConfig::default();
+        assert_eq!(c.agent.api_max_retries, None);
+
+        apply_user_config_patch(&mut c, "agent.api_max_retries", "7").unwrap();
+
+        assert_eq!(c.agent.api_max_retries, Some(7));
+        assert_eq!(
+            user_config_field_display(&c, "agent.api_max_retries").unwrap(),
+            "7"
+        );
+        assert!(apply_user_config_patch(&mut c, "agent.api_max_retries", "nope").is_err());
     }
 
     #[test]
@@ -2925,6 +2989,23 @@ llm_providers:
 
         unsafe {
             std::env::remove_var("HERMES_KANBAN_DISPATCH_IN_GATEWAY");
+        }
+    }
+
+    #[test]
+    fn apply_env_overrides_supports_agent_api_max_retries() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        unsafe {
+            std::env::set_var("HERMES_AGENT_API_MAX_RETRIES", "9");
+        }
+
+        let mut cfg = GatewayConfig::default();
+        apply_env_overrides(&mut cfg);
+        assert_eq!(cfg.agent.api_max_retries, Some(9));
+
+        unsafe {
+            std::env::remove_var("HERMES_AGENT_API_MAX_RETRIES");
         }
     }
 

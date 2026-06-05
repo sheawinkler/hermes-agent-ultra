@@ -14,6 +14,16 @@ pub mod serve;
 pub mod server;
 pub mod transport;
 
+pub(crate) fn coerce_mcp_tool_arguments(arguments: serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::String(raw) = arguments else {
+        return arguments;
+    };
+    match serde_json::from_str::<serde_json::Value>(raw.trim()) {
+        Ok(parsed @ (serde_json::Value::Object(_) | serde_json::Value::Array(_))) => parsed,
+        _ => serde_json::Value::String(raw),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // McpError
 // ---------------------------------------------------------------------------

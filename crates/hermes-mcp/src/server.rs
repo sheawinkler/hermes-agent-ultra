@@ -18,7 +18,7 @@ use hermes_tools::ToolRegistry;
 
 use crate::client::ResourceInfo;
 use crate::transport::McpTransport;
-use crate::McpError;
+use crate::{coerce_mcp_tool_arguments, McpError};
 
 // ---------------------------------------------------------------------------
 // MCP tool format (for exposing to clients)
@@ -233,6 +233,7 @@ impl McpServer {
             .get("arguments")
             .cloned()
             .unwrap_or(Value::Object(serde_json::Map::new()));
+        let arguments = coerce_mcp_tool_arguments(arguments);
 
         debug!("MCP tools/call: {} with args: {}", tool_name, arguments);
 
@@ -473,9 +474,93 @@ impl McpServer {
 mod tests {
     use super::{McpCapabilityPolicy, McpPromptInfo, McpServer};
     use crate::client::ResourceInfo;
+    use crate::coerce_mcp_tool_arguments;
+    use async_trait::async_trait;
+    use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
     use hermes_tools::ToolRegistry;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::sync::Arc;
+
+    struct EchoArgsHandler;
+
+    #[async_trait]
+    impl ToolHandler for EchoArgsHandler {
+        async fn execute(&self, params: Value) -> Result<String, ToolError> {
+            let kind = match &params {
+                Value::Object(_) => "object",
+                Value::Array(_) => "array",
+                Value::String(_) => "string",
+                _ => "other",
+            };
+            Ok(json!({
+                "kind": kind,
+                "params": params,
+            })
+            .to_string())
+        }
+
+        fn schema(&self) -> ToolSchema {
+            tool_schema("echo_args", "Echo args", JsonSchema::new("object"))
+        }
+    }
+
+    fn registry_with_echo_args() -> Arc<ToolRegistry> {
+        let registry = ToolRegistry::new();
+        let handler = Arc::new(EchoArgsHandler);
+        registry.register(
+            "echo_args",
+            "test",
+            handler.schema(),
+            handler,
+            Arc::new(|| true),
+            vec![],
+            false,
+            "Echo args",
+            "test",
+            None,
+        );
+        Arc::new(registry)
+    }
+
+    #[test]
+    fn stringified_mcp_arguments_coerce_only_objects_and_arrays() {
+        assert_eq!(
+            coerce_mcp_tool_arguments(Value::String(r#"{"path":"Cargo.toml"}"#.to_string())),
+            json!({"path":"Cargo.toml"})
+        );
+        assert_eq!(
+            coerce_mcp_tool_arguments(Value::String(r#"[{"x":1}]"#.to_string())),
+            json!([{"x":1}])
+        );
+        assert_eq!(
+            coerce_mcp_tool_arguments(Value::String(r#""plain""#.to_string())),
+            Value::String(r#""plain""#.to_string())
+        );
+        assert_eq!(
+            coerce_mcp_tool_arguments(Value::String("not json".to_string())),
+            Value::String("not json".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_call_coerces_stringified_object_arguments_before_dispatch() {
+        let server = McpServer::new(registry_with_echo_args());
+        let result = server
+            .handle_request(
+                "tools/call",
+                json!({
+                    "name": "echo_args",
+                    "arguments": "{\"path\":\"Cargo.toml\"}"
+                }),
+            )
+            .await
+            .expect("tools/call");
+
+        let text = result["content"][0]["text"].as_str().expect("text");
+        let payload: Value = serde_json::from_str(text).expect("tool json");
+        assert_eq!(payload["kind"], "object");
+        assert_eq!(payload["params"], json!({"path":"Cargo.toml"}));
+    }
 
     #[tokio::test]
     async fn prompts_get_returns_not_found() {
