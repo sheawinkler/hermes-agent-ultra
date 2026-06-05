@@ -10342,6 +10342,14 @@ fn maybe_import_legacy_env(
     Ok(())
 }
 
+fn read_setup_stdin_line(stdin: &std::io::Stdin) -> String {
+    use std::io::BufRead;
+    let mut line = String::new();
+    let mut reader = stdin.lock();
+    reader.read_line(&mut line).ok();
+    line
+}
+
 /// Handle `hermes setup`.
 fn run_kanban(args: Vec<String>) -> Result<(), AgentError> {
     let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
@@ -10399,7 +10407,7 @@ async fn run_portal(cli: Cli, action: Option<String>) -> Result<(), AgentError> 
 }
 
 async fn run_setup(cli: Cli) -> Result<(), AgentError> {
-    use std::io::{self, BufRead, Write};
+    use std::io::{self, Write};
 
     println!("Hermes Agent Ultra — Setup Wizard");
     println!("===========================\n");
@@ -10426,10 +10434,12 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
     let config_path = config_dir.join("config.yaml");
     let env_path = config_dir.join(".env");
     let stdin = io::stdin();
-    let mut reader = stdin.lock();
 
     // 2. Optional import from legacy Python/OpenClaw .env files
-    maybe_import_legacy_env(&mut reader, &env_path)?;
+    {
+        let mut reader = stdin.lock();
+        maybe_import_legacy_env(&mut reader, &env_path)?;
+    }
 
     // 3. Choose setup depth first (upstream parity: quick/full first).
     let mode_labels = vec![
@@ -10507,8 +10517,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
             selected_provider_label
         );
         io::stdout().flush().ok();
-        let mut answer = String::new();
-        reader.read_line(&mut answer).ok();
+        let answer = read_setup_stdin_line(&stdin);
         let use_oauth = !matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no");
         if use_oauth {
             let store = FileTokenStore::new(config_dir.join("auth").join("tokens.json")).await?;
@@ -10702,8 +10711,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
         if selected_nous_oauth_authenticated {
             print!("\nEnable Nous managed tool-gateway integrations (recommended) [Y/n]: ");
             io::stdout().flush().ok();
-            let mut answer = String::new();
-            reader.read_line(&mut answer).ok();
+            let answer = read_setup_stdin_line(&stdin);
             let enable = !matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no");
             selected_nous_managed_tools_enabled = Some(enable);
         } else {
@@ -10734,8 +10742,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
                 env_path.display()
             );
             io::stdout().flush().ok();
-            reader.read_line(&mut api_key).ok();
-            api_key = api_key.trim().to_string();
+            api_key = read_setup_stdin_line(&stdin).trim().to_string();
         }
     } else if !stored_provider_secret_in_vault {
         if has_selected_provider_env_key {
@@ -10752,8 +10759,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
             );
         }
         io::stdout().flush().ok();
-        reader.read_line(&mut api_key).ok();
-        api_key = api_key.trim().to_string();
+        api_key = read_setup_stdin_line(&stdin).trim().to_string();
     }
 
     if !api_key.is_empty() {
@@ -10762,8 +10768,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
             selected_provider_label
         );
         io::stdout().flush().ok();
-        let mut answer = String::new();
-        reader.read_line(&mut answer).ok();
+        let answer = read_setup_stdin_line(&stdin);
         let use_vault = !matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no");
         if use_vault {
             let store = FileTokenStore::new(config_dir.join("auth").join("tokens.json")).await?;
@@ -10796,8 +10801,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
     if displayed_suggested_models.is_empty() {
         print!("Model ID for {} [{}]: ", selected_provider_label, model);
         io::stdout().flush().ok();
-        let mut model_override = String::new();
-        reader.read_line(&mut model_override).ok();
+        let model_override = read_setup_stdin_line(&stdin);
         let model_override = model_override.trim();
         if !model_override.is_empty() {
             let candidate = if model_override.contains(':') {
@@ -10847,8 +10851,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
                 selected_provider_label, model
             );
             io::stdout().flush().ok();
-            let mut model_override = String::new();
-            reader.read_line(&mut model_override).ok();
+            let model_override = read_setup_stdin_line(&stdin);
             let model_override = model_override.trim();
             if !model_override.is_empty() {
                 let candidate = if model_override.contains(':') {
@@ -10874,8 +10877,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
             builtin_personalities.join(", ")
         );
         io::stdout().flush().ok();
-        let mut personality = String::new();
-        reader.read_line(&mut personality).ok();
+        let personality = read_setup_stdin_line(&stdin);
         let personality = personality.trim();
         if personality.is_empty() {
             "default".to_string()
@@ -10903,8 +10905,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
     if config_path.exists() {
         print!("\nconfig.yaml already exists. Overwrite? [y/N]: ");
         io::stdout().flush().ok();
-        let mut answer = String::new();
-        reader.read_line(&mut answer).ok();
+        let answer = read_setup_stdin_line(&stdin);
         if !answer.trim().eq_ignore_ascii_case("y") {
             overwrite_config = false;
             println!("Keeping existing config.yaml.");
@@ -10995,7 +10996,6 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
         println!("  ✓ Created SOUL.md");
     }
 
-    drop(reader);
     if full_setup && prompt_yes_no("\nConfigure optional setup sections now?", true).await? {
         run_optional_setup_sections(&cli, &disk).await?;
     } else if !full_setup {
