@@ -540,19 +540,18 @@ impl AgentLoop {
         }
 
         let provider = self.effective_provider_for_prompt(model_for_prompt);
-        builder = builder.with_timestamp(Some(model_for_prompt), provider.as_deref());
-
-        let mut timestamp_extras = String::new();
-        if self.config().pass_session_id {
-            if let Some(ref sid) = self.config().session_id {
-                if !sid.trim().is_empty() {
-                    timestamp_extras.push_str(&format!("Session ID: {}\n", sid.trim()));
-                }
-            }
-        }
-        if !timestamp_extras.trim().is_empty() {
-            builder = builder.with_block(timestamp_extras.trim_end());
-        }
+        let session_id = self.config().pass_session_id.then(|| {
+            self.config()
+                .session_id
+                .as_ref()
+                .filter(|sid| !sid.trim().is_empty())
+                .cloned()
+        }).flatten();
+        builder = builder.with_timestamp(
+            Some(model_for_prompt),
+            provider.as_deref(),
+            session_id.as_deref(),
+        );
 
         if provider.as_deref() == Some("alibaba") {
             let model_short = model_for_prompt

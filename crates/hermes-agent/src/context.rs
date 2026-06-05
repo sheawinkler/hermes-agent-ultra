@@ -624,10 +624,18 @@ impl SystemPromptBuilder {
         self
     }
 
-    /// Add current date/time and optional metadata.
-    pub fn with_timestamp(mut self, model: Option<&str>, provider: Option<&str>) -> Self {
+    /// Add current date/time and optional metadata (Python `system_prompt.build_system_prompt_parts`).
+    pub fn with_timestamp(
+        mut self,
+        model: Option<&str>,
+        provider: Option<&str>,
+        session_id: Option<&str>,
+    ) -> Self {
         let date_line = hermes_core::format_conversation_started_date();
         let mut line = format!("Conversation started: {date_line}");
+        if let Some(sid) = session_id.filter(|s| !s.trim().is_empty()) {
+            line.push_str(&format!("\nSession ID: {sid}"));
+        }
         if let Some(m) = model {
             line.push_str(&format!("\nModel: {m}"));
         }
@@ -815,7 +823,7 @@ mod tests {
             .with_personality(Some("You are Hermes."))
             .with_system_message("Be concise.")
             .with_memory_context("<memory-context>User likes Rust</memory-context>")
-            .with_timestamp(Some("gpt-4o"), None);
+            .with_timestamp(Some("gpt-4o"), None, None);
 
         let prompt = builder.build();
         assert!(prompt.contains("You are Hermes."));

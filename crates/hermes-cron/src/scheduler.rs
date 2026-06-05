@@ -15,7 +15,7 @@ use tokio::time::{self, Duration};
 use crate::completion::CronCompletionEvent;
 use crate::job::{CronJob, JobStatus};
 use crate::persistence::JobPersistence;
-use crate::runner::CronRunner;
+use crate::runner::{CronRunOutcome, CronRunner};
 use crate::schedule::advance_next_run_before_execute;
 
 /// Background poll interval for due jobs. Default **60** seconds.
@@ -287,105 +287,219 @@ impl CronScheduler {
                     .map(|(id, _)| id.clone())
                     .collect();
 
-                for job_id in due_job_ids {
-                    let job = guard.get(&job_id).cloned();
-                    if let Some(mut job) = job {
-                        if let Some(spec) = job.schedule_spec.clone() {
-                            if let Some(advanced) =
-                                advance_next_run_before_execute(&spec, job.next_run, now)
-                            {
-                                job.next_run = Some(advanced);
-                                guard.insert(job.id.clone(), job.clone());
-                                drop(guard);
-                                if let Err(e) = persistence.save_job(&job).await {
-                                    tracing::error!(
-                                        "Failed to persist advanced next_run for '{}': {}",
-                                        job.id,
-                                        e
-                                    );
-                                }
-                                guard = jobs.lock().await;
-                            }
-                        }
-                        let mut runnable_job = job.clone();
-                        if let Some(ctx_prefix) = build_context_prefix_for_job(&job, &guard) {
-                            runnable_job.prompt =
-                                format!("{}\n\n{}", ctx_prefix, runnable_job.prompt);
-                        }
-                        // Capture generation before releasing lock: if it
-                        // changes while the job is running, remove_job was
-                        // called and we must NOT re-insert the stale clone.
-                        let gen_before = *generation.lock().await;
-                        drop(guard);
+                // Phase 1: pre-process all due jobs while holding the lock.
+                // Advance next_run timestamps and build context-enriched runnables.
+                // Jobs with workdir/profile mutate process-global env vars (TERMINAL_CWD,
+                // HERMES_HOME) so they must run serially; all others can run concurrently.
+                let mut parallel_queue: Vec<(CronJob, CronJob)> = Vec::new();
+                let mut sequential_queue: Vec<(CronJob, CronJob)> = Vec::new();
 
-                        // Execute the job
+                for job_id in &due_job_ids {
+                    let Some(mut job) = guard.get(job_id).cloned() else {
+                        continue;
+                    };
+                    if let Some(spec) = job.schedule_spec.clone() {
+                        if let Some(advanced) =
+                            advance_next_run_before_execute(&spec, job.next_run, now)
+                        {
+                            job.next_run = Some(advanced);
+                            guard.insert(job.id.clone(), job.clone());
+                        }
+                    }
+                    let mut runnable = job.clone();
+                    if let Some(ctx_prefix) = build_context_prefix_for_job(&job, &guard) {
+                        runnable.prompt = format!("{}\n\n{}", ctx_prefix, runnable.prompt);
+                    }
+                    let needs_serial = job
+                        .workdir
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .is_some()
+                        || job
+                            .profile
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .is_some();
+                    if needs_serial {
+                        sequential_queue.push((job, runnable));
+                    } else {
+                        parallel_queue.push((job, runnable));
+                    }
+                }
+                drop(guard);
+
+                // Persist all advanced next_run timestamps before any job runs.
+                for (job, _) in parallel_queue.iter().chain(sequential_queue.iter()) {
+                    if let Err(e) = persistence.save_job(job).await {
+                        tracing::error!(
+                            "Failed to persist advanced next_run for '{}': {}",
+                            job.id,
+                            e
+                        );
+                    }
+                }
+
+                // Phase 2: spawn independent (no workdir/profile) jobs concurrently.
+                let mut parallel_handles: Vec<
+                    tokio::task::JoinHandle<(
+                        CronJob,
+                        Result<CronRunOutcome, crate::scheduler::CronError>,
+                        u64,
+                    )>,
+                > = Vec::new();
+                for (original, runnable) in parallel_queue {
+                    let runner_clone = runner.clone();
+                    let gen_before = *generation.lock().await;
+                    tracing::info!(
+                        "Executing cron job '{}' ({})",
+                        runnable.name.as_deref().unwrap_or(&runnable.id),
+                        runnable.id,
+                    );
+                    parallel_handles.push(tokio::spawn(async move {
+                        let outcome = runner_clone.run_job(&runnable).await;
+                        (original, outcome, gen_before)
+                    }));
+                }
+
+                // Phase 3: run workdir/profile jobs serially (env-mutation safety).
+                for (mut job, runnable) in sequential_queue {
+                    let gen_before = *generation.lock().await;
+                    tracing::info!(
+                        "Executing cron job '{}' ({})",
+                        job.name.as_deref().unwrap_or(&job.id),
+                        job.id
+                    );
+                    match runner.run_job(&runnable).await {
+                        Ok(outcome) => {
+                            tracing::info!(
+                                "Cron job '{}' completed successfully (turns: {})",
+                                job.id,
+                                outcome.result.total_turns
+                            );
+                            Self::emit_completion(
+                                &completion_tx,
+                                &job,
+                                "schedule",
+                                Ok(&outcome.result),
+                            );
+                            job.mark_executed(now);
+                            job.last_output = latest_assistant_output(&outcome.result)
+                                .map(|s| truncate_chars(&s, MAX_STORED_OUTPUT_CHARS));
+                            job.last_delivery_error = outcome.delivery_error;
+                        }
+                        Err(e) => {
+                            tracing::error!("Cron job '{}' failed: {}", job.id, e);
+                            let err_msg = e.to_string();
+                            job.last_delivery_error =
+                                runner.delivery_error_for_failure(&job, &err_msg).await;
+                            if let Some(ref del_err) = job.last_delivery_error {
+                                tracing::warn!(
+                                    "Cron job '{}' failed to deliver error alert: {}",
+                                    job.id,
+                                    del_err
+                                );
+                            }
+                            Self::emit_completion(
+                                &completion_tx,
+                                &job,
+                                "schedule",
+                                Err(err_msg),
+                            );
+                            job.mark_failed();
+                        }
+                    }
+                    let gen_after = *generation.lock().await;
+                    if gen_after != gen_before {
                         tracing::info!(
-                            "Executing cron job '{}' ({})",
-                            job.name.as_deref().unwrap_or(&job.id),
+                            "Skipping re-insert of job '{}' — removed during execution",
                             job.id
                         );
-                        match runner.run_job(&runnable_job).await {
-                            Ok(outcome) => {
-                                tracing::info!(
-                                    "Cron job '{}' completed successfully (turns: {})",
-                                    job.id,
-                                    outcome.result.total_turns
-                                );
-                                Self::emit_completion(
-                                    &completion_tx,
-                                    &job,
-                                    "schedule",
-                                    Ok(&outcome.result),
-                                );
-                                job.mark_executed(now);
-                                job.last_output = latest_assistant_output(&outcome.result)
-                                    .map(|s| truncate_chars(&s, MAX_STORED_OUTPUT_CHARS));
-                                job.last_delivery_error = outcome.delivery_error;
-                            }
-                            Err(e) => {
-                                tracing::error!("Cron job '{}' failed: {}", job.id, e);
-                                let err_msg = e.to_string();
-                                job.last_delivery_error =
-                                    runner.delivery_error_for_failure(&job, &err_msg).await;
-                                if let Some(ref del_err) = job.last_delivery_error {
-                                    tracing::warn!(
-                                        "Cron job '{}' failed to deliver error alert: {}",
-                                        job.id,
-                                        del_err
-                                    );
-                                }
-                                Self::emit_completion(
-                                    &completion_tx,
-                                    &job,
-                                    "schedule",
-                                    Err(err_msg.clone()),
-                                );
-                                job.mark_failed();
-                            }
-                        }
+                        continue;
+                    }
+                    {
+                        let mut g = jobs.lock().await;
+                        g.insert(job.id.clone(), job.clone());
+                    }
+                    if let Err(e) = persistence.save_job(&job).await {
+                        tracing::error!("Failed to persist job '{}': {}", job.id, e);
+                    }
+                }
 
-                        // If generation changed, the job was removed while
-                        // executing — skip re-insertion and persistence.
-                        let gen_after = *generation.lock().await;
-                        if gen_after != gen_before {
+                // Phase 4: collect results from concurrent jobs.
+                for handle in parallel_handles {
+                    match handle.await {
+                        Ok((mut job, Ok(outcome), gen_before)) => {
                             tracing::info!(
-                                "Skipping re-insert of job '{}' — removed during execution",
-                                job.id
+                                "Cron job '{}' completed successfully (turns: {})",
+                                job.id,
+                                outcome.result.total_turns
                             );
-                            guard = jobs.lock().await;
-                            continue;
+                            Self::emit_completion(
+                                &completion_tx,
+                                &job,
+                                "schedule",
+                                Ok(&outcome.result),
+                            );
+                            job.mark_executed(now);
+                            job.last_output = latest_assistant_output(&outcome.result)
+                                .map(|s| truncate_chars(&s, MAX_STORED_OUTPUT_CHARS));
+                            job.last_delivery_error = outcome.delivery_error;
+                            let gen_after = *generation.lock().await;
+                            if gen_after != gen_before {
+                                tracing::info!(
+                                    "Skipping re-insert of job '{}' — removed during execution",
+                                    job.id
+                                );
+                                continue;
+                            }
+                            {
+                                let mut g = jobs.lock().await;
+                                g.insert(job.id.clone(), job.clone());
+                            }
+                            if let Err(e) = persistence.save_job(&job).await {
+                                tracing::error!("Failed to persist job '{}': {}", job.id, e);
+                            }
                         }
-
-                        // Update the job in memory and persist
-                        guard = jobs.lock().await;
-                        guard.insert(job.id.clone(), job.clone());
-                        drop(guard);
-
-                        if let Err(e) = persistence.save_job(&job).await {
-                            tracing::error!("Failed to persist job '{}': {}", job.id, e);
+                        Ok((mut job, Err(e), gen_before)) => {
+                            tracing::error!("Cron job '{}' failed: {}", job.id, e);
+                            let err_msg = e.to_string();
+                            job.last_delivery_error =
+                                runner.delivery_error_for_failure(&job, &err_msg).await;
+                            if let Some(ref del_err) = job.last_delivery_error {
+                                tracing::warn!(
+                                    "Cron job '{}' failed to deliver error alert: {}",
+                                    job.id,
+                                    del_err
+                                );
+                            }
+                            Self::emit_completion(
+                                &completion_tx,
+                                &job,
+                                "schedule",
+                                Err(err_msg),
+                            );
+                            job.mark_failed();
+                            let gen_after = *generation.lock().await;
+                            if gen_after != gen_before {
+                                tracing::info!(
+                                    "Skipping re-insert of job '{}' — removed during execution",
+                                    job.id
+                                );
+                                continue;
+                            }
+                            {
+                                let mut g = jobs.lock().await;
+                                g.insert(job.id.clone(), job.clone());
+                            }
+                            if let Err(e) = persistence.save_job(&job).await {
+                                tracing::error!("Failed to persist job '{}': {}", job.id, e);
+                            }
                         }
-
-                        guard = jobs.lock().await;
+                        Err(e) => {
+                            tracing::error!("Cron parallel task panicked: {}", e);
+                        }
                     }
                 }
             }

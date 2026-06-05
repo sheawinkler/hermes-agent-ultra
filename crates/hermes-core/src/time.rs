@@ -1,7 +1,7 @@
 //! Timezone-aware wall clock for Hermes (Python `hermes_time.py` parity).
 //!
-//! **Tier A (user wall clock):** system prompt date line, cron scheduling, execute_code `TZ`.
-//! **Tier B (internal UTC):** session timestamps, auth expiry, telemetry — use `Utc::now()` directly.
+//! **(user wall clock):** system prompt date line, cron scheduling, execute_code `TZ`.
+//! **(internal UTC):** session timestamps, auth expiry, telemetry — use `Utc::now()` directly.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -42,6 +42,11 @@ pub fn reset_global_clock_cache() {
     state.clock = HermesClock::from_env_and_config(cfg.as_deref());
 }
 
+/// Python `hermes_time.reset_cache()`.
+pub fn reset_cache() {
+    reset_global_clock_cache();
+}
+
 /// User wall-clock "now" as a fixed offset (Hermes tz or server-local).
 pub fn now() -> DateTime<FixedOffset> {
     global_state()
@@ -58,6 +63,11 @@ pub fn now_utc() -> DateTime<Utc> {
 
 /// Configured IANA timezone name, if any (empty when using server-local fallback).
 pub fn timezone_name() -> Option<String> {
+    get_timezone()
+}
+
+/// Python `hermes_time.get_timezone()` — configured IANA name, or None (server-local).
+pub fn get_timezone() -> Option<String> {
     global_state()
         .lock()
         .expect("hermes time lock poisoned")
@@ -84,6 +94,11 @@ pub fn format_conversation_started_date() -> String {
         .format_conversation_started_date()
 }
 
+/// Normalize through Hermes wall timezone (Python `cron.jobs._ensure_aware` for aware values).
+pub fn ensure_aware(dt: DateTime<Utc>) -> DateTime<Utc> {
+    ensure_aware_utc(dt)
+}
+
 /// Normalize a UTC instant through the Hermes timezone (Python `_ensure_aware` for aware values).
 pub fn ensure_aware_utc(dt: DateTime<Utc>) -> DateTime<Utc> {
     global_state()
@@ -93,13 +108,28 @@ pub fn ensure_aware_utc(dt: DateTime<Utc>) -> DateTime<Utc> {
         .ensure_aware_utc(dt)
 }
 
-/// Interpret naive wall time as system-local, then normalize to UTC (legacy job timestamps).
+/// Interpret naive wall time as system-local, then normalize to UTC (Python `_ensure_aware` for naive).
 pub fn ensure_aware_naive(naive: NaiveDateTime) -> DateTime<Utc> {
     global_state()
         .lock()
         .expect("hermes time lock poisoned")
         .clock
         .ensure_aware_naive(naive)
+}
+
+/// Wall-clock `YYYY-MM-DD HH:MM:SS` (Python `_hermes_now().strftime("%Y-%m-%d %H:%M:%S")`).
+pub fn format_wall_ymd_hms() -> String {
+    now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Wall-clock `HH:MM:SS` for scheduler tick logs (Python `_hermes_now().strftime("%H:%M:%S")`).
+pub fn format_wall_hms() -> String {
+    now().format("%H:%M:%S").to_string()
+}
+
+/// Compact wall-clock stamp for cron session ids (Python `_hermes_now().strftime("%Y%m%d_%H%M%S")`).
+pub fn format_wall_compact() -> String {
+    now().format("%Y%m%d_%H%M%S").to_string()
 }
 
 /// Format a UTC instant for human display in the Hermes wall timezone.
@@ -367,6 +397,26 @@ mod tests {
             let refreshed = HermesClock::from_env_and_config(None);
             assert_eq!(
                 refreshed.now().offset().fix().local_minus_utc(),
+                5 * 3600 + 30 * 60
+            );
+        });
+    }
+
+    #[test]
+    fn get_timezone_matches_clock_name() {
+        let clock = HermesClock::with_fixed_tz("Asia/Kolkata");
+        assert_eq!(clock.timezone_name(), Some("Asia/Kolkata"));
+    }
+
+    #[test]
+    fn reset_cache_alias_picks_up_env_change() {
+        with_env("HERMES_TIMEZONE", Some("UTC"), || {
+            init_global_clock(None);
+            assert_eq!(now().offset().fix().local_minus_utc(), 0);
+            crate::test_env::set_var("HERMES_TIMEZONE", "Asia/Kolkata");
+            reset_cache();
+            assert_eq!(
+                now().offset().fix().local_minus_utc(),
                 5 * 3600 + 30 * 60
             );
         });

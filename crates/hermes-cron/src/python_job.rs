@@ -45,7 +45,8 @@ pub fn cron_job_from_python_value(raw: &Value) -> Result<CronJob, String> {
         .unwrap_or(schedule_display.clone());
 
     let status = python_job_status(raw);
-    let created_at = parse_time_field(raw.get("created_at")).unwrap_or_else(Utc::now);
+    let created_at =
+        parse_time_field(raw.get("created_at")).unwrap_or_else(hermes_core::now_utc);
     let last_run = parse_time_field(raw.get("last_run_at"));
     let next_run = parse_time_field(raw.get("next_run_at"))
         .or_else(|| crate::schedule::compute_next_run(&schedule_spec, last_run));

@@ -17,8 +17,58 @@ use hermes_tools::tools::messaging::MessagingSessionContext;
 
 use crate::job::{CronJob, JobStatus, ModelConfig};
 use crate::python_job::{parse_deliver_string, JobOrigin};
+use crate::runner::detect_cron_prompt_injection;
 use crate::schedule::{normalize_schedule_input, ScheduleSpec};
 use crate::scheduler::{CronError, CronScheduler};
+
+/// Reject absolute paths and directory traversal in cron script fields.
+///
+/// Mirrors Python `cronjob_tools._validate_cron_script_path()`.
+fn validate_script_path(script: &str) -> Result<(), ToolError> {
+    let raw = script.trim();
+    if raw.is_empty() {
+        return Ok(());
+    }
+    let is_absolute = raw.starts_with('/')
+        || raw.starts_with('~')
+        || raw.starts_with('\\')
+        || (raw.len() >= 2 && raw.as_bytes()[1] == b':');
+    if is_absolute {
+        return Err(ToolError::InvalidParams(format!(
+            "cron script must be a name relative to ~/.hermes/scripts/, not an absolute path: {raw:?}"
+        )));
+    }
+    for component in std::path::Path::new(raw).components() {
+        if component == std::path::Component::ParentDir {
+            return Err(ToolError::InvalidParams(format!(
+                "cron script path must not contain '..': {raw:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Scan `prompt` and `script` for injection / exfil patterns at write time.
+///
+/// Calling this in `create()` / `update()` surfaces errors immediately, before
+/// the job is persisted — rather than waiting until execution.
+fn scan_job_content(task: &str, script: Option<&str>) -> Result<(), ToolError> {
+    if let Some(rule) = detect_cron_prompt_injection(task) {
+        return Err(ToolError::InvalidParams(format!(
+            "prompt blocked by security scanner ({rule})"
+        )));
+    }
+    if let Some(s) = script {
+        let trimmed = s.trim();
+        if let Some(rule) = detect_cron_prompt_injection(trimmed) {
+            return Err(ToolError::InvalidParams(format!(
+                "script blocked by security scanner ({rule})"
+            )));
+        }
+        validate_script_path(trimmed)?;
+    }
+    Ok(())
+}
 
 /// A [`CronjobBackend`] that delegates to a running [`CronScheduler`].
 pub struct ScheduledCronjobBackend {
@@ -278,6 +328,8 @@ impl CronjobBackend for ScheduledCronjobBackend {
         }
         apply_repeat_for_oneshot(&mut job);
 
+        scan_job_content(task, script)?;
+
         let context_from = parse_context_from_create(context_from)?;
         if let Some(ref refs) = context_from {
             self.validate_context_refs_exist(refs).await?;
@@ -400,10 +452,23 @@ impl CronjobBackend for ScheduledCronjobBackend {
             job.normalize_schedule();
         }
         if let Some(t) = task {
+            if let Some(rule) = detect_cron_prompt_injection(t) {
+                return Err(ToolError::InvalidParams(format!(
+                    "prompt blocked by security scanner ({rule})"
+                )));
+            }
             job.prompt = t.to_string();
         }
         if let Some(script) = script {
             let trimmed = script.trim();
+            if !trimmed.is_empty() {
+                validate_script_path(trimmed)?;
+                if let Some(rule) = detect_cron_prompt_injection(trimmed) {
+                    return Err(ToolError::InvalidParams(format!(
+                        "script blocked by security scanner ({rule})"
+                    )));
+                }
+            }
             job.script = if trimmed.is_empty() {
                 None
             } else {
@@ -459,7 +524,7 @@ impl CronjobBackend for ScheduledCronjobBackend {
                 JobStatus::Paused
             };
             if matches!(job.status, JobStatus::Active) {
-                job.next_run = job.compute_next_run(chrono::Utc::now());
+                job.next_run = job.compute_next_run(hermes_core::now_utc());
             }
         }
 

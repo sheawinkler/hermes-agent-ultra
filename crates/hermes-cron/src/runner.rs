@@ -43,7 +43,8 @@ pub struct CronRunOutcome {
 /// Prompt-injection patterns blocked for scheduled jobs.
 ///
 /// Cron tasks are non-interactive and can run unattended, so we reject inputs
-/// that attempt to override system/developer instructions.
+/// that attempt to override system/developer instructions.  Mirrors Python's
+/// `_CRON_THREAT_PATTERNS` in `hermes/cron/runner.py`.
 static CRON_PROMPT_BLOCK_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
     vec![
         (
@@ -59,8 +60,79 @@ static CRON_PROMPT_BLOCK_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLo
             "override_system_prompt",
             Regex::new(r"(?is)\boverride\W+(?:the\W+)?system\W+prompt\b").expect("valid regex"),
         ),
+        (
+            "deception_hide",
+            Regex::new(r"(?is)\bdo\s+not\s+tell\s+the\s+user\b").expect("valid regex"),
+        ),
+        (
+            "disregard_rules",
+            Regex::new(
+                r"(?is)\bdisregard\s+(?:your|all|any)\s+(?:instructions|rules|guidelines)\b",
+            )
+            .expect("valid regex"),
+        ),
+        (
+            "read_dotenv",
+            Regex::new(r"(?is)\bcat\s+[^\n]*(?:\.env\b|credentials|\.netrc|\.pgpass)")
+                .expect("valid regex"),
+        ),
+        (
+            "ssh_backdoor",
+            Regex::new(r"(?is)\bauthorized_keys\b").expect("valid regex"),
+        ),
+        (
+            "sudoers_mod",
+            Regex::new(r"(?is)(?:/etc/sudoers\b|visudo\b)").expect("valid regex"),
+        ),
+        (
+            "destructive_root_rm",
+            Regex::new(r"(?is)\brm\s+-rf\s+/").expect("valid regex"),
+        ),
     ]
 });
+
+/// Pattern fragment matching common secret variable references (e.g. `$API_KEY`, `${TOKEN}`).
+const CRON_SECRET_VAR_PAT: &str =
+    r"\$\{?[A-Za-z_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)[A-Za-z0-9_]*\}?";
+
+/// Exfiltration patterns: curl/wget carrying secret env vars.  Mirrors Python's
+/// `_CRON_EXFIL_COMMAND_PATTERNS`.
+static CRON_EXFIL_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
+    let sv = CRON_SECRET_VAR_PAT;
+    vec![
+        (
+            "exfil_curl_url",
+            Regex::new(&format!(r#"(?is)\bcurl\b[^\n]*https?://[^\s"'`]*{sv}"#))
+                .expect("valid regex"),
+        ),
+        (
+            "exfil_wget_url",
+            Regex::new(&format!(r#"(?is)\bwget\b[^\n]*https?://[^\s"'`]*{sv}"#))
+                .expect("valid regex"),
+        ),
+        (
+            "exfil_curl_data",
+            Regex::new(&format!(
+                r#"(?is)\bcurl\b[^\n]*(?:--data(?:-raw|-binary|-urlencode)?|-d\b|--form|-F\b)[^\n]*{sv}"#
+            ))
+            .expect("valid regex"),
+        ),
+        (
+            "exfil_curl_auth_header",
+            Regex::new(&format!(
+                r#"(?is)\bcurl\b[^\n]*(?:-H|--header)\s+["']Authorization:\s*(?:Bearer|token)\s+{sv}"#
+            ))
+            .expect("valid regex"),
+        ),
+    ]
+});
+
+/// Unicode code points used as invisible steganographic characters.  Mirrors Python's
+/// `_CRON_INVISIBLE_CHARS`.
+const CRON_INVISIBLE_CHARS: &[char] = &[
+    '\u{200B}', '\u{200C}', '\u{200D}', '\u{2060}', '\u{FEFF}', '\u{202A}', '\u{202B}',
+    '\u{202C}', '\u{202D}', '\u{202E}',
+];
 
 const DEFAULT_SCRIPT_TIMEOUT_SECS: u64 = 120;
 const MAX_SCRIPT_OUTPUT_CHARS: usize = 64_000;
@@ -683,7 +755,11 @@ impl CronRunner {
         config.quiet_mode = true;
         config.skip_memory = true;
         config.platform = Some("cron".to_string());
-        config.session_id = Some(format!("cron:{}", job.id));
+        config.session_id = Some(format!(
+            "cron_{}_{}",
+            job.id,
+            hermes_core::format_wall_compact()
+        ));
         if let Some(profile_home) = profile_home.as_ref() {
             config.hermes_home = Some(profile_home.to_string_lossy().into_owned());
         }
@@ -1117,10 +1193,28 @@ impl CronRunner {
     }
 }
 
-fn detect_cron_prompt_injection(text: &str) -> Option<&'static str> {
-    CRON_PROMPT_BLOCK_PATTERNS
+/// Scan `text` for prompt-injection, exfiltration, and steganographic patterns.
+///
+/// Returns the first matching rule name, or `None` if the text is clean.
+/// Called at **create/update time** (in `backend.rs`) and again just before
+/// job execution as a last-resort defence.
+pub(crate) fn detect_cron_prompt_injection(text: &str) -> Option<&'static str> {
+    if text.chars().any(|c| CRON_INVISIBLE_CHARS.contains(&c)) {
+        return Some("invisible_unicode");
+    }
+    if let Some((name, _)) = CRON_PROMPT_BLOCK_PATTERNS
         .iter()
-        .find_map(|(name, re)| re.is_match(text).then_some(*name))
+        .find(|(_, re)| re.is_match(text))
+    {
+        return Some(*name);
+    }
+    if let Some((name, _)) = CRON_EXFIL_PATTERNS
+        .iter()
+        .find(|(_, re)| re.is_match(text))
+    {
+        return Some(*name);
+    }
+    None
 }
 
 #[cfg(test)]

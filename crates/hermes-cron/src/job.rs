@@ -387,7 +387,7 @@ impl CronJob {
             .schedule_spec
             .clone()
             .or_else(|| parse_schedule(&self.schedule).ok());
-        if spec.is_none() && self.compute_next_run(Utc::now()).is_none() {
+        if spec.is_none() && self.compute_next_run(now_utc()).is_none() {
             return Err(format!(
                 "Invalid cron schedule expression: '{}'",
                 self.schedule
