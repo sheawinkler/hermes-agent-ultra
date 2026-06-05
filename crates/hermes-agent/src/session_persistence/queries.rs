@@ -115,13 +115,17 @@ pub fn create_session(
     let started = now_unix();
 
     execute_write(conn, |c| {
-        c.execute(
-            "INSERT INTO sessions (id, source, model, system_prompt, parent_session_id, cwd, started_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(id) DO NOTHING",
-            params![sid, src, model, sp, parent, cwd, started],
+        hermes_tools::state_db::insert_session_if_missing(
+            c,
+            &sid,
+            &src,
+            model.as_deref(),
+            parent.as_deref(),
+            sp.as_deref(),
+            cwd.as_deref(),
+            started,
         )
-        .map_err(|e| AgentError::Io(format!("create_session: {e}")))?;
+        .map_err(|e| AgentError::Io(e.to_string()))?;
         Ok(())
     })
 }
@@ -886,13 +890,10 @@ pub fn append_messages(
     let owned: Vec<Message> = messages.to_vec();
     execute_write(conn, move |c| {
         let ts = now_unix();
+        let insert_sql = hermes_tools::state_db::message_insert_sql(c)
+            .map_err(|e| AgentError::Io(e.to_string()))?;
         let mut stmt = c
-            .prepare(
-                "INSERT INTO messages (
-                    session_id, role, content, tool_call_id, tool_calls,
-                    tool_name, reasoning_content, timestamp
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            )
+            .prepare(&insert_sql)
             .map_err(|e| AgentError::Io(format!("append prepare: {e}")))?;
         for msg in &owned {
             let role = match msg.role {

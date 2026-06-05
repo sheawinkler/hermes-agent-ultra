@@ -20,26 +20,67 @@ pub const HERMES_AGENT_HELP_GUIDANCE: &str = "If the user asks about configuring
 itself, load the `hermes-agent` skill with skill_view(name='hermes-agent') \
 before answering. Docs: https://hermes-agent.nousresearch.com/docs";
 
-pub const MEMORY_GUIDANCE: &str = "You have persistent memory across sessions. Save durable facts using the memory \
-tool: user preferences, environment details, tool quirks, and stable conventions. \
-Memory is injected into every turn, so keep it compact and focused on facts that \
-will still matter later.\n\
-Prioritize what reduces future user steering — the most valuable memory is one \
-that prevents the user from having to correct or remind you again. \
-User preferences and recurring corrections matter more than procedural task details.\n\
-Do NOT save task progress, session outcomes, completed-work logs, or temporary TODO \
-state to memory; use session_search to recall those from past transcripts. \
-Specifically: do not record PR numbers, issue numbers, commit SHAs, 'fixed bug X', \
-'submitted PR Y', 'Phase N done', file counts, or any artifact that will be stale \
-in 7 days. If a fact will be stale in a week, it does not belong in memory. \
-If you've discovered a new way to do something, solved a problem that could be \
-necessary later, save it as a skill with the skill tool.\n\
-Write memories as declarative facts, not instructions to yourself. \
-'User prefers concise responses' ✓ — 'Always respond concisely' ✗. \
-'Project uses pytest with xdist' ✓ — 'Run tests with pytest -n 4' ✗. \
-Imperative phrasing gets re-read as a directive in later sessions and can \
-cause repeated work or override the user's current request. Procedures and \
-workflows belong in skills, not memory.";
+/// Guidance for the USER.md store (`memory` tool with `target='user'`).
+pub const USER_PROFILE_GUIDANCE: &str = "You have a dedicated USER PROFILE store (memory tool, target='user'). \
+It is injected every session as 'USER PROFILE (who the user is)' — keep it compact \
+and purely about the human, not their projects or machines.\n\
+Save ONLY cross-session facts about the user themselves:\n\
+- Identity context they shared (name, role, home timezone when relevant to how you speak)\n\
+- Communication preferences: language, verbosity, tone, formatting, channel habits\n\
+- Stable expectations about how you should interact with them (not task runbooks)\n\
+- Pet peeves and things to avoid in replies\n\
+- Rough technical comfort level when they state it ('beginner at Rust', 'staff engineer')\n\
+Do NOT put these in USER profile — use the correct store instead:\n\
+- Upcoming events, travel plans, appointments, deadlines, or 'don't forget' reminders → target='memory'\n\
+- Project paths, repo names, stack choices, verification commands → target='memory'\n\
+- Live OS/CPU/port/process state → use terminal; never cache as profile\n\
+- Task progress, PRs, commits, session outcomes → session_search, not memory\n\
+- Multi-step how-to for a task class → skills, not USER profile\n\
+Write declarative facts about the user: 'User prefers concise Chinese answers' ✓ — \
+'Always respond concisely' ✗. Imperative phrasing is re-read as a directive and can \
+override the user's current request.";
+
+/// Guidance for the MEMORY.md store (`memory` tool with `target='memory'`).
+pub const MEMORY_GUIDANCE: &str = "You have a dedicated MEMORY store (memory tool, target='memory'). \
+It is injected every session as 'MEMORY (your personal notes)' — your durable notes \
+about their environment, projects, and tooling, not who they are as a person.\n\
+Save stable facts that will still matter across sessions:\n\
+- Explicit 'remember this' requests: upcoming trips, appointments, deadlines, recurring obligations\n\
+- Dated plans and diary-style notes you may need to recall later (not communication prefs)\n\
+- Environment and toolchain (OS family, key installed tools, deployment targets they use)\n\
+- Project/repo conventions, directory layout, preferred verification commands\n\
+- Tool quirks, workarounds, and recurring workspace corrections (not universal style prefs)\n\
+- Stable integrations (which CI, which package manager, which test runner)\n\
+Do NOT put these in MEMORY — use the correct store instead:\n\
+- User identity, persona, or communication preferences → target='user'\n\
+- Task progress, session outcomes, completed-work logs, temporary TODO state\n\
+- PR numbers, issue numbers, commit SHAs, or anything stale within a week\n\
+- Multi-step procedures → skills; past conversation detail → session_search\n\
+Write declarative facts, not instructions: 'Project uses cargo test -p hermes-parity-tests' ✓ — \
+'Run cargo test before every commit' ✗. Procedures and workflows belong in skills, not MEMORY.";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_profile_guidance_targets_user_store_only() {
+        assert!(USER_PROFILE_GUIDANCE.contains("target='user'"));
+        assert!(USER_PROFILE_GUIDANCE.contains("USER PROFILE"));
+        assert!(USER_PROFILE_GUIDANCE.contains("target='memory'"));
+        assert!(!USER_PROFILE_GUIDANCE.contains("tool quirks"));
+        assert!(USER_PROFILE_GUIDANCE.contains("don't forget"));
+    }
+
+    #[test]
+    fn memory_guidance_targets_memory_store_only() {
+        assert!(MEMORY_GUIDANCE.contains("target='memory'"));
+        assert!(MEMORY_GUIDANCE.contains("target='user'"));
+        assert!(MEMORY_GUIDANCE.contains("session_search"));
+        assert!(MEMORY_GUIDANCE.contains("communication preferences → target='user'"));
+        assert!(MEMORY_GUIDANCE.contains("remember this"));
+    }
+}
 
 pub const SESSION_SEARCH_GUIDANCE: &str = "When the user references something from a past conversation or you suspect \
 relevant cross-session context exists, use session_search to recall it before \
@@ -212,9 +253,9 @@ NEVER answer these from memory or mental computation — ALWAYS use a tool:\n\
 - File contents, sizes, line counts → use read_file, search_files, or terminal\n\
 - Git history, branches, diffs → use terminal\n\
 - Current facts (weather, news, versions) → use web_search\n\
-Your memory and user profile describe the USER, not the system you are \
-running on. The execution environment may differ from what the user profile \
-says about their personal setup.\n\
+USER profile (target='user') describes the human's preferences, not live system \
+state. MEMORY (target='memory') may describe their usual projects/tools but is \
+not a substitute for checking the machine you are running on now.\n\
 </mandatory_tool_use>\n\
 \n\
 <act_dont_ask>\n\

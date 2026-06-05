@@ -9,7 +9,8 @@ use crate::context::{SystemPromptBuilder, load_builtin_memory_snapshot, load_sou
 use crate::prompt_builder::{
     COMPUTER_USE_GUIDANCE, CRONJOB_GUIDANCE, KANBAN_GUIDANCE, MEMORY_GUIDANCE,
     OPENAI_MODEL_EXECUTION_GUIDANCE, SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE,
-    TASK_COMPLETION_GUIDANCE, TOOL_USE_ENFORCEMENT_GUIDANCE, GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
+    TASK_COMPLETION_GUIDANCE, TOOL_USE_ENFORCEMENT_GUIDANCE, USER_PROFILE_GUIDANCE,
+    GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
 };
 
 pub static PLATFORM_HINTS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
@@ -437,6 +438,7 @@ impl AgentLoop {
         // Tool-aware behavioral guidance: only inject when the tools are loaded
         let mut tool_guidance = Vec::new();
         if tool_names.contains("memory") {
+            tool_guidance.push(USER_PROFILE_GUIDANCE);
             tool_guidance.push(MEMORY_GUIDANCE);
         }
         if tool_names.contains("session_search") {

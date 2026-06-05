@@ -52,13 +52,21 @@ pub fn ensure_session_row(
     source: &str,
     model: Option<&str>,
 ) -> Result<(), StateDbError> {
-    conn.execute(
-        "INSERT INTO sessions (id, source, model, started_at)
-         VALUES (?1, ?2, ?3, CAST(strftime('%s','now') AS REAL))
-         ON CONFLICT(id) DO NOTHING",
-        params![session_id, source, model],
-    )?;
-    Ok(())
+    super::sessions::insert_session_if_missing(
+        conn,
+        session_id,
+        source,
+        model,
+        None,
+        None,
+        None,
+        {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0)
+        },
+    )
 }
 
 pub fn update_token_counts(

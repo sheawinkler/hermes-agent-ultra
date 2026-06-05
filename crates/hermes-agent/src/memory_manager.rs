@@ -448,8 +448,9 @@ impl MemoryManager {
         if self.turns_since_memory_write >= self.memory_nudge_threshold {
             Some(
                 "[System hint: You haven't saved anything to memory recently. \
-                 If the user has shared preferences, corrections, or important \
-                 information, consider using the memory tool to persist it.]"
+                 If appropriate, use the memory tool: target='user' for durable \
+                 user preferences/identity; target='memory' for stable \
+                 environment or project facts.]"
                     .to_string(),
             )
         } else {

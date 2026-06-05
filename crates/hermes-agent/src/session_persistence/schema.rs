@@ -79,7 +79,10 @@ CREATE TABLE IF NOT EXISTS compression_locks (
     acquired_at REAL NOT NULL,
     expires_at REAL NOT NULL
 );
+"#;
 
+/// Core indexes — must run after [`reconcile_table`] on legacy DBs missing columns like `source`.
+const SESSION_INDEXES_SQL: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC);
@@ -455,6 +458,21 @@ fn ensure_title_unique_index(conn: &Connection) -> Result<(), AgentError> {
     Ok(())
 }
 
+fn ensure_core_indexes(conn: &Connection) -> Result<(), AgentError> {
+    conn.execute_batch(SESSION_INDEXES_SQL)
+        .map_err(|e| AgentError::Io(format!("session indexes: {e}")))?;
+
+    if table_has_column(conn, "messages", "platform_message_id")? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_messages_platform_msg_id
+             ON messages(session_id, platform_message_id)
+             WHERE platform_message_id IS NOT NULL",
+        )
+        .map_err(|e| AgentError::Io(format!("platform_message_id index: {e}")))?;
+    }
+    Ok(())
+}
+
 /// Initialize or migrate the database schema to Python `hermes_state` parity.
 pub fn init_schema(conn: &Connection) -> Result<bool, AgentError> {
     conn.execute_batch(BASE_SCHEMA_SQL)
@@ -463,6 +481,7 @@ pub fn init_schema(conn: &Connection) -> Result<bool, AgentError> {
     reconcile_table(conn, "sessions", SESSIONS_COLUMNS)?;
     reconcile_table(conn, "messages", MESSAGES_COLUMNS)?;
     migrate_legacy_sessions(conn)?;
+    ensure_core_indexes(conn)?;
 
     let fts_enabled = ensure_python_fts(conn)?;
 
@@ -491,5 +510,51 @@ mod tests {
         assert!(fts);
         assert!(table_exists(&conn, "sessions").unwrap());
         assert!(table_exists(&conn, "messages_fts_trigram").unwrap());
+    }
+
+    #[test]
+    fn init_schema_migrates_legacy_sessions_without_source() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                platform TEXT DEFAULT 'cli',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT,
+                created_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+
+        let fts = init_schema(&conn).unwrap();
+        assert!(fts);
+        assert!(table_has_column(&conn, "sessions", "source").unwrap());
+
+        hermes_tools::state_db::insert_session_if_missing(
+            &conn,
+            "legacy-1",
+            "cli",
+            None,
+            None,
+            None,
+            None,
+            1.0,
+        )
+        .unwrap();
+
+        let created: String = conn
+            .query_row(
+                "SELECT created_at FROM sessions WHERE id = 'legacy-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!created.is_empty());
     }
 }

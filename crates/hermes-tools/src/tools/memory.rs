@@ -117,7 +117,7 @@ impl ToolHandler for MemoryHandler {
             "target".into(),
             json!({
                 "type": "string",
-                "description": "Which memory store to update.",
+                "description": "Which store to update: 'user' = USER PROFILE (identity and communication preferences only); 'memory' = agent notes (environment, projects, reminders, dated plans, conventions).",
                 "enum": ["memory", "user"]
             }),
         );
@@ -138,7 +138,7 @@ impl ToolHandler for MemoryHandler {
 
         tool_schema(
             "memory",
-            "Save durable information to persistent memory across sessions. Use target='user' for user preferences and target='memory' for environment/workflow notes. Do not store temporary task progress.",
+            "Save durable information across sessions. target='user' is ONLY for the human's identity and communication preferences (USER.md). target='memory' is for environment, project conventions, and tool quirks (MEMORY.md). Do not store temporary task progress or live system state.",
             JsonSchema::object(props, vec!["action".into(), "target".into()]),
         )
     }

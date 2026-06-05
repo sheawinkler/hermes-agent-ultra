@@ -1,11 +1,13 @@
 //! Shared SQLite state.db read/write helpers (`hermes_state.py` parity surface for tools/gateway).
 
 mod billing;
+mod columns;
 mod conn;
 mod content;
 mod error;
 mod list;
 mod search;
+mod sessions;
 mod telegram;
 
 pub use billing::{TokenCountUpdate, update_token_counts};
@@ -14,6 +16,7 @@ pub use content::decode_content_preview;
 pub use error::StateDbError;
 pub use list::{SessionListRow, get_compression_tip, list_sessions_rich, load_session_messages};
 pub use search::{SearchContextMessage, SearchMessageMatch, sanitize_fts5_query, search_messages};
+pub use sessions::{insert_session_if_missing, message_insert_sql};
 pub use telegram::{
     TelegramTopicBinding, UnlinkedTelegramSession, apply_telegram_topic_migration,
     bind_telegram_topic, disable_telegram_topic_mode, enable_telegram_topic_mode,

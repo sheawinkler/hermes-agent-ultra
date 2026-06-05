@@ -278,13 +278,18 @@ const FINALIZER_OUTPUT_QUALITY_MAX_RETRIES: u32 = 2;
 const FINALIZER_ACTION_EXECUTION_MAX_RETRIES: u32 = 2;
 
 // Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (0.14.0)
-const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
-Focus on:\n\
-1. Has the user revealed things about themselves — their persona, desires, \
-preferences, or personal details worth remembering?\n\
-2. Has the user expressed expectations about how you should behave, their work \
-style, or ways they want you to operate?\n\n\
-If something stands out, save it using the memory tool. \
+const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving durable facts \
+with the memory tool. Use the correct target — do not mix user identity with \
+project/environment notes.\n\n\
+**User profile (target='user')** — save ONLY if the user revealed:\n\
+1. Persona, role, or stable identity details (not dated trips/events — those are memory)\n\
+2. Communication preferences: language, verbosity, tone, formatting\n\
+3. Cross-session expectations about how you should interact with them\n\n\
+**Agent notes (target='memory')** — save ONLY if you learned stable facts about:\n\
+4. Their environment, project layout, toolchain, or repo conventions\n\
+5. Durable workspace corrections (not universal communication style)\n\
+6. Upcoming events, travel, appointments, or explicit 'don't forget' facts they asked you to remember\n\n\
+USER profile must stay about WHO the user is, not WHAT they are working on. \
 If nothing is worth saving, just say 'Nothing to save.' and stop.";
 
 const SKILL_REVIEW_PROMPT: &str = "Review the conversation above and update the skill library. Be \
@@ -347,13 +352,13 @@ The name MUST NOT be a specific PR number, error string, feature \
 codename, library-alone name, or 'fix-X / debug-Y / audit-Z-today' \
 session artifact. If the proposed name only makes sense for \
 today's task, it's wrong — fall back to (1), (2), or (3).\n\n\
-User-preference embedding (important): when the user expressed a \
-style/format/workflow preference, the update belongs in the \
-SKILL.md body, not just in memory. Memory captures 'who the user \
-is and what the current situation and state of your operations \
-are'; skills capture 'how to do this class of task for this \
-user'. When they complain about how you handled a task, the \
-skill that governs that task needs to carry the lesson.\n\n\
+User-preference embedding (important): universal style/format preferences \
+that apply across all tasks → memory target='user'. Task-specific workflow \
+or approach corrections → the relevant SKILL.md body. Environment and \
+project facts → memory target='memory'. Skills capture 'how to do this \
+class of task'; USER profile captures 'who the user is'. When they \
+complain about how you handled a specific task, the skill that governs \
+that task needs to carry the lesson.\n\n\
 If you notice two existing skills that overlap, note it in your \
 reply — the background curator handles consolidation at scale.\n\n\
 Protected skills (DO NOT edit these):\n\
@@ -388,10 +393,11 @@ produced no new technique, just say 'Nothing to save.' and stop. \
 Otherwise, act.";
 
 const COMBINED_REVIEW_PROMPT: &str = "Review the conversation above and update two things:\n\n\
-**Memory**: who the user is. Did the user reveal persona,  \
-desires, preferences, personal details, or expectations about \
-how you should behave? Save facts about the user and durable \
-preferences with the memory tool.\n\n\
+**Memory** — use the memory tool with the correct target:\n\
+• target='user': persona, communication preferences, and cross-session \
+expectations about how you should interact with them (WHO they are).\n\
+• target='memory': stable environment, project, toolchain, or repo \
+conventions you learned (WHAT they work on — not live system state).\n\n\
 **Skills**: how to do this class of task. Be ACTIVE — most \
 sessions produce at least one skill update. A pass that does \
 nothing is a missed learning opportunity, not a neutral outcome.\n\n\
@@ -429,12 +435,11 @@ Name at the class level — NOT a PR number, error string, \
 codename, library-alone name, or 'fix-X / debug-Y' session \
 artifact. If the name only fits today's task, fall back to (1), \
 (2), or (3).\n\n\
-User-preference embedding: when the user complains about how \
-you handled a task, update the skill that governs that task — \
-memory alone isn't enough. Memory says 'who the user is and \
-what the current situation and state of your operations are'; \
-skills say 'how to do this class of task for this user'. Both \
-should carry user-preference lessons when relevant.\n\n\
+User-preference embedding: universal style/format preferences → memory \
+target='user'. Task-specific workflow corrections → the relevant skill. \
+Environment/project facts → memory target='memory'. When the user complains \
+about how you handled a specific task, update the skill that governs that \
+task — USER profile alone is not enough for task-class lessons.\n\n\
 If you notice overlapping existing skills, mention it — the \
 background curator handles consolidation.\n\n\
 Protected skills (DO NOT edit these):\n\
