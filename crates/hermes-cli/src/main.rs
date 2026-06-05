@@ -4436,15 +4436,41 @@ where
     lookup(key).is_some_and(|value| env_value_truthy(&value))
 }
 
-fn explicit_platform_unauthorized_dm_behavior(
+fn dm_policy_unauthorized_behavior(raw: &str) -> Option<UnauthorizedDmBehavior> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "pairing" | "pair" => Some(UnauthorizedDmBehavior::Pair),
+        "allowlist" | "disabled" | "ignore" | "deny" | "drop" => {
+            Some(UnauthorizedDmBehavior::Ignore)
+        }
+        _ => None,
+    }
+}
+
+fn platform_dm_policy_env_key(platform: &str) -> String {
+    format!("{}_DM_POLICY", platform.to_ascii_uppercase())
+}
+
+fn explicit_platform_unauthorized_dm_behavior<F>(
+    platform: &str,
     platform_cfg: &PlatformConfig,
-) -> Option<UnauthorizedDmBehavior> {
+    lookup: &mut F,
+) -> Option<UnauthorizedDmBehavior>
+where
+    F: FnMut(&str) -> Option<String>,
+{
     if let Some(raw) = extra_string(platform_cfg, "unauthorized_dm_behavior") {
         return match raw.trim().to_ascii_lowercase().as_str() {
             "pair" => Some(UnauthorizedDmBehavior::Pair),
             "ignore" | "deny" | "drop" => Some(UnauthorizedDmBehavior::Ignore),
             _ => None,
         };
+    }
+    if let Some(raw) = extra_string(platform_cfg, "dm_policy")
+        .or_else(|| lookup(&platform_dm_policy_env_key(platform)))
+    {
+        if let Some(behavior) = dm_policy_unauthorized_behavior(&raw) {
+            return Some(behavior);
+        }
     }
     (platform_cfg.unauthorized_dm_behavior == UnauthorizedDmBehavior::Pair)
         .then_some(UnauthorizedDmBehavior::Pair)
@@ -4595,7 +4621,9 @@ where
         if platform == "whatsapp" {
             dm_manager.load_whatsapp_lid_mappings_from_home(&hermes_home_dir);
         }
-        if let Some(behavior) = explicit_platform_unauthorized_dm_behavior(platform_cfg) {
+        if let Some(behavior) =
+            explicit_platform_unauthorized_dm_behavior(&platform, platform_cfg, &mut lookup)
+        {
             dm_manager.set_platform_unauthorized_behavior(&platform, behavior);
         } else if has_platform_allowlist {
             dm_manager
@@ -15312,6 +15340,59 @@ mod tests {
         );
         assert_eq!(
             dm.handle_dm("+15559999999", "signal").await,
+            hermes_gateway::DmDecision::Deny
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_dm_manager_dm_policy_pairing_overrides_global_allowlist_ignore() {
+        let mut config = hermes_config::GatewayConfig::default();
+        config.platforms.insert(
+            "wecom".to_string(),
+            PlatformConfig {
+                enabled: true,
+                ..PlatformConfig::default()
+            },
+        );
+        let env = std::collections::HashMap::from([
+            (
+                "GATEWAY_ALLOWED_USERS".to_string(),
+                "admin-user".to_string(),
+            ),
+            ("WECOM_DM_POLICY".to_string(), "pairing".to_string()),
+        ]);
+
+        let dm = build_gateway_dm_manager_with_lookup(&config, |key| env.get(key).cloned());
+        assert_eq!(
+            dm.handle_dm("admin-user", "wecom").await,
+            hermes_gateway::DmDecision::Allow
+        );
+        assert!(matches!(
+            dm.handle_dm("stranger", "wecom").await,
+            hermes_gateway::DmDecision::Pair { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn gateway_dm_manager_dm_policy_allowlist_denies_unlisted_sender_without_pairing() {
+        let mut config = hermes_config::GatewayConfig::default();
+        let mut weixin = PlatformConfig {
+            enabled: true,
+            ..PlatformConfig::default()
+        };
+        weixin.allowed_users = vec!["known-user".to_string()];
+        weixin
+            .extra
+            .insert("dm_policy".to_string(), serde_json::json!("allowlist"));
+        config.platforms.insert("weixin".to_string(), weixin);
+
+        let dm = build_gateway_dm_manager_with_lookup(&config, |_key| None);
+        assert_eq!(
+            dm.handle_dm("known-user", "weixin").await,
+            hermes_gateway::DmDecision::Allow
+        );
+        assert_eq!(
+            dm.handle_dm("stranger", "weixin").await,
             hermes_gateway::DmDecision::Deny
         );
     }

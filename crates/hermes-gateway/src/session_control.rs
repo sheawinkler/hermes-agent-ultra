@@ -241,6 +241,10 @@ impl BusySessionCoordinator {
         session_key: &str,
         _outcome: ProcessingOutcome,
     ) -> Option<MessageEvent> {
+        self.reset_session(session_key)
+    }
+
+    pub fn reset_session(&mut self, session_key: &str) -> Option<MessageEvent> {
         self.active.remove(session_key);
         self.busy_ack_ts.remove(session_key);
         self.pending.remove(session_key)
@@ -564,6 +568,54 @@ mod tests {
         coord.handle_busy_message(&key, event("queued", "10"), BusyInputMode::Queue);
         let pending = coord.finish(&key, ProcessingOutcome::Success).unwrap();
         assert_eq!(pending.text, "queued");
+        assert!(!coord.is_active(&key));
+        assert!(coord.pending(&key).is_none());
+    }
+
+    #[test]
+    fn reset_session_evicts_active_pending_and_busy_ack_state() {
+        let mut coord = BusySessionCoordinator::default();
+        let key = build_session_key(&source("10"));
+        let now = Instant::now();
+        coord.mark_active_at(&key, None, now);
+        let queued = coord.handle_busy_message_at(
+            &key,
+            event("queued before reset", "10"),
+            BusyInputMode::Queue,
+            now,
+        );
+        assert!(queued.handled);
+        assert!(queued.ack.is_some());
+
+        let pending = coord.reset_session(&key).unwrap();
+        assert_eq!(pending.text, "queued before reset");
+        assert!(!coord.is_active(&key));
+        assert!(coord.pending(&key).is_none());
+
+        let after_reset = coord.handle_busy_message_at(
+            &key,
+            event("late follow-up", "10"),
+            BusyInputMode::Queue,
+            now + Duration::from_secs(1),
+        );
+        assert!(!after_reset.handled);
+        assert!(after_reset.ack.is_none());
+        assert!(coord.pending(&key).is_none());
+    }
+
+    #[test]
+    fn reset_session_makes_late_finish_a_noop() {
+        let mut coord = BusySessionCoordinator::default();
+        let key = build_session_key(&source("10"));
+        coord.mark_active(&key, None);
+        coord.handle_busy_message(
+            &key,
+            event("queued before reset", "10"),
+            BusyInputMode::Queue,
+        );
+
+        assert!(coord.reset_session(&key).is_some());
+        assert!(coord.finish(&key, ProcessingOutcome::Cancelled).is_none());
         assert!(!coord.is_active(&key));
         assert!(coord.pending(&key).is_none());
     }
