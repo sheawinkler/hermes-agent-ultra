@@ -115,7 +115,8 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "Clear screen/session state and start a fresh session",
     ),
     ("/retry", "Retry the last user message"),
-    ("/undo", "Undo the last exchange"),
+    ("/undo", "Undo the last N user turns and prefill the latest undone prompt"),
+    ("/rewind", "Alias for /undo [N]"),
     ("/history", "Show recent conversation history"),
     (
         "/recap",
@@ -3559,9 +3560,36 @@ async fn dispatch_slash_command(
             app.retry_last().await?;
             Ok(CommandResult::Handled)
         }
-        "/undo" => {
-            app.undo_last();
-            emit_command_output(app, "[Last exchange undone]");
+        "/undo" | "/rewind" => {
+            let count = match args.first() {
+                Some(raw) => match raw.parse::<usize>() {
+                    Ok(value) if value > 0 => value,
+                    _ => {
+                        emit_command_output(app, "Usage: /undo [positive-turn-count]");
+                        return Ok(CommandResult::Handled);
+                    }
+                },
+                None => 1,
+            };
+            match app.undo_last_n(count) {
+                Some(prefill) if !prefill.trim().is_empty() => emit_command_output(
+                    app,
+                    format!(
+                        "[Undid {} user turn{}; prompt restored to composer for editing]",
+                        count,
+                        if count == 1 { "" } else { "s" }
+                    ),
+                ),
+                Some(_) => emit_command_output(
+                    app,
+                    format!(
+                        "[Undid {} user turn{}]",
+                        count,
+                        if count == 1 { "" } else { "s" }
+                    ),
+                ),
+                None => emit_command_output(app, "[No user turns to undo]"),
+            }
             Ok(CommandResult::Handled)
         }
         "/history" => handle_history_command(app),
@@ -18336,9 +18364,7 @@ fn handle_rollback_command(app: &mut App, args: &[&str]) -> Result<CommandResult
             sub.parse::<usize>().unwrap_or(1)
         };
         let bounded = steps.clamp(1, 64);
-        for _ in 0..bounded {
-            app.undo_last();
-        }
+        let _ = app.undo_last_n(bounded);
         emit_command_output(
             app,
             format!("Rolled back {} exchange(s) via undo.", bounded),
@@ -20004,6 +20030,7 @@ const COMMAND_CATALOG_SECTIONS: &[CommandCatalogSection] = &[
             "/reset",
             "/retry",
             "/undo",
+            "/rewind",
             "/history",
             "/recap",
             "/context",

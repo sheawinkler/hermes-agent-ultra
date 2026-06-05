@@ -575,6 +575,18 @@
     "794519c6ad49": {
       "disposition": "ported",
       "notes": "Rust SessionPersistence updates sessions.model on persisted session conflicts, exposes update_session_model/get_session_model, and App::switch_model immediately refreshes existing persisted session metadata."
+    },
+    "3e59be0c412b": {
+      "disposition": "ported",
+      "notes": "Rust SessionPersistence now adds messages.active and sessions.rewind_count, filters loads/search to active rows, preserves inactive audit rows, and exposes soft rewind/recent-user/restore primitives with regression coverage."
+    },
+    "243e836dce95": {
+      "disposition": "ported",
+      "notes": "Rust TUI consumes App pending prefill after /rewind or /undo, restoring the rewound prompt into the composer without auto-submitting while App soft-rewinds active session rows."
+    },
+    "3f7d1c801ddf": {
+      "disposition": "ported",
+      "notes": "Rust /undo [N] and /rewind [N] clamp to active user turns, truncate in-memory context, soft-delete persisted rows, preserve inactive audit rows, and stage the backed-up prompt for editing."
     }
   },
   "subject_patterns": [
