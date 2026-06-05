@@ -2433,6 +2433,18 @@ impl App {
         ));
         self.agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
 
+        match SessionPersistence::new(&self.state_root)
+            .update_session_model(&self.session_id, &self.current_model)
+        {
+            Ok(true) => tracing::debug!(
+                "Persisted model switch for session {} to {}",
+                self.session_id,
+                self.current_model
+            ),
+            Ok(false) => {}
+            Err(err) => tracing::debug!("Failed to persist model switch to session DB: {}", err),
+        }
+
         tracing::info!("Switched model to: {}", provider_model);
     }
 
@@ -3744,6 +3756,10 @@ mod tests {
     }
 
     fn build_minimal_test_app() -> App {
+        build_minimal_test_app_with_state_root(hermes_home_dir())
+    }
+
+    fn build_minimal_test_app_with_state_root(state_root: PathBuf) -> App {
         let config = Arc::new(GatewayConfig::default());
         let tool_registry = Arc::new(ToolRegistry::new());
         let agent_tool_registry = Arc::new(bridge_tool_registry(&tool_registry));
@@ -3759,12 +3775,12 @@ mod tests {
         .with_callbacks(App::stream_callbacks(Arc::new(StdMutex::new(None))));
         let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
             &agent_inner,
-            hermes_home_dir(),
+            state_root.clone(),
         ));
         let agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
 
         App {
-            state_root: hermes_home_dir(),
+            state_root,
             config,
             agent,
             tool_registry,
@@ -3786,6 +3802,49 @@ mod tests {
             session_objective: None,
             quorum_armed_once: false,
             pet_settings: PetSettings::default(),
+        }
+    }
+
+    #[test]
+    fn test_switch_model_updates_existing_session_db_row() {
+        let _guard = env_test_lock();
+        let env_keys = [
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "HERMES_TUI_PROVIDER",
+        ];
+        let saved_env: Vec<(&str, Option<String>)> = env_keys
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());
+        let persistence = SessionPersistence::new(tmp.path());
+        persistence
+            .persist_session(
+                &app.session_id,
+                &[hermes_core::Message::user("hello")],
+                Some(&app.current_model),
+                Some("cli"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        app.switch_model("anthropic:claude-sonnet-4-6");
+
+        assert_eq!(
+            persistence.get_session_model(&app.session_id).unwrap(),
+            Some("anthropic:claude-sonnet-4-6".to_string())
+        );
+
+        for (key, value) in saved_env {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
         }
     }
 

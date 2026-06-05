@@ -559,6 +559,22 @@
     "7de8cd4c5f67": {
       "disposition": "ported",
       "notes": "TUI voice TTS state now flows through SlashHandlerContext into useMainApp status rendering, with createSlashHandler coverage for /voice tts state sync."
+    },
+    "5ad2b4c6dab7": {
+      "disposition": "ported",
+      "notes": "Rust SessionPersistence now treats SQLite FTS5 as optional: base session persistence remains available without FTS, FTS deletes are guarded, and tests cover no-FTS degradation helpers."
+    },
+    "97ecfa0fc487": {
+      "disposition": "ported",
+      "notes": "Rust session search degrades content search when FTS is unavailable while keeping recent/session-id lookup live; no separate trigram table exists in Rust."
+    },
+    "355af2c20f49": {
+      "disposition": "ported",
+      "notes": "Rust session DB and search survive missing FTS5 by creating base tables first, optional FTS schema second, and returning search_degraded=fts5_unavailable rather than failing registration/search."
+    },
+    "794519c6ad49": {
+      "disposition": "ported",
+      "notes": "Rust SessionPersistence updates sessions.model on persisted session conflicts, exposes update_session_model/get_session_model, and App::switch_model immediately refreshes existing persisted session metadata."
     }
   },
   "subject_patterns": [

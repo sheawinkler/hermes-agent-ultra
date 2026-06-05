@@ -19,6 +19,7 @@ const HIDDEN_SESSION_SOURCES: &[&str] = &["tool", "internal"];
 /// Real session search backend using SQLite FTS5.
 pub struct SqliteSessionSearchBackend {
     conn: Mutex<Connection>,
+    fts_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -50,6 +51,68 @@ struct SessionRowContext {
 }
 
 impl SqliteSessionSearchBackend {
+    fn is_fts5_unavailable_message(message: &str) -> bool {
+        let lower = message.to_ascii_lowercase();
+        lower.contains("no such module")
+            || lower.contains("unknown tokenizer")
+            || lower.contains("fts5")
+    }
+
+    fn is_fts5_unavailable_error(error: &rusqlite::Error) -> bool {
+        Self::is_fts5_unavailable_message(&error.to_string())
+    }
+
+    fn fts_table_exists(conn: &Connection) -> Result<bool, ToolError> {
+        conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts' LIMIT 1",
+            [],
+            |_| Ok(true),
+        )
+        .or_else(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => Ok(false),
+            other => Err(ToolError::ExecutionFailed(format!(
+                "Failed to inspect messages_fts availability: {other}"
+            ))),
+        })
+    }
+
+    fn ensure_fts_schema(conn: &Connection, db_path: &str) -> Result<bool, ToolError> {
+        match conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                content,
+                session_id UNINDEXED,
+                role UNINDEXED,
+                content='messages',
+                content_rowid='id'
+            );
+            CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts(rowid, content, session_id, role)
+                VALUES (new.id, new.content, new.session_id, new.role);
+            END;
+            CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+                DELETE FROM messages_fts WHERE rowid = old.id;
+            END;
+            CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+                DELETE FROM messages_fts WHERE rowid = old.id;
+                INSERT INTO messages_fts(rowid, content, session_id, role)
+                VALUES (new.id, new.content, new.session_id, new.role);
+            END;",
+        ) {
+            Ok(()) => Ok(true),
+            Err(err) if Self::is_fts5_unavailable_error(&err) => {
+                tracing::warn!(
+                    "SQLite FTS5 unavailable for {}; session_search will use recent/id lookup only: {}",
+                    db_path,
+                    err
+                );
+                Ok(false)
+            }
+            Err(err) => Err(ToolError::ExecutionFailed(format!(
+                "Failed to ensure session FTS schema: {err}"
+            ))),
+        }
+    }
+
     fn ensure_text_column(conn: &Connection, table: &str, column: &str) -> Result<(), ToolError> {
         match conn.execute(
             &format!("ALTER TABLE {table} ADD COLUMN {column} TEXT"),
@@ -778,27 +841,18 @@ impl SqliteSessionSearchBackend {
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
-            CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
-            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-                content,
-                session_id UNINDEXED,
-                role UNINDEXED,
-                content='messages',
-                content_rowid='id'
-            );
-            CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-                INSERT INTO messages_fts(rowid, content, session_id, role)
-                VALUES (new.id, new.content, new.session_id, new.role);
-            END;",
+            CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);",
         )
         .map_err(|e| {
             ToolError::ExecutionFailed(format!("Failed to ensure session schema: {}", e))
         })?;
 
         Self::ensure_session_compat_columns(&conn)?;
+        let fts_enabled = Self::ensure_fts_schema(&conn, db_path)?;
 
         Ok(Self {
             conn: Mutex::new(conn),
+            fts_enabled,
         })
     }
 
@@ -846,7 +900,12 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
         let query = query.map(str::trim).unwrap_or("");
         let limit = limit.min(5).max(1);
 
-        let (tasks, sessions_searched, recent_payload): (Vec<SummaryTask>, usize, Option<Value>) = {
+        let (tasks, sessions_searched, recent_payload, search_degraded): (
+            Vec<SummaryTask>,
+            usize,
+            Option<Value>,
+            Option<&'static str>,
+        ) = {
             let conn = self
                 .conn
                 .lock()
@@ -977,7 +1036,7 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                         results.len()
                     ),
                 });
-                (Vec::new(), 0, Some(payload))
+                (Vec::new(), 0, Some(payload), None)
             } else {
                 let mut seen = HashSet::new();
                 let current_lineage_root = current_session_id
@@ -1019,7 +1078,9 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                     }
                 }
 
-                if tasks.len() < limit {
+                let fts_available = self.fts_enabled && Self::fts_table_exists(&conn)?;
+                let mut search_degraded = None;
+                if tasks.len() < limit && fts_available {
                     let hidden_placeholders = HIDDEN_SESSION_SOURCES
                         .iter()
                         .map(|_| "?".to_string())
@@ -1145,10 +1206,12 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                             tasks.push(task);
                         }
                     }
+                } else if !fts_available {
+                    search_degraded = Some("fts5_unavailable");
                 }
 
                 let searched = seen.len();
-                (tasks, searched, None)
+                (tasks, searched, None, search_degraded)
             }
         };
 
@@ -1221,14 +1284,17 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
             }
         }
 
-        Ok(json!({
+        let mut payload = json!({
             "success": true,
             "query": query,
             "results": summaries,
             "count": summaries.len(),
             "sessions_searched": sessions_searched,
-        })
-        .to_string())
+        });
+        if let Some(reason) = search_degraded {
+            payload["search_degraded"] = json!(reason);
+        }
+        Ok(payload.to_string())
     }
 }
 
@@ -1238,6 +1304,7 @@ mod tests {
     use crate::tools::session_search::SessionSearchBackend;
     use rusqlite::Connection;
     use serde_json::Value;
+    use std::sync::Mutex;
     use tempfile::TempDir;
 
     fn backend_with_db() -> (TempDir, SqliteSessionSearchBackend) {
@@ -1250,6 +1317,55 @@ mod tests {
 
     fn db_conn(tmp: &TempDir) -> Connection {
         Connection::open(tmp.path().join("sessions.db")).expect("open db")
+    }
+
+    fn no_fts_backend_with_seeded_db() -> SqliteSessionSearchBackend {
+        let conn = Connection::open_in_memory().expect("open memory db");
+        conn.execute_batch(
+            "CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                model TEXT,
+                platform TEXT DEFAULT 'cli',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                title TEXT,
+                message_count INTEGER DEFAULT 0,
+                parent_session_id TEXT,
+                model_config TEXT,
+                end_reason TEXT,
+                ended_at TEXT
+            );
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT,
+                tool_call_id TEXT,
+                tool_calls TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX idx_messages_session ON messages(session_id);",
+        )
+        .expect("schema");
+        insert_session(
+            &conn,
+            "nofts-session",
+            None,
+            None,
+            None,
+            None,
+            "2026-01-01T00:00:00Z",
+        );
+        insert_message(
+            &conn,
+            "nofts-session",
+            "user",
+            "uniquephrase only exists in plain messages",
+        );
+        SqliteSessionSearchBackend {
+            conn: Mutex::new(conn),
+            fts_enabled: false,
+        }
     }
 
     fn insert_session(
@@ -1300,6 +1416,10 @@ mod tests {
                     .map(ToString::to_string)
             })
             .collect()
+    }
+
+    fn parsed(output: &str) -> Value {
+        serde_json::from_str(output).expect("json output")
     }
 
     #[test]
@@ -1497,6 +1617,35 @@ mod tests {
             ],
             "{output}"
         );
+    }
+
+    #[tokio::test]
+    async fn no_fts_backend_still_supports_session_id_lookup() {
+        let backend = no_fts_backend_with_seeded_db();
+
+        let output = backend
+            .search(Some("nofts-session"), None, 5, None)
+            .await
+            .expect("search");
+        let value = parsed(&output);
+
+        assert_eq!(result_ids(&output), vec!["nofts-session".to_string()]);
+        assert_eq!(value["search_degraded"], "fts5_unavailable");
+    }
+
+    #[tokio::test]
+    async fn no_fts_backend_degrades_content_search_to_empty_success() {
+        let backend = no_fts_backend_with_seeded_db();
+
+        let output = backend
+            .search(Some("uniquephrase"), None, 5, None)
+            .await
+            .expect("search");
+        let value = parsed(&output);
+
+        assert_eq!(value["success"], true);
+        assert_eq!(value["count"], 0);
+        assert_eq!(value["search_degraded"], "fts5_unavailable");
     }
 
     #[tokio::test]

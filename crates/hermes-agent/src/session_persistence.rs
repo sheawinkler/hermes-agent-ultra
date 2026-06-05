@@ -1,6 +1,6 @@
 //! Session persistence — save and load conversation sessions.
 //!
-//! Provides SQLite-backed session storage with FTS5 indexing for search,
+//! Provides SQLite-backed session storage with optional FTS5 indexing for search,
 //! human-readable markdown session logs, and trajectory format for RL training.
 //!
 //! Corresponds to Python `run_agent.py`'s `_persist_session`, `_save_session_log`,
@@ -58,6 +58,86 @@ pub struct AutoMaintenanceResult {
 }
 
 impl SessionPersistence {
+    fn is_fts5_unavailable_message(message: &str) -> bool {
+        let lower = message.to_ascii_lowercase();
+        lower.contains("no such module")
+            || lower.contains("unknown tokenizer")
+            || lower.contains("fts5")
+    }
+
+    fn is_fts5_unavailable_error(error: &rusqlite::Error) -> bool {
+        Self::is_fts5_unavailable_message(&error.to_string())
+    }
+
+    fn fts_table_exists(conn: &rusqlite::Connection) -> Result<bool, AgentError> {
+        conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts' LIMIT 1",
+            [],
+            |_| Ok(true),
+        )
+        .or_else(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => Ok(false),
+            other => Err(AgentError::Io(format!(
+                "Failed to inspect messages_fts availability: {other}"
+            ))),
+        })
+    }
+
+    fn ensure_fts_schema(conn: &rusqlite::Connection, db_path: &Path) -> Result<bool, AgentError> {
+        match conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                content,
+                session_id UNINDEXED,
+                role UNINDEXED,
+                content='messages',
+                content_rowid='id'
+            );
+
+            CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts(rowid, content, session_id, role)
+                VALUES (new.id, new.content, new.session_id, new.role);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+                DELETE FROM messages_fts WHERE rowid = old.id;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+                DELETE FROM messages_fts WHERE rowid = old.id;
+                INSERT INTO messages_fts(rowid, content, session_id, role)
+                VALUES (new.id, new.content, new.session_id, new.role);
+            END;",
+        ) {
+            Ok(()) => Ok(true),
+            Err(err) if Self::is_fts5_unavailable_error(&err) => {
+                tracing::warn!(
+                    "SQLite FTS5 unavailable for {}; session persistence will continue without full-text indexing: {}",
+                    db_path.display(),
+                    err
+                );
+                Ok(false)
+            }
+            Err(err) => Err(AgentError::Io(format!(
+                "Failed to create FTS schema for sessions db: {err}"
+            ))),
+        }
+    }
+
+    fn delete_fts_rows_for_session(
+        conn: &rusqlite::Connection,
+        session_id: &str,
+    ) -> Result<(), AgentError> {
+        if !Self::fts_table_exists(conn)? {
+            return Ok(());
+        }
+        conn.execute(
+            "DELETE FROM messages_fts WHERE session_id = ?1",
+            rusqlite::params![session_id],
+        )
+        .map(|_| ())
+        .map_err(|e| AgentError::Io(format!("Failed to delete messages_fts rows: {e}")))
+    }
+
     fn ensure_text_column(
         conn: &rusqlite::Connection,
         table: &str,
@@ -155,19 +235,6 @@ impl SessionPersistence {
             CREATE INDEX IF NOT EXISTS idx_messages_session
                 ON messages(session_id);
 
-            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-                content,
-                session_id UNINDEXED,
-                role UNINDEXED,
-                content='messages',
-                content_rowid='id'
-            );
-
-            CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-                INSERT INTO messages_fts(rowid, content, session_id, role)
-                VALUES (new.id, new.content, new.session_id, new.role);
-            END;
-
             CREATE TABLE IF NOT EXISTS state_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT
@@ -192,6 +259,7 @@ impl SessionPersistence {
                 )));
             }
         }
+        Self::ensure_fts_schema(&conn, &self.db_path)?;
 
         Ok(())
     }
@@ -266,11 +334,7 @@ impl SessionPersistence {
             .unchecked_transaction()
             .map_err(|e| AgentError::Io(format!("Failed to open prune transaction: {e}")))?;
         for sid in &session_ids {
-            tx.execute(
-                "DELETE FROM messages_fts WHERE session_id = ?1",
-                rusqlite::params![sid],
-            )
-            .map_err(|e| AgentError::Io(format!("Failed to delete messages_fts rows: {e}")))?;
+            Self::delete_fts_rows_for_session(&tx, sid)?;
             tx.execute(
                 "DELETE FROM messages WHERE session_id = ?1",
                 rusqlite::params![sid],
@@ -363,16 +427,18 @@ impl SessionPersistence {
         // Upsert session record
         conn.execute(
             "INSERT INTO sessions (id, model, platform, created_at, updated_at, title, message_count, system_prompt)
-             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7)
+             VALUES (?1, COALESCE(?2, 'unknown'), COALESCE(?3, 'cli'), ?4, ?4, ?5, ?6, ?7)
              ON CONFLICT(id) DO UPDATE SET
                 updated_at = ?4,
+                model = COALESCE(?2, sessions.model),
+                platform = COALESCE(?3, sessions.platform),
                 message_count = ?6,
                 title = COALESCE(?5, sessions.title),
                 system_prompt = COALESCE(?7, sessions.system_prompt)",
             rusqlite::params![
                 session_id,
-                model.unwrap_or("unknown"),
-                platform.unwrap_or("cli"),
+                model,
+                platform,
                 now,
                 title,
                 messages.len() as i64,
@@ -387,6 +453,66 @@ impl SessionPersistence {
         Ok(())
     }
 
+    /// Update the persisted model for an existing session after a mid-session switch.
+    ///
+    /// This intentionally does not create a new session row: callers use it as a
+    /// best-effort dashboard/search metadata refresh for sessions that have
+    /// already been persisted.
+    pub fn update_session_model(&self, session_id: &str, model: &str) -> Result<bool, AgentError> {
+        let model = model.trim();
+        if session_id.trim().is_empty() || model.is_empty() {
+            return Ok(false);
+        }
+        if !self.db_path.exists() {
+            return Ok(false);
+        }
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        match conn.execute(
+            "UPDATE sessions SET model = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![model, Utc::now().to_rfc3339(), session_id],
+        ) {
+            Ok(changed) => Ok(changed > 0),
+            Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+                if message.contains("no such table") =>
+            {
+                Ok(false)
+            }
+            Err(e) => Err(AgentError::Io(format!(
+                "Failed to update session model: {e}"
+            ))),
+        }
+    }
+
+    /// Read the persisted model metadata for a session without creating a database.
+    pub fn get_session_model(&self, session_id: &str) -> Result<Option<String>, AgentError> {
+        if session_id.trim().is_empty() || !self.db_path.exists() {
+            return Ok(None);
+        }
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let mut stmt = match conn.prepare("SELECT model FROM sessions WHERE id = ?1") {
+            Ok(stmt) => stmt,
+            Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+                if message.contains("no such table") =>
+            {
+                return Ok(None);
+            }
+            Err(e) => {
+                return Err(AgentError::Io(format!(
+                    "Failed to prepare session model query: {e}"
+                )));
+            }
+        };
+        match stmt.query_row(rusqlite::params![session_id], |r| {
+            r.get::<_, Option<String>>(0)
+        }) {
+            Ok(model) => Ok(model.filter(|value| !value.trim().is_empty())),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AgentError::Io(format!("Failed to read session model: {e}"))),
+        }
+    }
+
     /// Batch insert messages into the database for FTS5 indexing.
     fn flush_messages_to_session_db(
         &self,
@@ -395,6 +521,7 @@ impl SessionPersistence {
         messages: &[Message],
     ) -> Result<(), AgentError> {
         // Delete existing messages for this session (full replace)
+        Self::delete_fts_rows_for_session(conn, session_id)?;
         conn.execute(
             "DELETE FROM messages WHERE session_id = ?1",
             rusqlite::params![session_id],
@@ -788,6 +915,149 @@ mod tests {
 
         let loaded = sp.load_session("replace-test").unwrap();
         assert_eq!(loaded.len(), 3);
+    }
+
+    #[test]
+    fn test_persist_session_updates_existing_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let messages = vec![Message::user("hello")];
+
+        sp.persist_session(
+            "model-update",
+            &messages,
+            Some("openai:gpt-4o"),
+            Some("cli"),
+            None,
+            None,
+        )
+        .unwrap();
+        sp.persist_session(
+            "model-update",
+            &messages,
+            Some("nous:hermes-4"),
+            Some("cli"),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let model: String = conn
+            .query_row(
+                "SELECT model FROM sessions WHERE id='model-update'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(model, "nous:hermes-4");
+    }
+
+    #[test]
+    fn test_update_session_model_only_updates_existing_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let messages = vec![Message::user("hello")];
+
+        assert!(!sp
+            .update_session_model("missing-session", "openai:gpt-4o")
+            .unwrap());
+
+        sp.persist_session(
+            "existing-session",
+            &messages,
+            Some("openai:gpt-4o"),
+            Some("cli"),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(sp
+            .update_session_model("existing-session", "anthropic:claude-sonnet")
+            .unwrap());
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let model: String = conn
+            .query_row(
+                "SELECT model FROM sessions WHERE id='existing-session'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(model, "anthropic:claude-sonnet");
+    }
+
+    #[test]
+    fn test_replacing_messages_clears_old_fts_rows_when_available() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+
+        sp.persist_session(
+            "fts-replace",
+            &[Message::user("needlebefore")],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        sp.persist_session(
+            "fts-replace",
+            &[Message::user("needleafter")],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        if SessionPersistence::fts_table_exists(&conn).unwrap() {
+            let old_hits: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'needlebefore'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let new_hits: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'needleafter'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(old_hits, 0);
+            assert_eq!(new_hits, 1);
+        }
+    }
+
+    #[test]
+    fn test_delete_fts_rows_ignores_missing_fts_table() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT,
+                created_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+
+        SessionPersistence::delete_fts_rows_for_session(&conn, "no-fts").unwrap();
+    }
+
+    #[test]
+    fn test_fts_unavailable_error_classifier_matches_missing_modules() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let err = conn
+            .execute_batch(
+                "CREATE VIRTUAL TABLE broken_fts USING definitely_missing_module(content);",
+            )
+            .expect_err("missing virtual table module should fail");
+        assert!(SessionPersistence::is_fts5_unavailable_error(&err));
     }
 
     #[test]
