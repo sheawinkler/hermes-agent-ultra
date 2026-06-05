@@ -27,6 +27,7 @@ use crate::background::{BackgroundTaskManager, TaskStatus};
 use crate::commands::{handle_command, GatewayCommandResult};
 use crate::dm::{DmDecision, DmManager};
 use crate::hooks::{HookEvent, HookRegistry};
+use crate::media::validate_media_delivery_path;
 use crate::platforms::helpers::extract_inline_images;
 use crate::session::{Session, SessionManager};
 use crate::stream::{StreamConfig, StreamManager};
@@ -2528,7 +2529,13 @@ impl Gateway {
         let adapter = self.get_adapter(platform).await.ok_or_else(|| {
             GatewayError::Platform(format!("No adapter registered for platform: {}", platform))
         })?;
-        adapter.send_file(chat_id, file_path, caption).await
+        let validated_path = validate_media_delivery_path(file_path).ok_or_else(|| {
+            GatewayError::SendFailed("Refusing to deliver unsafe local file path".to_string())
+        })?;
+        let validated_path = validated_path.to_str().ok_or_else(|| {
+            GatewayError::SendFailed("Refusing to deliver non-UTF-8 local file path".to_string())
+        })?;
+        adapter.send_file(chat_id, validated_path, caption).await
     }
 
     // -----------------------------------------------------------------------
@@ -2733,6 +2740,10 @@ mod tests {
         reactions: Arc<Mutex<Vec<String>>>,
     }
 
+    struct FileTestAdapter {
+        files: Arc<Mutex<Vec<String>>>,
+    }
+
     struct RecordingHook {
         seen: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
     }
@@ -2829,6 +2840,53 @@ mod tests {
 
         fn platform_name(&self) -> &str {
             "test"
+        }
+    }
+
+    #[async_trait]
+    impl PlatformAdapter for FileTestAdapter {
+        async fn start(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn stop(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_message(
+            &self,
+            _chat_id: &str,
+            _text: &str,
+            _parse_mode: Option<ParseMode>,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn edit_message(
+            &self,
+            _chat_id: &str,
+            _message_id: &str,
+            _text: &str,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_file(
+            &self,
+            _chat_id: &str,
+            file_path: &str,
+            _caption: Option<&str>,
+        ) -> Result<(), GatewayError> {
+            self.files.lock().unwrap().push(file_path.to_string());
+            Ok(())
+        }
+
+        fn is_running(&self) -> bool {
+            true
+        }
+
+        fn platform_name(&self) -> &str {
+            "file-test"
         }
     }
 
@@ -3105,6 +3163,40 @@ mod tests {
             "[image] https://cdn.example.com/x.png | caption=diagram"
         );
         assert_eq!(sent[2].1, "[image] https://fal.media/abc");
+    }
+
+    #[tokio::test]
+    async fn gateway_send_file_validates_and_canonicalizes_local_paths() {
+        let files = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(FileTestAdapter {
+            files: files.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let gw = Gateway::with_defaults(session_mgr, GatewayConfig::default());
+        gw.register_adapter("file-test", adapter).await;
+        let tmp = tempfile::tempdir().unwrap();
+        let report = tmp.path().join("report.pdf");
+        std::fs::write(&report, b"%PDF-1.4").unwrap();
+        let wrapped = format!("'{}'", report.display());
+
+        gw.send_file("file-test", "chat1", &wrapped, Some("caption"))
+            .await
+            .expect("safe file should be delivered");
+
+        assert_eq!(
+            files.lock().unwrap().as_slice(),
+            &[std::fs::canonicalize(&report)
+                .unwrap()
+                .to_string_lossy()
+                .to_string()]
+        );
+
+        let err = gw
+            .send_file("file-test", "chat1", "/etc/passwd", None)
+            .await
+            .expect_err("system file should be rejected");
+        assert!(err.to_string().contains("unsafe local file path"));
+        assert_eq!(files.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]

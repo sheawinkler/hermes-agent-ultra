@@ -4,7 +4,7 @@
 //! and to enable sending files through platform APIs that require local paths.
 
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
@@ -91,6 +91,287 @@ impl Default for MediaCacheConfig {
 fn default_cache_dir() -> String {
     std::env::var("HERMES_MEDIA_CACHE_DIR")
         .unwrap_or_else(|_| "/tmp/hermes-media-cache".to_string())
+}
+
+const MEDIA_DELIVERY_ALLOW_DIRS_ENV: &str = "HERMES_MEDIA_ALLOW_DIRS";
+const MEDIA_DELIVERY_TRUST_RECENT_ENV: &str = "HERMES_MEDIA_TRUST_RECENT_FILES";
+const MEDIA_DELIVERY_TRUST_RECENT_SECONDS_ENV: &str = "HERMES_MEDIA_TRUST_RECENT_SECONDS";
+const MEDIA_DELIVERY_STRICT_ENV: &str = "HERMES_MEDIA_DELIVERY_STRICT";
+const MEDIA_DELIVERY_TRUST_RECENT_DEFAULT_SECONDS: u64 = 600;
+
+const MEDIA_DELIVERY_DENIED_PREFIXES: &[&str] = &[
+    "/etc", "/proc", "/sys", "/dev", "/root", "/boot", "/var/log", "/var/lib", "/var/run",
+];
+
+const MEDIA_DELIVERY_DENIED_HOME_SUBPATHS: &[&str] = &[
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".kube",
+    ".docker",
+    ".config",
+    ".azure",
+    ".gcloud",
+    "Library/Keychains",
+];
+
+const MEDIA_DELIVERY_DENIED_HERMES_FILES: &[&str] =
+    &[".env", "auth.json", "credentials", "config.yaml"];
+
+#[derive(Debug, Clone)]
+struct MediaDeliveryPolicy {
+    home: Option<PathBuf>,
+    hermes_home: PathBuf,
+    hermes_root: Option<PathBuf>,
+    allowed_roots: Vec<PathBuf>,
+    denied_prefixes: Vec<PathBuf>,
+    strict_mode: bool,
+    recent_window: Duration,
+}
+
+impl MediaDeliveryPolicy {
+    fn from_env() -> Self {
+        let home = current_user_home();
+        let hermes_home = hermes_config::hermes_home();
+        let hermes_root = home.as_ref().map(|home| home.join(".hermes"));
+
+        let mut allowed_roots = vec![PathBuf::from(default_cache_dir())];
+        allowed_roots.extend(hermes_media_cache_roots(&hermes_home));
+        allowed_roots.extend(extra_media_allow_roots_from_env());
+
+        Self {
+            home,
+            hermes_home,
+            hermes_root,
+            allowed_roots,
+            denied_prefixes: MEDIA_DELIVERY_DENIED_PREFIXES
+                .iter()
+                .map(PathBuf::from)
+                .collect(),
+            strict_mode: truthy_env(MEDIA_DELIVERY_STRICT_ENV, false),
+            recent_window: media_delivery_recency_window_from_env(),
+        }
+    }
+}
+
+fn current_user_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn hermes_media_cache_roots(hermes_home: &Path) -> Vec<PathBuf> {
+    [
+        "image_cache",
+        "audio_cache",
+        "video_cache",
+        "document_cache",
+        "browser_screenshots",
+        "cache/images",
+        "cache/audio",
+        "cache/videos",
+        "cache/documents",
+        "cache/screenshots",
+    ]
+    .into_iter()
+    .map(|subpath| hermes_home.join(subpath))
+    .collect()
+}
+
+fn extra_media_allow_roots_from_env() -> Vec<PathBuf> {
+    let Some(raw) = std::env::var_os(MEDIA_DELIVERY_ALLOW_DIRS_ENV) else {
+        return Vec::new();
+    };
+    let raw = raw.to_string_lossy();
+    let path_separator = if cfg!(windows) { ';' } else { ':' };
+    raw.split(path_separator)
+        .flat_map(|chunk| chunk.split(','))
+        .map(str::trim)
+        .filter(|chunk| !chunk.is_empty())
+        .filter_map(|chunk| expand_home_path(chunk, current_user_home().as_deref()))
+        .filter(|path| path.is_absolute())
+        .collect()
+}
+
+fn truthy_env(name: &str, default: bool) -> bool {
+    let Ok(raw) = std::env::var(name) else {
+        return default;
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" | "" => false,
+        _ => default,
+    }
+}
+
+fn media_delivery_recency_window_from_env() -> Duration {
+    if !truthy_env(MEDIA_DELIVERY_TRUST_RECENT_ENV, true) {
+        return Duration::ZERO;
+    }
+    let seconds = std::env::var(MEDIA_DELIVERY_TRUST_RECENT_SECONDS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(MEDIA_DELIVERY_TRUST_RECENT_DEFAULT_SECONDS as f64);
+    Duration::from_secs_f64(seconds)
+}
+
+fn expand_home_path(raw: &str, home: Option<&Path>) -> Option<PathBuf> {
+    if raw.contains('\0') {
+        return None;
+    }
+    if raw == "~" {
+        return home.map(Path::to_path_buf);
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        return home.map(|home| home.join(rest));
+    }
+    Some(PathBuf::from(raw))
+}
+
+fn strip_model_path_wrapping(raw: &str) -> Option<String> {
+    let mut candidate = raw.trim();
+    if candidate.is_empty() || candidate.contains('\0') {
+        return None;
+    }
+
+    let mut chars = candidate.chars();
+    if let (Some(first), Some(last)) = (chars.next(), candidate.chars().last()) {
+        if candidate.len() >= 2 && first == last && matches!(first, '`' | '"' | '\'') {
+            let start = first.len_utf8();
+            let end = candidate.len() - last.len_utf8();
+            candidate = candidate[start..end].trim();
+        }
+    }
+
+    let candidate = candidate
+        .trim_start_matches(['`', '"', '\''])
+        .trim_end_matches(['`', '"', '\'', ',', '.', ';', ':', ')', '}', ']'])
+        .trim();
+
+    if candidate.is_empty() || candidate.contains('\0') {
+        None
+    } else {
+        Some(candidate.to_string())
+    }
+}
+
+fn canonicalize_or_absolute(path: &Path) -> Option<PathBuf> {
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return Some(canonical);
+    }
+    if path.is_absolute() {
+        return Some(path.to_path_buf());
+    }
+    std::env::current_dir().ok().map(|cwd| cwd.join(path))
+}
+
+fn media_delivery_denied_paths(policy: &MediaDeliveryPolicy) -> Vec<PathBuf> {
+    let mut denied = policy.denied_prefixes.clone();
+    if let Some(home) = policy.home.as_ref() {
+        denied.extend(
+            MEDIA_DELIVERY_DENIED_HOME_SUBPATHS
+                .iter()
+                .map(|subpath| home.join(subpath)),
+        );
+    }
+    for hermes_root in std::iter::once(&policy.hermes_home).chain(policy.hermes_root.iter()) {
+        denied.extend(
+            MEDIA_DELIVERY_DENIED_HERMES_FILES
+                .iter()
+                .map(|file| hermes_root.join(file)),
+        );
+    }
+    denied
+}
+
+fn path_under_denied_prefix(resolved: &Path, policy: &MediaDeliveryPolicy) -> bool {
+    let home = policy
+        .home
+        .as_ref()
+        .and_then(|home| canonicalize_or_absolute(home));
+
+    for denied in media_delivery_denied_paths(policy) {
+        let Some(resolved_denied) = canonicalize_or_absolute(&denied) else {
+            continue;
+        };
+        if !(resolved == resolved_denied || resolved.starts_with(&resolved_denied)) {
+            continue;
+        }
+        // Root-run gateways have $HOME=/root; the home tree itself can contain
+        // legitimate deliverables, while credential subpaths remain separate
+        // more-specific denylist entries.
+        if home.as_deref() == Some(resolved_denied.as_path()) {
+            continue;
+        }
+        return true;
+    }
+
+    false
+}
+
+fn file_is_recently_produced(path: &Path, window: Duration) -> bool {
+    if window.is_zero() {
+        return false;
+    }
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    let Ok(modified) = metadata.modified() else {
+        return false;
+    };
+    SystemTime::now()
+        .duration_since(modified)
+        .map(|age| age <= window)
+        .unwrap_or(false)
+}
+
+fn validate_media_delivery_path_with_policy(
+    path: &str,
+    policy: &MediaDeliveryPolicy,
+) -> Option<PathBuf> {
+    let candidate = strip_model_path_wrapping(path)?;
+    let expanded = expand_home_path(&candidate, policy.home.as_deref())?;
+    if !expanded.is_absolute() {
+        return None;
+    }
+
+    let resolved = std::fs::canonicalize(&expanded).ok()?;
+    if !resolved.is_file() {
+        return None;
+    }
+
+    for root in &policy.allowed_roots {
+        let Some(resolved_root) = canonicalize_or_absolute(root) else {
+            continue;
+        };
+        if resolved == resolved_root || resolved.starts_with(&resolved_root) {
+            return Some(resolved);
+        }
+    }
+
+    if !policy.strict_mode {
+        return (!path_under_denied_prefix(&resolved, policy)).then_some(resolved);
+    }
+
+    if !path_under_denied_prefix(&resolved, policy)
+        && file_is_recently_produced(&resolved, policy.recent_window)
+    {
+        return Some(resolved);
+    }
+
+    None
+}
+
+/// Return a safe absolute file path for native platform media delivery.
+///
+/// Default mode accepts existing regular files outside credential and system
+/// deny paths. Strict mode (`HERMES_MEDIA_DELIVERY_STRICT=1`) requires either a
+/// Hermes/operator allow root or a freshly-produced file inside the recency
+/// window. Symlinks are resolved before allow/deny checks.
+pub fn validate_media_delivery_path(path: &str) -> Option<PathBuf> {
+    validate_media_delivery_path_with_policy(path, &MediaDeliveryPolicy::from_env())
 }
 
 // ---------------------------------------------------------------------------
@@ -696,5 +977,135 @@ mod tests {
         let bad = PathBuf::from("/tmp/hermes-cache-test-2/file.txt");
         assert!(is_path_within(&ok, &root));
         assert!(!is_path_within(&bad, &root));
+    }
+
+    fn test_media_policy(
+        home: &Path,
+        hermes_home: &Path,
+        denied_prefixes: Vec<PathBuf>,
+    ) -> MediaDeliveryPolicy {
+        MediaDeliveryPolicy {
+            home: Some(home.to_path_buf()),
+            hermes_home: hermes_home.to_path_buf(),
+            hermes_root: Some(home.join(".hermes")),
+            allowed_roots: Vec::new(),
+            denied_prefixes,
+            strict_mode: false,
+            recent_window: Duration::from_secs(MEDIA_DELIVERY_TRUST_RECENT_DEFAULT_SECONDS),
+        }
+    }
+
+    #[test]
+    fn media_delivery_accepts_running_users_home_deliverable_when_home_prefix_denied() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake_home = tmp.path().join("root");
+        let hermes_home = fake_home.join(".hermes-agent-ultra");
+        let workdir = fake_home.join("work");
+        std::fs::create_dir_all(&workdir).unwrap();
+        std::fs::create_dir_all(&hermes_home).unwrap();
+        let doc = workdir.join("proposal.docx");
+        std::fs::write(&doc, b"PK\x03\x04").unwrap();
+        let policy = test_media_policy(&fake_home, &hermes_home, vec![fake_home.clone()]);
+
+        assert_eq!(
+            validate_media_delivery_path_with_policy(&doc.to_string_lossy(), &policy),
+            Some(std::fs::canonicalize(&doc).unwrap())
+        );
+    }
+
+    #[test]
+    fn media_delivery_blocks_home_credential_subdir_under_home_exception() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake_home = tmp.path().join("root");
+        let hermes_home = fake_home.join(".hermes-agent-ultra");
+        let ssh_dir = fake_home.join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        std::fs::create_dir_all(&hermes_home).unwrap();
+        let key = ssh_dir.join("id_rsa");
+        std::fs::write(&key, b"-----BEGIN OPENSSH PRIVATE KEY-----").unwrap();
+        let policy = test_media_policy(&fake_home, &hermes_home, vec![fake_home.clone()]);
+
+        assert!(
+            validate_media_delivery_path_with_policy(&key.to_string_lossy(), &policy).is_none()
+        );
+    }
+
+    #[test]
+    fn media_delivery_blocks_hermes_env_under_home_exception() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake_home = tmp.path().join("root");
+        let hermes_home = fake_home.join(".hermes");
+        std::fs::create_dir_all(&hermes_home).unwrap();
+        let env_file = hermes_home.join(".env");
+        std::fs::write(&env_file, b"OPENROUTER_API_KEY=sk-test").unwrap();
+        let policy = test_media_policy(&fake_home, &hermes_home, vec![fake_home.clone()]);
+
+        assert!(
+            validate_media_delivery_path_with_policy(&env_file.to_string_lossy(), &policy)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn media_delivery_blocks_other_users_home_when_not_running_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        let my_home = tmp.path().join("home/me");
+        let other_home = tmp.path().join("root");
+        let hermes_home = my_home.join(".hermes-agent-ultra");
+        std::fs::create_dir_all(&my_home).unwrap();
+        std::fs::create_dir_all(&other_home).unwrap();
+        std::fs::create_dir_all(&hermes_home).unwrap();
+        let other_doc = other_home.join("secret.docx");
+        std::fs::write(&other_doc, b"PK\x03\x04").unwrap();
+        let policy = test_media_policy(
+            &my_home,
+            &hermes_home,
+            vec![my_home.clone(), other_home.clone()],
+        );
+
+        assert!(
+            validate_media_delivery_path_with_policy(&other_doc.to_string_lossy(), &policy)
+                .is_none()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn media_delivery_blocks_workdir_symlink_to_home_credential() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake_home = tmp.path().join("root");
+        let hermes_home = fake_home.join(".hermes-agent-ultra");
+        let ssh_dir = fake_home.join(".ssh");
+        let workdir = fake_home.join("work");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        std::fs::create_dir_all(&workdir).unwrap();
+        std::fs::create_dir_all(&hermes_home).unwrap();
+        let key = ssh_dir.join("id_rsa");
+        std::fs::write(&key, b"-----BEGIN OPENSSH PRIVATE KEY-----").unwrap();
+        let link = workdir.join("innocent.pdf");
+        std::os::unix::fs::symlink(&key, &link).unwrap();
+        let policy = test_media_policy(&fake_home, &hermes_home, vec![fake_home.clone()]);
+
+        assert!(
+            validate_media_delivery_path_with_policy(&link.to_string_lossy(), &policy).is_none()
+        );
+    }
+
+    #[test]
+    fn media_delivery_normalizes_wrapped_absolute_safe_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let hermes_home = home.join(".hermes-agent-ultra");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&hermes_home).unwrap();
+        let report = tmp.path().join("deliverable.pdf");
+        std::fs::write(&report, b"%PDF-1.4").unwrap();
+        let policy = test_media_policy(&home, &hermes_home, vec![tmp.path().join("other-home")]);
+        let wrapped = format!("`{}.`", report.display());
+
+        assert_eq!(
+            validate_media_delivery_path_with_policy(&wrapped, &policy),
+            Some(std::fs::canonicalize(&report).unwrap())
+        );
     }
 }
