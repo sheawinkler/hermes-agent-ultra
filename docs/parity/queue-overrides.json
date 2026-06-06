@@ -739,6 +739,26 @@
     "9e85408c7bfd": {
       "disposition": "ported",
       "notes": "rust todo tool remains first-class in CLI/API toolsets and builtin registration; existing toolset tests and new registry/schema contract cover create/update/list parity"
+    },
+    "ada0b4f131ba": {
+      "disposition": "ported",
+      "notes": "rust gateway/platform adapter surface sends inline image URLs natively and now strips/delivers local MEDIA image markers through validated send_file paths; tests cover inline image extraction and media marker delivery"
+    },
+    "5404a8fcd8a5": {
+      "disposition": "ported",
+      "notes": "rust gateway already supports vision/image URL handling and platform media send paths; this slice adds MEDIA marker extraction/routing with unsafe path blocking to close generated screenshot/image delivery parity"
+    },
+    "b8c3bc78417c": {
+      "disposition": "ported",
+      "notes": "rust browser screenshot/TTS output markers can now be delivered as native platform files via Gateway::send_message_threaded MEDIA extraction; tests cover MEDIA path stripping, canonicalized file delivery, blocked unsafe paths, and existing inline image routing"
+    },
+    "586b0a7047ea": {
+      "disposition": "ported",
+      "notes": "rust text_to_speech/tts_premium providers and gateway MEDIA marker delivery cover TTS audio handoff without Python Edge TTS runtime; existing TTS tests plus gateway media marker tests prove audio file delivery path"
+    },
+    "eb49936a60aa": {
+      "disposition": "superseded",
+      "notes": "upstream docs/install audio-format update is superseded by rust-native TTS providers, media_category/send_file adapter routing, and gateway MEDIA marker delivery tests; no Python install-script runtime remains to port"
     }
   },
   "subject_patterns": [

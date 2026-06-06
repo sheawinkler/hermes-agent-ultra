@@ -11,6 +11,12 @@ pub struct InlineImageRef {
     pub alt_text: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaMarkerRef {
+    pub path: String,
+    pub as_voice: bool,
+}
+
 /// Split a long message into chunks that respect word and sentence boundaries.
 ///
 /// Prefers breaking at sentence endings (`. `, `! `, `? `), then at newlines,
@@ -202,6 +208,53 @@ pub fn extract_inline_images(text: &str) -> (String, Vec<InlineImageRef>) {
     (cleaned, images)
 }
 
+fn clean_media_marker_path(raw: &str) -> String {
+    let mut cleaned = raw
+        .trim()
+        .trim_matches(|c| matches!(c, '"' | '\'' | '`'))
+        .to_string();
+    while cleaned
+        .chars()
+        .last()
+        .is_some_and(|c| matches!(c, ',' | '}' | ']' | '"' | '\'' | '`'))
+    {
+        cleaned.pop();
+    }
+    cleaned.trim().to_string()
+}
+
+/// Extract `MEDIA:<path>` output markers and `[[audio_as_voice]]` directives.
+///
+/// Tool backends such as browser screenshots and TTS can return media paths
+/// inside tool JSON or plain text. The gateway strips these markers from the
+/// chat text and delivers the local paths through platform-native file APIs.
+pub fn extract_media_markers(text: &str) -> (String, Vec<MediaMarkerRef>) {
+    let as_voice = text.contains("[[audio_as_voice]]");
+    let voice_re = Regex::new(r"\[\[audio_as_voice\]\]").expect("valid regex");
+    let media_re = Regex::new(r"MEDIA:([^\r\n]+)").expect("valid regex");
+    let blank_re = Regex::new(r"\n{3,}").expect("valid regex");
+
+    let mut media = Vec::new();
+    for caps in media_re.captures_iter(text) {
+        let path = caps
+            .get(1)
+            .map(|m| clean_media_marker_path(m.as_str()))
+            .unwrap_or_default();
+        if !path.is_empty() {
+            media.push(MediaMarkerRef { path, as_voice });
+        }
+    }
+
+    let without_voice = voice_re.replace_all(text, "");
+    let without_media = media_re.replace_all(&without_voice, "");
+    let cleaned = blank_re
+        .replace_all(&without_media, "\n\n")
+        .trim()
+        .to_string();
+
+    (cleaned, media)
+}
+
 /// Format a code block with optional language tag.
 pub fn format_code_block(code: &str, lang: Option<&str>) -> String {
     match lang {
@@ -350,6 +403,27 @@ mod tests {
         let (cleaned, images) = extract_inline_images(text);
         assert_eq!(images.len(), 0);
         assert_eq!(cleaned, "A <img src=\"https://example.com/not-image\"> B");
+    }
+
+    #[test]
+    fn test_extract_media_markers_strips_tags_and_preserves_voice_directive() {
+        let text =
+            "Here\n[[audio_as_voice]]\nMEDIA:/tmp/audio.ogg\nMEDIA:\"/tmp/screenshot.png\",\nDone";
+        let (cleaned, media) = extract_media_markers(text);
+        assert_eq!(cleaned, "Here\n\nDone");
+        assert_eq!(
+            media,
+            vec![
+                MediaMarkerRef {
+                    path: "/tmp/audio.ogg".to_string(),
+                    as_voice: true,
+                },
+                MediaMarkerRef {
+                    path: "/tmp/screenshot.png".to_string(),
+                    as_voice: true,
+                },
+            ]
+        );
     }
 
     #[test]
