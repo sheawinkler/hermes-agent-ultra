@@ -15,7 +15,7 @@ use url::Url;
 use crate::auth::{
     build_auth_methods_for_provider, detect_provider, TERMINAL_SETUP_AUTH_METHOD_ID,
 };
-use crate::events::{AcpEvent, EventSink};
+use crate::events::{plan_entries_from_todo_result, AcpEvent, EventSink};
 use crate::permissions::PermissionStore;
 use crate::protocol::*;
 use crate::session::{SessionManager, SessionPhase, SessionState};
@@ -807,12 +807,19 @@ impl HermesAcpHandler {
                         })
                         .unwrap_or_else(|| "tool".to_string());
                     let text = history_message_text(message);
+                    let result = (!text.is_empty()).then_some(text.as_str());
                     self.event_sink.push(AcpEvent::tool_call_complete(
                         &state.session_id,
                         tool_call_id,
                         &tool_name,
-                        (!text.is_empty()).then_some(text),
+                        result.map(str::to_string),
                     ));
+                    if tool_name == "todo" {
+                        if let Some(entries) = plan_entries_from_todo_result(result) {
+                            self.event_sink
+                                .push(AcpEvent::plan_update(&state.session_id, entries));
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -2493,6 +2500,64 @@ mod tests {
             events.last().unwrap().kind,
             AcpEventKind::AvailableCommandsUpdate
         );
+    }
+
+    #[tokio::test]
+    async fn test_load_session_replays_native_plan_for_persisted_todo_tool() {
+        let handler = make_handler();
+        let created = handler.session_manager.create_session("/tmp");
+        let session_id = created.session_id;
+        let todo_result = r#"{"todos":[{"id":"ship","content":"Ship it","status":"in_progress"}]}"#;
+        handler.session_manager.set_history(
+            &session_id,
+            vec![
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_todo_1",
+                        "function": {
+                            "name": "todo",
+                            "arguments": "{\"todos\":[{\"id\":\"ship\",\"content\":\"Ship it\",\"status\":\"in_progress\"}]}"
+                        }
+                    }]
+                }),
+                json!({
+                    "role": "tool",
+                    "tool_call_id": "call_todo_1",
+                    "content": todo_result,
+                }),
+            ],
+        );
+
+        let loaded = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/load".into(),
+                params: Some(json!({"sessionId": session_id, "cwd": "/tmp"})),
+            })
+            .await;
+        assert!(loaded.error.is_none());
+
+        let events = handler.event_sink.drain_for_session(&session_id);
+        let kinds = events
+            .iter()
+            .map(|event| event.kind.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                AcpEventKind::ToolCallStart,
+                AcpEventKind::ToolCallComplete,
+                AcpEventKind::PlanUpdate,
+                AcpEventKind::AvailableCommandsUpdate,
+            ]
+        );
+        assert_eq!(events[2].session_update.as_deref(), Some("plan"));
+        let entries = events[2].entries.as_ref().expect("plan entries");
+        assert_eq!(entries[0].content, "Ship it");
+        assert_eq!(entries[0].status, "in_progress");
     }
 
     #[tokio::test]

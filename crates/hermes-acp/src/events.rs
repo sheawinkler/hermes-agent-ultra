@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::protocol::AvailableCommand;
+use crate::protocol::{AvailableCommand, PlanEntry};
 use crate::tools::{format_tool_result, tool_completion_status, tool_start_metadata};
 
 // ---------------------------------------------------------------------------
@@ -46,6 +46,8 @@ pub enum AcpEventKind {
     AvailableCommandsUpdate,
     /// Session metadata changed.
     SessionInfoUpdate,
+    /// Native plan/task list changed.
+    PlanUpdate,
     /// An error occurred.
     Error,
 }
@@ -89,6 +91,8 @@ pub struct AcpEvent {
         skip_serializing_if = "Option::is_none"
     )]
     pub available_commands: Option<Vec<AvailableCommand>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entries: Option<Vec<PlanEntry>>,
     #[serde(rename = "updatedAt", default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
 }
@@ -119,6 +123,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            entries: None,
             updated_at: None,
         }
     }
@@ -147,6 +152,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            entries: None,
             updated_at: None,
         }
     }
@@ -176,6 +182,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            entries: None,
             updated_at: None,
         }
     }
@@ -198,6 +205,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            entries: None,
             updated_at: None,
         }
     }
@@ -220,6 +228,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            entries: None,
             updated_at: None,
         }
     }
@@ -274,6 +283,30 @@ impl AcpEvent {
             api_call_count: None,
             error: None,
             available_commands: None,
+            entries: None,
+            updated_at: None,
+        }
+    }
+
+    pub fn plan_update(session_id: &str, entries: Vec<PlanEntry>) -> Self {
+        Self {
+            kind: AcpEventKind::PlanUpdate,
+            session_id: session_id.to_string(),
+            timestamp: Self::now(),
+            session_update: Some("plan".to_string()),
+            entries: Some(entries),
+            tool_call_id: None,
+            tool_name: None,
+            tool_kind: None,
+            title: None,
+            arguments: None,
+            result: None,
+            status: None,
+            content: None,
+            text: None,
+            api_call_count: None,
+            error: None,
+            available_commands: None,
             updated_at: None,
         }
     }
@@ -296,6 +329,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            entries: None,
             updated_at: None,
         }
     }
@@ -318,6 +352,7 @@ impl AcpEvent {
             api_call_count: None,
             session_update: None,
             available_commands: None,
+            entries: None,
             updated_at: None,
         }
     }
@@ -341,6 +376,7 @@ impl AcpEvent {
             text: None,
             api_call_count: None,
             error: None,
+            entries: None,
         }
     }
 
@@ -366,9 +402,63 @@ impl AcpEvent {
             text: None,
             api_call_count: None,
             error: None,
+            entries: None,
             available_commands: None,
         }
     }
+}
+
+fn json_loads_maybe_prefix(text: &str) -> Option<Value> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<Value>(text).ok().or_else(|| {
+        serde_json::Deserializer::from_str(text)
+            .into_iter::<Value>()
+            .next()
+            .and_then(Result::ok)
+    })
+}
+
+pub fn plan_entries_from_todo_result(result: Option<&str>) -> Option<Vec<PlanEntry>> {
+    let data = json_loads_maybe_prefix(result?)?;
+    let todos = data.get("todos")?.as_array()?;
+
+    let mut entries = Vec::new();
+    for item in todos.iter().filter_map(Value::as_object) {
+        let mut content = item
+            .get("content")
+            .or_else(|| item.get("id"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            continue;
+        }
+        let raw_status = item
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("pending")
+            .trim();
+        let status = match raw_status {
+            "completed" => "completed",
+            "in_progress" => "in_progress",
+            "cancelled" => {
+                content = format!("[cancelled] {content}");
+                "completed"
+            }
+            _ => "pending",
+        };
+        entries.push(PlanEntry {
+            content,
+            priority: "medium".to_string(),
+            status: status.to_string(),
+        });
+    }
+
+    Some(entries)
 }
 
 // ---------------------------------------------------------------------------
@@ -542,5 +632,57 @@ mod tests {
             Some("Error: pytest collected 0 items")
         );
         assert_eq!(e3.status.as_deref(), Some("completed"));
+    }
+
+    #[test]
+    fn todo_plan_update_parses_statuses_and_serializes_native_entries() {
+        let entries = plan_entries_from_todo_result(Some(
+            r#"{"todos":[{"id":"inspect","content":"Inspect ACP","status":"completed"},{"id":"patch","content":"Patch renderer","status":"in_progress"},{"id":"old","content":"Drop stale task","status":"cancelled"}]}"#,
+        ))
+        .expect("todo entries");
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.content.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "Inspect ACP",
+                "Patch renderer",
+                "[cancelled] Drop stale task"
+            ]
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.status.as_str())
+                .collect::<Vec<_>>(),
+            vec!["completed", "in_progress", "completed"]
+        );
+
+        let event = AcpEvent::plan_update("s1", entries);
+        let value = serde_json::to_value(event).unwrap();
+        assert_eq!(value["sessionUpdate"], "plan");
+        assert_eq!(value["entries"][0]["priority"], "medium");
+        assert_eq!(
+            value["entries"][2]["content"],
+            "[cancelled] Drop stale task"
+        );
+    }
+
+    #[test]
+    fn todo_plan_update_parses_trailing_hint_and_empty_todos() {
+        let entries = plan_entries_from_todo_result(Some(
+            r#"{"todos":[{"id":"ship","content":"Ship ACP plan","status":"pending"}]}
+
+[Hint: persisted]"#,
+        ))
+        .expect("todo entries with suffix");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content, "Ship ACP plan");
+        assert_eq!(entries[0].status, "pending");
+
+        let empty = plan_entries_from_todo_result(Some(r#"{"todos":[]}"#)).expect("empty plan");
+        assert!(empty.is_empty());
     }
 }

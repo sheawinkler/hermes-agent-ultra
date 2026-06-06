@@ -327,6 +327,14 @@ pub struct AvailableCommand {
     pub input_hint: Option<String>,
 }
 
+/// Entry in a native ACP plan update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanEntry {
+    pub content: String,
+    pub priority: String,
+    pub status: String,
+}
+
 // ---------------------------------------------------------------------------
 // Usage stats
 // ---------------------------------------------------------------------------

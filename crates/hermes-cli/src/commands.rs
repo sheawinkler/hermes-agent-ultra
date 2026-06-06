@@ -26757,6 +26757,13 @@ fn acp_events_from_agent_messages(
                     &tool_name,
                     message.content.clone(),
                 ));
+                if tool_name == "todo" {
+                    if let Some(entries) =
+                        hermes_acp::plan_entries_from_todo_result(message.content.as_deref())
+                    {
+                        events.push(hermes_acp::AcpEvent::plan_update(session_id, entries));
+                    }
+                }
             }
             _ => {}
         }
@@ -27832,6 +27839,38 @@ mod tests {
         assert_eq!(events[2].result.as_deref(), Some("127.0.0.1 localhost"));
         assert_eq!(events[3].tool_call_id.as_deref(), Some("tc-web"));
         assert_eq!(events[3].tool_name.as_deref(), Some("web_search"));
+    }
+
+    #[test]
+    fn test_acp_events_from_agent_messages_emits_native_todo_plan() {
+        let todo_result = r#"{"todos":[{"id":"inspect","content":"Inspect ACP","status":"completed"},{"id":"patch","content":"Patch renderer","status":"in_progress"}]}"#;
+        let messages = vec![
+            hermes_core::Message::assistant_with_tool_calls(
+                None,
+                vec![hermes_core::ToolCall {
+                    id: "tc-todo".to_string(),
+                    function: hermes_core::FunctionCall {
+                        name: "todo".to_string(),
+                        arguments: r#"{"todos":[]}"#.to_string(),
+                    },
+                    extra_content: None,
+                }],
+            ),
+            hermes_core::Message::tool_result("tc-todo", todo_result),
+        ];
+
+        let events = acp_events_from_agent_messages("session-1", &messages);
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].kind, hermes_acp::AcpEventKind::ToolCallStart);
+        assert_eq!(events[1].kind, hermes_acp::AcpEventKind::ToolCallComplete);
+        assert_eq!(events[2].kind, hermes_acp::AcpEventKind::PlanUpdate);
+        assert_eq!(events[2].session_update.as_deref(), Some("plan"));
+        let entries = events[2].entries.as_ref().expect("plan entries");
+        assert_eq!(entries[0].content, "Inspect ACP");
+        assert_eq!(entries[0].status, "completed");
+        assert_eq!(entries[1].content, "Patch renderer");
+        assert_eq!(entries[1].status, "in_progress");
     }
 
     #[test]

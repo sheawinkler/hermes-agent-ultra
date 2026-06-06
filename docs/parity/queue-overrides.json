@@ -895,6 +895,14 @@
     "cdf9793d6d6b97aa99e1b2f27629e52d89eac41d": {
       "disposition": "ported",
       "notes": "Rust ACP forwards image prompt blocks as OpenAI-style image_url multimodal content, preserves text-only slash command interception, treats image-bearing slash text as a model prompt, and now advertises promptCapabilities.image during initialize with protocol and handler tests."
+    },
+    "4444d5fe4f65dcbca939a1f39ae58438205e7dad": {
+      "disposition": "ported",
+      "notes": "Rust ACP emits native sessionUpdate=plan events after live todo tool completions, using typed PlanEntry values and shared parser tests for status mapping, cancelled preservation, and wire serialization."
+    },
+    "bd3a5873e11f084d74be876a505a406224a6ef3e": {
+      "disposition": "ported",
+      "notes": "Rust ACP replays native todo plan updates from persisted tool results after tool_call_complete, supports trailing human hints and empty todo lists for plan clearing, and covers replay ordering plus CLI live converter behavior."
     }
   },
   "subject_patterns": [

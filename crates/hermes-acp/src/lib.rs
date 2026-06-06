@@ -20,7 +20,9 @@ pub mod session;
 pub mod tools;
 
 pub use auth::{build_auth_methods, detect_provider, has_provider, TERMINAL_SETUP_AUTH_METHOD_ID};
-pub use events::{AcpEvent, AcpEventKind, EventSink, ToolCallIdTracker};
+pub use events::{
+    plan_entries_from_todo_result, AcpEvent, AcpEventKind, EventSink, ToolCallIdTracker,
+};
 pub use handler::{
     AcpHandler, AcpPromptExecutor, DefaultAcpHandler, HermesAcpHandler, PromptExecutionOutput,
 };
@@ -31,7 +33,8 @@ pub use permissions::{
 pub use protocol::{
     AcpError, AcpMethod, AcpRequest, AcpResponse, AgentCapabilities, AuthMethod, AvailableCommand,
     ClientCapabilities, ContentBlock, Implementation, InitializeResponse, McpServerConfig,
-    PromptCapabilities, PromptResponse, SessionCapabilities, SessionUpdate, StopReason, Usage,
+    PlanEntry, PromptCapabilities, PromptResponse, SessionCapabilities, SessionUpdate, StopReason,
+    Usage,
 };
 pub use server::AcpServer;
 pub use session::{SessionInfo, SessionManager, SessionPhase, SessionState};
