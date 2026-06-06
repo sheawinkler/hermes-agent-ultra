@@ -1048,6 +1048,10 @@
       "disposition": "superseded",
       "notes": "Desktop Cmd/Ctrl+Enter steer keybinding policy is not a Rust runtime surface. Rust TUI has its own terminal key contract: Enter submits, Shift+Enter and Ctrl+J insert newlines, Ctrl+Enter/Ctrl+M are submit fallbacks, and focused tests guard those shortcuts."
     },
+    "8a9ded5b21b1": {
+      "disposition": "ported",
+      "notes": "Rust gateway now has a dependency-free 48 kHz stereo s16le continuous VoiceMixer with ambient loops, ducked speech overlays, clipping, stop/cleanup, and synthesized ambient PCM, plus VoiceManager voice_fx lifecycle integration for join/remove, active checks, ack phrase selection, speech enqueue/read/stop, and focused mixer/manager unit tests."
+    },
     "ffb53767bfff": {
       "disposition": "ported",
       "notes": "Rust config now resolves HERMES_PREFILL_MESSAGES_FILE > top-level prefill_messages_file > legacy agent.prefill_messages_file, loads JSON prefill messages relative to HERMES_HOME/config home, injects them ephemerally into CLI/HTTP/gateway/cron agent contexts through AgentConfig.prefill_messages, and strips them from returned/persisted history with focused config/CLI/HTTP/agent/cron/gateway tests."

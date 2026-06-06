@@ -7,6 +7,8 @@ use hermes_core::AgentError;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
+use crate::voice_mixer::{synth_ambient_pcm, VoiceMixer};
+
 /// Voice mode state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VoiceState {
@@ -29,6 +31,7 @@ pub struct VoiceConfig {
     pub tts_provider: TtsProvider,
     pub auto_detect_voice: bool,
     pub language: Option<String>,
+    pub voice_fx: VoiceFxConfig,
 }
 
 impl Default for VoiceConfig {
@@ -39,6 +42,39 @@ impl Default for VoiceConfig {
             tts_provider: TtsProvider::OpenAi,
             auto_detect_voice: false,
             language: None,
+            voice_fx: VoiceFxConfig::default(),
+        }
+    }
+}
+
+/// Outgoing voice-channel effects: ambient bed plus ducked speech overlays.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VoiceFxConfig {
+    pub enabled: bool,
+    pub ambient_enabled: bool,
+    pub ambient_gain: f32,
+    pub duck_gain: f32,
+    pub speech_gain: f32,
+    pub ack_enabled: bool,
+    pub ack_phrases: Vec<String>,
+}
+
+impl Default for VoiceFxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ambient_enabled: true,
+            ambient_gain: 0.18,
+            duck_gain: 0.06,
+            speech_gain: 1.0,
+            ack_enabled: true,
+            ack_phrases: vec![
+                "Let me look into that.".to_string(),
+                "One moment.".to_string(),
+                "Checking on that now.".to_string(),
+                "Give me a sec.".to_string(),
+                "On it.".to_string(),
+            ],
         }
     }
 }
@@ -167,6 +203,8 @@ fn gateway_transcription_response_format(provider: &str, model: &str) -> &'stati
 pub struct VoiceManager {
     config: VoiceConfig,
     joined_channels: Mutex<HashMap<String, HashSet<String>>>,
+    voice_mixers: Mutex<HashMap<String, VoiceMixer>>,
+    ack_phrase_cursor: Mutex<usize>,
 }
 
 impl VoiceManager {
@@ -174,6 +212,8 @@ impl VoiceManager {
         Self {
             config,
             joined_channels: Mutex::new(HashMap::new()),
+            voice_mixers: Mutex::new(HashMap::new()),
+            ack_phrase_cursor: Mutex::new(0),
         }
     }
 
@@ -280,6 +320,8 @@ impl VoiceManager {
             );
             return Ok(());
         }
+        drop(lock);
+        self.install_voice_mixer_if_enabled(&platform, &channel_id)?;
         tracing::info!(
             platform = platform,
             channel_id = channel_id,
@@ -316,12 +358,146 @@ impl VoiceManager {
         if channels.is_empty() {
             lock.remove(&platform);
         }
+        drop(lock);
+        self.remove_voice_mixer(&platform, &channel_id);
         tracing::info!(
             platform = platform,
             channel_id = channel_id,
             "Left voice channel"
         );
         Ok(())
+    }
+
+    fn install_voice_mixer_if_enabled(
+        &self,
+        platform: &str,
+        channel_id: &str,
+    ) -> Result<(), AgentError> {
+        if !self.config.voice_fx.enabled {
+            return Ok(());
+        }
+        let mixer = VoiceMixer::new(
+            self.config.voice_fx.ambient_gain,
+            self.config.voice_fx.duck_gain,
+            self.config.voice_fx.speech_gain,
+            400,
+        );
+        if self.config.voice_fx.ambient_enabled {
+            let ambient = synth_ambient_pcm(4.0);
+            mixer.set_ambient(Some(&ambient), None);
+        }
+        let mut mixers = self
+            .voice_mixers
+            .lock()
+            .map_err(|_| AgentError::Io("voice mixer lock poisoned".into()))?;
+        mixers.insert(Self::voice_mixer_key(platform, channel_id), mixer);
+        Ok(())
+    }
+
+    fn remove_voice_mixer(&self, platform: &str, channel_id: &str) {
+        let Ok(mut mixers) = self.voice_mixers.lock() else {
+            return;
+        };
+        if let Some(mixer) = mixers.remove(&Self::voice_mixer_key(platform, channel_id)) {
+            mixer.cleanup();
+        }
+    }
+
+    pub fn voice_mixer_active(&self, platform: &str, channel_id: &str) -> bool {
+        let Ok(mixers) = self.voice_mixers.lock() else {
+            return false;
+        };
+        mixers.contains_key(&Self::voice_mixer_key(platform, channel_id))
+    }
+
+    pub fn play_voice_speech_pcm(
+        &self,
+        platform: &str,
+        channel_id: &str,
+        pcm: &[u8],
+    ) -> Result<(), AgentError> {
+        let platform = Self::normalize_identifier(platform, "platform")?;
+        let channel_id = Self::normalize_identifier(channel_id, "channel_id")?;
+        let mixers = self
+            .voice_mixers
+            .lock()
+            .map_err(|_| AgentError::Io("voice mixer lock poisoned".into()))?;
+        let mixer = mixers
+            .get(&Self::voice_mixer_key(&platform, &channel_id))
+            .ok_or_else(|| {
+                AgentError::Config(format!(
+                    "Voice mixer is not active for '{}' channel '{}'",
+                    platform, channel_id
+                ))
+            })?;
+        mixer.play_speech(pcm, Some(self.config.voice_fx.speech_gain), 40);
+        Ok(())
+    }
+
+    pub fn read_voice_mixer_frame(
+        &self,
+        platform: &str,
+        channel_id: &str,
+    ) -> Result<Vec<u8>, AgentError> {
+        let platform = Self::normalize_identifier(platform, "platform")?;
+        let channel_id = Self::normalize_identifier(channel_id, "channel_id")?;
+        let mixers = self
+            .voice_mixers
+            .lock()
+            .map_err(|_| AgentError::Io("voice mixer lock poisoned".into()))?;
+        let mixer = mixers
+            .get(&Self::voice_mixer_key(&platform, &channel_id))
+            .ok_or_else(|| {
+                AgentError::Config(format!(
+                    "Voice mixer is not active for '{}' channel '{}'",
+                    platform, channel_id
+                ))
+            })?;
+        Ok(mixer.read())
+    }
+
+    pub fn voice_speech_active(&self, platform: &str, channel_id: &str) -> bool {
+        let Ok(mixers) = self.voice_mixers.lock() else {
+            return false;
+        };
+        mixers
+            .get(&Self::voice_mixer_key(platform, channel_id))
+            .map(VoiceMixer::speech_active)
+            .unwrap_or(false)
+    }
+
+    pub fn stop_voice_speech(&self, platform: &str, channel_id: &str) -> bool {
+        let Ok(mixers) = self.voice_mixers.lock() else {
+            return false;
+        };
+        let Some(mixer) = mixers.get(&Self::voice_mixer_key(platform, channel_id)) else {
+            return false;
+        };
+        mixer.stop_speech();
+        true
+    }
+
+    pub fn voice_ack_phrase(&self, platform: &str, channel_id: &str) -> Option<String> {
+        if !self.config.voice_fx.ack_enabled || !self.voice_mixer_active(platform, channel_id) {
+            return None;
+        }
+        let phrases: Vec<_> = self
+            .config
+            .voice_fx
+            .ack_phrases
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if phrases.is_empty() {
+            return None;
+        }
+        let Ok(mut cursor) = self.ack_phrase_cursor.lock() else {
+            return Some(phrases[0].to_string());
+        };
+        let phrase = phrases[*cursor % phrases.len()].to_string();
+        *cursor = cursor.saturating_add(1);
+        Some(phrase)
     }
 
     /// Lightweight voice activity detection (VAD) using RMS energy.
@@ -381,6 +557,14 @@ impl VoiceManager {
         Ok(trimmed.to_string())
     }
 
+    fn voice_mixer_key(platform: &str, channel_id: &str) -> String {
+        format!(
+            "{}:{}",
+            platform.trim().to_ascii_lowercase(),
+            channel_id.trim()
+        )
+    }
+
     pub fn is_joined(&self, platform: &str, channel_id: &str) -> bool {
         let lock = match self.joined_channels.lock() {
             Ok(l) => l,
@@ -406,6 +590,12 @@ impl VoiceManager {
         };
         let count: usize = lock.values().map(|channels| channels.len()).sum();
         lock.clear();
+        drop(lock);
+        if let Ok(mut mixers) = self.voice_mixers.lock() {
+            for (_, mixer) in mixers.drain() {
+                mixer.cleanup();
+            }
+        }
         count
     }
 
@@ -787,6 +977,7 @@ impl VoiceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::voice_mixer::{FRAME_SIZE, SILENCE_FRAME};
     use std::f32::consts::PI;
     use std::sync::{Mutex as StdMutex, MutexGuard, OnceLock};
 
@@ -849,6 +1040,8 @@ mod tests {
         let config = VoiceConfig::default();
         assert_eq!(config.state, VoiceState::Disabled);
         assert_eq!(config.stt_provider, SttProvider::Whisper);
+        assert!(!config.voice_fx.enabled);
+        assert_eq!(config.voice_fx.ack_phrases[0], "Let me look into that.");
     }
 
     #[test]
@@ -888,6 +1081,114 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn voice_fx_installs_mixer_on_join_and_removes_on_leave() {
+        let mut config = VoiceConfig::default();
+        config.state = VoiceState::FullDuplex;
+        config.voice_fx.enabled = true;
+        config.voice_fx.ack_phrases = vec!["One moment.".to_string()];
+        let mgr = VoiceManager::new(config);
+
+        mgr.join_voice_channel("discord", "voice-1")
+            .await
+            .expect("join should install mixer");
+        assert!(mgr.voice_mixer_active("DISCORD", "voice-1"));
+        assert_eq!(
+            mgr.voice_ack_phrase("discord", "voice-1").as_deref(),
+            Some("One moment.")
+        );
+
+        let ambient_frame = mgr
+            .read_voice_mixer_frame("discord", "voice-1")
+            .expect("mixer frame");
+        assert_eq!(ambient_frame.len(), FRAME_SIZE);
+        assert_ne!(ambient_frame, SILENCE_FRAME.to_vec());
+
+        mgr.leave_voice_channel("discord", "voice-1")
+            .await
+            .expect("leave should remove mixer");
+        assert!(!mgr.voice_mixer_active("discord", "voice-1"));
+        assert!(mgr.voice_ack_phrase("discord", "voice-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn voice_fx_ack_phrases_rotate_and_skip_empty_values() {
+        let mut config = VoiceConfig::default();
+        config.state = VoiceState::FullDuplex;
+        config.voice_fx.enabled = true;
+        config.voice_fx.ack_phrases = vec![
+            " ".to_string(),
+            "One moment.".to_string(),
+            "Checking now.".to_string(),
+        ];
+        let mgr = VoiceManager::new(config);
+        mgr.join_voice_channel("discord", "voice-ack")
+            .await
+            .expect("join should install mixer");
+
+        assert_eq!(
+            mgr.voice_ack_phrase("discord", "voice-ack").as_deref(),
+            Some("One moment.")
+        );
+        assert_eq!(
+            mgr.voice_ack_phrase("discord", "voice-ack").as_deref(),
+            Some("Checking now.")
+        );
+        assert_eq!(
+            mgr.voice_ack_phrase("discord", "voice-ack").as_deref(),
+            Some("One moment.")
+        );
+    }
+
+    #[tokio::test]
+    async fn voice_fx_speech_layers_and_can_stop() {
+        let mut config = VoiceConfig::default();
+        config.state = VoiceState::FullDuplex;
+        config.voice_fx.enabled = true;
+        config.voice_fx.ambient_enabled = false;
+        let mgr = VoiceManager::new(config);
+        mgr.join_voice_channel("discord", "voice-2")
+            .await
+            .expect("join should install mixer");
+
+        assert_eq!(
+            mgr.read_voice_mixer_frame("discord", "voice-2").unwrap(),
+            SILENCE_FRAME.to_vec()
+        );
+        let speech = constant_pcm(16_000, 10);
+        mgr.play_voice_speech_pcm("discord", "voice-2", &speech)
+            .expect("speech should enqueue");
+        assert!(mgr.voice_speech_active("discord", "voice-2"));
+        let frame = mgr.read_voice_mixer_frame("discord", "voice-2").unwrap();
+        assert_eq!(frame.len(), FRAME_SIZE);
+        assert_ne!(frame, SILENCE_FRAME.to_vec());
+        assert!(mgr.stop_voice_speech("discord", "voice-2"));
+        assert!(!mgr.voice_speech_active("discord", "voice-2"));
+    }
+
+    #[tokio::test]
+    async fn leave_all_channels_cleans_voice_mixers() {
+        let mut config = VoiceConfig::default();
+        config.state = VoiceState::FullDuplex;
+        config.voice_fx.enabled = true;
+        let mgr = VoiceManager::new(config);
+        mgr.join_voice_channel("discord", "voice-a").await.unwrap();
+        mgr.join_voice_channel("discord", "voice-b").await.unwrap();
+        assert!(mgr.voice_mixer_active("discord", "voice-a"));
+        assert_eq!(mgr.leave_all_channels(), 2);
+        assert!(!mgr.voice_mixer_active("discord", "voice-a"));
+        assert!(!mgr.voice_mixer_active("discord", "voice-b"));
+    }
+
+    #[test]
+    fn voice_fx_play_requires_active_mixer() {
+        let mgr = VoiceManager::new(VoiceConfig::default());
+        let err = mgr
+            .play_voice_speech_pcm("discord", "missing", &[1, 2, 3])
+            .unwrap_err();
+        assert!(err.to_string().contains("Voice mixer is not active"));
+    }
+
+    #[tokio::test]
     async fn test_join_requires_voice_enabled() {
         let mgr = VoiceManager::new(VoiceConfig::default());
         let err = mgr
@@ -913,6 +1214,15 @@ mod tests {
             pcm.extend_from_slice(&sample.to_le_bytes());
         }
         assert!(mgr.detect_voice_activity(&pcm));
+    }
+
+    fn constant_pcm(sample: i16, frames: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        for _ in 0..(crate::voice_mixer::SAMPLES_PER_FRAME * crate::voice_mixer::CHANNELS * frames)
+        {
+            out.extend_from_slice(&sample.to_le_bytes());
+        }
+        out
     }
 
     #[test]
