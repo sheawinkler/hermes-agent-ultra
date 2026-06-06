@@ -34,7 +34,7 @@ use hermes_config::{
     hermes_home as hermes_home_dir, load_config, normalize_service_tier, state_dir, GatewayConfig,
 };
 use hermes_core::ToolSchema;
-use hermes_core::{AgentError, LlmProvider};
+use hermes_core::{AgentError, LlmProvider, UsageStats};
 use hermes_cron::{CronRunner, CronScheduler, FileJobPersistence};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
@@ -278,6 +278,15 @@ pub struct App {
     /// Currently active model identifier (e.g. "openai:gpt-4o").
     pub current_model: String,
 
+    /// Actual provider-reported usage for the most recently applied agent run.
+    pub last_usage: Option<UsageStats>,
+
+    /// Aggregated provider-reported usage for the current interactive session.
+    pub session_usage: Option<UsageStats>,
+
+    /// Aggregated provider-reported or estimated cost for the current session.
+    pub session_cost_usd: f64,
+
     /// Currently active personality name.
     pub current_personality: Option<String>,
 
@@ -317,6 +326,9 @@ impl std::fmt::Debug for App {
             .field("session_id", &self.session_id)
             .field("running", &self.running)
             .field("current_model", &self.current_model)
+            .field("last_usage", &self.last_usage)
+            .field("session_usage", &self.session_usage)
+            .field("session_cost_usd", &self.session_cost_usd)
             .field("current_personality", &self.current_personality)
             .field("history_index", &self.history_index)
             .field("mouse_enabled", &self.mouse_enabled)
@@ -343,6 +355,9 @@ impl Clone for App {
             session_id: self.session_id.clone(),
             running: self.running,
             current_model: self.current_model.clone(),
+            last_usage: self.last_usage.clone(),
+            session_usage: self.session_usage.clone(),
+            session_cost_usd: self.session_cost_usd,
             current_personality: self.current_personality.clone(),
             input_history: self.input_history.clone(),
             history_index: self.history_index,
@@ -357,6 +372,23 @@ impl Clone for App {
             quorum_armed_once: self.quorum_armed_once,
             pet_settings: self.pet_settings.clone(),
         }
+    }
+}
+
+fn merge_usage_stats(existing: Option<UsageStats>, new: &UsageStats) -> UsageStats {
+    match existing {
+        Some(prev) => UsageStats {
+            prompt_tokens: prev.prompt_tokens + new.prompt_tokens,
+            completion_tokens: prev.completion_tokens + new.completion_tokens,
+            total_tokens: prev.total_tokens + new.total_tokens,
+            estimated_cost: match (prev.estimated_cost, new.estimated_cost) {
+                (Some(a), Some(b)) => Some(a + b),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            },
+        },
+        None => new.clone(),
     }
 }
 
@@ -2122,6 +2154,9 @@ impl App {
             session_id: Uuid::new_v4().to_string(),
             running: true,
             current_model,
+            last_usage: None,
+            session_usage: None,
+            session_cost_usd: 0.0,
             current_personality,
             input_history: Vec::new(),
             history_index: 0,
@@ -2321,6 +2356,9 @@ impl App {
         self.session_id = Uuid::new_v4().to_string();
         self.messages.clear();
         self.ui_messages.clear();
+        self.last_usage = None;
+        self.session_usage = None;
+        self.session_cost_usd = 0.0;
         self.pending_image_hint = None;
         self.session_objective = None;
         self.input_history.clear();
@@ -2335,6 +2373,9 @@ impl App {
         self.invoke_session_lifecycle_hook(HookType::OnSessionFinalize, &session_id);
         self.messages.clear();
         self.ui_messages.clear();
+        self.last_usage = None;
+        self.session_usage = None;
+        self.session_cost_usd = 0.0;
         self.pending_image_hint = None;
         self.session_objective = None;
         self.input_history.clear();
@@ -3229,6 +3270,19 @@ impl App {
 
     /// Apply the finalized messages returned by an agent run.
     pub fn apply_agent_result(&mut self, result: hermes_core::AgentResult) {
+        let usage = result.usage.clone();
+        let run_cost = result
+            .session_cost_usd
+            .or_else(|| usage.as_ref().and_then(|usage| usage.estimated_cost))
+            .filter(|cost| cost.is_finite() && *cost >= 0.0);
+
+        self.last_usage = usage.clone();
+        if let Some(usage) = usage {
+            self.session_usage = Some(merge_usage_stats(self.session_usage.take(), &usage));
+        }
+        if let Some(run_cost) = run_cost {
+            self.session_cost_usd += run_cost;
+        }
         self.messages = result.messages;
         self.prune_ui_after_current_messages();
     }
@@ -3865,6 +3919,9 @@ mod tests {
             session_id: "test-session".to_string(),
             running: true,
             current_model: "openai:gpt-4o".to_string(),
+            last_usage: None,
+            session_usage: None,
+            session_cost_usd: 0.0,
             current_personality: None,
             input_history: Vec::new(),
             history_index: 0,
@@ -4348,6 +4405,57 @@ mod tests {
             app.state_root.join("sessions").join("state-root-test.json")
         );
         assert!(path.exists());
+    }
+
+    #[test]
+    fn app_tracks_actual_usage_from_agent_results_and_resets() {
+        let mut app = build_minimal_test_app();
+        let first = hermes_core::UsageStats {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+            estimated_cost: Some(0.0015),
+        };
+        let second = hermes_core::UsageStats {
+            prompt_tokens: 7,
+            completion_tokens: 3,
+            total_tokens: 10,
+            estimated_cost: None,
+        };
+
+        app.apply_agent_result(hermes_core::AgentResult {
+            messages: vec![hermes_core::Message::assistant("first")],
+            finished_naturally: true,
+            total_turns: 1,
+            tool_errors: Vec::new(),
+            usage: Some(first.clone()),
+            interrupted: false,
+            session_cost_usd: Some(0.002),
+            session_started_hooks_fired: false,
+        });
+        app.apply_agent_result(hermes_core::AgentResult {
+            messages: vec![hermes_core::Message::assistant("second")],
+            finished_naturally: true,
+            total_turns: 1,
+            tool_errors: Vec::new(),
+            usage: Some(second.clone()),
+            interrupted: false,
+            session_cost_usd: None,
+            session_started_hooks_fired: false,
+        });
+
+        assert_eq!(app.last_usage, Some(second));
+        let session = app.session_usage.as_ref().expect("session usage");
+        assert_eq!(session.prompt_tokens, 17);
+        assert_eq!(session.completion_tokens, 8);
+        assert_eq!(session.total_tokens, 25);
+        assert_eq!(session.estimated_cost, Some(0.0015));
+        assert!((app.session_cost_usd - 0.002).abs() < f64::EPSILON);
+
+        app.reset_session();
+        assert!(app.last_usage.is_none());
+        assert!(app.session_usage.is_none());
+        assert_eq!(app.session_cost_usd, 0.0);
     }
 
     #[test]

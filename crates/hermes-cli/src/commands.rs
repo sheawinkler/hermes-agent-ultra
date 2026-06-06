@@ -6301,6 +6301,21 @@ fn handle_autocompact_command(app: &mut App, args: &[&str]) -> Result<CommandRes
     }
 }
 
+fn usage_token_line(label: &str, usage: &hermes_core::UsageStats) -> String {
+    format!(
+        "{label}: {} prompt / {} completion / {} total tokens",
+        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+    )
+}
+
+fn format_usage_cost_usd(cost: f64) -> String {
+    if cost > 0.0 && cost < 0.0001 {
+        format!("${cost:.6}")
+    } else {
+        format!("${cost:.4}")
+    }
+}
+
 fn handle_usage_command(app: &mut App) -> Result<CommandResult, AgentError> {
     let msg_count = app.messages.len();
     let user_msgs = app
@@ -6320,13 +6335,37 @@ fn handle_usage_command(app: &mut App) -> Result<CommandResult, AgentError> {
         .map(|m| m.content.as_ref().map_or(0, |c| c.len()) / 4)
         .sum();
 
-    emit_command_output(
-        app,
-        format!(
-            "Session Usage Statistics\n  Session:     {}\n  Model:       {}\n  Messages:    {} total\n    User:      {}\n    Assistant: {}\n  Est. tokens: ~{}",
-            app.session_id, app.current_model, msg_count, user_msgs, assistant_msgs, estimated_tokens
-        ),
+    let mut output = format!(
+        "Session Usage Statistics\n  Session:     {}\n  Model:       {}\n  Messages:    {} total\n    User:      {}\n    Assistant: {}\n  Est. tokens: ~{}",
+        app.session_id, app.current_model, msg_count, user_msgs, assistant_msgs, estimated_tokens
     );
+
+    match app.last_usage.as_ref() {
+        Some(usage) => {
+            output.push_str("\n  ");
+            output.push_str(&usage_token_line("Last response", usage));
+        }
+        None => output
+            .push_str("\n  Last response: provider usage metadata unavailable for the latest run"),
+    }
+
+    match app.session_usage.as_ref() {
+        Some(usage) => {
+            output.push_str("\n  ");
+            output.push_str(&usage_token_line("Actual session", usage));
+        }
+        None => output
+            .push_str("\n  Actual session: unavailable until a provider returns usage metadata"),
+    }
+
+    if app.session_cost_usd > 0.0 {
+        output.push_str(&format!(
+            "\n  Actual cost:   {}",
+            format_usage_cost_usd(app.session_cost_usd)
+        ));
+    }
+
+    emit_command_output(app, output);
     Ok(CommandResult::Handled)
 }
 
@@ -28051,6 +28090,42 @@ mod tests {
         assert_eq!(acp_usage.total_tokens, 168);
         assert_eq!(acp_usage.thought_tokens, None);
         assert_eq!(acp_usage.cached_read_tokens, None);
+    }
+
+    #[tokio::test]
+    async fn usage_command_reports_actual_session_usage_and_cost() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        app.apply_agent_result(hermes_core::AgentResult {
+            messages: vec![
+                hermes_core::Message::user("measure usage"),
+                hermes_core::Message::assistant("measured"),
+            ],
+            finished_naturally: true,
+            total_turns: 1,
+            tool_errors: Vec::new(),
+            usage: Some(hermes_core::UsageStats {
+                prompt_tokens: 12,
+                completion_tokens: 3,
+                total_tokens: 15,
+                estimated_cost: Some(0.0123),
+            }),
+            interrupted: false,
+            session_cost_usd: Some(0.0123),
+            session_started_hooks_fired: false,
+        });
+
+        let result = handle_slash_command(&mut app, "/usage", &[])
+            .await
+            .expect("usage command");
+        assert_eq!(result, CommandResult::Handled);
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("Last response: 12 prompt / 3 completion / 15 total tokens"));
+        assert!(output.contains("Actual session: 12 prompt / 3 completion / 15 total tokens"));
+        assert!(output.contains("Actual cost:   $0.0123"));
     }
 
     #[test]
