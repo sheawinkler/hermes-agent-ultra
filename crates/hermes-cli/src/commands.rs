@@ -162,6 +162,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     ("/profile", "Show active profile and Hermes home path"),
     ("/whoami", "Alias for /profile"),
+    ("/version", "Show Hermes Agent Ultra version and build label"),
     ("/fast", "Toggle fast-mode hints"),
     ("/skin", "Show available skin/theme options"),
     ("/skins", "Alias for /skin"),
@@ -3627,6 +3628,10 @@ async fn dispatch_slash_command(
         "/provider" => handle_provider_command(app).await,
         "/personality" => handle_personality_command(app, args),
         "/profile" | "/whoami" => handle_profile_command(app),
+        "/version" => {
+            emit_command_output(app, hermes_core::version::version_label());
+            Ok(CommandResult::Handled)
+        }
         "/fast" | "/skin" | "/voice" => {
             handle_runtime_ui_mode_command(app, canonical_command(cmd), args)
         }
@@ -20207,6 +20212,7 @@ const COMMAND_CATALOG_SECTIONS: &[CommandCatalogSection] = &[
             "/qos",
             "/boot",
             "/walkthrough",
+            "/version",
         ],
     },
     CommandCatalogSection {
@@ -27146,7 +27152,7 @@ pub async fn handle_cli_import(path: String) -> Result<(), hermes_core::AgentErr
 
 /// Handle `hermes version`.
 pub fn handle_cli_version() -> Result<(), hermes_core::AgentError> {
-    println!("hermes {}", env!("CARGO_PKG_VERSION"));
+    println!("{}", hermes_core::version::version_label());
     Ok(())
 }
 
@@ -27362,6 +27368,24 @@ mod tests {
         let results = autocomplete_contextual("/objective behavior ");
         assert!(results.contains(&"/objective behavior strict ".to_string()));
         assert!(results.contains(&"/objective behavior sigma ".to_string()));
+    }
+
+    #[tokio::test]
+    async fn version_slash_command_renders_shared_version_label() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_slash_command(&mut app, "/version", &[])
+            .await
+            .expect("version command");
+
+        assert_eq!(result, CommandResult::Handled);
+        assert_eq!(
+            latest_ui_assistant_text(&app),
+            hermes_core::version::version_label()
+        );
     }
 
     #[tokio::test]

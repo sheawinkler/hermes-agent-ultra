@@ -11,6 +11,7 @@ pub mod tool_call_parser;
 pub mod tool_schema;
 pub mod traits;
 pub mod types;
+pub mod version;
 
 #[cfg(test)]
 pub mod test_generators;

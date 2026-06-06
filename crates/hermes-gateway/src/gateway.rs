@@ -1080,6 +1080,7 @@ impl Gateway {
                     | GatewayCommandResult::ToggleReasoning(text)
                     | GatewayCommandResult::ShowUsage(text)
                     | GatewayCommandResult::ShowStatus(text)
+                    | GatewayCommandResult::ShowVersion(text)
                     | GatewayCommandResult::CompressContext(text)
                     | GatewayCommandResult::StopAgent(text) => Some(text),
                     GatewayCommandResult::SwitchModel { reply, .. }
@@ -1432,6 +1433,11 @@ impl Gateway {
             }
             GatewayCommandResult::ShowStatus(_) => {
                 let text = self.build_status_text(session_key).await;
+                self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ShowVersion(text) => {
                 self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
                     .await?;
                 Ok(true)

@@ -80,6 +80,8 @@ pub enum GatewayCommandResult {
     Rollback { steps: usize },
     /// Check for updates.
     CheckUpdate,
+    /// Show runtime version.
+    ShowVersion(String),
     /// Unknown command.
     Unknown(String),
     /// No-op (command handled internally).
@@ -216,6 +218,12 @@ pub fn all_commands() -> Vec<CommandInfo> {
             aliases: &[],
             description: "Show current status",
             usage: "/status",
+        },
+        CommandInfo {
+            name: "/version",
+            aliases: &[],
+            description: "Show Hermes Agent Ultra version and build label",
+            usage: "/version",
         },
         CommandInfo {
             name: "/agents",
@@ -533,6 +541,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         "/status" => {
             GatewayCommandResult::ShowStatus("Status information will be shown.".to_string())
         }
+        "/version" => GatewayCommandResult::ShowVersion(hermes_core::version::version_label()),
         "/agents" | "/tasks" => GatewayCommandResult::Reply(
             "🧵 Active task state is shown by /background list in this Rust gateway.".to_string(),
         ),
@@ -727,9 +736,21 @@ mod tests {
             GatewayCommandResult::ShowHelp(text) => {
                 assert!(text.contains("Available Commands"));
                 assert!(text.contains("`/start`"));
+                assert!(text.contains("`/version`"));
             }
             other => panic!("Expected ShowHelp for /commands, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_version_command_returns_shared_version_label() {
+        match handle_command("/version") {
+            GatewayCommandResult::ShowVersion(text) => {
+                assert_eq!(text, hermes_core::version::version_label());
+            }
+            other => panic!("Expected ShowVersion, got {:?}", other),
+        }
+        assert!(should_bypass_active_session(Some("/version")));
     }
 
     #[test]
