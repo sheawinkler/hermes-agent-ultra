@@ -15,8 +15,8 @@ use crate::registry::ToolRegistry;
 // Predefined toolset constants
 // ---------------------------------------------------------------------------
 
-/// Web search and extraction tools.
-pub const TOOLSET_WEB: &[&str] = &["web_search", "web_extract"];
+/// Web search, extraction, and crawl tools.
+pub const TOOLSET_WEB: &[&str] = &["web_search", "web_extract", "web_crawl"];
 /// Terminal command execution tools.
 pub const TOOLSET_TERMINAL: &[&str] = &["terminal", "process", "process_registry"];
 /// File system tools.
@@ -607,6 +607,7 @@ mod tests {
         let tools = manager.resolve_toolset_unfiltered("web").unwrap();
         assert!(tools.contains(&"web_search".to_string()));
         assert!(tools.contains(&"web_extract".to_string()));
+        assert!(tools.contains(&"web_crawl".to_string()));
     }
 
     #[test]
@@ -615,6 +616,7 @@ mod tests {
         let tools = manager.resolve_toolset_unfiltered("all").unwrap();
         // Should include tools from all toolsets
         assert!(tools.contains(&"web_search".to_string()));
+        assert!(tools.contains(&"web_crawl".to_string()));
         assert!(tools.contains(&"terminal".to_string()));
         assert!(tools.contains(&"read_file".to_string()));
     }
@@ -705,6 +707,7 @@ mod tests {
         let tools = manager.resolve_toolset_unfiltered("hermes-cli").unwrap();
         // Should include tools from web, terminal, file, etc.
         assert!(tools.contains(&"web_search".to_string()));
+        assert!(tools.contains(&"web_crawl".to_string()));
         assert!(tools.contains(&"terminal".to_string()));
         assert!(tools.contains(&"read_file".to_string()));
         // Python parity core for CLI.
@@ -732,6 +735,7 @@ mod tests {
         for expected in [
             "web_search",
             "web_extract",
+            "web_crawl",
             "terminal",
             "process",
             "read_file",

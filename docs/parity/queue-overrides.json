@@ -1319,6 +1319,42 @@
     "5d3398aa8a20": {
       "disposition": "superseded",
       "notes": "Upstream terminal approval and CLI feedback refactor is superseded by Rust ApprovalManager plus session-scoped YOLO/approval state, hardline and sudo floors, gateway approval lifecycle, and terminal handler denial/bypass tests."
+    },
+    "bf4223f3818f": {
+      "disposition": "superseded",
+      "notes": "Early Python scrape/crawl compression is superseded by Rust web_extract/web_crawl typed handlers, provider-specific normalized document output, URL secret-exfiltration guards, web content redaction, and tool-result storage/budget controls."
+    },
+    "cde7e64418e0": {
+      "disposition": "ported",
+      "notes": "Rust has first-class web_search/web_extract/web_crawl, vision_analyze, and filtered toolset resolution. This batch adds web_crawl to the web toolset and platform filtering tests, while existing vision tests cover schema, execution, URL safety, local image base64, and response normalization."
+    },
+    "ebb46ba0e6a7": {
+      "disposition": "ported",
+      "notes": "Rust exposes image_generate as a first-class tool with schema/handler coverage and FalImageGenBackend direct/managed transport tests for payload shape, auth routing, model override, and unconfigured errors."
+    },
+    "e1710378b738": {
+      "disposition": "ported",
+      "notes": "Rust builtin registration and toolset resolution now expose image_generate, mixture_of_agents, and the complete web tool trio through typed registries instead of Python model_tools dispatch."
+    },
+    "58d5fa1e4cec": {
+      "disposition": "superseded",
+      "notes": "Python FAL dependency wiring is superseded by Rust reqwest-based FalImageGenBackend with direct FAL_KEY and Nous-managed fal-queue transports plus hermetic backend tests; no Python requirement path remains."
+    },
+    "4ece87efb0dd": {
+      "disposition": "ported",
+      "notes": "Rust Firecrawl support covers search and extract through direct, self-hosted URL, and Nous-managed gateway transports, with response normalization and backend-selection tests for Firecrawl-specific shapes."
+    },
+    "587d1cf72095": {
+      "disposition": "superseded",
+      "notes": "The mixed Python web/MoA/trajectory update is superseded by Rust web provider backends, first-class mixture_of_agents runtime/tests, and Rust session/tool-result persistence. Python trajectory file management is not a separate Rust runtime boundary."
+    },
+    "17608c11422b": {
+      "disposition": "ported",
+      "notes": "Rust ToolsetManager already supports named, recursive, filtered, alias, wildcard, and platform toolsets; this batch ports the upstream web-tools membership by ensuring web_crawl resolves with web_search/web_extract through web and platform defaults."
+    },
+    "8d256779d8fa": {
+      "disposition": "ported",
+      "notes": "Rust OpenAiVisionBackend handles local image files by MIME-sniffing extensions and base64-encoding data URLs, validates remote image URLs against unsafe hosts/schemes, and normalizes empty vision responses with focused tests."
     }
   },
   "subject_patterns": [

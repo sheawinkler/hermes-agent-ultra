@@ -219,6 +219,7 @@ mod tests {
         };
         register(&reg, "web_search", "web");
         register(&reg, "web_extract", "web");
+        register(&reg, "web_crawl", "web");
         register(&reg, "terminal", "terminal");
         register(&reg, "process", "terminal");
         register(&reg, "read_file", "file");
@@ -282,6 +283,7 @@ mod tests {
         let reg = registry_with_minimal_tools();
         let names = resolve_platform_tool_names(&cfg, "cli", &reg);
         assert!(names.contains(&"web_search".to_string()));
+        assert!(names.contains(&"web_crawl".to_string()));
         assert!(!names.contains(&"terminal".to_string()));
     }
 
@@ -305,6 +307,7 @@ mod tests {
         for expected in [
             "web_search",
             "web_extract",
+            "web_crawl",
             "terminal",
             "process",
             "read_file",
