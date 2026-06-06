@@ -4914,6 +4914,80 @@ mod tests {
     }
 
     #[test]
+    fn test_build_agent_config_maps_active_provider_max_tokens() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(&["HERMES_MAX_TOKENS"]);
+        std::env::remove_var("HERMES_MAX_TOKENS");
+
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "openrouter".to_string(),
+            LlmProviderConfig {
+                max_tokens: Some(4096),
+                ..LlmProviderConfig::default()
+            },
+        );
+        cfg.llm_providers.insert(
+            "openai".to_string(),
+            LlmProviderConfig {
+                max_tokens: Some(2048),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6");
+
+        assert_eq!(agent_cfg.max_tokens, Some(4096));
+    }
+
+    #[test]
+    fn test_build_agent_config_maps_normalized_provider_max_tokens_alias() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(&["HERMES_MAX_TOKENS"]);
+        std::env::remove_var("HERMES_MAX_TOKENS");
+
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "openai-codex".to_string(),
+            LlmProviderConfig {
+                max_tokens: Some(1234),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let agent_cfg = build_agent_config(&cfg, "codex:gpt-5");
+
+        assert_eq!(agent_cfg.max_tokens, Some(1234));
+    }
+
+    #[test]
+    fn test_build_agent_config_env_max_tokens_overrides_provider_cap() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(&["HERMES_MAX_TOKENS"]);
+
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "openrouter".to_string(),
+            LlmProviderConfig {
+                max_tokens: Some(4096),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        std::env::set_var("HERMES_MAX_TOKENS", "8192");
+        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6");
+        assert_eq!(agent_cfg.max_tokens, Some(8192));
+
+        std::env::set_var("HERMES_MAX_TOKENS", "not-a-number");
+        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6");
+        assert_eq!(agent_cfg.max_tokens, Some(4096));
+
+        std::env::set_var("HERMES_MAX_TOKENS", "0");
+        let agent_cfg = build_agent_config(&cfg, "openrouter:anthropic/claude-sonnet-4.6");
+        assert_eq!(agent_cfg.max_tokens, Some(4096));
+    }
+
+    #[test]
     fn test_build_agent_config_forwards_provider_extra_body() {
         let mut cfg = GatewayConfig::default();
         cfg.llm_providers.insert(
@@ -6264,17 +6338,19 @@ fn parse_provider_api_mode(value: &str) -> Option<ApiMode> {
     }
 }
 
-pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
-    let (resolved_provider, _) = resolve_provider_and_model(config, model);
-    let runtime_provider = normalize_runtime_provider_name(resolved_provider.as_str());
-    let provider_extra_body = config
+fn active_llm_provider_config<'a>(
+    config: &'a GatewayConfig,
+    provider_name: &str,
+    runtime_provider: &str,
+) -> Option<&'a hermes_config::LlmProviderConfig> {
+    config
         .llm_providers
-        .get(resolved_provider.as_str())
-        .or_else(|| config.llm_providers.get(runtime_provider.as_str()))
+        .get(provider_name)
+        .or_else(|| config.llm_providers.get(runtime_provider))
         .or_else(|| {
             config.llm_providers.iter().find_map(|(name, cfg)| {
-                if name.eq_ignore_ascii_case(resolved_provider.as_str())
-                    || name.eq_ignore_ascii_case(runtime_provider.as_str())
+                if name.eq_ignore_ascii_case(provider_name)
+                    || name.eq_ignore_ascii_case(runtime_provider)
                 {
                     Some(cfg)
                 } else {
@@ -6282,7 +6358,31 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                 }
             })
         })
-        .and_then(|cfg| cfg.extra_body.clone());
+}
+
+fn configured_agent_max_tokens(
+    provider_config: Option<&hermes_config::LlmProviderConfig>,
+) -> Option<u32> {
+    if let Ok(raw) = std::env::var("HERMES_MAX_TOKENS") {
+        if let Ok(value) = raw.trim().parse::<u32>() {
+            if value > 0 {
+                return Some(value);
+            }
+        }
+    }
+    provider_config.and_then(|cfg| cfg.max_tokens.filter(|value| *value > 0))
+}
+
+pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
+    let (resolved_provider, _) = resolve_provider_and_model(config, model);
+    let runtime_provider = normalize_runtime_provider_name(resolved_provider.as_str());
+    let provider_config = active_llm_provider_config(
+        config,
+        resolved_provider.as_str(),
+        runtime_provider.as_str(),
+    );
+    let provider_extra_body = provider_config.and_then(|cfg| cfg.extra_body.clone());
+    let max_tokens = configured_agent_max_tokens(provider_config);
     let extra_body =
         merge_service_tier_extra_body(provider_extra_body, config.agent.normalized_service_tier());
     let skip_memory_env = std::env::var("HERMES_SKIP_MEMORY")
@@ -6318,6 +6418,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         hermes_home: config.home_dir.clone(),
         provider: Some(resolved_provider),
         stream: config.streaming.enabled,
+        max_tokens,
         max_delegate_depth,
         delegation_model: config
             .delegation
@@ -7044,21 +7145,8 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
         runtime_provider.as_str(),
     );
 
-    let provider_config = config
-        .llm_providers
-        .get(provider_name.as_str())
-        .or_else(|| config.llm_providers.get(runtime_provider.as_str()));
-    let provider_config = provider_config.or_else(|| {
-        config.llm_providers.iter().find_map(|(name, cfg)| {
-            if name.eq_ignore_ascii_case(provider_name.as_str())
-                || name.eq_ignore_ascii_case(runtime_provider.as_str())
-            {
-                Some(cfg)
-            } else {
-                None
-            }
-        })
-    });
+    let provider_config =
+        active_llm_provider_config(config, provider_name.as_str(), runtime_provider.as_str());
     let request_timeout_seconds = provider_config.and_then(|c| c.request_timeout_seconds);
 
     let default_base_url = provider_default_base_url(provider_name.as_str())

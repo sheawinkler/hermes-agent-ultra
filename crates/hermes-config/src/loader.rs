@@ -849,6 +849,21 @@ fn apply_user_config_patch_dotted(
                 "base_url" => entry.base_url = Some(value.to_string()),
                 "model" => entry.model = Some(value.to_string()),
                 "api_mode" => entry.api_mode = Some(normalize_provider_api_mode(value)?),
+                "max_tokens" | "max_output_tokens" => {
+                    let parsed = value.parse::<u32>().map_err(|_| {
+                        ConfigError::ValidationError(format!(
+                            "llm.{}.{} must be a positive integer: {}",
+                            provider, field, value
+                        ))
+                    })?;
+                    if parsed == 0 {
+                        return Err(ConfigError::ValidationError(format!(
+                            "llm.{}.{} must be a positive integer: {}",
+                            provider, field, value
+                        )));
+                    }
+                    entry.max_tokens = Some(parsed);
+                }
                 "command" => entry.command = Some(value.to_string()),
                 "args" => {
                     entry.args = value
@@ -865,7 +880,7 @@ fn apply_user_config_patch_dotted(
                 "oauth_client_id" => entry.oauth_client_id = Some(value.to_string()),
                 other => {
                     return Err(ConfigError::NotFound(format!(
-                        "unknown llm field: llm.{}.{} (supported: api_key, api_key_env, base_url, model, api_mode, command, args, request_timeout_seconds, oauth_token_url, oauth_client_id)",
+                        "unknown llm field: llm.{}.{} (supported: api_key, api_key_env, base_url, model, api_mode, max_tokens, max_output_tokens, command, args, request_timeout_seconds, oauth_token_url, oauth_client_id)",
                         provider, other
                     )));
                 }
@@ -1075,6 +1090,12 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .and_then(|c| c.api_mode.as_deref())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["llm", provider, "max_tokens"] | ["llm", provider, "max_output_tokens"] => Ok(config
+            .llm_providers
+            .get(*provider)
+            .and_then(|c| c.max_tokens)
+            .map(|value| value.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
         ["llm", provider, "command"] => Ok(config
             .llm_providers
@@ -2197,6 +2218,11 @@ pub fn validate_config(config: &GatewayConfig) -> Result<(), ConfigError> {
                 )));
             }
         }
+        if matches!(provider.max_tokens, Some(0)) {
+            return Err(ConfigError::ValidationError(format!(
+                "llm_providers.{name}.max_tokens must be a positive integer"
+            )));
+        }
     }
 
     if let Some(api_key) = &config.delegation.api_key {
@@ -3035,6 +3061,28 @@ llm_providers:
     }
 
     #[test]
+    fn load_user_config_file_parses_llm_provider_max_output_tokens_alias() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(
+            &path,
+            r#"
+llm_providers:
+  custom:
+    base_url: https://gateway.example.com/v1
+    max_output_tokens: 4096
+"#,
+        )
+        .unwrap();
+
+        let loaded = load_user_config_file(&path).unwrap();
+        let provider = loaded.llm_providers.get("custom").expect("custom provider");
+        assert_eq!(provider.max_tokens, Some(4096));
+    }
+
+    #[test]
     fn load_user_config_file_rejects_unknown_llm_provider_api_mode() {
         use tempfile::tempdir;
 
@@ -3062,6 +3110,7 @@ llm_providers:
         apply_user_config_patch(&mut c, "llm.openai.base_url", "https://api.openai.com/v1")
             .unwrap();
         apply_user_config_patch(&mut c, "llm.openai.api_mode", "codex-responses").unwrap();
+        apply_user_config_patch(&mut c, "llm.openai.max_output_tokens", "8192").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.command", "copilot-language-server").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.args", "--stdio,--model,gpt-4o-mini").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.request_timeout_seconds", "45.5").unwrap();
@@ -3082,6 +3131,10 @@ llm_providers:
         assert_eq!(
             c.llm_providers.get("openai").unwrap().api_mode.as_deref(),
             Some("codex_responses")
+        );
+        assert_eq!(
+            c.llm_providers.get("openai").unwrap().max_tokens,
+            Some(8192)
         );
         assert_eq!(
             c.llm_providers.get("openai").unwrap().command.as_deref(),
@@ -3123,6 +3176,14 @@ llm_providers:
             "codex_responses"
         );
         assert_eq!(
+            user_config_field_display(&c, "llm.openai.max_tokens").unwrap(),
+            "8192"
+        );
+        assert_eq!(
+            user_config_field_display(&c, "llm.openai.max_output_tokens").unwrap(),
+            "8192"
+        );
+        assert_eq!(
             user_config_field_display(&c, "llm.openai.args").unwrap(),
             "--stdio,--model,gpt-4o-mini"
         );
@@ -3144,6 +3205,7 @@ llm_providers:
         assert!(
             apply_user_config_patch(&mut c, "llm.openai.request_timeout_seconds", "fast").is_err()
         );
+        assert!(apply_user_config_patch(&mut c, "llm.openai.max_tokens", "0").is_err());
     }
 
     #[test]

@@ -989,7 +989,11 @@ pub struct LlmProviderConfig {
     pub api_mode: Option<String>,
 
     /// Maximum tokens in the completion response.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "max_output_tokens",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_tokens: Option<u32>,
 
     /// Sampling temperature.

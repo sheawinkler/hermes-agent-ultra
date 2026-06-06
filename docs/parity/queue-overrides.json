@@ -960,6 +960,22 @@
       "disposition": "ported",
       "notes": "Rust provider config now accepts llm.<provider>.request_timeout_seconds, validates and exposes it through config set/get, propagates it into AgentConfig RuntimeProviderConfig, and applies it to OpenAI-compatible, Codex Responses, Anthropic, OpenRouter, extra provider, fallback/runtime-routing, and client rebuild paths with targeted tests."
     },
+    "cf786593cd83": {
+      "disposition": "ported",
+      "notes": "Rust now propagates active provider output caps into AgentConfig.max_tokens so gateway/CLI/cron agent paths pass configured max_tokens into provider requests through the existing AgentLoop max_tokens chain."
+    },
+    "1c909e75e1a0": {
+      "disposition": "ported",
+      "notes": "Rust build_agent_config now honors HERMES_MAX_TOKENS as the highest-precedence output-token override and falls back to active provider config caps for CLI and gateway-created agents, with focused precedence tests."
+    },
+    "14275d7baa1a": {
+      "disposition": "ported",
+      "notes": "Rust llm provider config accepts max_output_tokens as an alias for max_tokens, exposes both dotted config set/get spellings, validates positive values, and uses the active provider cap only when HERMES_MAX_TOKENS is unset."
+    },
+    "2dda393f99cb": {
+      "disposition": "ported",
+      "notes": "Rust regression tests cover the max_tokens propagation chain from config parsing/set-get through build_agent_config into AgentConfig.max_tokens precedence, superseding the upstream Python gateway test-only follow-up."
+    },
     "38695254f851": {
       "disposition": "ported",
       "notes": "Rust session persistence now exposes FTS index counting and optimize_fts maintenance, VACUUM runs FTS optimization before reclaiming pages, and top-level `hermes sessions optimize` reports FTS index count plus before/after sessions.db size with Rust unit/e2e coverage."
