@@ -730,6 +730,56 @@ mod tests {
         }
     }
 
+    struct NonzeroExitBackend;
+
+    #[async_trait]
+    impl TerminalBackend for NonzeroExitBackend {
+        async fn execute_command(
+            &self,
+            command: &str,
+            timeout: Option<u64>,
+            workdir: Option<&str>,
+            background: bool,
+            pty: bool,
+        ) -> Result<CommandOutput, AgentError> {
+            self.execute_command_with_stdin(command, timeout, workdir, background, pty, None)
+                .await
+        }
+
+        async fn execute_command_with_stdin(
+            &self,
+            cmd: &str,
+            _timeout: Option<u64>,
+            _workdir: Option<&str>,
+            _background: bool,
+            _pty: bool,
+            _stdin_data: Option<&str>,
+        ) -> Result<CommandOutput, AgentError> {
+            Ok(CommandOutput {
+                exit_code: 7,
+                stdout: format!("stdout from {cmd}"),
+                stderr: format!("stderr from {cmd}"),
+            })
+        }
+
+        async fn read_file(
+            &self,
+            _path: &str,
+            _offset: Option<u64>,
+            _limit: Option<u64>,
+        ) -> Result<String, AgentError> {
+            Ok(String::new())
+        }
+
+        async fn write_file(&self, _path: &str, _content: &str) -> Result<(), AgentError> {
+            Ok(())
+        }
+
+        async fn file_exists(&self, _path: &str) -> Result<bool, AgentError> {
+            Ok(true)
+        }
+    }
+
     #[derive(Default)]
     struct RecordingBackend {
         calls: Arc<Mutex<Vec<Option<String>>>>,
@@ -1124,5 +1174,19 @@ mod tests {
         assert!(formatted.contains("out"));
         assert!(formatted.contains("err"));
         assert!(formatted.contains("exit code: 1"));
+    }
+
+    #[test]
+    fn terminal_handler_nonzero_exit_code_is_output_not_tool_failure() {
+        let _env_lock = TEST_ENV_LOCK.lock().expect("test env lock");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(Arc::new(NonzeroExitBackend));
+
+        let rendered = block_on(handler.execute(json!({"command": "false"})))
+            .expect("nonzero terminal exits should be returned to the model");
+
+        assert!(rendered.contains("stdout from false"));
+        assert!(rendered.contains("stderr from false"));
+        assert!(rendered.contains("[exit code: 7]"));
     }
 }

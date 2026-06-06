@@ -1295,6 +1295,30 @@
     "dfc5563641f0": {
       "disposition": "ported",
       "notes": "Rust ACP sessions now include client-provided MCP server toolsets through live ToolRegistry mcp-{server} toolsets and explicit aliases, so tools.list, /tools, initialize tool names, ToolsetManager resolution, and registered MCP dispatch all see the session MCP surface. Focused tests cover toolset expansion and ACP MCP tool visibility."
+    },
+    "f81395975025": {
+      "disposition": "superseded",
+      "notes": "Upstream simple-terminal registration is superseded by Rust TerminalHandler and LocalBackend command execution, explicit background=true lifecycle tracking, timeout/workdir/schema contracts, and process-management tests without the Python Morph VM dependency."
+    },
+    "ab7293bed652": {
+      "disposition": "ported",
+      "notes": "Rust TerminalHandler now has regression coverage proving a nonzero terminal exit code returns normal model-visible command output with [exit code: N] instead of surfacing as ToolError/agent tool failure."
+    },
+    "ba19d530ad24": {
+      "disposition": "superseded",
+      "notes": "Python mini-swe/hecate terminal backend integration is superseded by Rust-native terminal and process backends: command execution, background lifecycle, stdin/PTY/workdir, schema registration, and local runtime contracts are implemented without Python terminal_tool dispatch."
+    },
+    "771cf41fea1f": {
+      "disposition": "superseded",
+      "notes": "Upstream Singularity/run-script terminal environment tuning is not a separate Rust runtime surface; Rust terminal execution already exposes explicit timeout, workdir, background, PTY, stdin, and process-polling contracts through typed handlers and tests."
+    },
+    "bbeed5b5d12d": {
+      "disposition": "superseded",
+      "notes": "Upstream session logging and interactive sudo support is superseded by Rust session-aware terminal/process logging, task cwd mapping, background log reads, SUDO_PASSWORD sudo transformation, approval manager, and gateway/terminal regression coverage."
+    },
+    "5d3398aa8a20": {
+      "disposition": "superseded",
+      "notes": "Upstream terminal approval and CLI feedback refactor is superseded by Rust ApprovalManager plus session-scoped YOLO/approval state, hardline and sudo floors, gateway approval lifecycle, and terminal handler denial/bypass tests."
     }
   },
   "subject_patterns": [
