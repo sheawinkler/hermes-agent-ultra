@@ -326,6 +326,30 @@ impl ToolsetManager {
             .collect(),
         ));
         self.register(Toolset::with_includes(
+            "hermes-cron",
+            vec![
+                "web",
+                "terminal",
+                "file",
+                "browser",
+                "vision",
+                "image_gen",
+                "video_gen",
+                "spotify",
+                "skills",
+                "memory",
+                "session_search",
+                "todo",
+                "code_execution",
+                "delegation",
+                "tts",
+                "system",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        ));
+        self.register(Toolset::with_includes(
             "hermes-telegram",
             vec!["hermes-cli"].into_iter().map(String::from).collect(),
         ));
@@ -702,6 +726,45 @@ mod tests {
             assert!(
                 tools.contains(&"ha_call_service".to_string()),
                 "preset {preset} should include homeassistant tools"
+            );
+        }
+    }
+
+    #[test]
+    fn test_hermes_cron_toolset_omits_expensive_and_recursive_platform_tools() {
+        let manager = ToolsetManager::new(empty_registry());
+        let tools = manager.resolve_toolset_unfiltered("hermes-cron").unwrap();
+
+        for expected in [
+            "web_search",
+            "terminal",
+            "read_file",
+            "browser_navigate",
+            "image_generate",
+            "video_generate",
+            "skills_list",
+            "memory",
+            "session_search",
+            "todo",
+            "execute_code",
+            "delegate_task",
+            "text_to_speech",
+        ] {
+            assert!(
+                tools.contains(&expected.to_string()),
+                "hermes-cron should include {expected}"
+            );
+        }
+        for excluded in [
+            "cronjob",
+            "send_message",
+            "clarify",
+            "mixture_of_agents",
+            "ha_call_service",
+        ] {
+            assert!(
+                !tools.contains(&excluded.to_string()),
+                "hermes-cron should exclude {excluded}"
             );
         }
     }

@@ -632,6 +632,7 @@ pub fn default_platform_toolsets() -> HashMap<String, Vec<String>> {
     map.insert("discord".to_string(), vec!["hermes-discord".to_string()]);
     map.insert("whatsapp".to_string(), vec!["hermes-whatsapp".to_string()]);
     map.insert("slack".to_string(), vec!["hermes-slack".to_string()]);
+    map.insert("cron".to_string(), vec!["hermes-cron".to_string()]);
     map
 }
 
@@ -1437,6 +1438,13 @@ mod tests {
                 .cloned()
                 .unwrap_or_default(),
             vec!["hermes-telegram".to_string()]
+        );
+        assert_eq!(
+            cfg.platform_toolsets
+                .get("cron")
+                .cloned()
+                .unwrap_or_default(),
+            vec!["hermes-cron".to_string()]
         );
     }
 

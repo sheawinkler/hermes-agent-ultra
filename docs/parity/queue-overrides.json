@@ -807,6 +807,10 @@
     "3078053795e838e47797ede02b44e6dead731aac": {
       "disposition": "ported",
       "notes": "Rust mixture_of_agents is now a first-class OpenAI-compatible two-layer MoA runtime with env/model/base-url configuration, parallel reference fanout, retries, minimum-success threshold, aggregator prompt synthesis, toolset/distribution exposure, and deterministic mock HTTP tests."
+    },
+    "ef5eaf8d8757a5e75fa571042abc287430192f53": {
+      "disposition": "ported",
+      "notes": "Rust cron now honors the cron platform_toolsets config path, adds the hermes-cron default platform/toolset surface, hard-denies recursive and interactive cron tools, preserves direct custom-tool fallback, and covers default/configured cron filtering with targeted tests."
     }
   },
   "subject_patterns": [

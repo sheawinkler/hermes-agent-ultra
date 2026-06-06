@@ -91,15 +91,15 @@ pub fn resolve_platform_tool_names(
         };
         let mut matched = false;
         for candidate in candidates {
-            if registry.get_tool(candidate).is_some() {
-                names.insert(candidate.to_string());
-                matched = true;
-                break;
-            }
             if let Ok(resolved) = manager.resolve_toolset(candidate) {
                 for name in resolved {
                     names.insert(name);
                 }
+                matched = true;
+                break;
+            }
+            if registry.get_tool(candidate).is_some() {
+                names.insert(candidate.to_string());
                 matched = true;
                 break;
             }
@@ -417,6 +417,8 @@ mod tests {
             "voice_mode",
             "ha_call_service",
             "terminal",
+            "process",
+            "process_registry",
         ] {
             assert!(
                 names.contains(&expected.to_string()),

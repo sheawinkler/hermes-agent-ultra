@@ -7,6 +7,7 @@
 //! Safety: cron jobs **cannot** recursively schedule more cron jobs. The runner
 //! runs the agent with a restricted tool set that excludes the cronjob tool.
 
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -17,8 +18,10 @@ use std::time::Duration as StdDuration;
 use hermes_agent::agent_loop::ToolRegistry;
 use hermes_agent::skill_orchestrator::parse_frontmatter;
 use hermes_agent::{AgentConfig, AgentLoop};
+use hermes_config::{load_config, GatewayConfig};
 use hermes_core::{AgentResult, LlmProvider, Message, Skill, ToolSchema};
 use hermes_skills::SkillGuard;
+use hermes_tools::{ToolRegistry as ToolsetRegistry, ToolsetManager};
 use regex::Regex;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -55,6 +58,9 @@ static CRON_PROMPT_BLOCK_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLo
 
 const DEFAULT_SCRIPT_TIMEOUT_SECS: u64 = 120;
 const MAX_SCRIPT_OUTPUT_CHARS: usize = 64_000;
+const CRON_PLATFORM: &str = "cron";
+const CRON_DEFAULT_TOOLSET: &str = "hermes-cron";
+const CRON_HARD_DISABLED_TOOLS: &[&str] = &["cronjob", "send_message", "clarify"];
 
 #[derive(Debug, Clone)]
 struct ScriptControl {
@@ -539,7 +545,8 @@ impl CronRunner {
             runnable_job.prompt
         ));
 
-        // Build tool list, excluding the cronjob tool to prevent recursive scheduling
+        // Build tool list from `hermes tools` cron-platform config, with
+        // recursive/messaging tools denied even if a broad toolset includes them.
         let tools = self.filtered_tool_schemas();
 
         // Create a fresh agent loop
@@ -668,12 +675,39 @@ impl CronRunner {
         Ok(messages)
     }
 
-    /// Filter out the `cronjob` tool from the registry to prevent recursive scheduling.
+    /// Filter cron tools through the same platform-toolset config used by
+    /// gateway/CLI surfaces. Falls back to legacy all-tools-minus-denylist if
+    /// user config cannot be loaded.
     fn filtered_tool_schemas(&self) -> Vec<ToolSchema> {
+        match load_config(None) {
+            Ok(config) => self.filtered_tool_schemas_for_config(&config),
+            Err(err) => {
+                tracing::warn!(
+                    "Cron platform toolset resolution failed, falling back to legacy tool filter: {err}"
+                );
+                self.legacy_filtered_tool_schemas()
+            }
+        }
+    }
+
+    fn filtered_tool_schemas_for_config(&self, config: &GatewayConfig) -> Vec<ToolSchema> {
+        let live_names: HashSet<String> = self.tool_registry.names().into_iter().collect();
+        let allowed = resolve_cron_platform_tool_names(config, &live_names);
+        self.filter_tool_schemas(Some(&allowed))
+    }
+
+    fn legacy_filtered_tool_schemas(&self) -> Vec<ToolSchema> {
+        self.filter_tool_schemas(None)
+    }
+
+    fn filter_tool_schemas(&self, allowed: Option<&HashSet<String>>) -> Vec<ToolSchema> {
         self.tool_registry
             .schemas()
             .into_iter()
-            .filter(|schema| schema.name != "cronjob")
+            .filter(|schema| {
+                !CRON_HARD_DISABLED_TOOLS.contains(&schema.name.as_str())
+                    && allowed.is_none_or(|names| names.contains(&schema.name))
+            })
             .collect()
     }
 
@@ -785,6 +819,91 @@ impl CronRunner {
     }
 }
 
+fn configured_cron_toolsets(config: &GatewayConfig) -> Vec<String> {
+    config
+        .platform_toolsets
+        .get(CRON_PLATFORM)
+        .filter(|tokens| !tokens.is_empty())
+        .cloned()
+        .unwrap_or_else(|| vec![CRON_DEFAULT_TOOLSET.to_string()])
+}
+
+fn canonical_cron_toolset_token(token: &str) -> String {
+    let token = token.trim().to_ascii_lowercase();
+    match token.as_str() {
+        "image-gen" | "imagegen" => "image_gen".to_string(),
+        "video-gen" | "videogen" => "video_gen".to_string(),
+        "code-execution" | "code" => "code_execution".to_string(),
+        "session-search" => "session_search".to_string(),
+        "home-assistant" | "home_assistant" | "ha" => "homeassistant".to_string(),
+        "mixture-of-agents" | "mixture-of-agent" | "mixture" | "moa" => {
+            "mixture_of_agents".to_string()
+        }
+        "browser-use" | "browser_use" => "browser".to_string(),
+        "voice-mode" | "voice_mode" => "voice".to_string(),
+        "hermes_cli" => "hermes-cli".to_string(),
+        "hermes_api_server" => "hermes-api-server".to_string(),
+        "hermes_cron" => CRON_DEFAULT_TOOLSET.to_string(),
+        "hermes_telegram" => "hermes-telegram".to_string(),
+        "hermes_discord" => "hermes-discord".to_string(),
+        "hermes_whatsapp" => "hermes-whatsapp".to_string(),
+        "hermes_slack" => "hermes-slack".to_string(),
+        _ => token,
+    }
+}
+
+fn resolve_cron_platform_tool_names(
+    config: &GatewayConfig,
+    live_names: &HashSet<String>,
+) -> HashSet<String> {
+    let manager = ToolsetManager::new(Arc::new(ToolsetRegistry::new()));
+    let mut names = HashSet::new();
+
+    for token in configured_cron_toolsets(config) {
+        let original = token.trim();
+        if original.is_empty() {
+            continue;
+        }
+        let canonical = canonical_cron_toolset_token(original);
+        let candidates = if canonical == original {
+            vec![canonical.as_str()]
+        } else {
+            vec![canonical.as_str(), original]
+        };
+        let mut matched = false;
+        for candidate in candidates {
+            if let Ok(resolved) = manager.resolve_toolset_unfiltered(candidate) {
+                names.extend(resolved);
+                matched = true;
+                break;
+            }
+            if live_names.contains(candidate) {
+                names.insert(candidate.to_string());
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            tracing::warn!("Unknown cron platform toolset/token '{}'", original);
+        }
+    }
+
+    for tool_name in &config.tools_config.enabled {
+        let trimmed = tool_name.trim();
+        if !trimmed.is_empty() && live_names.contains(trimmed) {
+            names.insert(trimmed.to_string());
+        }
+    }
+    for tool_name in &config.tools_config.disabled {
+        names.remove(tool_name.trim());
+    }
+    for denied in CRON_HARD_DISABLED_TOOLS {
+        names.remove(*denied);
+    }
+
+    names
+}
+
 fn detect_cron_prompt_injection(text: &str) -> Option<&'static str> {
     if has_invisible_unicode(text) {
         return Some("invisible_unicode");
@@ -813,30 +932,12 @@ mod tests {
 
     #[test]
     fn test_filtered_tool_schemas_excludes_cronjob() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _ignore_user_config = EnvGuard::set("HERMES_IGNORE_USER_CONFIG", "1");
         // Create a minimal tool registry with a cronjob tool
         let mut registry = ToolRegistry::new();
-        registry.register(
-            "cronjob",
-            hermes_core::tool_schema(
-                "cronjob",
-                "Manage cron jobs",
-                hermes_core::JsonSchema::new("object"),
-            ),
-            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> {
-                Ok("ok".to_string())
-            }),
-        );
-        registry.register(
-            "terminal",
-            hermes_core::tool_schema(
-                "terminal",
-                "Run commands",
-                hermes_core::JsonSchema::new("object"),
-            ),
-            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> {
-                Ok("ok".to_string())
-            }),
-        );
+        register_test_tool(&mut registry, "cronjob");
+        register_test_tool(&mut registry, "terminal");
 
         let runner = CronRunner {
             llm_provider: Arc::new(MockLlmProvider),
@@ -847,6 +948,130 @@ mod tests {
         let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
         assert!(!names.contains(&"cronjob"));
         assert!(names.contains(&"terminal"));
+    }
+
+    #[test]
+    fn test_filtered_tool_schemas_default_cron_omits_default_off_and_interactive_tools() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
+        let _ignore_user_config = EnvGuard::remove("HERMES_IGNORE_USER_CONFIG");
+
+        let mut registry = ToolRegistry::new();
+        for name in [
+            "terminal",
+            "web_search",
+            "mixture_of_agents",
+            "ha_call_service",
+            "cronjob",
+            "send_message",
+            "clarify",
+        ] {
+            register_test_tool(&mut registry, name);
+        }
+
+        let runner = CronRunner {
+            llm_provider: Arc::new(MockLlmProvider),
+            tool_registry: Arc::new(registry),
+        };
+
+        let names = schema_name_set(runner.filtered_tool_schemas());
+        assert!(names.contains("terminal"));
+        assert!(names.contains("web_search"));
+        for excluded in [
+            "mixture_of_agents",
+            "ha_call_service",
+            "cronjob",
+            "send_message",
+            "clarify",
+        ] {
+            assert!(
+                !names.contains(excluded),
+                "default cron platform tools should omit {excluded}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_filtered_tool_schemas_honors_cron_platform_config_and_tool_toggles() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join("config.yaml"),
+            r#"
+platform_toolsets:
+  cron:
+    - terminal
+tools_config:
+  enabled:
+    - web_search
+  disabled:
+    - process
+"#,
+        )
+        .unwrap();
+        let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
+        let _ignore_user_config = EnvGuard::remove("HERMES_IGNORE_USER_CONFIG");
+
+        let mut registry = ToolRegistry::new();
+        for name in [
+            "terminal",
+            "process",
+            "process_registry",
+            "web_search",
+            "web_extract",
+            "cronjob",
+            "send_message",
+            "clarify",
+        ] {
+            register_test_tool(&mut registry, name);
+        }
+
+        let runner = CronRunner {
+            llm_provider: Arc::new(MockLlmProvider),
+            tool_registry: Arc::new(registry),
+        };
+
+        let names = schema_name_set(runner.filtered_tool_schemas());
+        assert!(names.contains("terminal"));
+        assert!(names.contains("process_registry"));
+        assert!(names.contains("web_search"));
+        assert!(!names.contains("process"));
+        assert!(!names.contains("web_extract"));
+        assert!(!names.contains("cronjob"));
+        assert!(!names.contains("send_message"));
+        assert!(!names.contains("clarify"));
+    }
+
+    #[test]
+    fn test_resolve_cron_platform_tool_names_expands_known_toolsets_before_direct_fallback() {
+        let mut cfg = GatewayConfig::default();
+        cfg.platform_toolsets
+            .insert("cron".to_string(), vec!["terminal".to_string()]);
+        cfg.tools_config.enabled = vec!["CustomTool".to_string()];
+        cfg.tools_config.disabled = vec!["process".to_string()];
+
+        let live_names: HashSet<String> = [
+            "terminal",
+            "process",
+            "process_registry",
+            "CustomTool",
+            "cronjob",
+            "send_message",
+            "clarify",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+
+        let names = resolve_cron_platform_tool_names(&cfg, &live_names);
+        assert!(names.contains("terminal"));
+        assert!(names.contains("process_registry"));
+        assert!(names.contains("CustomTool"));
+        assert!(!names.contains("process"));
+        assert!(!names.contains("cronjob"));
+        assert!(!names.contains("send_message"));
+        assert!(!names.contains("clarify"));
     }
 
     #[test]
@@ -1041,6 +1266,30 @@ mod tests {
             std::env::set_var(key, value);
             Self { key, previous }
         }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    fn register_test_tool(registry: &mut ToolRegistry, name: &str) {
+        registry.register(
+            name,
+            hermes_core::tool_schema(
+                name,
+                format!("{name} test tool"),
+                hermes_core::JsonSchema::new("object"),
+            ),
+            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> {
+                Ok("ok".to_string())
+            }),
+        );
+    }
+
+    fn schema_name_set(schemas: Vec<ToolSchema>) -> HashSet<String> {
+        schemas.into_iter().map(|schema| schema.name).collect()
     }
 
     impl Drop for EnvGuard {
