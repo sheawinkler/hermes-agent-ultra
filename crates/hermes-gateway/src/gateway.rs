@@ -1241,6 +1241,7 @@ impl Gateway {
                     GatewayCommandResult::SwitchModel { reply, .. }
                     | GatewayCommandResult::SwitchFast { reply, .. }
                     | GatewayCommandResult::SwitchPersonality { reply, .. }
+                    | GatewayCommandResult::SetTitle { reply, .. }
                     | GatewayCommandResult::SetHome { reply, .. } => Some(reply),
                     _ => Some(format!("Quick command `{key}` routed to `{rewritten}`.")),
                 })
@@ -1586,6 +1587,37 @@ impl Gateway {
                     .await?;
                 Ok(true)
             }
+            GatewayCommandResult::ShowTitle => {
+                let reply = match self.session_manager.get_title(session_key).await {
+                    Some(title) => format!("🏷 Current session title: {}", title),
+                    None => "🏷 No explicit title set for this gateway session.".to_string(),
+                };
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SetTitle { title, reply } => {
+                let stored = self.session_manager.set_title(session_key, &title).await;
+                let response = match &stored {
+                    Some(stored_title) if stored_title.as_str() == title => reply,
+                    Some(stored_title) => format!("🏷 Session title set to: {}", stored_title),
+                    None => "🏷 Session title cleared.".to_string(),
+                };
+                self.emit_hook_event(
+                    "session:title",
+                    serde_json::json!({
+                        "platform": incoming.platform,
+                        "chat_id": incoming.chat_id,
+                        "user_id": incoming.user_id,
+                        "session_id": session_key,
+                        "title": stored
+                    }),
+                )
+                .await;
+                self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
+                    .await?;
+                Ok(true)
+            }
             GatewayCommandResult::ShowStatus(_) => {
                 let text = self.build_status_text(session_key).await;
                 self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
@@ -1830,10 +1862,12 @@ impl Gateway {
                             &s.chat_id,
                             &s.user_id,
                         );
+                        let title = s.title.as_deref().unwrap_or("(untitled)");
                         out.push_str(&format!(
-                            "• `{}` — {} messages, platform `{}` (id `{}`)\n",
+                            "• `{}` — {} messages, title `{}`, platform `{}` (id `{}`)\n",
                             key,
                             s.messages.len(),
+                            title,
                             s.platform,
                             s.id
                         ));
@@ -1861,7 +1895,11 @@ impl Gateway {
                 let msg = if let Some(target) = matched {
                     let copied = self
                         .session_manager
-                        .replace_messages(session_key, target.messages.clone())
+                        .replace_messages_and_title(
+                            session_key,
+                            target.messages.clone(),
+                            target.title.clone(),
+                        )
                         .await;
                     if copied {
                         self.clear_session_boundary_security_state(session_key)
@@ -2377,6 +2415,7 @@ impl Gateway {
             .get(session_key)
             .cloned()
             .unwrap_or_default();
+        let title = self.session_manager.get_title(session_key).await;
         let messages = self.session_manager.get_messages(session_key).await;
         let running_tasks = self
             .background_tasks
@@ -2386,7 +2425,8 @@ impl Gateway {
             .count();
 
         format!(
-            "🧭 Gateway status\n- model: {}\n- provider: {}\n- profile: {}\n- branch: {}\n- personality: {}\n- service tier: {}\n- reasoning: {}\n- verbose: {}\n- tool progress: {}\n- yolo: {}\n- home: {}\n- messages in session: {}\n- running background tasks: {}\n- mcp generation: {}\n- input/output chars: {}/{}",
+            "🧭 Gateway status\n- title: {}\n- model: {}\n- provider: {}\n- profile: {}\n- branch: {}\n- personality: {}\n- service tier: {}\n- reasoning: {}\n- verbose: {}\n- tool progress: {}\n- yolo: {}\n- home: {}\n- messages in session: {}\n- running background tasks: {}\n- mcp generation: {}\n- input/output chars: {}/{}",
+            title.unwrap_or_else(|| "(untitled)".to_string()),
             state.model.unwrap_or_else(|| "default".to_string()),
             state.provider.unwrap_or_else(|| "default".to_string()),
             state.profile.unwrap_or_else(|| "default".to_string()),
@@ -4656,6 +4696,88 @@ mod tests {
         assert!(status_text.contains("provider: openrouter"));
         assert!(status_text.contains("profile: prod"));
         assert!(status_text.contains("mcp generation: 1"));
+    }
+
+    #[tokio::test]
+    async fn gateway_title_command_persists_and_surfaces_session_title() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let hooks = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr.clone(), dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+        let mut registry = HookRegistry::new();
+        registry.register_in_process(
+            "session:title",
+            Arc::new(RecordingHook {
+                seen: hooks.clone(),
+            }),
+        );
+        gw.set_hook_registry(Arc::new(registry)).await;
+
+        let title = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat-title".into(),
+            user_id: "user1".into(),
+            text: "/title Release readiness".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&title).await.is_ok());
+        let session_key = session_mgr.compose_session_key("test", "chat-title", "user1");
+        assert_eq!(
+            session_mgr.get_title(&session_key).await.as_deref(),
+            Some("Release readiness")
+        );
+
+        let show_title = IncomingMessage {
+            text: "/title".into(),
+            ..title.clone()
+        };
+        assert!(gw.route_message(&show_title).await.is_ok());
+
+        let status = IncomingMessage {
+            text: "/status".into(),
+            ..title.clone()
+        };
+        assert!(gw.route_message(&status).await.is_ok());
+
+        let sessions = IncomingMessage {
+            text: "/sessions".into(),
+            ..title
+        };
+        assert!(gw.route_message(&sessions).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        assert!(msgs
+            .iter()
+            .any(|(_, text)| text.contains("Session title set to: Release readiness")));
+        assert!(msgs
+            .iter()
+            .any(|(_, text)| text.contains("Current session title: Release readiness")));
+        assert!(msgs
+            .iter()
+            .any(|(_, text)| text.contains("- title: Release readiness")));
+        assert!(msgs
+            .iter()
+            .any(|(_, text)| text.contains("title `Release readiness`")));
+        drop(msgs);
+
+        let hooks = hooks.lock().unwrap();
+        let title_event = hooks
+            .iter()
+            .find(|(name, _)| name == "session:title")
+            .expect("title hook emitted");
+        assert_eq!(title_event.1["session_id"], serde_json::json!(session_key));
+        assert_eq!(
+            title_event.1["title"],
+            serde_json::json!("Release readiness")
+        );
     }
 
     #[tokio::test]

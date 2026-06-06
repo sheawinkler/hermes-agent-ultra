@@ -1167,6 +1167,10 @@
     "580d9240979c": {
       "disposition": "superseded",
       "notes": "The upstream SQL-bounded desktop SessionDB optimization is superseded for Rust because the relevant runtime surface is file-backed resume snapshots rather than the Python desktop session-search endpoint. The Rust port avoids message-body scans, searches only snapshot stems plus session_info.session_id metadata, and preserves deterministic bounded result selection for resume."
+    },
+    "c54b93587313": {
+      "disposition": "ported",
+      "notes": "Rust gateway /title now persists user-visible Session.title metadata in SessionManager, exposes bare /title, /status and /sessions title surfaces, emits a session:title hook, and copies title metadata when switching sessions; regression tests cover command parsing, session metadata, and gateway routing."
     }
   },
   "subject_patterns": [

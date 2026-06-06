@@ -40,6 +40,10 @@ pub enum GatewayCommandResult {
     ToggleYolo(String),
     /// Set the home/working directory.
     SetHome { path: String, reply: String },
+    /// Show the current session title.
+    ShowTitle,
+    /// Set or clear the current session title.
+    SetTitle { title: String, reply: String },
     /// Show status information.
     ShowStatus(String),
     /// Show help text.
@@ -551,11 +555,12 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         ),
         "/title" => {
             if args.is_empty() {
-                GatewayCommandResult::Reply(
-                    "🏷 No explicit title set for this gateway session.".to_string(),
-                )
+                GatewayCommandResult::ShowTitle
             } else {
-                GatewayCommandResult::Reply(format!("🏷 Session title set to: {}", args))
+                GatewayCommandResult::SetTitle {
+                    title: args.clone(),
+                    reply: format!("🏷 Session title set to: {}", args),
+                }
             }
         }
         "/resume" => GatewayCommandResult::Reply(
@@ -933,6 +938,21 @@ mod tests {
         match handle_command("/rollback 5") {
             GatewayCommandResult::Rollback { steps } => assert_eq!(steps, 5),
             other => panic!("Expected Rollback, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_title_commands() {
+        match handle_command("/title") {
+            GatewayCommandResult::ShowTitle => {}
+            other => panic!("Expected ShowTitle, got {:?}", other),
+        }
+        match handle_command("/title Release readiness") {
+            GatewayCommandResult::SetTitle { title, reply } => {
+                assert_eq!(title, "Release readiness");
+                assert!(reply.contains("Release readiness"));
+            }
+            other => panic!("Expected SetTitle, got {:?}", other),
         }
     }
 

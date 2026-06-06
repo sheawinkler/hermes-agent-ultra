@@ -45,6 +45,10 @@ pub struct Session {
     /// All messages in this session.
     pub messages: Vec<Message>,
 
+    /// Optional user-visible title for session lists and status surfaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
     /// When this session was created.
     pub created_at: DateTime<Utc>,
 
@@ -74,6 +78,7 @@ impl Session {
             chat_id: chat_id.into(),
             user_id: user_id.into(),
             messages: Vec::new(),
+            title: None,
             created_at: now,
             last_active_at: now,
             reset_policy,
@@ -418,6 +423,40 @@ impl SessionManager {
         false
     }
 
+    /// Replace messages and title metadata when switching the active chat
+    /// context to another known session.
+    pub async fn replace_messages_and_title(
+        &self,
+        session_id: &str,
+        messages: Vec<Message>,
+        title: Option<String>,
+    ) -> bool {
+        let mut sessions = self.sessions.write().await;
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.messages = messages;
+            session.title = normalize_session_title(title.as_deref());
+            session.last_active_at = Utc::now();
+            return true;
+        }
+        false
+    }
+
+    /// Set or clear the user-visible title for a session.
+    pub async fn set_title(&self, session_id: &str, title: impl AsRef<str>) -> Option<String> {
+        let mut sessions = self.sessions.write().await;
+        let normalized = normalize_session_title(Some(title.as_ref()));
+        let session = sessions.get_mut(session_id)?;
+        session.title = normalized.clone();
+        session.last_active_at = Utc::now();
+        normalized
+    }
+
+    /// Return the user-visible title for a session, if one is set.
+    pub async fn get_title(&self, session_id: &str) -> Option<String> {
+        let sessions = self.sessions.read().await;
+        sessions.get(session_id).and_then(|s| s.title.clone())
+    }
+
     /// Pop the latest message from a session.
     pub async fn pop_last_message(&self, session_id: &str) -> Option<Message> {
         let mut sessions = self.sessions.write().await;
@@ -503,6 +542,9 @@ impl SessionManager {
             ctx.set_metadata("session_type", format!("{:?}", session.session_type));
             ctx.set_metadata("message_count", session.messages.len().to_string());
             ctx.set_metadata("created_at", session.created_at.to_rfc3339());
+            if let Some(title) = &session.title {
+                ctx.set_metadata("title", title.clone());
+            }
             ctx
         })
     }
@@ -593,6 +635,12 @@ fn is_slack_shared_channel(platform: &str, chat_id: &str) -> bool {
         return false;
     };
     matches!(first, 'C' | 'c' | 'G' | 'g')
+}
+
+fn normalize_session_title(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 #[cfg(test)]
@@ -770,6 +818,54 @@ mod tests {
         assert_eq!(new_session.chat_id, "chat-reset-id");
         assert!(new_session.messages.is_empty());
         assert!(manager.get_messages(&sid).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn session_manager_sets_clears_and_copies_title_metadata() {
+        let config = SessionConfig::default();
+        let manager = SessionManager::new(config);
+        let session = manager
+            .get_or_create_session("telegram", "chat-title", "user1")
+            .await;
+        let sid =
+            manager.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
+
+        let title = manager
+            .set_title(&sid, "  Release readiness  ")
+            .await
+            .expect("session exists");
+        assert_eq!(title, "Release readiness");
+        assert_eq!(
+            manager.get_title(&sid).await.as_deref(),
+            Some("Release readiness")
+        );
+
+        let ctx = manager
+            .build_session_context(&sid)
+            .await
+            .expect("session context");
+        assert_eq!(
+            ctx.metadata.get("title").map(String::as_str),
+            Some("Release readiness")
+        );
+
+        assert!(
+            manager
+                .replace_messages_and_title(
+                    &sid,
+                    vec![Message::user("hello")],
+                    Some("Copied title".to_string()),
+                )
+                .await
+        );
+        assert_eq!(manager.get_messages(&sid).await.len(), 1);
+        assert_eq!(
+            manager.get_title(&sid).await.as_deref(),
+            Some("Copied title")
+        );
+
+        assert!(manager.set_title(&sid, "   ").await.is_none());
+        assert!(manager.get_title(&sid).await.is_none());
     }
 
     #[tokio::test]
