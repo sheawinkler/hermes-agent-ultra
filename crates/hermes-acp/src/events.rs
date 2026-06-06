@@ -44,6 +44,8 @@ pub enum AcpEventKind {
     Progress,
     /// Available slash commands changed.
     AvailableCommandsUpdate,
+    /// Session metadata changed.
+    SessionInfoUpdate,
     /// An error occurred.
     Error,
 }
@@ -90,6 +92,8 @@ pub struct AcpEvent {
         skip_serializing_if = "Option::is_none"
     )]
     pub available_commands: Option<Vec<AvailableCommand>>,
+    #[serde(rename = "updatedAt", default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
 }
 
 impl AcpEvent {
@@ -119,6 +123,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            updated_at: None,
         }
     }
 
@@ -147,6 +152,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            updated_at: None,
         }
     }
 
@@ -176,6 +182,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            updated_at: None,
         }
     }
 
@@ -198,6 +205,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            updated_at: None,
         }
     }
 
@@ -220,6 +228,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            updated_at: None,
         }
     }
 
@@ -278,6 +287,7 @@ impl AcpEvent {
             api_call_count: None,
             error: None,
             available_commands: None,
+            updated_at: None,
         }
     }
 
@@ -300,6 +310,7 @@ impl AcpEvent {
             error: None,
             session_update: None,
             available_commands: None,
+            updated_at: None,
         }
     }
 
@@ -322,6 +333,7 @@ impl AcpEvent {
             api_call_count: None,
             session_update: None,
             available_commands: None,
+            updated_at: None,
         }
     }
 
@@ -332,6 +344,7 @@ impl AcpEvent {
             timestamp: Self::now(),
             session_update: Some("available_commands_update".to_string()),
             available_commands: Some(commands),
+            updated_at: None,
             tool_call_id: None,
             tool_name: None,
             tool_kind: None,
@@ -344,6 +357,33 @@ impl AcpEvent {
             text: None,
             api_call_count: None,
             error: None,
+        }
+    }
+
+    pub fn session_info_update(
+        session_id: &str,
+        title: Option<String>,
+        updated_at: String,
+    ) -> Self {
+        Self {
+            kind: AcpEventKind::SessionInfoUpdate,
+            session_id: session_id.to_string(),
+            timestamp: Self::now(),
+            session_update: Some("session_info_update".to_string()),
+            title,
+            updated_at: Some(updated_at),
+            tool_call_id: None,
+            tool_name: None,
+            tool_kind: None,
+            arguments: None,
+            result: None,
+            status: None,
+            content: None,
+            message_id: None,
+            text: None,
+            api_call_count: None,
+            error: None,
+            available_commands: None,
         }
     }
 }

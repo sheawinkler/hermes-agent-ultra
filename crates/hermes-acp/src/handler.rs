@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
@@ -694,6 +695,17 @@ impl HermesAcpHandler {
         ));
     }
 
+    fn emit_session_info_update(&self, session_id: &str) {
+        let Some(state) = self.session_manager.get_session(session_id) else {
+            return;
+        };
+        self.event_sink.push(AcpEvent::session_info_update(
+            session_id,
+            session_title_from_history(&state.history),
+            session_info_refresh_timestamp(),
+        ));
+    }
+
     fn replay_session_history(&self, state: &SessionState) {
         let mut active_tool_calls: HashMap<String, String> = HashMap::new();
         for (index, message) in state.history.iter().enumerate() {
@@ -952,6 +964,7 @@ impl HermesAcpHandler {
                 .add_usage(session_id, usage.input_tokens, usage.output_tokens);
         }
         self.session_manager.save_session(session_id);
+        self.emit_session_info_update(session_id);
 
         Ok(usage)
     }
@@ -1199,6 +1212,14 @@ fn history_tool_call_name(tool_call: &Value) -> String {
         .and_then(Value::as_str)
         .filter(|name| !name.trim().is_empty())
         .unwrap_or("tool")
+        .to_string()
+}
+
+fn session_info_refresh_timestamp() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
         .to_string()
 }
 
@@ -3091,6 +3112,23 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("executor:hello")
         );
+
+        let events = handler.event_sink.drain_for_session(&session_id);
+        let info_updates = events
+            .iter()
+            .filter(|event| event.kind == AcpEventKind::SessionInfoUpdate)
+            .collect::<Vec<_>>();
+        assert_eq!(info_updates.len(), 1);
+        assert_eq!(
+            info_updates[0].session_update.as_deref(),
+            Some("session_info_update")
+        );
+        assert_eq!(info_updates[0].title.as_deref(), Some("hello"));
+        assert!(info_updates[0]
+            .updated_at
+            .as_deref()
+            .and_then(|value| value.parse::<u64>().ok())
+            .is_some_and(|value| value > 0));
     }
 
     #[tokio::test]
