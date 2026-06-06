@@ -50,6 +50,8 @@ pub struct SessionState {
     pub provider: Option<String>,
     pub api_mode: Option<String>,
     pub base_url: Option<String>,
+    pub profile: Option<String>,
+    pub home: Option<String>,
     pub phase: SessionPhase,
     pub history: Vec<Value>,
     pub mode: Option<String>,
@@ -78,6 +80,8 @@ pub struct SessionMetaUpdate {
     pub provider: Option<String>,
     pub api_mode: Option<String>,
     pub base_url: Option<String>,
+    pub profile: Option<String>,
+    pub home: Option<String>,
     pub config_options: HashMap<String, String>,
 }
 
@@ -94,6 +98,8 @@ impl SessionState {
             provider: None,
             api_mode: None,
             base_url: None,
+            profile: None,
+            home: None,
             phase: SessionPhase::Created,
             history: Vec::new(),
             mode: None,
@@ -125,6 +131,10 @@ pub struct SessionInfo {
     pub session_id: String,
     pub cwd: String,
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<String>,
     pub phase: SessionPhase,
     pub history_len: usize,
     pub created_at: u64,
@@ -137,6 +147,8 @@ impl From<&SessionState> for SessionInfo {
             session_id: s.session_id.clone(),
             cwd: s.cwd.clone(),
             model: s.model.clone(),
+            profile: s.profile.clone(),
+            home: s.home.clone(),
             phase: s.phase,
             history_len: s.history.len(),
             created_at: s.created_at,
@@ -177,8 +189,14 @@ impl SessionManager {
 
     /// Create a new session with a unique ID.
     pub fn create_session(&self, cwd: &str) -> SessionState {
+        self.create_session_with_meta(cwd, SessionMetaUpdate::default())
+    }
+
+    /// Create a new session with initial metadata.
+    pub fn create_session_with_meta(&self, cwd: &str, update: SessionMetaUpdate) -> SessionState {
         let session_id = uuid::Uuid::new_v4().to_string();
-        let state = SessionState::new(session_id.clone(), cwd.to_string());
+        let mut state = SessionState::new(session_id.clone(), cwd.to_string());
+        apply_session_meta(&mut state, update);
         {
             let mut sessions = self.sessions.lock().unwrap();
             sessions.insert(session_id.clone(), state.clone());
@@ -224,27 +242,7 @@ impl SessionManager {
     ) -> Option<SessionState> {
         let mut sessions = self.sessions.lock().unwrap();
         if let Some(state) = sessions.get_mut(session_id) {
-            if let Some(cwd) = update.cwd {
-                state.cwd = cwd;
-            }
-            if let Some(model) = update.model.filter(|value| !value.trim().is_empty()) {
-                state.model = Some(model);
-            }
-            if let Some(provider) = update.provider.filter(|value| !value.trim().is_empty()) {
-                state.provider = Some(provider);
-            }
-            if let Some(api_mode) = update.api_mode.filter(|value| !value.trim().is_empty()) {
-                state.api_mode = Some(api_mode);
-            }
-            if let Some(base_url) = update.base_url.filter(|value| !value.trim().is_empty()) {
-                state.base_url = Some(base_url);
-            }
-            for (key, value) in update.config_options {
-                let key = key.trim();
-                if !key.is_empty() {
-                    state.config_options.insert(key.to_string(), value);
-                }
-            }
+            apply_session_meta(state, update);
             state.touch();
             let cloned = state.clone();
             drop(sessions);
@@ -371,11 +369,29 @@ impl SessionManager {
 
     /// Fork a session — deep-copy history into a new session.
     pub fn fork_session(&self, session_id: &str, cwd: &str) -> Option<SessionState> {
+        self.fork_session_with_meta(session_id, cwd, SessionMetaUpdate::default())
+    }
+
+    /// Fork a session with optional metadata overrides.
+    pub fn fork_session_with_meta(
+        &self,
+        session_id: &str,
+        cwd: &str,
+        update: SessionMetaUpdate,
+    ) -> Option<SessionState> {
         let original = self.get_session(session_id)?;
         let new_id = uuid::Uuid::new_v4().to_string();
         let mut new_state = SessionState::new(new_id.clone(), cwd.to_string());
         new_state.model = original.model.clone();
+        new_state.provider = original.provider.clone();
+        new_state.api_mode = original.api_mode.clone();
+        new_state.base_url = original.base_url.clone();
+        new_state.profile = original.profile.clone();
+        new_state.home = original.home.clone();
+        new_state.mode = original.mode.clone();
+        new_state.config_options = original.config_options.clone();
         new_state.history = original.history.clone();
+        apply_session_meta(&mut new_state, update);
         {
             let mut sessions = self.sessions.lock().unwrap();
             sessions.insert(new_id.clone(), new_state.clone());
@@ -423,6 +439,41 @@ impl SessionManager {
     fn persist(&self, state: &SessionState) {
         if let Some(ref cb) = self.on_persist {
             cb(state);
+        }
+    }
+}
+
+fn normalize_meta_string(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn apply_session_meta(state: &mut SessionState, update: SessionMetaUpdate) {
+    if let Some(cwd) = update.cwd.and_then(normalize_meta_string) {
+        state.cwd = cwd;
+    }
+    if let Some(model) = update.model.and_then(normalize_meta_string) {
+        state.model = Some(model);
+    }
+    if let Some(provider) = update.provider.and_then(normalize_meta_string) {
+        state.provider = Some(provider);
+    }
+    if let Some(api_mode) = update.api_mode.and_then(normalize_meta_string) {
+        state.api_mode = Some(api_mode);
+    }
+    if let Some(base_url) = update.base_url.and_then(normalize_meta_string) {
+        state.base_url = Some(base_url);
+    }
+    if let Some(profile) = update.profile.and_then(normalize_meta_string) {
+        state.profile = Some(profile);
+    }
+    if let Some(home) = update.home.and_then(normalize_meta_string) {
+        state.home = Some(home);
+    }
+    for (key, value) in update.config_options {
+        let key = key.trim();
+        if !key.is_empty() {
+            state.config_options.insert(key.to_string(), value);
         }
     }
 }
@@ -553,6 +604,7 @@ mod tests {
                     api_mode: Some("responses".to_string()),
                     base_url: Some("https://api.openai.com/v1".to_string()),
                     config_options,
+                    ..SessionMetaUpdate::default()
                 },
             )
             .expect("session exists");
@@ -578,6 +630,54 @@ mod tests {
         assert_eq!(persisted.len(), 1);
         assert_eq!(persisted[0].session_id, sid);
         assert_eq!(persisted[0].cwd, "/repo");
+    }
+
+    #[test]
+    fn profile_home_metadata_flows_through_create_update_and_fork() {
+        let mgr = SessionManager::new();
+        let state = mgr.create_session_with_meta(
+            "/workspace",
+            SessionMetaUpdate {
+                profile: Some("work".to_string()),
+                home: Some("/profiles/work".to_string()),
+                provider: Some("openrouter".to_string()),
+                ..SessionMetaUpdate::default()
+            },
+        );
+        assert_eq!(state.profile.as_deref(), Some("work"));
+        assert_eq!(state.home.as_deref(), Some("/profiles/work"));
+
+        let updated = mgr
+            .update_session_meta(
+                &state.session_id,
+                SessionMetaUpdate {
+                    cwd: Some("/workspace/repo".to_string()),
+                    profile: Some("research".to_string()),
+                    home: Some("/profiles/research".to_string()),
+                    ..SessionMetaUpdate::default()
+                },
+            )
+            .expect("session exists");
+        assert_eq!(updated.cwd, "/workspace/repo");
+        assert_eq!(updated.profile.as_deref(), Some("research"));
+        assert_eq!(updated.home.as_deref(), Some("/profiles/research"));
+        assert_eq!(updated.provider.as_deref(), Some("openrouter"));
+
+        let forked = mgr
+            .fork_session_with_meta(
+                &state.session_id,
+                "/fork",
+                SessionMetaUpdate {
+                    profile: Some("scratch".to_string()),
+                    home: Some("/profiles/scratch".to_string()),
+                    ..SessionMetaUpdate::default()
+                },
+            )
+            .expect("forked");
+        assert_eq!(forked.cwd, "/fork");
+        assert_eq!(forked.profile.as_deref(), Some("scratch"));
+        assert_eq!(forked.home.as_deref(), Some("/profiles/scratch"));
+        assert_eq!(forked.provider.as_deref(), Some("openrouter"));
     }
 
     #[test]

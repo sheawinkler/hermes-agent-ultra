@@ -434,6 +434,10 @@ pub struct AcpSessionInfo {
     #[serde(rename = "sessionId", alias = "session_id")]
     pub session_id: String,
     pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<String>,
 }
 
 #[cfg(test)]

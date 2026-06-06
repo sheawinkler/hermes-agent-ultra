@@ -21,7 +21,7 @@ use crate::auth::{
 use crate::events::{plan_entries_from_todo_result, AcpEvent, AcpEventKind, EventSink};
 use crate::permissions::PermissionStore;
 use crate::protocol::*;
-use crate::session::{SessionManager, SessionPhase, SessionState};
+use crate::session::{SessionManager, SessionMetaUpdate, SessionPhase, SessionState};
 
 /// Trait for handling ACP requests.
 #[async_trait::async_trait]
@@ -1197,6 +1197,42 @@ fn param_str_any<'a>(p: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Op
     keys.iter().find_map(|key| param_str(p, key))
 }
 
+fn session_meta_from_params(
+    p: &serde_json::Map<String, Value>,
+) -> Result<SessionMetaUpdate, String> {
+    let profile = match param_str(p, "profile").map(str::trim) {
+        Some("") | None => None,
+        Some(profile) if valid_session_profile(profile) => Some(profile.to_string()),
+        Some(profile) => {
+            return Err(format!(
+                "invalid profile '{}': use letters, numbers, '-', '_' or '.'",
+                profile
+            ))
+        }
+    };
+    let home = param_str_any(
+        p,
+        &["home", "homeDir", "home_dir", "profileHome", "profile_home"],
+    )
+    .map(str::trim)
+    .filter(|home| !home.is_empty())
+    .map(ToOwned::to_owned);
+    Ok(SessionMetaUpdate {
+        profile,
+        home,
+        ..SessionMetaUpdate::default()
+    })
+}
+
+fn valid_session_profile(profile: &str) -> bool {
+    !profile.is_empty()
+        && !profile.contains('/')
+        && !profile.contains('\\')
+        && profile
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+}
+
 fn param_value_as_string(p: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
     let value = p.get(key)?;
     if let Some(s) = value.as_str() {
@@ -1394,6 +1430,8 @@ fn session_info_value(session: &SessionState) -> Value {
         "sessionId": session.session_id,
         "cwd": session.cwd,
         "model": session.model,
+        "profile": session.profile,
+        "home": session.home,
         "phase": session.phase,
         "historyLen": session.history.len(),
         "createdAt": session.created_at.to_string(),
@@ -1455,10 +1493,13 @@ impl AcpHandler for HermesAcpHandler {
 
             // -- Session management -----------------------------------------
             AcpMethod::NewSession => {
-                let cwd = params_obj(&request.params)
-                    .and_then(|p| param_str(p, "cwd"))
-                    .unwrap_or(".");
-                let state = self.session_manager.create_session(cwd);
+                let p = params_obj(&request.params);
+                let cwd = p.and_then(|p| param_str(p, "cwd")).unwrap_or(".");
+                let meta = match p.map(session_meta_from_params).transpose() {
+                    Ok(meta) => meta.unwrap_or_default(),
+                    Err(err) => return AcpResponse::error(request.id, -32602, err),
+                };
+                let state = self.session_manager.create_session_with_meta(cwd, meta);
                 self.advertise_available_commands(&state.session_id);
                 self.emit_usage_update(&state.session_id);
                 AcpResponse::success(request.id, session_id_response(&state.session_id))
@@ -1470,8 +1511,13 @@ impl AcpHandler for HermesAcpHandler {
                 };
                 let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
                 let cwd = param_str(p, "cwd").unwrap_or(".");
+                let mut meta = match session_meta_from_params(p) {
+                    Ok(meta) => meta,
+                    Err(err) => return AcpResponse::error(request.id, -32602, err),
+                };
+                meta.cwd = Some(cwd.to_string());
 
-                match self.session_manager.update_cwd(session_id, cwd) {
+                match self.session_manager.update_session_meta(session_id, meta) {
                     Some(state) => {
                         self.replay_session_history(&state);
                         self.advertise_available_commands(session_id);
@@ -1492,14 +1538,23 @@ impl AcpHandler for HermesAcpHandler {
                 };
                 let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
                 let cwd = param_str(p, "cwd").unwrap_or(".");
+                let mut meta = match session_meta_from_params(p) {
+                    Ok(meta) => meta,
+                    Err(err) => return AcpResponse::error(request.id, -32602, err),
+                };
+                meta.cwd = Some(cwd.to_string());
 
-                if let Some(state) = self.session_manager.update_cwd(session_id, cwd) {
+                if let Some(state) = self.session_manager.update_session_meta(session_id, meta) {
                     self.replay_session_history(&state);
                     self.advertise_available_commands(&state.session_id);
                     self.emit_usage_update(&state.session_id);
                     AcpResponse::success(request.id, json!({}))
                 } else {
-                    let state = self.session_manager.create_session(cwd);
+                    let meta = match session_meta_from_params(p) {
+                        Ok(meta) => meta,
+                        Err(err) => return AcpResponse::error(request.id, -32602, err),
+                    };
+                    let state = self.session_manager.create_session_with_meta(cwd, meta);
                     self.advertise_available_commands(&state.session_id);
                     self.emit_usage_update(&state.session_id);
                     AcpResponse::success(request.id, session_id_response(&state.session_id))
@@ -1512,8 +1567,15 @@ impl AcpHandler for HermesAcpHandler {
                 };
                 let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
                 let cwd = param_str(p, "cwd").unwrap_or(".");
+                let meta = match session_meta_from_params(p) {
+                    Ok(meta) => meta,
+                    Err(err) => return AcpResponse::error(request.id, -32602, err),
+                };
 
-                match self.session_manager.fork_session(session_id, cwd) {
+                match self
+                    .session_manager
+                    .fork_session_with_meta(session_id, cwd, meta)
+                {
                     Some(new_state) => {
                         self.advertise_available_commands(&new_state.session_id);
                         self.emit_usage_update(&new_state.session_id);
@@ -1534,9 +1596,16 @@ impl AcpHandler for HermesAcpHandler {
                 let cursor = params_obj(&request.params)
                     .and_then(|p| param_str(p, "cursor"))
                     .filter(|cursor| !cursor.trim().is_empty());
+                let profile_filter = params_obj(&request.params)
+                    .and_then(|p| param_str(p, "profile"))
+                    .map(str::trim)
+                    .filter(|profile| !profile.is_empty());
                 let mut sessions = self.session_manager.list_session_states();
                 if let Some(cwd) = cwd_filter {
                     sessions.retain(|s| s.cwd == cwd);
+                }
+                if let Some(profile) = profile_filter {
+                    sessions.retain(|s| s.profile.as_deref() == Some(profile));
                 }
                 sessions.sort_by(|a, b| {
                     b.updated_at
@@ -2002,6 +2071,33 @@ mod tests {
         }
     }
 
+    type SeenProfiles = Vec<(Option<String>, Option<String>)>;
+
+    struct ProfileRecordingPromptExecutor {
+        seen: Arc<std::sync::Mutex<SeenProfiles>>,
+    }
+
+    #[async_trait::async_trait]
+    impl AcpPromptExecutor for ProfileRecordingPromptExecutor {
+        async fn execute_prompt(
+            &self,
+            session: &SessionState,
+            user_text: &str,
+            _history: &[Value],
+        ) -> Result<PromptExecutionOutput, String> {
+            self.seen
+                .lock()
+                .expect("profile recorder lock")
+                .push((session.profile.clone(), session.home.clone()));
+            Ok(PromptExecutionOutput {
+                response_text: format!("profiled:{user_text}"),
+                usage: None,
+                total_turns: Some(1),
+                events: Vec::new(),
+            })
+        }
+    }
+
     struct ToolEventPromptExecutor;
 
     #[async_trait::async_trait]
@@ -2398,6 +2494,121 @@ mod tests {
             state.config_options.get("sandbox").map(String::as_str),
             Some("workspace-write")
         );
+    }
+
+    #[tokio::test]
+    async fn test_session_profile_home_metadata_flows_through_acp_lifecycle() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let handler =
+            make_handler().with_prompt_executor(Arc::new(ProfileRecordingPromptExecutor {
+                seen: seen.clone(),
+            }));
+
+        let created = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/new".into(),
+                params: Some(json!({
+                    "cwd": "/tmp",
+                    "profile": "work",
+                    "profileHome": "/profiles/work"
+                })),
+            })
+            .await
+            .result
+            .unwrap();
+        let session_id = created["sessionId"].as_str().unwrap().to_string();
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.profile.as_deref(), Some("work"));
+        assert_eq!(state.home.as_deref(), Some("/profiles/work"));
+
+        let listed = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "session/list".into(),
+                params: Some(json!({"profile": "work"})),
+            })
+            .await
+            .result
+            .unwrap();
+        let sessions = listed["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["profile"], "work");
+        assert_eq!(sessions[0]["home"], "/profiles/work");
+
+        let loaded = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(3)),
+                method: "session/load".into(),
+                params: Some(json!({
+                    "sessionId": session_id,
+                    "cwd": "/repo",
+                    "profile": "research",
+                    "homeDir": "/profiles/research"
+                })),
+            })
+            .await;
+        assert!(loaded.error.is_none());
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.cwd, "/repo");
+        assert_eq!(state.profile.as_deref(), Some("research"));
+        assert_eq!(state.home.as_deref(), Some("/profiles/research"));
+
+        let prompt = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(4)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "sessionId": session_id,
+                    "prompt": "who owns this profile?"
+                })),
+            })
+            .await;
+        assert!(prompt.error.is_none());
+        assert_eq!(
+            seen.lock().expect("profile recorder lock").as_slice(),
+            &[(
+                Some("research".to_string()),
+                Some("/profiles/research".to_string())
+            )]
+        );
+
+        let forked = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(5)),
+                method: "session/fork".into(),
+                params: Some(json!({
+                    "sessionId": session_id,
+                    "cwd": "/fork",
+                    "profile": "scratch",
+                    "home": "/profiles/scratch"
+                })),
+            })
+            .await
+            .result
+            .unwrap();
+        let forked_id = forked["sessionId"].as_str().unwrap().to_string();
+        let forked_state = handler.session_manager.get_session(&forked_id).unwrap();
+        assert_eq!(forked_state.profile.as_deref(), Some("scratch"));
+        assert_eq!(forked_state.home.as_deref(), Some("/profiles/scratch"));
+
+        let invalid = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(6)),
+                method: "session/resume".into(),
+                params: Some(json!({
+                    "sessionId": "missing",
+                    "profile": "../bad"
+                })),
+            })
+            .await;
+        assert!(invalid.error.is_some());
     }
 
     fn assert_available_commands_update(events: Vec<AcpEvent>, expected_session_id: &str) {

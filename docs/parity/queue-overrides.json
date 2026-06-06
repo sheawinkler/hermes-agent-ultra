@@ -1171,6 +1171,70 @@
     "c54b93587313": {
       "disposition": "ported",
       "notes": "Rust gateway /title now persists user-visible Session.title metadata in SessionManager, exposes bare /title, /status and /sessions title surfaces, emits a session:title hook, and copies title metadata when switching sessions; regression tests cover command parsing, session metadata, and gateway routing."
+    },
+    "02d6bf1c39df": {
+      "disposition": "ported",
+      "notes": "Rust ACP sessions now carry profile/home ownership through session/new, session/load, session/resume, session/fork, session/list, and prompt executor snapshots. The upstream desktop Electron routing pieces are not present in this Rust-only repo; the runtime-equivalent profile-scoped session lifecycle is covered by hermes-acp tests."
+    },
+    "6f6eb871d834": {
+      "disposition": "ported",
+      "notes": "Rust ACP session/new now accepts profile/home metadata and preserves it on the SessionState handed to prompt executors, so new chats can remain attached to their owning profile in the Rust runtime surface. Regression coverage asserts create, prompt, list, and fork profile ownership."
+    },
+    "83c13862f107": {
+      "disposition": "superseded",
+      "notes": "Upstream change is Electron desktop remote-profile read routing only (apps/desktop/electron/main.cjs). This Rust repo has no desktop Electron backend-routing layer; profile ownership is represented in Rust ACP/gateway session metadata instead."
+    },
+    "3e4fa8ca9ca3": {
+      "disposition": "superseded",
+      "notes": "Desktop profile-rail drag-axis polish touches only apps/desktop React UI, which is absent from this Rust-only runtime repo."
+    },
+    "9915665e4c51": {
+      "disposition": "superseded",
+      "notes": "Desktop profile-rail cell drag/clamp behavior touches only apps/desktop React UI, which is absent from this Rust-only runtime repo."
+    },
+    "fb18bde89740": {
+      "disposition": "superseded",
+      "notes": "Desktop profile-rail haptic reordering touches only apps/desktop React UI, which is absent from this Rust-only runtime repo."
+    },
+    "76b98f43ca0a": {
+      "disposition": "superseded",
+      "notes": "Desktop ALL-profiles grouping gate touches only apps/desktop sidebar UI, which is absent from this Rust-only runtime repo."
+    },
+    "0c7def31aa86": {
+      "disposition": "superseded",
+      "notes": "Desktop single-profile rail plus-button behavior touches only apps/desktop sidebar UI, which is absent from this Rust-only runtime repo."
+    },
+    "cf9dc366dd0b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop cross-profile read-only icon/action cleanup is tied to apps/desktop and Python web_server/session DB surfaces. Rust runtime profile ownership is handled through ACP/gateway session metadata, not desktop per-session icon routing."
+    },
+    "86371e6cd8d5": {
+      "disposition": "superseded",
+      "notes": "Desktop profile-swap overlay border/radius styling touches only apps/desktop React UI, which is absent from this Rust-only runtime repo."
+    },
+    "1b01fa3acf15": {
+      "disposition": "superseded",
+      "notes": "Desktop long-press profile color picker touches only apps/desktop React UI/storage, which is absent from this Rust-only runtime repo."
+    },
+    "cdfbd89ea539": {
+      "disposition": "ported",
+      "notes": "Rust gateway /title now persists Session.title metadata directly, bare /title reads current title, /status and /sessions expose it, and gateway tests cover the title command lifecycle. No Python TUI session.title RPC is used in the Rust runtime."
+    },
+    "3824b0323793": {
+      "disposition": "superseded",
+      "notes": "Python TUI session.title DB/RPC edge cases are superseded by Rust gateway in-memory Session.title storage and command tests; there is no pending DB row queue or Python RPC failure mode in this runtime path."
+    },
+    "492c4c6573b4": {
+      "disposition": "superseded",
+      "notes": "Python TUI pending-title flush/no-op DB lookup edge cases are superseded by Rust gateway Session.title mutation on the active in-memory session, with hook/status/session-list regression coverage."
+    },
+    "3aa86717b60c": {
+      "disposition": "superseded",
+      "notes": "Python TUI pending-title retry and title validation error mapping are superseded by Rust gateway title parsing/storage; invalid empty titles fall through to bare /title read and no DB retry path exists."
+    },
+    "27936ee02dfc": {
+      "disposition": "superseded",
+      "notes": "Python TUI queued-title retry over auto-title DB state is superseded by Rust gateway user title storage on Session.title, which is not delayed behind DB materialization."
     }
   },
   "subject_patterns": [
