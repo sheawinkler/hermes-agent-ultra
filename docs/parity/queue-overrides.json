@@ -879,6 +879,14 @@
     "3034eee38ec516109566c00975be4d0276747c34": {
       "disposition": "ported",
       "notes": "Rust ACP server now flushes session/load and session/resume replay notifications before the JSON-RPC response, with run_on coverage proving clients receive transcript updates within the request lifetime."
+    },
+    "741a34945810a7cb5142804660f9e6108e2d49ec": {
+      "disposition": "ported",
+      "notes": "Rust ACP now emits session_info_update after prompt turns refresh session metadata, using the Rust-derived session title so editor clients can update their session list without waiting for a separate list refresh."
+    },
+    "2057977102da26cbf0fa9e699fa4432dbf017566": {
+      "disposition": "ported",
+      "notes": "Rust ACP session_info_update uses the notification refresh moment for updatedAt instead of relying on stored session updated_at fields; prompt-turn coverage asserts a non-empty fresh numeric timestamp."
     }
   },
   "subject_patterns": [
