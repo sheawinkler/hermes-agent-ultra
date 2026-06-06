@@ -983,6 +983,10 @@
     "4447e7d71afa": {
       "disposition": "ported",
       "notes": "Rust runtime now supports Kimi Code sk-kimi-* routing to https://api.kimi.com/coding/v1 with KimiCLI user-agent while preserving KIMI_BASE_URL override and legacy Moonshot fallback."
+    },
+    "fcb1944b4f76": {
+      "disposition": "ported",
+      "notes": "Rust now captures Nous credits headers at the provider HTTP boundary, parses the v1 x-nous-credits and x-nous-tool-pool contracts with strict money/bool validation, stores a last-known credits snapshot, appends the credits block to CLI and gateway /usage output, and surfaces depleted/50/75/90 percent usage notices in the TUI status bar with focused Rust tests. Python dev fixtures and desktop-only scaffolding are superseded by the Rust runtime surface."
     }
   },
   "subject_patterns": [

@@ -3979,6 +3979,10 @@ fn render_status(
     if state.background_jobs_running > 0 {
         status_text.push_str(&format!(" | bg:{}", state.background_jobs_running));
     }
+    if let Some(credits_notice) = hermes_core::credits::last_nous_credits_notice_line() {
+        status_text.push_str(" | ");
+        status_text.push_str(&credits_notice);
+    }
     status_text.push_str(if app.mouse_enabled() {
         " | mouse:on"
     } else {
