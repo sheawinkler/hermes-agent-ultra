@@ -15,16 +15,31 @@ const TOOL_KIND_MAP: &[(&str, &str)] = &[
     ("execute_code", "execute"),
     ("patch", "edit"),
     ("write_file", "edit"),
+    ("skills_list", "read"),
     ("web_search", "fetch"),
     ("web_extract", "fetch"),
     ("browser_navigate", "fetch"),
-    ("browser_click", "fetch"),
+    ("browser_click", "execute"),
+    ("browser_type", "execute"),
+    ("browser_snapshot", "read"),
+    ("browser_vision", "read"),
+    ("browser_scroll", "execute"),
+    ("browser_press", "execute"),
+    ("browser_back", "execute"),
+    ("browser_console", "read"),
+    ("browser_get_images", "read"),
     ("skill_view", "read"),
     ("skill_manage", "edit"),
     ("todo", "other"),
     ("memory", "other"),
     ("session_search", "read"),
-    ("delegate_task", "other"),
+    ("delegate_task", "execute"),
+    ("vision_analyze", "read"),
+    ("image_generate", "execute"),
+    ("text_to_speech", "execute"),
+    ("cronjob", "other"),
+    ("send_message", "other"),
+    ("clarify", "other"),
 ];
 
 static TOOL_CALL_IDS: AtomicU64 = AtomicU64::new(1);
@@ -74,11 +89,68 @@ pub fn tool_title(tool_name: &str, arguments: Option<&Value>) -> String {
             .unwrap_or_else(|| "web_search".to_string()),
         "web_extract" => value_urls(value, "urls")
             .first()
-            .map(|url| format!("extract: {url}"))
+            .map(|url| {
+                let extra = value_urls(value, "urls").len().saturating_sub(1);
+                if extra > 0 {
+                    format!("extract: {url} (+{extra})")
+                } else {
+                    format!("extract: {url}")
+                }
+            })
             .unwrap_or_else(|| "web_extract".to_string()),
         "browser_navigate" => value_string(value, "url")
             .map(|url| format!("navigate: {url}"))
             .unwrap_or_else(|| "browser_navigate".to_string()),
+        "process" => {
+            let action = value_string(value, "action").unwrap_or_else(|| "manage".to_string());
+            value_string(value, "session_id")
+                .map(|sid| format!("process {action}: {sid}"))
+                .unwrap_or_else(|| format!("process {action}"))
+        }
+        "delegate_task" => {
+            if let Some(tasks) = value.get("tasks").and_then(Value::as_array) {
+                if !tasks.is_empty() {
+                    return format!(
+                        "delegate batch ({} task{})",
+                        tasks.len(),
+                        if tasks.len() == 1 { "" } else { "s" }
+                    );
+                }
+            }
+            value_string(value, "goal")
+                .map(|goal| format!("delegate: {}", truncate_chars(&goal, 60)))
+                .unwrap_or_else(|| "delegate task".to_string())
+        }
+        "session_search" => value_string(value, "query")
+            .map(|query| format!("session search: {query}"))
+            .unwrap_or_else(|| "recent sessions".to_string()),
+        "memory" => {
+            let action = value_string(value, "action").unwrap_or_else(|| "manage".to_string());
+            let target = value_string(value, "target").unwrap_or_else(|| "memory".to_string());
+            format!("memory {action}: {target}")
+        }
+        "skills_list" => value_string(value, "category")
+            .map(|category| format!("skills list ({category})"))
+            .unwrap_or_else(|| "skills list".to_string()),
+        "browser_snapshot" => "browser snapshot".to_string(),
+        "browser_vision" => value_string(value, "question")
+            .map(|question| format!("browser vision: {}", truncate_chars(&question, 50)))
+            .unwrap_or_else(|| "browser vision".to_string()),
+        "browser_get_images" => "browser images".to_string(),
+        "vision_analyze" => value_string(value, "question")
+            .map(|question| format!("analyze image: {}", truncate_chars(&question, 50)))
+            .unwrap_or_else(|| "analyze image".to_string()),
+        "image_generate" => value_string(value, "prompt")
+            .or_else(|| value_string(value, "description"))
+            .map(|prompt| format!("generate image: {}", truncate_chars(&prompt, 50)))
+            .unwrap_or_else(|| "generate image".to_string()),
+        "cronjob" => {
+            let action = value_string(value, "action").unwrap_or_else(|| "manage".to_string());
+            value_string(value, "job_id")
+                .or_else(|| value_string(value, "id"))
+                .map(|job_id| format!("cron {action}: {job_id}"))
+                .unwrap_or_else(|| format!("cron {action}"))
+        }
         "skill_view" => {
             let name = value_string(value, "name").unwrap_or_else(|| "unknown".to_string());
             match value_string(value, "file_path") {
@@ -122,6 +194,10 @@ pub fn tool_completion_status(tool_name: &str, result: Option<&str>) -> &'static
 }
 
 pub fn format_tool_result(tool_name: &str, result: Option<&str>) -> Option<String> {
+    if tool_name == "web_extract" {
+        return format_web_extract_result(result);
+    }
+
     let formatted = match tool_name {
         "todo" => format_todo_result(result),
         "read_file" => format_read_file_result(result),
@@ -129,12 +205,16 @@ pub fn format_tool_result(tool_name: &str, result: Option<&str>) -> Option<Strin
         "execute_code" => format_execute_code_result(result),
         "skill_view" => format_skill_view_result(result),
         "skill_manage" | "write_file" | "patch" => format_edit_result(tool_name, result),
+        "web_search" => format_web_search_result(result),
+        "process" => format_process_result(result),
+        "delegate_task" => format_delegate_result(result),
+        "session_search" => format_session_search_result(result),
+        "memory" => format_memory_result(result),
         "browser_navigate" | "browser_snapshot" | "browser_vision" | "browser_get_images" => {
             format_browser_result(tool_name, result)
         }
-        "memory" | "process" | "delegate_task" | "session_search" | "web_search"
-        | "web_extract" | "vision_analyze" | "image_generate" | "cronjob" => {
-            format_generic_structured_result(tool_name, result, true)
+        "vision_analyze" | "image_generate" | "text_to_speech" | "cronjob" => {
+            format_media_or_cron_result(tool_name, result)
         }
         _ => format_generic_structured_result(tool_name, result, false),
     };
@@ -624,6 +704,485 @@ fn format_browser_result(tool_name: &str, result: Option<&str>) -> Option<String
     Some(truncate_text(&lines.join("\n"), 7000))
 }
 
+fn format_web_search_result(result: Option<&str>) -> Option<String> {
+    let data = json_loads_maybe(result)?;
+    let obj = data.as_object()?;
+    let web = obj
+        .get("data")
+        .and_then(|data| data.get("web"))
+        .or_else(|| obj.get("web"))?
+        .as_array()?;
+    let mut lines = vec![format!("Web results: {}", web.len())];
+    for item in web.iter().take(10).filter_map(Value::as_object) {
+        let title = item
+            .get("title")
+            .or_else(|| item.get("url"))
+            .and_then(value_summary)
+            .unwrap_or_else(|| "result".to_string());
+        let url = item
+            .get("url")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|url| !url.is_empty());
+        lines.push(match url {
+            Some(url) if url != title => format!("- {title} - {url}"),
+            _ => format!("- {title}"),
+        });
+        if let Some(desc) = item
+            .get("description")
+            .or_else(|| item.get("snippet"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|desc| !desc.is_empty())
+        {
+            lines.push(format!("  {}", truncate_text(desc, 500)));
+        }
+    }
+    Some(truncate_text(&lines.join("\n"), 5000))
+}
+
+fn format_web_extract_result(result: Option<&str>) -> Option<String> {
+    let data = json_loads_maybe(result)?;
+    let obj = data.as_object()?;
+    if obj.get("success").and_then(Value::as_bool) == Some(false) {
+        return Some(format!(
+            "Web extract failed: {}",
+            obj.get("error")
+                .and_then(value_summary)
+                .unwrap_or_else(|| "unknown error".to_string())
+        ));
+    }
+
+    let results = obj.get("results")?.as_array()?;
+    let mut failures = Vec::new();
+    for item in results.iter().take(10).filter_map(Value::as_object) {
+        let Some(error) = item
+            .get("error")
+            .and_then(value_summary)
+            .map(|error| error.trim().to_string())
+            .filter(|error| !error.is_empty() && error != "None" && error != "null")
+        else {
+            continue;
+        };
+        let url = item
+            .get("url")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|url| !url.is_empty());
+        let title = item
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .or(url)
+            .unwrap_or("Untitled");
+        failures.push(match url {
+            Some(url) if url != title => {
+                format!("- {title} - {url}\n  Error: {}", truncate_text(&error, 500))
+            }
+            _ => format!("- {title}\n  Error: {}", truncate_text(&error, 500)),
+        });
+    }
+
+    if failures.is_empty() {
+        return None;
+    }
+    let mut lines = vec![format!(
+        "Web extract failed for {} URL{}",
+        failures.len(),
+        if failures.len() == 1 { "" } else { "s" }
+    )];
+    lines.extend(failures);
+    Some(lines.join("\n"))
+}
+
+fn format_process_result(result: Option<&str>) -> Option<String> {
+    let Some(data) = json_loads_maybe(result) else {
+        return result
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(|text| truncate_text(text, 5000));
+    };
+    let obj = data.as_object()?;
+    if obj.get("success").and_then(Value::as_bool) == Some(false) || obj.contains_key("error") {
+        return Some(format!(
+            "Process error: {}",
+            obj.get("error")
+                .and_then(value_summary)
+                .unwrap_or_else(|| "unknown error".to_string())
+        ));
+    }
+
+    if let Some(processes) = obj.get("processes").and_then(Value::as_array) {
+        let mut lines = vec![format!("Processes: {}", processes.len())];
+        for proc in processes.iter().take(20) {
+            let Some(proc_obj) = proc.as_object() else {
+                if let Some(summary) = value_summary(proc) {
+                    lines.push(format!("- {summary}"));
+                }
+                continue;
+            };
+            let sid = proc_obj
+                .get("session_id")
+                .or_else(|| proc_obj.get("id"))
+                .and_then(value_summary)
+                .unwrap_or_else(|| "?".to_string());
+            let status = proc_obj
+                .get("status")
+                .and_then(value_summary)
+                .or_else(|| {
+                    proc_obj
+                        .get("exited")
+                        .and_then(Value::as_bool)
+                        .map(|exited| if exited { "exited" } else { "running" }.to_string())
+                })
+                .unwrap_or_else(|| "running".to_string());
+            let mut bits = vec![status];
+            if let Some(pid) = proc_obj.get("pid").and_then(value_summary) {
+                bits.push(format!("pid {pid}"));
+            }
+            if let Some(code) = proc_obj
+                .get("exit_code")
+                .or_else(|| proc_obj.get("returncode"))
+                .and_then(value_summary)
+            {
+                bits.push(format!("exit {code}"));
+            }
+            let command = proc_obj
+                .get("command")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|cmd| !cmd.is_empty())
+                .map(|cmd| truncate_text(cmd, 120));
+            let suffix = command.map(|cmd| format!(" - {cmd}")).unwrap_or_default();
+            lines.push(format!("- `{sid}` - {}{suffix}", bits.join(", ")));
+        }
+        if processes.len() > 20 {
+            lines.push(format!("... {} more process(es)", processes.len() - 20));
+        }
+        return Some(lines.join("\n"));
+    }
+
+    let action = obj
+        .get("action")
+        .and_then(value_summary)
+        .unwrap_or_else(|| "process".to_string());
+    let status = obj
+        .get("status")
+        .or_else(|| obj.get("state"))
+        .and_then(value_summary)
+        .unwrap_or_else(|| action.clone());
+    let sid = obj
+        .get("session_id")
+        .and_then(value_summary)
+        .filter(|sid| !sid.trim().is_empty());
+    let mut lines = vec![match sid {
+        Some(sid) => format!("Process {action}: {status} (`{sid}`)"),
+        None => format!("Process {action}: {status}"),
+    }];
+    for (key, label) in [
+        ("command", "Command"),
+        ("pid", "PID"),
+        ("exit_code", "Exit code"),
+        ("returncode", "Exit code"),
+        ("lines", "Lines"),
+    ] {
+        if let Some(value) = obj.get(key).and_then(value_summary) {
+            lines.push(format!("- **{label}:** {value}"));
+        }
+    }
+    if let Some(output) = obj
+        .get("output")
+        .or_else(|| obj.get("new_output"))
+        .or_else(|| obj.get("log"))
+        .or_else(|| obj.get("stdout"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        lines.extend([
+            "".to_string(),
+            "Output:".to_string(),
+            truncate_text(output, 5000),
+        ]);
+    }
+    if let Some(error) = obj
+        .get("stderr")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        lines.extend([
+            "".to_string(),
+            "Error:".to_string(),
+            truncate_text(error, 2000),
+        ]);
+    }
+    if let Some(message) = obj
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        lines.push(message.to_string());
+    }
+    Some(truncate_text(&lines.join("\n"), 7000))
+}
+
+fn format_delegate_result(result: Option<&str>) -> Option<String> {
+    let data = json_loads_maybe(result)?;
+    let obj = data.as_object()?;
+    if obj.get("error").is_some() && !obj.get("results").is_some_and(Value::is_array) {
+        return Some(format!(
+            "Delegation failed: {}",
+            obj.get("error")
+                .and_then(value_summary)
+                .unwrap_or_else(|| "unknown error".to_string())
+        ));
+    }
+    let results = obj.get("results")?.as_array()?;
+    let total = obj.get("total_duration_seconds").and_then(value_summary);
+    let mut lines = vec![match total {
+        Some(total) => format!(
+            "Delegation results: {} task{} in {total}s",
+            results.len(),
+            if results.len() == 1 { "" } else { "s" }
+        ),
+        None => format!(
+            "Delegation results: {} task{}",
+            results.len(),
+            if results.len() == 1 { "" } else { "s" }
+        ),
+    }];
+    for item in results {
+        let Some(item) = item.as_object() else {
+            if let Some(summary) = value_summary(item) {
+                lines.push(format!("- {summary}"));
+            }
+            continue;
+        };
+        let idx = item
+            .get("task_index")
+            .and_then(Value::as_i64)
+            .map(|idx| idx + 1)
+            .map(|idx| idx.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let status = item
+            .get("status")
+            .and_then(value_summary)
+            .unwrap_or_else(|| "unknown".to_string());
+        let mut header = format!("Task {idx}: {status}");
+        let mut bits = Vec::new();
+        if let Some(model) = item.get("model").and_then(value_summary) {
+            bits.push(model);
+        }
+        if let Some(role) = item.get("_child_role").and_then(value_summary) {
+            bits.push(format!("role={role}"));
+        }
+        if let Some(duration) = item.get("duration_seconds").and_then(value_summary) {
+            bits.push(format!("{duration}s"));
+        }
+        if !bits.is_empty() {
+            header.push_str(&format!(" ({})", bits.join(", ")));
+        }
+        lines.extend(["".to_string(), header]);
+        if let Some(summary) = item
+            .get("summary")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            lines.push(truncate_text(summary, 1200));
+        }
+        if let Some(error) = item
+            .get("error")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            lines.push(format!("Error: {}", truncate_text(error, 800)));
+        }
+        if let Some(trace) = item.get("tool_trace").and_then(Value::as_array) {
+            let names: Vec<String> = trace
+                .iter()
+                .filter_map(Value::as_object)
+                .filter_map(|tool| tool.get("tool").and_then(value_summary))
+                .collect();
+            if !names.is_empty() {
+                let mut line = format!(
+                    "Tools: {}",
+                    names
+                        .iter()
+                        .take(12)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                if names.len() > 12 {
+                    line.push_str(&format!(" (+{})", names.len() - 12));
+                }
+                lines.push(line);
+            }
+        }
+    }
+    Some(truncate_text(&lines.join("\n"), 8000))
+}
+
+fn format_session_search_result(result: Option<&str>) -> Option<String> {
+    let data = json_loads_maybe(result)?;
+    let obj = data.as_object()?;
+    if obj.get("success").and_then(Value::as_bool) == Some(false) {
+        return Some(format!(
+            "Session search failed: {}",
+            obj.get("error")
+                .and_then(value_summary)
+                .unwrap_or_else(|| "unknown error".to_string())
+        ));
+    }
+    let results = obj.get("results")?.as_array()?;
+    let mode = obj.get("mode").and_then(Value::as_str).unwrap_or("search");
+    let query = obj
+        .get("query")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|query| !query.is_empty());
+    let mut lines = vec![if mode == "recent" {
+        "Recent sessions".to_string()
+    } else if let Some(query) = query {
+        format!("Session search results for `{query}`")
+    } else {
+        "Session search results".to_string()
+    }];
+    if results.is_empty() {
+        lines.push(
+            obj.get("message")
+                .and_then(value_summary)
+                .unwrap_or_else(|| "No matching sessions found.".to_string()),
+        );
+        return Some(lines.join("\n"));
+    }
+    for item in results.iter().filter_map(Value::as_object) {
+        let sid = item
+            .get("session_id")
+            .and_then(value_summary)
+            .unwrap_or_else(|| "?".to_string());
+        let title = item
+            .get("title")
+            .or_else(|| item.get("when"))
+            .and_then(value_summary)
+            .unwrap_or_else(|| "Untitled session".to_string());
+        let mut meta = Vec::new();
+        for key in ["last_active", "started_at", "when", "source"] {
+            if let Some(value) = item.get(key).and_then(value_summary) {
+                meta.push(value);
+            }
+        }
+        if let Some(count) = item.get("message_count").and_then(value_summary) {
+            meta.push(format!("{count} msgs"));
+        }
+        let suffix = if meta.is_empty() {
+            String::new()
+        } else {
+            format!(" - {}", meta.join(", "))
+        };
+        lines.push(format!("- **{title}** (`{sid}`){suffix}"));
+        if let Some(summary) = item
+            .get("summary")
+            .or_else(|| item.get("preview"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            lines.push(format!(
+                "  {}",
+                truncate_text(
+                    &summary.split_whitespace().collect::<Vec<_>>().join(" "),
+                    500
+                )
+            ));
+        }
+    }
+    Some(truncate_text(&lines.join("\n"), 7000))
+}
+
+fn format_memory_result(result: Option<&str>) -> Option<String> {
+    let data = json_loads_maybe(result)?;
+    let obj = data.as_object()?;
+    let action = obj
+        .get("action")
+        .and_then(value_summary)
+        .unwrap_or_else(|| "memory".to_string());
+    let target = obj
+        .get("target")
+        .and_then(value_summary)
+        .unwrap_or_else(|| "memory".to_string());
+    if obj.get("success").and_then(Value::as_bool) == Some(false) {
+        let mut lines = vec![
+            format!("Memory {action} failed ({target})"),
+            obj.get("error")
+                .and_then(value_summary)
+                .unwrap_or_else(|| "unknown error".to_string()),
+        ];
+        if let Some(matches) = obj.get("matches").and_then(Value::as_array) {
+            lines.push("Matches:".to_string());
+            lines.extend(
+                matches
+                    .iter()
+                    .take(5)
+                    .filter_map(value_summary)
+                    .map(|summary| format!("- {}", truncate_text(&summary, 160))),
+            );
+        }
+        return Some(lines.join("\n"));
+    }
+    let mut lines = vec![format!("Memory {action} saved ({target})")];
+    if let Some(message) = obj.get("message").and_then(value_summary) {
+        lines.push(message);
+    }
+    if let Some(entry_count) = obj.get("entry_count").and_then(value_summary) {
+        lines.push(format!("Entries: {entry_count}"));
+    }
+    if let Some(usage) = obj.get("usage").and_then(value_summary) {
+        lines.push(format!("Usage: {usage}"));
+    }
+    Some(lines.join("\n"))
+}
+
+fn format_media_or_cron_result(tool_name: &str, result: Option<&str>) -> Option<String> {
+    let Some(data) = json_loads_maybe(result) else {
+        return result
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(|text| truncate_text(text, 5000));
+    };
+    let obj = data.as_object()?;
+    if obj.get("success").and_then(Value::as_bool) == Some(false) || obj.contains_key("error") {
+        return Some(format!(
+            "{tool_name} failed: {}",
+            obj.get("error")
+                .and_then(value_summary)
+                .unwrap_or_else(|| "unknown error".to_string())
+        ));
+    }
+    let mut lines = vec![format!("{tool_name} completed")];
+    for key in [
+        "file_path",
+        "path",
+        "url",
+        "image_url",
+        "job_id",
+        "id",
+        "status",
+        "message",
+        "next_run",
+    ] {
+        if let Some(value) = obj.get(key).and_then(value_summary) {
+            lines.push(format!("- **{key}:** {value}"));
+        }
+    }
+    Some(lines.join("\n"))
+}
+
 fn format_structured_value(
     key: &str,
     value: &Value,
@@ -931,10 +1490,15 @@ mod tests {
             ("write_file", "edit"),
             ("process", "execute"),
             ("web_search", "fetch"),
+            ("web_extract", "fetch"),
+            ("skills_list", "read"),
             ("execute_code", "execute"),
             ("todo", "other"),
             ("skill_view", "read"),
             ("browser_navigate", "fetch"),
+            ("browser_click", "execute"),
+            ("browser_snapshot", "read"),
+            ("delegate_task", "execute"),
             ("unknown_tool", "other"),
         ] {
             assert_eq!(tool_kind(tool), expected);
@@ -969,6 +1533,13 @@ mod tests {
             "search: rust acp"
         );
         assert_eq!(
+            tool_title(
+                "web_extract",
+                Some(&json!({"urls": ["https://a.test", "https://b.test"]}))
+            ),
+            "extract: https://a.test (+1)"
+        );
+        assert_eq!(
             tool_title("browser_navigate", Some(&json!({"url": "https://x.com"}))),
             "navigate: https://x.com"
         );
@@ -999,6 +1570,36 @@ mod tests {
                 Some(&json!({"todos": [{"id": "one", "content": "Fix ACP"}]}))
             ),
             "todo (1 item)"
+        );
+        assert_eq!(
+            tool_title("process", Some(&json!({"action": "list"}))),
+            "process list"
+        );
+        assert_eq!(
+            tool_title(
+                "delegate_task",
+                Some(&json!({"tasks": [{"goal": "one"}, {"goal": "two"}]}))
+            ),
+            "delegate batch (2 tasks)"
+        );
+        assert_eq!(
+            tool_title("session_search", Some(&json!({"query": "ACP"}))),
+            "session search: ACP"
+        );
+        assert_eq!(
+            tool_title("memory", Some(&json!({"action": "add", "target": "user"}))),
+            "memory add: user"
+        );
+        assert_eq!(
+            tool_title("skills_list", Some(&json!({"category": "rust"}))),
+            "skills list (rust)"
+        );
+        assert_eq!(
+            tool_title(
+                "cronjob",
+                Some(&json!({"action": "run", "job_id": "nightly"}))
+            ),
+            "cron run: nightly"
         );
     }
 
@@ -1072,6 +1673,121 @@ mod tests {
         assert!(result.contains("- **status:** done"));
         assert!(result.contains("hidden body"));
         assert!(!result.contains(r#""success""#));
+    }
+
+    #[test]
+    fn format_tool_result_renders_web_search_results() {
+        let result = format_tool_result(
+            "web_search",
+            Some(
+                r#"{"data":{"web":[{"title":"ACP docs","url":"https://example.com/acp","description":"Agent protocol docs."},{"url":"https://example.com/zed"}]}}"#,
+            ),
+        )
+        .expect("formatted");
+        assert!(result.contains("Web results: 2"));
+        assert!(result.contains("ACP docs - https://example.com/acp"));
+        assert!(result.contains("Agent protocol docs."));
+        assert!(!result.contains(r#""data""#));
+    }
+
+    #[test]
+    fn format_tool_result_keeps_successful_web_extract_compact() {
+        let result = format_tool_result(
+            "web_extract",
+            Some(
+                r##"{"results":[{"url":"https://example.com","title":"Example","content":"# Intro\nThis is extracted content."}]}"##,
+            ),
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn format_tool_result_shows_web_extract_failures() {
+        let result = format_tool_result(
+            "web_extract",
+            Some(
+                r#"{"results":[{"url":"https://example.com","title":"Example","error":"timeout"}]}"#,
+            ),
+        )
+        .expect("formatted");
+        assert!(result.contains("Web extract failed for 1 URL"));
+        assert!(result.contains("Example - https://example.com"));
+        assert!(result.contains("timeout"));
+        assert!(!result.contains(r#""results""#));
+    }
+
+    #[test]
+    fn format_tool_result_renders_process_list() {
+        let result = format_tool_result(
+            "process",
+            Some(
+                r#"{"processes":[{"session_id":"p1","status":"running","pid":123,"command":"npm run dev"}]}"#,
+            ),
+        )
+        .expect("formatted");
+        assert!(result.contains("Processes: 1"));
+        assert!(result.contains("`p1`"));
+        assert!(result.contains("pid 123"));
+        assert!(result.contains("npm run dev"));
+        assert!(!result.contains(r#""processes""#));
+    }
+
+    #[test]
+    fn format_tool_result_summarizes_delegate_children() {
+        let result = format_tool_result(
+            "delegate_task",
+            Some(
+                r#"{"results":[{"task_index":0,"status":"completed","summary":"Reviewed ACP rendering.","model":"gpt-5.5","duration_seconds":3.2,"tool_trace":[{"tool":"read_file"}]}],"total_duration_seconds":3.4}"#,
+            ),
+        )
+        .expect("formatted");
+        assert!(result.contains("Delegation results: 1 task in 3.4s"));
+        assert!(result.contains("Task 1: completed"));
+        assert!(result.contains("Reviewed ACP rendering."));
+        assert!(result.contains("gpt-5.5"));
+        assert!(result.contains("Tools: read_file"));
+    }
+
+    #[test]
+    fn format_tool_result_renders_session_search_recent() {
+        let result = format_tool_result(
+            "session_search",
+            Some(
+                r#"{"success":true,"mode":"recent","results":[{"session_id":"s1","title":"ACP work","last_active":"2026-05-02","message_count":12,"preview":"Polished tool rendering."}],"count":1}"#,
+            ),
+        )
+        .expect("formatted");
+        assert!(result.contains("Recent sessions"));
+        assert!(result.contains("ACP work"));
+        assert!(result.contains("s1"));
+        assert!(result.contains("Polished tool rendering."));
+    }
+
+    #[test]
+    fn format_tool_result_memory_avoids_dumping_entries() {
+        let result = format_tool_result(
+            "memory",
+            Some(
+                r#"{"success":true,"action":"add","target":"user","entries":["private long memory"],"usage":"19/2000 chars","entry_count":1,"message":"Entry added."}"#,
+            ),
+        )
+        .expect("formatted");
+        assert!(result.contains("Memory add saved (user)"));
+        assert!(result.contains("Entry added."));
+        assert!(result.contains("Entries: 1"));
+        assert!(!result.contains("private long memory"));
+    }
+
+    #[test]
+    fn format_tool_result_renders_media_and_cron_keys() {
+        let result = format_tool_result(
+            "cronjob",
+            Some(r#"{"success":true,"job_id":"nightly","status":"scheduled","next_run":"2026-06-07T00:00:00Z"}"#),
+        )
+        .expect("formatted");
+        assert!(result.contains("cronjob completed"));
+        assert!(result.contains("- **job_id:** nightly"));
+        assert!(result.contains("- **next_run:** 2026-06-07T00:00:00Z"));
     }
 
     #[test]

@@ -48,6 +48,8 @@ pub enum AcpEventKind {
     SessionInfoUpdate,
     /// Native plan/task list changed.
     PlanUpdate,
+    /// Native context usage changed.
+    UsageUpdate,
     /// An error occurred.
     Error,
 }
@@ -95,6 +97,10 @@ pub struct AcpEvent {
     pub entries: Option<Vec<PlanEntry>>,
     #[serde(rename = "updatedAt", default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used: Option<u64>,
 }
 
 impl AcpEvent {
@@ -125,6 +131,8 @@ impl AcpEvent {
             available_commands: None,
             entries: None,
             updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -154,6 +162,8 @@ impl AcpEvent {
             available_commands: None,
             entries: None,
             updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -184,6 +194,8 @@ impl AcpEvent {
             available_commands: None,
             entries: None,
             updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -207,6 +219,8 @@ impl AcpEvent {
             available_commands: None,
             entries: None,
             updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -230,6 +244,8 @@ impl AcpEvent {
             available_commands: None,
             entries: None,
             updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -285,6 +301,8 @@ impl AcpEvent {
             available_commands: None,
             entries: None,
             updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -307,6 +325,33 @@ impl AcpEvent {
             api_call_count: None,
             error: None,
             available_commands: None,
+            updated_at: None,
+            size: None,
+            used: None,
+        }
+    }
+
+    pub fn usage_update(session_id: &str, size: u64, used: u64) -> Self {
+        Self {
+            kind: AcpEventKind::UsageUpdate,
+            session_id: session_id.to_string(),
+            timestamp: Self::now(),
+            session_update: Some("usage_update".to_string()),
+            size: Some(size),
+            used: Some(used),
+            tool_call_id: None,
+            tool_name: None,
+            tool_kind: None,
+            title: None,
+            arguments: None,
+            result: None,
+            status: None,
+            content: None,
+            text: None,
+            api_call_count: None,
+            error: None,
+            available_commands: None,
+            entries: None,
             updated_at: None,
         }
     }
@@ -331,6 +376,8 @@ impl AcpEvent {
             available_commands: None,
             entries: None,
             updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -354,6 +401,8 @@ impl AcpEvent {
             available_commands: None,
             entries: None,
             updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -365,6 +414,8 @@ impl AcpEvent {
             session_update: Some("available_commands_update".to_string()),
             available_commands: Some(commands),
             updated_at: None,
+            size: None,
+            used: None,
             tool_call_id: None,
             tool_name: None,
             tool_kind: None,
@@ -404,6 +455,8 @@ impl AcpEvent {
             error: None,
             entries: None,
             available_commands: None,
+            size: None,
+            used: None,
         }
     }
 }
@@ -632,6 +685,16 @@ mod tests {
             Some("Error: pytest collected 0 items")
         );
         assert_eq!(e3.status.as_deref(), Some("completed"));
+
+        let usage = AcpEvent::usage_update("s1", 100_000, 25_000);
+        assert_eq!(usage.kind, AcpEventKind::UsageUpdate);
+        assert_eq!(usage.session_update.as_deref(), Some("usage_update"));
+        assert_eq!(usage.size, Some(100_000));
+        assert_eq!(usage.used, Some(25_000));
+        let wire = serde_json::to_value(&usage).expect("usage event json");
+        assert_eq!(wire["sessionUpdate"], "usage_update");
+        assert_eq!(wire["size"], 100_000);
+        assert_eq!(wire["used"], 25_000);
     }
 
     #[test]

@@ -9,6 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
+use hermes_intelligence::model_metadata::{
+    estimate_request_tokens_rough, get_model_context_length,
+};
 use serde_json::{json, Value};
 use url::Url;
 
@@ -731,6 +734,32 @@ impl HermesAcpHandler {
         ));
     }
 
+    fn context_usage_for_state(state: &SessionState) -> Option<(u64, u64)> {
+        let model = match (state.provider.as_deref(), state.model.as_deref()) {
+            (Some(provider), Some(model)) if !model.contains(':') => {
+                format!("{provider}:{model}")
+            }
+            (_, Some(model)) => model.to_string(),
+            _ => "unknown-model".to_string(),
+        };
+        let size = get_model_context_length(&model);
+        if size == 0 {
+            return None;
+        }
+        let used = estimate_request_tokens_rough(&state.history, "", None);
+        Some((size, used))
+    }
+
+    fn emit_usage_update(&self, session_id: &str) {
+        let Some(state) = self.session_manager.get_session(session_id) else {
+            return;
+        };
+        if let Some((size, used)) = Self::context_usage_for_state(&state) {
+            self.event_sink
+                .push(AcpEvent::usage_update(session_id, size, used));
+        }
+    }
+
     fn emit_session_info_update(&self, session_id: &str) {
         let Some(state) = self.session_manager.get_session(session_id) else {
             return;
@@ -1033,9 +1062,6 @@ impl HermesAcpHandler {
             "context" => {
                 let state = self.session_manager.get_session(session_id)?;
                 let n = state.history.len();
-                if n == 0 {
-                    return Some("Conversation is empty (no messages yet).".to_string());
-                }
                 let mut roles: HashMap<String, usize> = HashMap::new();
                 for msg in &state.history {
                     let role = msg
@@ -1044,14 +1070,44 @@ impl HermesAcpHandler {
                         .unwrap_or("unknown");
                     *roles.entry(role.to_string()).or_default() += 1;
                 }
-                Some(format!(
-                    "Conversation: {} messages\n  user: {}, assistant: {}, tool: {}, system: {}",
-                    n,
-                    roles.get("user").unwrap_or(&0),
-                    roles.get("assistant").unwrap_or(&0),
-                    roles.get("tool").unwrap_or(&0),
-                    roles.get("system").unwrap_or(&0),
-                ))
+                let mut lines = if n == 0 {
+                    vec!["Conversation is empty (no messages yet).".to_string()]
+                } else {
+                    vec![format!(
+                        "Conversation: {} messages\n  user: {}, assistant: {}, tool: {}, system: {}",
+                        n,
+                        roles.get("user").unwrap_or(&0),
+                        roles.get("assistant").unwrap_or(&0),
+                        roles.get("tool").unwrap_or(&0),
+                        roles.get("system").unwrap_or(&0),
+                    )]
+                };
+                if let Some((size, used)) = Self::context_usage_for_state(&state) {
+                    let percent = if size == 0 {
+                        0.0
+                    } else {
+                        (used as f64 / size as f64) * 100.0
+                    };
+                    let threshold = ((size as f64) * 0.80).round() as u64;
+                    lines.push(format!(
+                        "Context usage: ~{} / {} tokens ({percent:.1}%)",
+                        format_token_count_plain(used),
+                        format_token_count_plain(size)
+                    ));
+                    if used >= threshold {
+                        lines.push(format!(
+                            "Compression: due now (threshold ~{}, 80%). Run /compact.",
+                            format_token_count_plain(threshold)
+                        ));
+                    } else {
+                        lines.push(format!(
+                            "Compression: ~{} tokens until threshold (~{}, 80%).",
+                            format_token_count_plain(threshold.saturating_sub(used)),
+                            format_token_count_plain(threshold)
+                        ));
+                    }
+                }
+                Some(lines.join("\n"))
             }
             "reset" => {
                 self.session_manager.set_history(session_id, Vec::new());
@@ -1292,6 +1348,18 @@ fn session_id_response(session_id: &str) -> Value {
     json!({"sessionId": session_id})
 }
 
+fn format_token_count_plain(value: u64) -> String {
+    let raw = value.to_string();
+    let mut out = String::with_capacity(raw.len() + raw.len() / 3);
+    for (idx, ch) in raw.chars().rev().enumerate() {
+        if idx > 0 && idx % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
+}
+
 fn session_title_from_history(history: &[Value]) -> Option<String> {
     history.iter().find_map(|message| {
         let role = message.get("role").and_then(Value::as_str)?;
@@ -1392,6 +1460,7 @@ impl AcpHandler for HermesAcpHandler {
                     .unwrap_or(".");
                 let state = self.session_manager.create_session(cwd);
                 self.advertise_available_commands(&state.session_id);
+                self.emit_usage_update(&state.session_id);
                 AcpResponse::success(request.id, session_id_response(&state.session_id))
             }
 
@@ -1406,6 +1475,7 @@ impl AcpHandler for HermesAcpHandler {
                     Some(state) => {
                         self.replay_session_history(&state);
                         self.advertise_available_commands(session_id);
+                        self.emit_usage_update(session_id);
                         AcpResponse::success(request.id, json!({}))
                     }
                     None => AcpResponse::error(
@@ -1426,10 +1496,12 @@ impl AcpHandler for HermesAcpHandler {
                 if let Some(state) = self.session_manager.update_cwd(session_id, cwd) {
                     self.replay_session_history(&state);
                     self.advertise_available_commands(&state.session_id);
+                    self.emit_usage_update(&state.session_id);
                     AcpResponse::success(request.id, json!({}))
                 } else {
                     let state = self.session_manager.create_session(cwd);
                     self.advertise_available_commands(&state.session_id);
+                    self.emit_usage_update(&state.session_id);
                     AcpResponse::success(request.id, session_id_response(&state.session_id))
                 }
             }
@@ -1444,6 +1516,7 @@ impl AcpHandler for HermesAcpHandler {
                 match self.session_manager.fork_session(session_id, cwd) {
                     Some(new_state) => {
                         self.advertise_available_commands(&new_state.session_id);
+                        self.emit_usage_update(&new_state.session_id);
                         AcpResponse::success(request.id, session_id_response(&new_state.session_id))
                     }
                     None => AcpResponse::error(
@@ -1580,6 +1653,7 @@ impl AcpHandler for HermesAcpHandler {
                     if let Some(response_text) = self.handle_slash_command(&user_text, session_id) {
                         self.event_sink
                             .push(AcpEvent::message_complete(session_id, &response_text));
+                        self.emit_usage_update(session_id);
                         return AcpResponse::success(
                             request.id,
                             prompt_response_value(StopReason::EndTurn, None),
@@ -1648,6 +1722,7 @@ impl AcpHandler for HermesAcpHandler {
 
                 self.session_manager
                     .set_phase(session_id, SessionPhase::Idle);
+                self.emit_usage_update(session_id);
 
                 AcpResponse::success(
                     request.id,
@@ -1676,6 +1751,7 @@ impl AcpHandler for HermesAcpHandler {
                 match self.session_manager.update_model(session_id, model_id) {
                     Some(_) => {
                         tracing::info!("Session {}: model switched to {}", session_id, model_id);
+                        self.emit_usage_update(session_id);
                         AcpResponse::success(request.id, json!({}))
                     }
                     None => AcpResponse::error(
@@ -2325,7 +2401,7 @@ mod tests {
     }
 
     fn assert_available_commands_update(events: Vec<AcpEvent>, expected_session_id: &str) {
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 2);
         let event = &events[0];
         assert_eq!(event.kind, AcpEventKind::AvailableCommandsUpdate);
         assert_eq!(event.session_id, expected_session_id);
@@ -2345,6 +2421,13 @@ mod tests {
         assert_eq!(model.input_hint.as_deref(), Some("model name to switch to"));
         assert!(commands.iter().any(|command| command.name == "queue"));
         assert!(commands.iter().any(|command| command.name == "steer"));
+
+        let usage = &events[1];
+        assert_eq!(usage.kind, AcpEventKind::UsageUpdate);
+        assert_eq!(usage.session_id, expected_session_id);
+        assert_eq!(usage.session_update.as_deref(), Some("usage_update"));
+        assert!(usage.size.unwrap_or_default() > 0);
+        assert!(usage.used.is_some());
     }
 
     #[tokio::test]
@@ -2462,6 +2545,7 @@ mod tests {
                 AcpEventKind::ToolCallStart,
                 AcpEventKind::ToolCallComplete,
                 AcpEventKind::AvailableCommandsUpdate,
+                AcpEventKind::UsageUpdate,
             ]
         );
         assert_eq!(
@@ -2525,9 +2609,10 @@ mod tests {
             "Reasoning persisted without assistant text."
         );
         assert_eq!(
-            events.last().unwrap().kind,
+            events[events.len() - 2].kind,
             AcpEventKind::AvailableCommandsUpdate
         );
+        assert_eq!(events.last().unwrap().kind, AcpEventKind::UsageUpdate);
     }
 
     #[tokio::test]
@@ -2580,6 +2665,7 @@ mod tests {
                 AcpEventKind::ToolCallComplete,
                 AcpEventKind::PlanUpdate,
                 AcpEventKind::AvailableCommandsUpdate,
+                AcpEventKind::UsageUpdate,
             ]
         );
         assert_eq!(events[2].session_update.as_deref(), Some("plan"));
@@ -2628,6 +2714,35 @@ mod tests {
             state.base_url.as_deref(),
             Some("https://openrouter.ai/api/v1")
         );
+    }
+
+    #[tokio::test]
+    async fn test_context_slash_command_includes_usage_and_threshold() {
+        let handler = make_handler();
+        let state = handler.session_manager.create_session("/workspace");
+        let session_id = state.session_id;
+        handler
+            .session_manager
+            .update_model(&session_id, "gpt-4o")
+            .expect("session exists");
+        handler.session_manager.set_history(
+            &session_id,
+            vec![
+                json!({"role": "user", "content": "hello"}),
+                json!({"role": "assistant", "content": "hi"}),
+            ],
+        );
+
+        let response = handler
+            .handle_slash_command("/context", &session_id)
+            .expect("context response");
+
+        assert!(response.contains("Conversation: 2 messages"));
+        assert!(response.contains("user: 1, assistant: 1"));
+        assert!(response.contains("Context usage: ~"));
+        assert!(response.contains("/ 128,000 tokens"));
+        assert!(response.contains("Compression: ~"));
+        assert!(response.contains("tokens until threshold (~102,400, 80%)."));
     }
 
     #[tokio::test]

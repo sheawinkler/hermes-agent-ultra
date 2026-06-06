@@ -279,7 +279,7 @@ mod tests {
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
 
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.len(), 3);
         let session_id = lines[0]["result"]["sessionId"].as_str().unwrap();
         assert_eq!(lines[1]["method"], "session/update");
         assert_eq!(lines[1]["params"]["kind"], "available_commands_update");
@@ -297,6 +297,12 @@ mod tests {
             .find(|command| command["name"] == "model")
             .expect("model command");
         assert_eq!(model["inputHint"], "model name to switch to");
+        assert_eq!(lines[2]["method"], "session/update");
+        assert_eq!(lines[2]["params"]["kind"], "usage_update");
+        assert_eq!(lines[2]["params"]["sessionUpdate"], "usage_update");
+        assert_eq!(lines[2]["params"]["session_id"], session_id);
+        assert!(lines[2]["params"]["size"].as_u64().unwrap() > 0);
+        assert!(lines[2]["params"]["used"].as_u64().is_some());
     }
 
     #[tokio::test]
@@ -333,7 +339,7 @@ mod tests {
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
 
-        assert_eq!(lines.len(), 4);
+        assert_eq!(lines.len(), 5);
         assert_eq!(lines[0]["method"], "session/update");
         assert_eq!(lines[0]["params"]["kind"], "user_message_chunk");
         assert_eq!(lines[0]["params"]["sessionUpdate"], "user_message_chunk");
@@ -342,8 +348,13 @@ mod tests {
         assert_eq!(lines[1]["params"]["kind"], "agent_message_chunk");
         assert_eq!(lines[2]["method"], "session/update");
         assert_eq!(lines[2]["params"]["kind"], "available_commands_update");
-        assert_eq!(lines[3]["id"], 1);
-        assert_eq!(lines[3]["result"], serde_json::json!({}));
+        assert_eq!(lines[3]["method"], "session/update");
+        assert_eq!(lines[3]["params"]["kind"], "usage_update");
+        assert_eq!(lines[3]["params"]["sessionUpdate"], "usage_update");
+        assert!(lines[3]["params"]["size"].as_u64().unwrap() > 0);
+        assert!(lines[3]["params"]["used"].as_u64().unwrap() > 0);
+        assert_eq!(lines[4]["id"], 1);
+        assert_eq!(lines[4]["result"], serde_json::json!({}));
     }
 
     #[test]

@@ -907,6 +907,34 @@
     "e26f9b207041c03d1aa9a982d29dbfda66df3a82": {
       "disposition": "ported",
       "notes": "Rust ACP routes provider reasoning callbacks to agent_thought_chunk updates, routes stream deltas to message_delta updates, and suppresses fallback final-response emission when executor streaming already delivered message content."
+    },
+    "72c8037a24b58b7b1a38a99903cc0bf8a3d7595c": {
+      "disposition": "ported",
+      "notes": "Rust ACP now has dedicated compact completion renderers for web_search, process, delegate_task, session_search, memory, media/cron, plus expanded tool kind/title mappings; tests assert raw JSON/private entry dumps are avoided."
+    },
+    "b294d1d0229ff6026838a04c4cb59c3b13e4827f": {
+      "disposition": "superseded",
+      "notes": "Rust ACP start events already carry compact title/kind/arguments only and do not synthesize read_file output content; existing title tests cover read_file start compactness."
+    },
+    "19854c7cd2f00e3d591e72ccbe2e456ad10c4886": {
+      "disposition": "superseded",
+      "notes": "Rust ACP already fences read_file completion content and intentionally flushes load/resume replay before the RPC response for deterministic local clients; server tests cover replay flushing and read_file formatting."
+    },
+    "9987f3d82486b04151dee2d27d640b3ae01b7b16": {
+      "disposition": "ported",
+      "notes": "Rust ACP now keeps successful web_extract completions silent while rendering compact per-URL failures; read_file fenced completion and compact replay rendering are covered by hermes-acp tools tests."
+    },
+    "6622277f11ca1dee03e868b064fb1851e5598b77": {
+      "disposition": "ported",
+      "notes": "Rust ACP browser_navigate starts already expose polished navigate titles without raw content, and this slice adds regression coverage plus corrected tool kind mappings for polished browser and delegate tools."
+    },
+    "eb612f55748d8f0888f09f055abd86afef925150": {
+      "disposition": "ported",
+      "notes": "Rust ACP web_extract rendering now matches the compact contract: success omits extracted content, structured failures show URL/title/error summaries, and tests prevent raw result dumps."
+    },
+    "ef9a08a872d1ed87eb4c91cf8ad8e8f4ef5a6e2b": {
+      "disposition": "ported",
+      "notes": "Rust ACP now emits native usage_update events with size/used on session lifecycle, model switch, slash-command, and prompt completion paths, enriches /context with usage and compaction threshold text, and ports polished common tool rendering/kind/title behavior with hermes-acp tests."
     }
   },
   "subject_patterns": [
