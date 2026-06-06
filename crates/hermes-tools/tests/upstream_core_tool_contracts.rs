@@ -7,8 +7,9 @@ use hermes_tools::{
     ClarifyBackend, ClarifyHandler, CodeExecutionBackend, CronjobBackend, CronjobHandler,
     ExecuteCodeHandler, HaCallServiceHandler, HaGetStateHandler, HaListEntitiesHandler,
     HaListServicesHandler, HomeAssistantBackend, MemoryBackend, MemoryHandler, MessagingBackend,
-    ProcessRegistryHandler, SendMessageHandler, SessionSearchBackend, SessionSearchHandler,
-    ToolRegistry,
+    ProcessBackend, ProcessHandler, ProcessRegistryHandler, SendMessageHandler,
+    SessionSearchBackend, SessionSearchHandler, TerminalHandler, TextToSpeechHandler, TodoBackend,
+    TodoHandler, ToolRegistry, TtsBackend,
 };
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -732,6 +733,189 @@ impl TerminalBackend for MinimalTerminalBackend {
 
     async fn file_exists(&self, _path: &str) -> Result<bool, AgentError> {
         Ok(true)
+    }
+}
+
+struct MinimalProcessBackend;
+
+#[async_trait]
+impl ProcessBackend for MinimalProcessBackend {
+    async fn list_processes(&self) -> Result<String, ToolError> {
+        Ok("[]".to_string())
+    }
+
+    async fn poll_process(&self, session_id: &str) -> Result<String, ToolError> {
+        Ok(json!({"session_id": session_id, "status": "running"}).to_string())
+    }
+
+    async fn read_process_log(
+        &self,
+        session_id: &str,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> Result<String, ToolError> {
+        Ok(json!({"session_id": session_id, "offset": offset, "limit": limit}).to_string())
+    }
+
+    async fn wait_process(
+        &self,
+        session_id: &str,
+        timeout: Option<u64>,
+    ) -> Result<String, ToolError> {
+        Ok(json!({"session_id": session_id, "timeout": timeout, "status": "exited"}).to_string())
+    }
+
+    async fn kill_process(&self, session_id: &str) -> Result<String, ToolError> {
+        Ok(json!({"session_id": session_id, "status": "killed"}).to_string())
+    }
+
+    async fn write_stdin(&self, session_id: &str, data: &str) -> Result<String, ToolError> {
+        Ok(json!({"session_id": session_id, "data": data}).to_string())
+    }
+
+    async fn submit_process(&self, session_id: &str, input: &str) -> Result<String, ToolError> {
+        Ok(json!({"session_id": session_id, "input": input}).to_string())
+    }
+
+    async fn close_process(&self, session_id: &str) -> Result<String, ToolError> {
+        Ok(json!({"session_id": session_id, "closed": true}).to_string())
+    }
+}
+
+struct MinimalTodoBackend;
+
+#[async_trait]
+impl TodoBackend for MinimalTodoBackend {
+    async fn create(
+        &self,
+        title: &str,
+        _description: Option<&str>,
+        _priority: Option<&str>,
+    ) -> Result<String, ToolError> {
+        Ok(json!({"created": title}).to_string())
+    }
+
+    async fn update(
+        &self,
+        id: &str,
+        _title: Option<&str>,
+        _description: Option<&str>,
+        _status: Option<&str>,
+        _priority: Option<&str>,
+    ) -> Result<String, ToolError> {
+        Ok(json!({"updated": id}).to_string())
+    }
+
+    async fn list(&self, status: Option<&str>) -> Result<String, ToolError> {
+        Ok(json!({"status": status, "items": []}).to_string())
+    }
+}
+
+struct MinimalTtsBackend;
+
+#[async_trait]
+impl TtsBackend for MinimalTtsBackend {
+    async fn synthesize(
+        &self,
+        text: &str,
+        voice: Option<&str>,
+        provider: Option<&str>,
+        output_path: Option<&str>,
+        speed: Option<f64>,
+    ) -> Result<String, ToolError> {
+        Ok(json!({
+            "text": text,
+            "voice": voice,
+            "provider": provider,
+            "output_path": output_path,
+            "speed": speed
+        })
+        .to_string())
+    }
+}
+
+fn rendered_schema(handler: &dyn ToolHandler) -> (String, String) {
+    let schema = handler.schema();
+    let rendered = serde_json::to_string(&schema.parameters).expect("schema json");
+    (schema.name, rendered)
+}
+
+#[test]
+fn core_runtime_tool_schemas_cover_terminal_process_todo_and_tts_parity() {
+    let (terminal_name, terminal_schema) =
+        rendered_schema(&TerminalHandler::new(Arc::new(MinimalTerminalBackend)));
+    assert_eq!(terminal_name, "terminal");
+    for expected in [
+        "\"command\"",
+        "\"timeout\"",
+        "\"background\"",
+        "\"pty\"",
+        "\"stdin_data\"",
+        "background=true",
+    ] {
+        assert!(
+            terminal_schema.contains(expected),
+            "terminal schema should include {expected}"
+        );
+    }
+
+    let (process_name, process_schema) =
+        rendered_schema(&ProcessHandler::new(Arc::new(MinimalProcessBackend)));
+    assert_eq!(process_name, "process");
+    for expected in [
+        "\"list\"",
+        "\"poll\"",
+        "\"log\"",
+        "\"wait\"",
+        "\"kill\"",
+        "\"write\"",
+        "\"submit\"",
+        "\"close\"",
+        "\"session_id\"",
+        "\"data\"",
+        "\"input\"",
+        "terminal(background=true)",
+    ] {
+        assert!(
+            process_schema.contains(expected),
+            "process schema should include {expected}"
+        );
+    }
+
+    let (todo_name, todo_schema) = rendered_schema(&TodoHandler::new(Arc::new(MinimalTodoBackend)));
+    assert_eq!(todo_name, "todo");
+    for expected in [
+        "\"create\"",
+        "\"update\"",
+        "\"list\"",
+        "\"title\"",
+        "\"status\"",
+        "\"priority\"",
+    ] {
+        assert!(
+            todo_schema.contains(expected),
+            "todo schema should include {expected}"
+        );
+    }
+
+    let (tts_name, tts_schema) =
+        rendered_schema(&TextToSpeechHandler::new(Arc::new(MinimalTtsBackend)));
+    assert_eq!(tts_name, "text_to_speech");
+    for expected in [
+        "\"text\"",
+        "\"voice\"",
+        "\"provider\"",
+        "\"output_path\"",
+        "\"speed\"",
+        "\"elevenlabs\"",
+        "\"openai\"",
+        "\"minimax\"",
+        "\"piper\"",
+    ] {
+        assert!(
+            tts_schema.contains(expected),
+            "tts schema should include {expected}"
+        );
     }
 }
 

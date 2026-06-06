@@ -1101,6 +1101,39 @@ mod tests {
     }
 
     #[test]
+    fn builtin_registry_registers_core_tool_surfaces_for_parity() {
+        let _lock = lock_env();
+        let home = tempfile::tempdir().expect("temp home");
+        let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
+        let _terminal_env = EnvGuard::set("TERMINAL_ENV", "local");
+        let names = registered_names();
+
+        for expected in [
+            "terminal",
+            "process",
+            "process_registry",
+            "todo",
+            "text_to_speech",
+            "tts_premium",
+            "browser_navigate",
+            "browser_snapshot",
+            "browser_click",
+            "browser_type",
+            "browser_scroll",
+            "browser_back",
+            "browser_press",
+            "browser_get_images",
+            "browser_vision",
+            "browser_console",
+        ] {
+            assert!(
+                names.contains(&expected.to_string()),
+                "builtin registry should expose {expected}"
+            );
+        }
+    }
+
+    #[test]
     fn browser_tool_surface_exposes_current_commands_without_legacy_close() {
         let _lock = lock_env();
         let home = tempfile::tempdir().expect("temp home");

@@ -703,6 +703,42 @@
     "96cd37e212e8": {
       "disposition": "superseded",
       "notes": "Upstream leak fix targets Python TUI gateway detached transports and _SlashWorker subprocesses. Rust HTTP websocket handling has no detached slash-worker subprocess lifecycle; in-process SessionManager already exposes explicit remove/idle-expire cleanup APIs."
+    },
+    "122d8788ae23": {
+      "disposition": "ported",
+      "notes": "rust terminal handler provides first-class terminal command execution through TerminalHandler, TOOLSET_TERMINAL, and builtin registry coverage; upstream_core_tool_contracts verifies command/timeout/background/pty/stdin_data schema surface"
+    },
+    "a49596cbb2c1": {
+      "disposition": "ported",
+      "notes": "rust terminal tool refinement is covered by the same TerminalHandler/runtime registry surface, with tests for foreground timeout caps, background guidance, stdin_data, and schema parity"
+    },
+    "20f287547275": {
+      "disposition": "superseded",
+      "notes": "rust browser runtime does not use the Python browser_tool session supervisor; Browserbase/Browser Use backends manage sessions with provider timeout/close contracts and builtin browser surface tests cover the current browser commands without legacy browser_close"
+    },
+    "971ed2bbdf61": {
+      "disposition": "ported",
+      "notes": "rust terminal handler supports sudo password transformation via SUDO_PASSWORD with shell quoting and approval safeguards; crates/hermes-tools/src/tools/terminal.rs tests cover sudo denial, yolo boundaries, and password quoting"
+    },
+    "76d929e17725": {
+      "disposition": "ported",
+      "notes": "rust approval manager and terminal handler implement dangerous command confirmation/denial, hardline blocks, gateway approvals, and session yolo controls with extensive tests in crates/hermes-tools/src/approval.rs and terminal handler tests"
+    },
+    "f5be6177b231": {
+      "disposition": "ported",
+      "notes": "rust text_to_speech/tts_premium tools, MultiTtsBackend providers, gateway voice send surfaces, and voice-compatible media tags cover the upstream TTS product surface; new registry/schema contract proves first-class TTS exposure"
+    },
+    "061fa7090720": {
+      "disposition": "ported",
+      "notes": "rust terminal/process/process_registry surface implements background=true, process list/poll/log/wait/kill/write/submit/close, PTY, stdin_data, and registry exposure; new core runtime schema contract plus terminal/process tests cover it"
+    },
+    "e184f5ab3a51": {
+      "disposition": "ported",
+      "notes": "rust TodoHandler and FileTodoBackend provide create/update/list task management with TOOLSET_TODO and builtin registry exposure; new schema contract proves first-class todo runtime surface"
+    },
+    "9e85408c7bfd": {
+      "disposition": "ported",
+      "notes": "rust todo tool remains first-class in CLI/API toolsets and builtin registration; existing toolset tests and new registry/schema contract cover create/update/list parity"
     }
   },
   "subject_patterns": [
