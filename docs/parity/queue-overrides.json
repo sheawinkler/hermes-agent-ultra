@@ -52,6 +52,18 @@
       "disposition": "ported",
       "notes": "The upstream atomic_json_write/checkpoint test refactor is ported as Rust hermes_intelligence::rl atomic_json_write plus BatchRunCheckpoint load/save helpers and BatchDatasetRunner checkpoint-path resume. Focused tests cover valid/overwrite writes, parent dirs, original preservation on serialization failure, no temp leaks, Unicode/concurrent writes, missing/corrupt checkpoint handling, run-name mismatch fresh starts, last_updated, and persisted resume progress."
     },
+    "10b4cfeace24": {
+      "disposition": "ported",
+      "notes": "Rust TerminalHandler already surfaces backend CommandOutput.stdout as the user-visible tool return string through format_command_output, including nonzero exit handling. This batch adds an explicit regression test proving backend stdout is returned without relying on a legacy output/stdout compatibility shim."
+    },
+    "a4db3fdee5b9": {
+      "disposition": "superseded",
+      "notes": "The upstream Morph leakage fix is superseded by Rust terminal architecture: terminal execution uses injected TerminalBackend implementations rather than shared Hecate/Morph module globals, and task_id only resolves scoped cwd state. Focused tests prove task-a, task-b, and no-task calls do not share task cwd state."
+    },
+    "fbd3a2fdb88e": {
+      "disposition": "superseded",
+      "notes": "The upstream per-task Morph instance cleanup/leakage patch is superseded by Rust's non-Morph terminal runtime plus task-scoped cwd registry. TerminalHandler tests now prove task_id isolation and explicit workdir precedence, so one task cannot inherit another task's terminal cwd context."
+    },
     "395dbcc873c8": {
       "disposition": "superseded",
       "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"

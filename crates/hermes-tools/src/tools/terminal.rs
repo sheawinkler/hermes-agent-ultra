@@ -920,6 +920,19 @@ mod tests {
     }
 
     #[test]
+    fn terminal_handler_surfaces_backend_stdout_as_user_visible_output() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let result = block_on(handler.execute(json!({"command": "stdout-only"}))).unwrap();
+
+        assert_eq!(result, "output of: stdout-only / stdin=");
+    }
+
+    #[test]
     fn test_terminal_handler_uses_registered_task_cwd_when_workdir_omitted() {
         let _lock = TEST_ENV_LOCK.lock().unwrap();
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
@@ -938,6 +951,33 @@ mod tests {
 
         let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(calls.as_slice(), [Some("/workspace/acp".to_string())]);
+    }
+
+    #[test]
+    fn terminal_handler_task_cwds_are_isolated_by_task_id() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
+        handler.set_task_cwd("task-a", "/workspace/task-a");
+        handler.set_task_cwd("task-b", "/workspace/task-b");
+
+        block_on(handler.execute(json!({"command": "pwd", "task_id": "task-a"}))).unwrap();
+        block_on(handler.execute(json!({"command": "pwd", "task_id": "task-b"}))).unwrap();
+        block_on(handler.execute(json!({"command": "pwd"}))).unwrap();
+
+        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            calls.as_slice(),
+            [
+                Some("/workspace/task-a".to_string()),
+                Some("/workspace/task-b".to_string()),
+                None
+            ]
+        );
     }
 
     #[test]
