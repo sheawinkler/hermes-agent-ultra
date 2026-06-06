@@ -20,6 +20,7 @@ pub fn canonical_provider_profile_id(provider: &str) -> Option<&'static str> {
         "openrouter" | "or" => Some("openrouter"),
         "nous" | "nous-portal" => Some("nous"),
         "qwen" | "qwen-oauth" | "qwen-portal" | "qwen-cli" => Some("qwen-oauth"),
+        "xiaomi" | "mimo" | "xiaomi-mimo" => Some("xiaomi"),
         "custom" | "ollama" | "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane"
         | "sglang" | "tgi" => Some("custom"),
         _ => None,
@@ -42,11 +43,20 @@ pub fn omit_temperature(profile: &str) -> bool {
     )
 }
 
+pub fn supports_vision(profile: &str) -> bool {
+    matches!(
+        canonical_provider_profile_id(profile),
+        Some("anthropic" | "nous" | "openrouter" | "qwen-oauth" | "xiaomi")
+    )
+}
+
 pub fn profile_auth_type(profile: &str) -> Option<&'static str> {
     match canonical_provider_profile_id(profile)? {
         "nous" => Some("oauth_device_code"),
         "qwen-oauth" => Some("oauth_external"),
-        "nvidia" | "kimi-coding" | "kimi-coding-cn" | "openrouter" | "custom" => Some("api_key"),
+        "nvidia" | "kimi-coding" | "kimi-coding-cn" | "openrouter" | "xiaomi" | "custom" => {
+            Some("api_key")
+        }
         _ => None,
     }
 }
@@ -59,6 +69,7 @@ pub fn profile_base_url(profile: &str) -> Option<&'static str> {
         "openrouter" => Some("https://openrouter.ai/api/v1"),
         "nous" => Some("https://inference-api.nousresearch.com/v1"),
         "qwen-oauth" => Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+        "xiaomi" => Some("https://api.xiaomimimo.com/v1"),
         _ => None,
     }
 }
@@ -75,6 +86,7 @@ pub fn local_control_key_for_profile(profile: Option<&str>, key: &str) -> bool {
             | "reasoning_config"
             | "provider_preferences"
             | "openrouter_min_coding_score"
+            | "supports_vision"
             | "session_id"
             | "qwen_session_metadata"
             | "ollama_num_ctx"
@@ -346,6 +358,8 @@ mod tests {
         assert_eq!(canonical_provider_profile_id("or"), Some("openrouter"));
         assert_eq!(canonical_provider_profile_id("nous-portal"), Some("nous"));
         assert_eq!(canonical_provider_profile_id("qwen"), Some("qwen-oauth"));
+        assert_eq!(canonical_provider_profile_id("mimo"), Some("xiaomi"));
+        assert_eq!(canonical_provider_profile_id("xiaomi-mimo"), Some("xiaomi"));
         assert_eq!(
             canonical_provider_profile_id("qwen-portal"),
             Some("qwen-oauth")
@@ -365,6 +379,9 @@ mod tests {
         assert!(profile_base_url("kimi-coding-cn")
             .unwrap()
             .contains("moonshot.cn"));
+        assert!(profile_base_url("mimo").unwrap().contains("xiaomimimo.com"));
+        assert!(supports_vision("xiaomi"));
+        assert!(!supports_vision("kimi"));
     }
 
     #[test]

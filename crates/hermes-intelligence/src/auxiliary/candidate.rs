@@ -260,4 +260,16 @@ mod tests {
         let v = chain.vision_only();
         assert_eq!(v.labels(), vec!["openrouter"]);
     }
+
+    #[test]
+    fn custom_and_direct_key_candidates_default_to_vision_capable() {
+        let custom = cand(AuxiliarySource::Custom, "custom-vision-model");
+        let xiaomi = cand(AuxiliarySource::DirectKey("xiaomi".into()), "mimo-v2.5-pro");
+        let kimi =
+            cand(AuxiliarySource::DirectKey("kimi".into()), "kimi-k2").with_supports_vision(false);
+
+        assert!(custom.supports_vision);
+        assert!(xiaomi.supports_vision);
+        assert!(!kimi.supports_vision);
+    }
 }

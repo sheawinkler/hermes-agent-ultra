@@ -553,8 +553,11 @@ impl GenericProvider {
         messages: &[Message],
         enabled: bool,
         effective_model: &str,
+        profile: Option<&str>,
+        extra_body: Option<&Value>,
     ) -> Value {
-        let model_supports_vision = supports_vision(effective_model);
+        let model_supports_vision =
+            Self::supports_multimodal_tool_results(profile, effective_model, extra_body);
         let mut out = Vec::with_capacity(messages.len());
         for msg in messages {
             let mut api_msg = serde_json::to_value(msg).unwrap_or_else(|_| serde_json::json!({}));
@@ -611,6 +614,20 @@ impl GenericProvider {
         Value::Array(out)
     }
 
+    fn supports_multimodal_tool_results(
+        profile: Option<&str>,
+        effective_model: &str,
+        extra_body: Option<&Value>,
+    ) -> bool {
+        if let Some(value) = extra_body
+            .and_then(|body| body.get("supports_vision"))
+            .and_then(Value::as_bool)
+        {
+            return value;
+        }
+        profile.is_some_and(provider_profiles::supports_vision) || supports_vision(effective_model)
+    }
+
     fn format_tools_for_openai_api(tools: &[ToolSchema]) -> Value {
         let formatted = Value::Array(
             tools
@@ -642,8 +659,13 @@ impl GenericProvider {
         } = request;
         let profile = self.profile_for_extra_body(extra_body);
         let strict_tool_sanitize = Self::should_sanitize_tool_calls(extra_body);
-        let mut api_messages =
-            Self::sanitize_messages_for_api(messages, strict_tool_sanitize, effective_model);
+        let mut api_messages = Self::sanitize_messages_for_api(
+            messages,
+            strict_tool_sanitize,
+            effective_model,
+            profile,
+            extra_body,
+        );
         provider_profiles::normalize_messages_for_profile(profile, &mut api_messages);
 
         let mut body = serde_json::json!({
@@ -2825,6 +2847,7 @@ mod tests {
             "provider_strict": true,
             "provider_profile": "openrouter",
             "provider_preferences": {"allow": ["anthropic"]},
+            "supports_vision": true,
             "temperature": 0.2
         });
         let mut body = serde_json::json!({"model": "m", "messages": []});
@@ -2834,6 +2857,7 @@ mod tests {
         assert!(body.get("provider_strict").is_none());
         assert!(body.get("provider_profile").is_none());
         assert!(body.get("provider_preferences").is_none());
+        assert!(body.get("supports_vision").is_none());
         assert_eq!(body["temperature"], 0.2);
     }
 
@@ -3065,7 +3089,8 @@ mod tests {
             }],
         )];
 
-        let sanitized = GenericProvider::sanitize_messages_for_api(&messages, true, "gpt-4o");
+        let sanitized =
+            GenericProvider::sanitize_messages_for_api(&messages, true, "gpt-4o", None, None);
         let tc = &sanitized[0]["tool_calls"][0];
         assert_eq!(tc["id"], "call_123");
         assert_eq!(tc["type"], "function");
@@ -3088,7 +3113,8 @@ mod tests {
                 extra_content: None,
             }],
         )];
-        let sanitized = GenericProvider::sanitize_messages_for_api(&messages, false, "gpt-4o");
+        let sanitized =
+            GenericProvider::sanitize_messages_for_api(&messages, false, "gpt-4o", None, None);
         let tc = &sanitized[0]["tool_calls"][0];
         assert_eq!(tc["name"], "read_file");
         assert_eq!(tc["arguments"], "{\"path\":\"a.txt\"}");
@@ -3103,7 +3129,8 @@ mod tests {
         ]);
         let marker = format!("{}{}", ACP_MULTIMODAL_PREFIX, parts);
         let messages = vec![Message::user(marker)];
-        let sanitized = GenericProvider::sanitize_messages_for_api(&messages, false, "gpt-4o");
+        let sanitized =
+            GenericProvider::sanitize_messages_for_api(&messages, false, "gpt-4o", None, None);
         assert!(sanitized[0]["content"].is_array());
         assert_eq!(sanitized[0]["content"][1]["type"], "image_url");
     }
@@ -3116,12 +3143,67 @@ mod tests {
         ]);
         let marker = format!("{}{}", ACP_MULTIMODAL_PREFIX, parts);
         let messages = vec![Message::user(marker)];
-        let sanitized =
-            GenericProvider::sanitize_messages_for_api(&messages, false, "deepseek-chat");
+        let sanitized = GenericProvider::sanitize_messages_for_api(
+            &messages,
+            false,
+            "deepseek-chat",
+            None,
+            None,
+        );
         let content = sanitized[0]["content"].as_str().expect("collapsed text");
         assert!(content.contains("inspect"));
         assert!(content.contains("[Attached image]"));
         assert!(!content.contains("image_url"));
+    }
+
+    #[test]
+    fn test_provider_profile_vision_preserves_acp_multimodal_parts() {
+        let parts = serde_json::json!([
+            {"type": "text", "text": "inspect"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
+        ]);
+        let messages = vec![Message::user(format!("{ACP_MULTIMODAL_PREFIX}{parts}"))];
+        let provider = GenericProvider::new("https://api.xiaomimimo.com/v1", "key", "mimo-v2-omni")
+            .with_provider_profile("mimo");
+
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "mimo-v2-omni",
+            extra_body: None,
+            stream: false,
+        });
+
+        assert_eq!(body["messages"][0]["content"][1]["type"], "image_url");
+    }
+
+    #[test]
+    fn test_supports_vision_override_can_disable_multimodal_parts() {
+        let parts = serde_json::json!([
+            {"type": "text", "text": "inspect"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
+        ]);
+        let messages = vec![Message::user(format!("{ACP_MULTIMODAL_PREFIX}{parts}"))];
+        let provider = GenericProvider::new("https://api.openai.com/v1", "key", "gpt-4o");
+        let extra = serde_json::json!({"supports_vision": false});
+
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "gpt-4o",
+            extra_body: Some(&extra),
+            stream: false,
+        });
+
+        let content = body["messages"][0]["content"]
+            .as_str()
+            .expect("collapsed text");
+        assert!(content.contains("[Attached image]"));
+        assert!(body.get("supports_vision").is_none());
     }
 
     #[test]

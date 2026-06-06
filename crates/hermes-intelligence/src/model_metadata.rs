@@ -306,6 +306,30 @@ pub fn known_models() -> Vec<ModelInfo> {
             output_cost_per_million: Some(0.40),
         },
         ModelInfo {
+            name: "mimo-v2.5-pro".into(),
+            provider: "xiaomi".into(),
+            context_window: 1_000_000,
+            max_output_tokens: None,
+            supports_vision: true,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_reasoning: false,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
+        },
+        ModelInfo {
+            name: "mimo-v2.5".into(),
+            provider: "xiaomi".into(),
+            context_window: 1_000_000,
+            max_output_tokens: None,
+            supports_vision: true,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_reasoning: false,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
+        },
+        ModelInfo {
             name: "deepseek-chat".into(),
             provider: "deepseek".into(),
             context_window: 128_000,
@@ -705,12 +729,18 @@ mod tests {
         let info = get_model_info("gpt-4o").unwrap();
         assert_eq!(info.context_window, 128_000);
         assert!(info.supports_vision);
+        let mimo = get_model_info("xiaomi/mimo-v2.5-pro").unwrap();
+        assert_eq!(mimo.provider, "xiaomi");
+        assert_eq!(mimo.context_window, 1_000_000);
+        assert!(mimo.supports_vision);
     }
 
     #[test]
     fn test_supports_vision() {
         assert!(supports_vision("gpt-4o"));
         assert!(supports_vision("claude-opus-4-6"));
+        assert!(supports_vision("xiaomi/mimo-v2.5-pro"));
+        assert!(supports_vision("mimo-v2.5"));
         assert!(!supports_vision("deepseek-chat"));
     }
 

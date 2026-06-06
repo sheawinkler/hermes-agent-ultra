@@ -683,6 +683,26 @@
     "46b2afc56b79": {
       "disposition": "ported",
       "notes": "Rust session persistence now runs PRAGMA wal_checkpoint(TRUNCATE) after startup auto-maintenance and exposes truncate_wal_checkpoint(); regression tests force WAL growth and assert the sessions.db-wal sidecar shrinks to zero."
+    },
+    "86c64cfb5bd5": {
+      "disposition": "superseded",
+      "notes": "Upstream Discord timeout fix targets Python discord.ui.View message editing. Rust Discord interactions are stateless REST responses/edits and have no discord.ui.View lifecycle; the existing model-picker edit contract already clears components when edits are sent."
+    },
+    "fff0561441d2": {
+      "disposition": "superseded",
+      "notes": "Google Chat OAuth client-secret anchoring is Python adapter-only in upstream; this Rust gateway surface has no Google Chat platform adapter or OAuth helper under crates/hermes-gateway, so no Rust runtime path exists to port."
+    },
+    "7309f3bef7d7": {
+      "disposition": "superseded",
+      "notes": "LINE inbound message-type mapping is Python adapter-only in upstream; this Rust gateway surface has no LINE platform adapter under crates/hermes-gateway and no MessageType.IMAGE crash path to port."
+    },
+    "f736d2be86b8": {
+      "disposition": "ported",
+      "notes": "Rust provider profiles now expose Xiaomi/MiMo as vision-capable, supports_vision can be overridden locally without leaking to provider requests, Xiaomi MiMo models carry vision metadata, and focused Rust tests prove ACP multimodal image parts stay native for vision providers."
+    },
+    "96cd37e212e8": {
+      "disposition": "superseded",
+      "notes": "Upstream leak fix targets Python TUI gateway detached transports and _SlashWorker subprocesses. Rust HTTP websocket handling has no detached slash-worker subprocess lifecycle; in-process SessionManager already exposes explicit remove/idle-expire cleanup APIs."
     }
   },
   "subject_patterns": [
