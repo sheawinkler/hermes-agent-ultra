@@ -1043,6 +1043,14 @@
     "ec46f5912e30": {
       "disposition": "ported",
       "notes": "Rust Gemini direct-provider setup and runtime defaults now use Google AI Studio's OpenAI-compatible /v1beta/openai endpoint, normalize manually supplied native Gemini base URLs to that endpoint, and defensively strip OpenAI-only extra_body/profile fields from native-Gemini request bodies while preserving thinking_config/thinkingConfig. The upstream native maxOutputTokens default is superseded by Rust's OpenAI-compatible max_tokens path."
+    },
+    "b459bac02c98": {
+      "disposition": "ported",
+      "notes": "Rust repo update/autostash safety now ignores the Desktop bootstrap marker .hermes-bootstrap-complete in the root .gitignore, with a hermes-cli regression test guarding that gitignore contract so bootstrap runtime state is not swept into update stashes."
+    },
+    "72eb42d9ecdf": {
+      "disposition": "superseded",
+      "notes": "The upstream Python source-checkout updater's stash/restore versus discard mode is superseded in Rust because top-level hermes update is non-mutating release-check behavior and does not run git checkout/pull/reset/clean against the source tree. The remaining shared safety contract, ignoring .hermes-bootstrap-complete so autostash paths do not capture Desktop bootstrap state, is ported separately under b459bac02c98."
     }
   },
   "subject_patterns": [

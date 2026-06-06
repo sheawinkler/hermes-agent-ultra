@@ -1059,6 +1059,17 @@ mod tests {
     }
 
     #[test]
+    fn update_autostash_ignores_desktop_bootstrap_marker() {
+        let gitignore = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../.gitignore"));
+        assert!(
+            gitignore
+                .lines()
+                .any(|line| line.trim() == ".hermes-bootstrap-complete"),
+            ".hermes-bootstrap-complete must stay ignored so update autostash paths do not sweep the Desktop bootstrap marker into a stash"
+        );
+    }
+
+    #[test]
     fn cli_parse_verify_provenance() {
         let cli = Cli::try_parse_from(vec![
             "hermes",

@@ -17,5 +17,10 @@ __pycache__/
 # and provider error details. Keep them off public main.
 artifacts/quorum/
 
+# Desktop/bootstrap install marker written into managed checkout roots. This is
+# Hermes-managed runtime state, not source, and must not be swept into update
+# autostashes by `git stash --include-untracked`.
+.hermes-bootstrap-complete
+
 # Generated PR infographics live in PR bodies, not in-tree.
 infographic/
