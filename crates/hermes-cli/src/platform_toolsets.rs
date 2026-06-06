@@ -450,4 +450,33 @@ mod tests {
         let names = resolve_platform_tool_names(&cfg, "cli", &reg);
         assert!(names.contains(&"CustomTool".to_string()));
     }
+
+    #[test]
+    fn platform_toolsets_resolve_live_mcp_server_aliases() {
+        let mut cfg = GatewayConfig::default();
+        cfg.platform_toolsets
+            .insert("cli".to_string(), vec!["dynserver".to_string()]);
+        let reg = registry_with_minimal_tools();
+        let schema = tool_schema(
+            "mcp_dynserver_ping",
+            "MCP server ping",
+            JsonSchema::new("object"),
+        );
+        reg.register(
+            "mcp_dynserver_ping",
+            "mcp-dynserver",
+            schema.clone(),
+            Arc::new(NoopTool { schema }),
+            Arc::new(|| true),
+            Vec::new(),
+            true,
+            "MCP server ping",
+            "x",
+            None,
+        );
+        reg.register_toolset_alias("dynserver", "mcp-dynserver");
+
+        let names = resolve_platform_tool_names(&cfg, "cli", &reg);
+        assert_eq!(names, vec!["mcp_dynserver_ping".to_string()]);
+    }
 }
