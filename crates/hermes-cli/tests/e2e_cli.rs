@@ -69,6 +69,51 @@ fn e2e_cli_config_set_dotted_llm_and_get_masks_key() {
 }
 
 #[test]
+fn e2e_cli_profile_list_and_current_show_custom_alias() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+
+    let mut create = Command::cargo_bin("hermes").expect("binary exists");
+    create.env("HERMES_HOME", home);
+    create.args(["profile", "create", "steve", "--no-alias"]);
+    create.assert().success();
+
+    let mut alias = Command::cargo_bin("hermes").expect("binary exists");
+    alias.env("HERMES_HOME", home);
+    alias.args(["profile", "alias", "steve", "--name", "qiaobusi"]);
+    alias.assert().success();
+
+    let mut list = Command::cargo_bin("hermes").expect("binary exists");
+    list.env("HERMES_HOME", home);
+    list.args(["profile", "list"]);
+    let list_out = list.assert().success().get_output().stdout.clone();
+    let list_text = std::str::from_utf8(&list_out).expect("utf8");
+    assert!(
+        list_text.contains("  steve (alias: qiaobusi)"),
+        "expected custom alias in profile list, got: {list_text:?}"
+    );
+
+    let mut use_alias = Command::cargo_bin("hermes").expect("binary exists");
+    use_alias.env("HERMES_HOME", home);
+    use_alias.args(["profile", "use", "qiaobusi"]);
+    use_alias.assert().success();
+
+    let mut current = Command::cargo_bin("hermes").expect("binary exists");
+    current.env("HERMES_HOME", home);
+    current.arg("profile");
+    let current_out = current.assert().success().get_output().stdout.clone();
+    let current_text = std::str::from_utf8(&current_out).expect("utf8");
+    assert!(
+        current_text.contains("Active:      steve"),
+        "expected resolved active profile, got: {current_text:?}"
+    );
+    assert!(
+        current_text.contains("Alias:       qiaobusi"),
+        "expected custom alias in current profile output, got: {current_text:?}"
+    );
+}
+
+#[test]
 fn e2e_cli_sessions_optimize_runs_against_isolated_home() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut cmd = Command::cargo_bin("hermes").expect("binary exists");

@@ -14137,6 +14137,39 @@ fn resolve_profile_name(
         .unwrap_or_else(|| requested.trim().to_string())
 }
 
+fn profile_alias_label(
+    aliases: &std::collections::BTreeMap<String, String>,
+    target: &str,
+) -> Option<String> {
+    let target = target.trim();
+    if target.is_empty() {
+        return None;
+    }
+    let mut custom = Vec::new();
+    let mut profile_named = Vec::new();
+    for (alias, resolved_target) in aliases {
+        let alias = alias.trim();
+        if alias.is_empty() || resolved_target.trim() != target {
+            continue;
+        }
+        if alias == target {
+            profile_named.push(alias.to_string());
+        } else {
+            custom.push(alias.to_string());
+        }
+    }
+    let selected = if custom.is_empty() {
+        profile_named
+    } else {
+        custom
+    };
+    match selected.as_slice() {
+        [] => None,
+        [one] => Some(format!("alias: {one}")),
+        many => Some(format!("aliases: {}", many.join(", "))),
+    }
+}
+
 fn resolve_profile_yaml_path(profiles_dir: &Path, name: &str) -> Option<PathBuf> {
     let yaml = profiles_dir.join(format!("{}.yaml", name));
     if yaml.exists() {
@@ -14247,6 +14280,13 @@ async fn run_profile(
                 read_active_profile_name(&profiles_dir).unwrap_or_else(|| "(none)".to_string());
             println!("Current profile:");
             println!("  Active:      {}", active);
+            if let Some(label) = profile_alias_label(&aliases, &active) {
+                if let Some(alias) = label.strip_prefix("alias: ") {
+                    println!("  Alias:       {alias}");
+                } else if let Some(alias) = label.strip_prefix("aliases: ") {
+                    println!("  Aliases:     {alias}");
+                }
+            }
             println!(
                 "  Model:       {}",
                 config.model.as_deref().unwrap_or("gpt-4o")
@@ -14293,7 +14333,10 @@ async fn run_profile(
                     } else {
                         " "
                     };
-                    println!("{} {}", marker, name);
+                    let alias = profile_alias_label(&aliases, name)
+                        .map(|label| format!(" ({label})"))
+                        .unwrap_or_default();
+                    println!("{} {}{}", marker, name, alias);
                 }
                 if !aliases.is_empty() {
                     println!("\nAliases:");
@@ -16234,6 +16277,25 @@ skills:
             validate_profile_name("prod-profile_1.2").expect("valid"),
             "prod-profile_1.2"
         );
+    }
+
+    #[test]
+    fn profile_alias_label_prefers_custom_aliases() {
+        let mut aliases = std::collections::BTreeMap::new();
+        aliases.insert("steve".to_string(), "steve".to_string());
+        aliases.insert("qiaobusi".to_string(), "steve".to_string());
+        aliases.insert("jobs".to_string(), "steve".to_string());
+        aliases.insert("other".to_string(), "research".to_string());
+
+        assert_eq!(
+            profile_alias_label(&aliases, "steve").as_deref(),
+            Some("aliases: jobs, qiaobusi")
+        );
+        assert_eq!(
+            profile_alias_label(&aliases, "research").as_deref(),
+            Some("alias: other")
+        );
+        assert_eq!(profile_alias_label(&aliases, "missing"), None);
     }
 
     #[tokio::test]
