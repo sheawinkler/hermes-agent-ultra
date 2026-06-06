@@ -1035,6 +1035,10 @@
     "338c07433699": {
       "disposition": "ported",
       "notes": "Rust ntfy sends now distinguish explicit tool/router targets from configured publish-topic replies: gateway-backed messaging marks caller recipients explicit, DeliveryTarget routing preserves is_explicit/thread hints for text and file sends, and NtfyAdapter publishes explicit topics directly while retaining configured publish_topic for non-explicit replies."
+    },
+    "ea266f43e9db": {
+      "disposition": "superseded",
+      "notes": "Rust LocalSearchBackend does not shell through rg/grep or parse merged stderr as matches; it compiles regexes with regex::Regex before traversal, skips unreadable/non-UTF8 files without diagnostic payload parsing, and now regression-tests invalid-regex errors plus partial read failures preserving content/files_only/count matches."
     }
   },
   "subject_patterns": [

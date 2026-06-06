@@ -928,6 +928,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn search_content_invalid_regex_surfaces_error() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::write(root.join("a.txt"), "needle\n").expect("write a.txt");
+
+        let backend = LocalSearchBackend::new();
+        let err = backend
+            .search_content(
+                "[",
+                root.to_str().expect("path str"),
+                Some("*.txt"),
+                Some(10),
+                Some(0),
+                Some("content"),
+                Some(0),
+            )
+            .await
+            .expect_err("invalid regex should fail before traversal");
+
+        assert!(err.to_string().contains("Invalid regex pattern"));
+    }
+
+    #[tokio::test]
+    async fn search_content_read_errors_keep_matches_and_do_not_pollute_modes() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let good = root.join("good.txt");
+        let bad = root.join("bad.txt");
+        std::fs::write(&good, "needle in readable file\n").expect("write good");
+        std::fs::write(&bad, b"\xff\xfe needle in non utf8 file").expect("write bad");
+
+        let backend = LocalSearchBackend::new();
+
+        let content = backend
+            .search_content(
+                "needle",
+                root.to_str().expect("path str"),
+                Some("*.txt"),
+                Some(10),
+                Some(0),
+                Some("content"),
+                Some(0),
+            )
+            .await
+            .expect("content search keeps readable matches");
+        let parsed: Value = serde_json::from_str(&content).expect("json");
+        let matches = parsed["matches"].as_array().expect("matches array");
+        assert_eq!(parsed["total"], 1);
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0]["file"]
+            .as_str()
+            .expect("match file")
+            .ends_with("good.txt"));
+        assert!(!content.contains("bad.txt"));
+
+        let files_only = backend
+            .search_content(
+                "needle",
+                root.to_str().expect("path str"),
+                Some("*.txt"),
+                Some(10),
+                Some(0),
+                Some("files_only"),
+                Some(0),
+            )
+            .await
+            .expect("files_only search keeps readable matches");
+        let parsed: Value = serde_json::from_str(&files_only).expect("json");
+        let files = parsed["files"].as_array().expect("files array");
+        assert_eq!(parsed["total"], 1);
+        assert_eq!(files.len(), 1);
+        assert!(files[0].as_str().expect("file").ends_with("good.txt"));
+        assert!(!files_only.contains("bad.txt"));
+
+        let counts = backend
+            .search_content(
+                "needle",
+                root.to_str().expect("path str"),
+                Some("*.txt"),
+                Some(10),
+                Some(0),
+                Some("count"),
+                Some(0),
+            )
+            .await
+            .expect("count search keeps readable matches");
+        let parsed: Value = serde_json::from_str(&counts).expect("json");
+        let counts = parsed["counts"].as_object().expect("counts object");
+        assert_eq!(parsed["total"], 1);
+        assert_eq!(counts.len(), 1);
+        assert!(counts.keys().any(|path| path.ends_with("good.txt")));
+        assert!(!counts.keys().any(|path| path.ends_with("bad.txt")));
+    }
+
+    #[tokio::test]
     async fn search_content_context_includes_surrounding_lines() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let root = tmp.path();
