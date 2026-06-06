@@ -943,6 +943,10 @@
     "30340eae2f6e": {
       "disposition": "ported",
       "notes": "Rust shared version_label includes the workspace package version and optional build git SHA captured by hermes-core build.rs, so CLI/gateway/ACP version surfaces share the same label helper."
+    },
+    "0f45509daf72": {
+      "disposition": "ported",
+      "notes": "Rust agent loop now treats formatted /steer redirects as trusted mid-turn out-of-band user messages appended to the last tool result, adds the shared steer channel system-prompt note when tools are available, and wires ACP active-session steer through the shared marker with regression tests preventing the old User guidance label."
     }
   },
   "subject_patterns": [

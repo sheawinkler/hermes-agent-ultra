@@ -33,6 +33,7 @@ pub mod reasoning;
 pub mod session_persistence;
 pub mod skill_orchestrator;
 pub mod smart_model_routing;
+pub mod steer;
 pub mod sub_agent_orchestrator;
 pub mod subdirectory_hints;
 pub mod tool_call_args;
@@ -76,6 +77,10 @@ pub use reasoning::parse_reasoning;
 
 // Re-export interrupt controller
 pub use interrupt::InterruptController;
+pub use steer::{
+    format_steer_marker, is_formatted_steer_marker, STEER_CHANNEL_NOTE, STEER_MARKER_CLOSE,
+    STEER_MARKER_OPEN,
+};
 
 // Re-export memory manager
 pub use memory_manager::{

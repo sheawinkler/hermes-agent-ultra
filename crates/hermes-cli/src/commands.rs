@@ -26905,7 +26905,7 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
             .get(&session.session_id)
             .cloned();
         if let Some(controller) = controller {
-            controller.interrupt(Some(format!("User guidance: {guidance}")));
+            controller.interrupt(Some(hermes_agent::format_steer_marker(guidance)));
             Ok(true)
         } else {
             Ok(false)
@@ -27554,6 +27554,39 @@ mod tests {
         handle_steer_command(&mut app, &["clear"]).expect("clear steer");
         assert!(current_session_steer(&app).is_none());
         assert!(latest_ui_assistant_text(&app).contains("Cleared session steering instruction."));
+    }
+
+    #[test]
+    fn acp_steer_prompt_interrupts_with_trusted_marker() {
+        let session_id = "session-steer-marker".to_string();
+        let controller = hermes_agent::InterruptController::new();
+        let interrupts = Arc::new(Mutex::new(HashMap::from([(
+            session_id.clone(),
+            controller.clone(),
+        )])));
+        let executor = CliAcpPromptExecutor {
+            config: Arc::new(GatewayConfig::default()),
+            tool_registry: Arc::new(hermes_tools::ToolRegistry::new()),
+            tool_schemas: Vec::new(),
+            interrupts,
+        };
+        let session = hermes_acp::SessionState::new(session_id, ".".to_string());
+
+        assert!(hermes_acp::AcpPromptExecutor::steer_prompt(
+            &executor,
+            &session,
+            "prefer the simpler fix"
+        )
+        .expect("steer prompt"));
+
+        let marker = controller
+            .take_interrupt_graceful()
+            .expect("interrupt set")
+            .expect("marker");
+        assert!(marker.contains(hermes_agent::STEER_MARKER_OPEN));
+        assert!(marker.contains("prefer the simpler fix"));
+        assert!(marker.contains(hermes_agent::STEER_MARKER_CLOSE));
+        assert!(!marker.contains("User guidance:"));
     }
 
     #[tokio::test]

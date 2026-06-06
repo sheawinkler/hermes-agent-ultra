@@ -60,7 +60,15 @@ use crate::smart_model_routing::{
     ResolvedCheapRuntime, TurnRouteSignature,
 };
 pub use crate::smart_model_routing::{ApiMode, CheapModelRouteConfig, SmartModelRoutingConfig};
+use crate::steer::{is_formatted_steer_marker, STEER_CHANNEL_NOTE};
 use crate::tool_call_args::{repair_tool_call_arguments, ToolArgumentRepair};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ToolBatchInterrupt {
+    None,
+    Stop,
+    Steer(String),
+}
 
 // ---------------------------------------------------------------------------
 // ToolRegistry
@@ -1826,6 +1834,41 @@ impl AgentLoop {
         }
     }
 
+    fn drain_tool_batch_interrupt(&self) -> ToolBatchInterrupt {
+        match self.interrupt.take_interrupt_graceful() {
+            None => ToolBatchInterrupt::None,
+            Some(Some(message)) if is_formatted_steer_marker(&message) => {
+                ToolBatchInterrupt::Steer(message)
+            }
+            Some(_) => ToolBatchInterrupt::Stop,
+        }
+    }
+
+    fn collect_tool_batch_interrupt(&self, steer_markers: &mut Vec<String>) -> bool {
+        match self.drain_tool_batch_interrupt() {
+            ToolBatchInterrupt::None => false,
+            ToolBatchInterrupt::Stop => true,
+            ToolBatchInterrupt::Steer(marker) => {
+                steer_markers.push(marker);
+                false
+            }
+        }
+    }
+
+    fn append_steer_markers_to_last_tool_result(
+        results: &mut [ToolResult],
+        steer_markers: &[String],
+    ) {
+        if steer_markers.is_empty() {
+            return;
+        }
+        if let Some(result) = results.last_mut() {
+            for marker in steer_markers {
+                result.content.push_str(marker);
+            }
+        }
+    }
+
     /// Create a new agent loop.
     pub fn new(
         config: AgentConfig,
@@ -3487,6 +3530,10 @@ impl AgentLoop {
         }
         if !tool_guidance.is_empty() {
             builder = builder.with_tool_guidance(&tool_guidance.join(" "));
+        }
+
+        if !tool_names.is_empty() {
+            builder = builder.with_block(STEER_CHANNEL_NOTE);
         }
 
         if !tool_names.is_empty() && self.should_inject_tool_enforcement(model_for_prompt) {
@@ -5473,7 +5520,8 @@ impl AgentLoop {
             }
 
             // --- Execute tool calls in parallel ---
-            if self.interrupt.take_interrupt_graceful().is_some() {
+            let mut steer_markers = Vec::new();
+            if self.collect_tool_batch_interrupt(&mut steer_markers) {
                 return Ok(self.graceful_interrupt_result(
                     &ctx,
                     total_turns,
@@ -5615,6 +5663,8 @@ impl AgentLoop {
                 }
                 inject_budget_pressure_into_last_tool_result(&mut results, w.as_deref());
             }
+            let stop_after_tool_results = self.collect_tool_batch_interrupt(&mut steer_markers);
+            Self::append_steer_markers_to_last_tool_result(&mut results, &steer_markers);
             let lsp_note = self.lsp_context_note(&tool_calls, &results);
 
             for result in results {
@@ -5631,6 +5681,17 @@ impl AgentLoop {
             }
             if let Some(note) = lsp_note {
                 ctx.add_message(Message::system(note));
+            }
+            if stop_after_tool_results {
+                return Ok(self.graceful_interrupt_result(
+                    &ctx,
+                    total_turns,
+                    &tool_errors,
+                    accumulated_usage.clone(),
+                    session_cost_usd,
+                    session_started_hooks_fired,
+                    persist_user_idx,
+                ));
             }
             if should_trip_tool_loop_guard(
                 governor_consecutive_error_turns,
@@ -6759,7 +6820,8 @@ impl AgentLoop {
                 }
             }
 
-            if self.interrupt.take_interrupt_graceful().is_some() {
+            let mut steer_markers = Vec::new();
+            if self.collect_tool_batch_interrupt(&mut steer_markers) {
                 return Ok(self.graceful_interrupt_result(
                     &ctx,
                     total_turns,
@@ -6897,6 +6959,8 @@ impl AgentLoop {
                 }
                 inject_budget_pressure_into_last_tool_result(&mut results, w.as_deref());
             }
+            let stop_after_tool_results = self.collect_tool_batch_interrupt(&mut steer_markers);
+            Self::append_steer_markers_to_last_tool_result(&mut results, &steer_markers);
             let lsp_note = self.lsp_context_note(&tool_calls, &results);
 
             for result in results {
@@ -6913,6 +6977,17 @@ impl AgentLoop {
             }
             if let Some(note) = lsp_note {
                 ctx.add_message(Message::system(note));
+            }
+            if stop_after_tool_results {
+                return Ok(self.graceful_interrupt_result(
+                    &ctx,
+                    total_turns,
+                    &tool_errors,
+                    accumulated_usage.clone(),
+                    session_cost_usd,
+                    session_started_hooks_fired,
+                    persist_user_idx,
+                ));
             }
             if should_trip_tool_loop_guard(
                 governor_consecutive_error_turns,
@@ -11358,6 +11433,172 @@ mod tests {
         let prompt = agent.build_system_prompt("", &[], "gpt-4o");
         assert!(!prompt.contains("## Active Personality (default)"));
         assert!(prompt.contains("You are Hermes Agent"));
+    }
+
+    #[test]
+    fn steer_channel_note_is_gated_on_tool_availability() {
+        use futures::stream::BoxStream;
+        use hermes_core::JsonSchema;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let without_tools = agent.build_system_prompt("", &[], "gpt-4o");
+        assert!(!without_tools.contains("## Mid-turn user steering"));
+
+        let tool_schemas = vec![ToolSchema::new(
+            "terminal",
+            "Terminal",
+            JsonSchema::new("object"),
+        )];
+        let with_tools = agent.build_system_prompt("", &tool_schemas, "gpt-4o");
+        assert!(with_tools.contains(STEER_CHANNEL_NOTE));
+        assert!(with_tools.contains(crate::steer::STEER_MARKER_OPEN));
+        assert!(with_tools.contains(crate::steer::STEER_MARKER_CLOSE));
+    }
+
+    #[tokio::test]
+    async fn mid_turn_steer_interrupt_is_appended_to_last_tool_result() {
+        use futures::stream::BoxStream;
+        use hermes_core::{FunctionCall, JsonSchema};
+
+        #[derive(Default)]
+        struct RecordingProvider {
+            calls: std::sync::Mutex<u32>,
+            second_call_messages: std::sync::Mutex<Vec<Message>>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for RecordingProvider {
+            async fn chat_completion(
+                &self,
+                messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                let mut calls = self.calls.lock().expect("calls lock");
+                *calls += 1;
+                if *calls == 1 {
+                    return Ok(hermes_core::LlmResponse {
+                        message: Message::assistant_with_tool_calls(
+                            None,
+                            vec![ToolCall {
+                                id: "call_1".to_string(),
+                                function: FunctionCall {
+                                    name: "steer_test".to_string(),
+                                    arguments: "{}".to_string(),
+                                },
+                                extra_content: None,
+                            }],
+                        ),
+                        usage: None,
+                        model: "dummy".into(),
+                        finish_reason: Some("tool_calls".into()),
+                    });
+                }
+
+                *self.second_call_messages.lock().expect("messages lock") = messages.to_vec();
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("done"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let interrupt = InterruptController::new();
+        let interrupt_for_tool = interrupt.clone();
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "steer_test",
+            ToolSchema::new("steer_test", "Steer test", JsonSchema::new("object")),
+            Arc::new(move |_args| {
+                interrupt_for_tool.interrupt(Some(crate::steer::format_steer_marker(
+                    "prefer the simpler fix",
+                )));
+                Ok("tool output".to_string())
+            }),
+        );
+        let provider = Arc::new(RecordingProvider::default());
+        let agent = AgentLoop::with_interrupt(
+            AgentConfig::default(),
+            Arc::new(registry),
+            provider.clone(),
+            interrupt,
+        );
+
+        let result = agent
+            .run(vec![Message::user("use the tool")], None)
+            .await
+            .expect("agent run");
+
+        assert!(!result.interrupted);
+        let second_call_messages = provider
+            .second_call_messages
+            .lock()
+            .expect("messages lock")
+            .clone();
+        let tool_message = second_call_messages
+            .iter()
+            .find(|message| message.role == MessageRole::Tool)
+            .expect("tool result in second call");
+        let content = tool_message.content.as_deref().expect("tool content");
+        assert!(content.contains("tool output"));
+        assert!(content.contains(crate::steer::STEER_MARKER_OPEN));
+        assert!(content.contains("prefer the simpler fix"));
+        assert!(content.contains(crate::steer::STEER_MARKER_CLOSE));
+        assert!(!content.contains("User guidance:"));
     }
 
     #[test]
