@@ -14,14 +14,158 @@ pub mod serve;
 pub mod server;
 pub mod transport;
 
-pub(crate) fn coerce_mcp_tool_arguments(arguments: serde_json::Value) -> serde_json::Value {
-    let serde_json::Value::String(raw) = arguments else {
+use serde_json::{Number, Value};
+
+pub(crate) fn coerce_mcp_tool_arguments_for_schema(
+    arguments: Value,
+    schema: Option<&Value>,
+) -> Value {
+    let mut arguments = coerce_whole_mcp_arguments(arguments);
+    let Some(schema) = schema else {
         return arguments;
     };
-    match serde_json::from_str::<serde_json::Value>(raw.trim()) {
-        Ok(parsed @ (serde_json::Value::Object(_) | serde_json::Value::Array(_))) => parsed,
-        _ => serde_json::Value::String(raw),
+    let Some(args) = arguments.as_object_mut() else {
+        return arguments;
+    };
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return arguments;
+    };
+
+    for (key, value) in args {
+        let Some(raw) = value.as_str().map(str::to_string) else {
+            continue;
+        };
+        let Some(property_schema) = properties.get(key) else {
+            continue;
+        };
+        if let Some(coerced) = coerce_string_for_schema(&raw, property_schema) {
+            *value = coerced;
+        }
     }
+
+    arguments
+}
+
+fn coerce_whole_mcp_arguments(arguments: Value) -> Value {
+    let Value::String(raw) = arguments else {
+        return arguments;
+    };
+    match serde_json::from_str::<Value>(raw.trim()) {
+        Ok(parsed @ (Value::Object(_) | Value::Array(_))) => parsed,
+        _ => Value::String(raw),
+    }
+}
+
+fn coerce_string_for_schema(raw: &str, schema: &Value) -> Option<Value> {
+    let trimmed = raw.trim();
+    if schema_allows_null(schema) && trimmed.eq_ignore_ascii_case("null") {
+        return Some(Value::Null);
+    }
+
+    for expected in schema_types(schema) {
+        if expected == "null" && trimmed.eq_ignore_ascii_case("null") {
+            return Some(Value::Null);
+        }
+        if let Some(coerced) = coerce_string_for_type(trimmed, expected) {
+            return Some(coerced);
+        }
+    }
+
+    None
+}
+
+fn coerce_string_for_type(raw: &str, expected: &str) -> Option<Value> {
+    match expected {
+        "integer" => coerce_number(raw, true),
+        "number" => coerce_number(raw, false),
+        "boolean" => coerce_boolean(raw),
+        "array" => coerce_json_shape(raw, Value::is_array),
+        "object" => coerce_json_shape(raw, Value::is_object),
+        _ => None,
+    }
+}
+
+fn coerce_number(raw: &str, integer_only: bool) -> Option<Value> {
+    let parsed = raw.parse::<f64>().ok()?;
+    if !parsed.is_finite() {
+        return None;
+    }
+    if parsed.fract() == 0.0 {
+        if parsed < i64::MIN as f64 || parsed > i64::MAX as f64 {
+            return None;
+        }
+        return Some(Value::Number(Number::from(parsed as i64)));
+    }
+    if integer_only {
+        return None;
+    }
+    Number::from_f64(parsed).map(Value::Number)
+}
+
+fn coerce_boolean(raw: &str) -> Option<Value> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "true" => Some(Value::Bool(true)),
+        "false" => Some(Value::Bool(false)),
+        _ => None,
+    }
+}
+
+fn coerce_json_shape(raw: &str, predicate: fn(&Value) -> bool) -> Option<Value> {
+    let parsed = serde_json::from_str::<Value>(raw).ok()?;
+    predicate(&parsed).then_some(parsed)
+}
+
+fn schema_types(schema: &Value) -> Vec<&str> {
+    let mut out = Vec::new();
+    collect_schema_types(schema, &mut out);
+    out
+}
+
+fn collect_schema_types<'a>(schema: &'a Value, out: &mut Vec<&'a str>) {
+    match schema.get("type") {
+        Some(Value::String(kind)) => out.push(kind),
+        Some(Value::Array(kinds)) => {
+            for kind in kinds {
+                if let Some(kind) = kind.as_str() {
+                    out.push(kind);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    for key in ["anyOf", "oneOf"] {
+        if let Some(variants) = schema.get(key).and_then(Value::as_array) {
+            for variant in variants {
+                collect_schema_types(variant, out);
+            }
+        }
+    }
+}
+
+fn schema_allows_null(schema: &Value) -> bool {
+    if schema.get("nullable").and_then(Value::as_bool) == Some(true) {
+        return true;
+    }
+    match schema.get("type") {
+        Some(Value::String(kind)) if kind == "null" => return true,
+        Some(Value::Array(kinds)) if kinds.iter().any(|kind| kind.as_str() == Some("null")) => {
+            return true;
+        }
+        _ => {}
+    }
+
+    for key in ["anyOf", "oneOf"] {
+        if schema
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|variants| variants.iter().any(schema_allows_null))
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 // ---------------------------------------------------------------------------

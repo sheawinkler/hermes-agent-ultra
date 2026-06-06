@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::{coerce_mcp_tool_arguments, McpError};
+use crate::{coerce_mcp_tool_arguments_for_schema, McpError};
 
 // ---------------------------------------------------------------------------
 // EventBridge — in-memory event queue with cursor-based polling
@@ -392,7 +392,7 @@ impl HermesMcpServe {
                     "type": "object",
                     "properties": {
                         "after_cursor": {"type": "integer", "description": "Cursor position (0 for all)."},
-                        "session_key": {"type": "string", "description": "Filter to one session."},
+                        "session_key": {"type": "string", "nullable": true, "description": "Filter to one session."},
                         "limit": {"type": "integer", "description": "Max events (default 20)."}
                     }
                 }
@@ -404,7 +404,7 @@ impl HermesMcpServe {
                     "type": "object",
                     "properties": {
                         "after_cursor": {"type": "integer", "description": "Cursor position."},
-                        "session_key": {"type": "string", "description": "Filter to one session."},
+                        "session_key": {"type": "string", "nullable": true, "description": "Filter to one session."},
                         "timeout_ms": {"type": "integer", "description": "Max wait in ms (default 30000)."}
                     }
                 }
@@ -591,8 +591,10 @@ impl HermesMcpServe {
                     .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| McpError::InvalidParams("missing tool name".into()))?;
-                let arguments = coerce_mcp_tool_arguments(
+                let schema = self.input_schema_for_tool(tool_name);
+                let arguments = coerce_mcp_tool_arguments_for_schema(
                     params.get("arguments").cloned().unwrap_or(json!({})),
+                    schema.as_ref(),
                 );
                 let result = self.handle_tool_call(tool_name, arguments).await?;
                 Ok(json!({
@@ -603,6 +605,13 @@ impl HermesMcpServe {
             "ping" => Ok(json!({})),
             _ => Err(McpError::MethodNotFound(method.to_string())),
         }
+    }
+
+    fn input_schema_for_tool(&self, tool_name: &str) -> Option<Value> {
+        self.tool_definitions()
+            .into_iter()
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some(tool_name))
+            .and_then(|tool| tool.get("inputSchema").cloned())
     }
 }
 
@@ -767,5 +776,32 @@ mod tests {
         let (events, _) = serve.event_bridge.poll(0, Some("s1"), 10);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].data["content"], "hello");
+    }
+
+    #[tokio::test]
+    async fn test_tools_call_coerces_nullable_session_filter() {
+        let store = Arc::new(InMemorySessionStore::new());
+        let serve = HermesMcpServe::new(store);
+        serve.event_bridge.push("message", "s1", HashMap::new());
+
+        let result = serve
+            .handle_request(
+                "tools/call",
+                json!({
+                    "name": "events_poll",
+                    "arguments": {
+                        "after_cursor": "0",
+                        "limit": "1",
+                        "session_key": "null"
+                    }
+                }),
+            )
+            .await
+            .expect("events_poll with nullable session_key");
+
+        assert!(!result["isError"].as_bool().unwrap_or(true));
+        let text = result["content"][0]["text"].as_str().unwrap_or("");
+        let payload: Value = serde_json::from_str(text).expect("tool result json");
+        assert_eq!(payload["events"].as_array().unwrap().len(), 1);
     }
 }

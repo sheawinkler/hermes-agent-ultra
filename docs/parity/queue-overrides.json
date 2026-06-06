@@ -1275,6 +1275,10 @@
     "27936ee02dfc": {
       "disposition": "superseded",
       "notes": "Python TUI queued-title retry over auto-title DB state is superseded by Rust gateway user title storage on Session.title, which is not delayed behind DB materialization."
+    },
+    "aa948832886a": {
+      "disposition": "ported",
+      "notes": "Rust MCP tools/call now applies schema-aware string argument coercion before dispatch: nullable object/array/type-union fields convert literal \"null\" to JSON null only when the inputSchema permits null, while integer, boolean, object, and array string values are coerced according to the exposed schema. Both generic McpServer and hermes mcp serve paths have focused runtime regression coverage."
     }
   },
   "subject_patterns": [
