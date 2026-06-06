@@ -693,6 +693,7 @@ impl TuiState {
     }
 
     fn begin_processing_cycle(&mut self, model: &str) {
+        let _ = hermes_core::credits::yield_current_nous_credits_flash_notice();
         self.processing = true;
         self.awaiting_run_complete = true;
         self.processing_started_at = Some(Instant::now());
@@ -5879,6 +5880,37 @@ mod tests {
             .recent_activity
             .last()
             .is_some_and(|line| line.contains("✔ completed in")));
+    }
+
+    #[test]
+    fn test_processing_cycle_yields_flash_credit_notice() {
+        hermes_core::credits::clear_last_nous_credits_state();
+        hermes_core::credits::capture_nous_credits_from_pairs([
+            ("x-nous-credits-version", "1"),
+            ("x-nous-credits-remaining-micros", "12000000"),
+            ("x-nous-credits-remaining-usd", "12.00"),
+            ("x-nous-credits-subscription-micros", "5000000"),
+            ("x-nous-credits-subscription-usd", "5.00"),
+            ("x-nous-credits-subscription-limit-micros", "10000000"),
+            ("x-nous-credits-subscription-limit-usd", "10.00"),
+            ("x-nous-credits-rollover-micros", "0"),
+            ("x-nous-credits-purchased-micros", "7000000"),
+            ("x-nous-credits-purchased-usd", "7.00"),
+            ("x-nous-credits-denominator-kind", "subscription_cap"),
+            ("x-nous-credits-paid-access", "true"),
+            ("x-nous-credits-as-of-ms", "1710000000000"),
+        ])
+        .expect("credits captured");
+        assert_eq!(
+            hermes_core::credits::last_nous_credits_notice_line().as_deref(),
+            Some("credits: 50% used - run /usage")
+        );
+
+        let mut state = TuiState::default();
+        state.begin_processing_cycle("nous:test-model");
+
+        assert_eq!(hermes_core::credits::last_nous_credits_notice_line(), None);
+        hermes_core::credits::clear_last_nous_credits_state();
     }
 
     #[test]

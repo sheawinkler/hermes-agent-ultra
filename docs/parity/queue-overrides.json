@@ -988,6 +988,10 @@
       "disposition": "ported",
       "notes": "Rust now captures Nous credits headers at the provider HTTP boundary, parses the v1 x-nous-credits and x-nous-tool-pool contracts with strict money/bool validation, stores a last-known credits snapshot, appends the credits block to CLI and gateway /usage output, and surfaces depleted/50/75/90 percent usage notices in the TUI status bar with focused Rust tests. Python dev fixtures and desktop-only scaffolding are superseded by the Rust runtime surface."
     },
+    "c79b6f23e696": {
+      "disposition": "ported",
+      "notes": "Rust credits notices now classify usage-band, grant-spent, and depleted states, suppress flash-style usage/grant-spent notices when a new TUI processing cycle starts, keep depleted sticky, and regression-test that yielded notices stay quiet until the band or grant-spent condition changes."
+    },
     "ffb53767bfff": {
       "disposition": "ported",
       "notes": "Rust config now resolves HERMES_PREFILL_MESSAGES_FILE > top-level prefill_messages_file > legacy agent.prefill_messages_file, loads JSON prefill messages relative to HERMES_HOME/config home, injects them ephemerally into CLI/HTTP/gateway/cron agent contexts through AgentConfig.prefill_messages, and strips them from returned/persisted history with focused config/CLI/HTTP/agent/cron/gateway tests."

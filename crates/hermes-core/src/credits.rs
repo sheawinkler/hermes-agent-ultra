@@ -11,7 +11,14 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, OnceLock};
 
 static LAST_NOUS_CREDITS: OnceLock<Mutex<Option<NousCreditsState>>> = OnceLock::new();
+static YIELDED_FLASH_NOTICES: OnceLock<Mutex<YieldedFlashNotices>> = OnceLock::new();
 static USD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^-?\d+\.\d{2}$").unwrap());
+
+#[derive(Debug, Default)]
+struct YieldedFlashNotices {
+    usage_band: Option<u8>,
+    grant_spent: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NousCreditsState {
@@ -56,6 +63,7 @@ where
     V: AsRef<str>,
 {
     let state = parse_nous_credits_headers(headers)?;
+    reconcile_yielded_flash_notices(&state);
     let store = LAST_NOUS_CREDITS.get_or_init(|| Mutex::new(None));
     if let Ok(mut guard) = store.lock() {
         *guard = Some(state.clone());
@@ -75,6 +83,12 @@ pub fn clear_last_nous_credits_state() {
     if let Ok(mut guard) = LAST_NOUS_CREDITS.get_or_init(|| Mutex::new(None)).lock() {
         *guard = None;
     }
+    if let Ok(mut guard) = YIELDED_FLASH_NOTICES
+        .get_or_init(|| Mutex::new(YieldedFlashNotices::default()))
+        .lock()
+    {
+        *guard = YieldedFlashNotices::default();
+    }
 }
 
 pub fn render_last_nous_credits_lines() -> Vec<String> {
@@ -85,14 +99,82 @@ pub fn render_last_nous_credits_lines() -> Vec<String> {
 }
 
 pub fn last_nous_credits_notice_line() -> Option<String> {
-    last_nous_credits_state().and_then(|state| nous_credits_notice_line(&state))
+    last_nous_credits_state().and_then(|state| {
+        let notice = nous_credits_notice(&state)?;
+        if notice_is_yielded(&notice) {
+            return None;
+        }
+        Some(notice.line)
+    })
 }
 
 pub fn nous_credits_notice_line(state: &NousCreditsState) -> Option<String> {
+    nous_credits_notice(state).map(|notice| notice.line)
+}
+
+/// Mark the current flash-style Nous credits notice as yielded.
+///
+/// Usage-band and grant-spent notices are heads-ups: they should remain visible
+/// until the next prompt starts, then stay quiet until their condition clears or
+/// the usage band changes. Depletion is intentionally sticky and is never yielded.
+pub fn yield_current_nous_credits_flash_notice() -> bool {
+    let Some(state) = last_nous_credits_state() else {
+        return false;
+    };
+    let Some(notice) = nous_credits_notice(&state) else {
+        return false;
+    };
+    let mut guard = match YIELDED_FLASH_NOTICES
+        .get_or_init(|| Mutex::new(YieldedFlashNotices::default()))
+        .lock()
+    {
+        Ok(guard) => guard,
+        Err(_) => return false,
+    };
+    match notice.kind {
+        NousCreditsNoticeKind::Usage { band } => {
+            guard.usage_band = Some(band);
+            true
+        }
+        NousCreditsNoticeKind::GrantSpent => {
+            guard.grant_spent = true;
+            true
+        }
+        NousCreditsNoticeKind::Depleted => false,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NousCreditsNoticeKind {
+    Usage { band: u8 },
+    GrantSpent,
+    Depleted,
+}
+
+struct NousCreditsNotice {
+    kind: NousCreditsNoticeKind,
+    line: String,
+}
+
+fn nous_credits_notice(state: &NousCreditsState) -> Option<NousCreditsNotice> {
     if state.depleted() {
-        return Some("credits: depleted - run /usage".to_string());
+        return Some(NousCreditsNotice {
+            kind: NousCreditsNoticeKind::Depleted,
+            line: "credits: depleted - run /usage".to_string(),
+        });
     }
     let used_fraction = state.used_fraction()?;
+    if grant_spent_condition(state, used_fraction) {
+        let top_up = if state.purchased_usd.trim().is_empty() {
+            format!("{} micros", state.purchased_micros)
+        } else {
+            state.purchased_usd.clone()
+        };
+        return Some(NousCreditsNotice {
+            kind: NousCreditsNoticeKind::GrantSpent,
+            line: format!("credits: grant spent - {top_up} top-up left"),
+        });
+    }
     let band = if used_fraction >= 0.90 {
         90
     } else if used_fraction >= 0.75 {
@@ -102,7 +184,63 @@ pub fn nous_credits_notice_line(state: &NousCreditsState) -> Option<String> {
     } else {
         return None;
     };
-    Some(format!("credits: {band}% used - run /usage"))
+    Some(NousCreditsNotice {
+        kind: NousCreditsNoticeKind::Usage { band },
+        line: format!("credits: {band}% used - run /usage"),
+    })
+}
+
+fn grant_spent_condition(state: &NousCreditsState, used_fraction: f64) -> bool {
+    used_fraction >= 1.0 && state.purchased_micros > 0
+}
+
+fn notice_is_yielded(notice: &NousCreditsNotice) -> bool {
+    let Ok(guard) = YIELDED_FLASH_NOTICES
+        .get_or_init(|| Mutex::new(YieldedFlashNotices::default()))
+        .lock()
+    else {
+        return false;
+    };
+    match notice.kind {
+        NousCreditsNoticeKind::Usage { band } => guard.usage_band == Some(band),
+        NousCreditsNoticeKind::GrantSpent => guard.grant_spent,
+        NousCreditsNoticeKind::Depleted => false,
+    }
+}
+
+fn reconcile_yielded_flash_notices(state: &NousCreditsState) {
+    let Ok(mut guard) = YIELDED_FLASH_NOTICES
+        .get_or_init(|| Mutex::new(YieldedFlashNotices::default()))
+        .lock()
+    else {
+        return;
+    };
+    if state.depleted() {
+        guard.usage_band = None;
+        guard.grant_spent = false;
+        return;
+    }
+    let used_fraction = state.used_fraction();
+    let current_usage_band = used_fraction.and_then(|used| {
+        if used >= 0.90 {
+            Some(90)
+        } else if used >= 0.75 {
+            Some(75)
+        } else if used >= 0.50 {
+            Some(50)
+        } else {
+            None
+        }
+    });
+    if guard.usage_band != current_usage_band {
+        guard.usage_band = None;
+    }
+    let current_grant_spent = used_fraction
+        .map(|used| grant_spent_condition(state, used))
+        .unwrap_or(false);
+    if !current_grant_spent {
+        guard.grant_spent = false;
+    }
 }
 
 pub fn render_nous_credits_lines(state: &NousCreditsState) -> Vec<String> {
@@ -298,6 +436,8 @@ fn valid_usd(value: &str) -> bool {
 mod tests {
     use super::*;
 
+    static TEST_CREDITS_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
     fn valid_headers() -> Vec<(&'static str, &'static str)> {
         vec![
             ("x-nous-credits-version", "1"),
@@ -366,6 +506,7 @@ mod tests {
 
     #[test]
     fn capture_and_render_last_state() {
+        let _guard = TEST_CREDITS_LOCK.lock().unwrap();
         clear_last_nous_credits_state();
         capture_nous_credits_from_pairs(valid_headers()).expect("captured");
         let lines = render_last_nous_credits_lines();
@@ -386,5 +527,74 @@ mod tests {
             nous_credits_notice_line(&state).as_deref(),
             Some("credits: depleted - run /usage")
         );
+    }
+
+    #[test]
+    fn usage_notice_yields_until_band_changes() {
+        let _guard = TEST_CREDITS_LOCK.lock().unwrap();
+        clear_last_nous_credits_state();
+        capture_nous_credits_from_pairs(valid_headers()).expect("captured");
+        assert_eq!(
+            last_nous_credits_notice_line().as_deref(),
+            Some("credits: 50% used - run /usage")
+        );
+
+        assert!(yield_current_nous_credits_flash_notice());
+        assert_eq!(last_nous_credits_notice_line(), None);
+
+        capture_nous_credits_from_pairs(valid_headers()).expect("captured");
+        assert_eq!(last_nous_credits_notice_line(), None);
+
+        let mut headers = valid_headers();
+        headers.retain(|(key, _)| *key != "x-nous-credits-subscription-micros");
+        headers.push(("x-nous-credits-subscription-micros", "2000000"));
+        headers.retain(|(key, _)| *key != "x-nous-credits-subscription-usd");
+        headers.push(("x-nous-credits-subscription-usd", "2.00"));
+        capture_nous_credits_from_pairs(headers).expect("captured");
+        assert_eq!(
+            last_nous_credits_notice_line().as_deref(),
+            Some("credits: 75% used - run /usage")
+        );
+        clear_last_nous_credits_state();
+    }
+
+    #[test]
+    fn grant_spent_notice_yields_but_depleted_stays_sticky() {
+        let _guard = TEST_CREDITS_LOCK.lock().unwrap();
+        clear_last_nous_credits_state();
+        let mut headers = valid_headers();
+        headers.retain(|(key, _)| *key != "x-nous-credits-subscription-micros");
+        headers.push(("x-nous-credits-subscription-micros", "0"));
+        headers.retain(|(key, _)| *key != "x-nous-credits-subscription-usd");
+        headers.push(("x-nous-credits-subscription-usd", "0.00"));
+        headers.retain(|(key, _)| *key != "x-nous-credits-purchased-micros");
+        headers.push(("x-nous-credits-purchased-micros", "990000000"));
+        headers.retain(|(key, _)| *key != "x-nous-credits-purchased-usd");
+        headers.push(("x-nous-credits-purchased-usd", "990.00"));
+
+        capture_nous_credits_from_pairs(headers.clone()).expect("captured");
+        assert_eq!(
+            last_nous_credits_notice_line().as_deref(),
+            Some("credits: grant spent - 990.00 top-up left")
+        );
+        assert!(yield_current_nous_credits_flash_notice());
+        assert_eq!(last_nous_credits_notice_line(), None);
+        capture_nous_credits_from_pairs(headers.clone()).expect("captured");
+        assert_eq!(last_nous_credits_notice_line(), None);
+
+        headers.retain(|(key, _)| *key != "x-nous-credits-paid-access");
+        headers.push(("x-nous-credits-paid-access", "false"));
+        headers.push(("x-nous-credits-disabled-reason", "out_of_credits"));
+        capture_nous_credits_from_pairs(headers).expect("captured");
+        assert_eq!(
+            last_nous_credits_notice_line().as_deref(),
+            Some("credits: depleted - run /usage")
+        );
+        assert!(!yield_current_nous_credits_flash_notice());
+        assert_eq!(
+            last_nous_credits_notice_line().as_deref(),
+            Some("credits: depleted - run /usage")
+        );
+        clear_last_nous_credits_state();
     }
 }
