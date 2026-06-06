@@ -9,6 +9,7 @@ use futures::StreamExt;
 use reqwest::Client;
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::Duration;
 
 use hermes_core::{
     AgentError, FunctionCall, FunctionCallDelta, LlmProvider, LlmResponse, Message, MessageRole,
@@ -18,6 +19,27 @@ use hermes_core::{
 use crate::credential_pool::CredentialPool;
 use crate::rate_limit::RateLimitTracker;
 
+fn request_timeout_duration(seconds: Option<f64>) -> Option<Duration> {
+    seconds.and_then(|value| {
+        if value.is_finite() && value > 0.0 {
+            Duration::try_from_secs_f64(value).ok()
+        } else {
+            None
+        }
+    })
+}
+
+fn build_codex_http_client(request_timeout: Option<Duration>) -> Client {
+    let mut builder = Client::builder();
+    if let Some(timeout) = request_timeout {
+        builder = builder.timeout(timeout);
+    }
+    builder.build().unwrap_or_else(|err| {
+        tracing::warn!("failed to build Codex HTTP client: {}", err);
+        Client::new()
+    })
+}
+
 /// OpenAI Responses API provider for Codex models.
 #[derive(Debug, Clone)]
 pub struct CodexProvider {
@@ -25,17 +47,20 @@ pub struct CodexProvider {
     pub api_key: String,
     pub model: String,
     client: Client,
+    request_timeout: Option<Duration>,
     pub rate_limiter: Option<Arc<RateLimitTracker>>,
     pub credential_pool: Option<Arc<CredentialPool>>,
 }
 
 impl CodexProvider {
     pub fn new(api_key: impl Into<String>) -> Self {
+        let request_timeout = None;
         Self {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: api_key.into(),
             model: "codex-mini-latest".to_string(),
-            client: Client::new(),
+            client: build_codex_http_client(request_timeout),
+            request_timeout,
             rate_limiter: None,
             credential_pool: None,
         }
@@ -49,6 +74,21 @@ impl CodexProvider {
     pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
         self
+    }
+
+    pub fn with_optional_request_timeout_seconds(mut self, seconds: Option<f64>) -> Self {
+        self.request_timeout = request_timeout_duration(seconds);
+        self.client = build_codex_http_client(self.request_timeout);
+        self
+    }
+
+    pub fn with_request_timeout_seconds(self, seconds: f64) -> Self {
+        self.with_optional_request_timeout_seconds(Some(seconds))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn configured_request_timeout(&self) -> Option<Duration> {
+        self.request_timeout
     }
 
     pub fn with_rate_limiter(mut self, tracker: Arc<RateLimitTracker>) -> Self {
@@ -501,6 +541,31 @@ impl LlmProvider for CodexProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_provider_request_timeout_seconds_configures_client() {
+        let provider = CodexProvider::new("sk-test").with_request_timeout_seconds(45.0);
+
+        assert_eq!(
+            provider.configured_request_timeout(),
+            Some(Duration::from_secs(45))
+        );
+    }
+
+    #[test]
+    fn codex_provider_ignores_invalid_request_timeout_seconds() {
+        for value in [
+            None,
+            Some(0.0),
+            Some(-1.0),
+            Some(f64::INFINITY),
+            Some(f64::NAN),
+        ] {
+            let provider =
+                CodexProvider::new("sk-test").with_optional_request_timeout_seconds(value);
+            assert_eq!(provider.configured_request_timeout(), None);
+        }
+    }
 
     #[test]
     fn test_convert_input_basic() {

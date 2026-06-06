@@ -722,6 +722,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                         api_key: cfg.api_key.clone(),
                         api_key_env: cfg.api_key_env.clone(),
                         base_url: cfg.base_url.clone(),
+                        request_timeout_seconds: cfg.request_timeout_seconds,
                         api_mode: cfg.api_mode.as_deref().and_then(parse_provider_api_mode),
                         command: cfg.command.clone(),
                         args: cfg.args.clone(),
@@ -937,6 +938,7 @@ fn resolve_model(default_model: &str, provider: Option<&str>, model: Option<&str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hermes_config::LlmProviderConfig;
 
     #[test]
     fn gateway_provider_aliases_resolve_to_direct_provider_defaults() {
@@ -952,5 +954,27 @@ mod tests {
             assert_eq!(canonical_gateway_provider_name(alias), canonical);
             assert_eq!(default_gateway_base_url(canonical), Some(base_url));
         }
+    }
+
+    #[test]
+    fn build_agent_config_maps_provider_request_timeout_seconds() {
+        let mut config = GatewayConfig::default();
+        config.llm_providers.insert(
+            "openai".to_string(),
+            LlmProviderConfig {
+                request_timeout_seconds: Some(45.5),
+                ..Default::default()
+            },
+        );
+
+        let agent_config = build_agent_config(&config, "openai:gpt-4o");
+
+        assert_eq!(
+            agent_config
+                .runtime_providers
+                .get("openai")
+                .and_then(|cfg| cfg.request_timeout_seconds),
+            Some(45.5)
+        );
     }
 }

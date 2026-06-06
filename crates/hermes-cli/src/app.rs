@@ -19,8 +19,8 @@ use hermes_agent::bedrock::{
 };
 use hermes_agent::plugins::HookType;
 use hermes_agent::provider::{
-    openai_codex_provider, AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
-    OPENAI_CODEX_BASE_URL,
+    openai_codex_provider_with_timeout, AnthropicProvider, GenericProvider, OpenAiProvider,
+    OpenRouterProvider, OPENAI_CODEX_BASE_URL,
 };
 use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
@@ -4536,6 +4536,27 @@ mod tests {
     }
 
     #[test]
+    fn test_build_agent_config_maps_runtime_provider_request_timeout_seconds() {
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "anthropic".to_string(),
+            LlmProviderConfig {
+                api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                request_timeout_seconds: Some(45.5),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let agent_cfg = build_agent_config(&cfg, "anthropic:claude-sonnet-4.5");
+        let runtime = agent_cfg
+            .runtime_providers
+            .get("anthropic")
+            .expect("runtime provider should exist");
+
+        assert_eq!(runtime.request_timeout_seconds, Some(45.5));
+    }
+
+    #[test]
     fn test_build_agent_config_maps_delegation_max_spawn_depth_without_legacy_ceiling() {
         let mut cfg = GatewayConfig::default();
         cfg.delegation.max_spawn_depth = Some(99);
@@ -6096,6 +6117,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                         api_key: cfg.api_key.clone(),
                         api_key_env: cfg.api_key_env.clone(),
                         base_url: cfg.base_url.clone(),
+                        request_timeout_seconds: cfg.request_timeout_seconds,
                         api_mode: cfg.api_mode.as_deref().and_then(parse_provider_api_mode),
                         command: cfg.command.clone(),
                         args: cfg.args.clone(),
@@ -6766,6 +6788,7 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             }
         })
     });
+    let request_timeout_seconds = provider_config.and_then(|c| c.request_timeout_seconds);
 
     let default_base_url = provider_default_base_url(provider_name.as_str())
         .or_else(|| provider_default_base_url(runtime_provider.as_str()));
@@ -6812,19 +6835,24 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
 
     match runtime_provider.as_str() {
         "openai" => {
-            let mut p = OpenAiProvider::new(&api_key).with_model(model_name.as_str());
+            let mut p = OpenAiProvider::new(&api_key)
+                .with_model(model_name.as_str())
+                .with_optional_request_timeout_seconds(request_timeout_seconds);
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
             Arc::new(p)
         }
-        "openai-codex" | "codex" => Arc::new(openai_codex_provider(
+        "openai-codex" | "codex" => Arc::new(openai_codex_provider_with_timeout(
             &api_key,
             model_name.as_str(),
             base_url.as_deref(),
+            request_timeout_seconds,
         )),
         "anthropic" => {
-            let mut p = AnthropicProvider::new(&api_key).with_model(model_name.as_str());
+            let mut p = AnthropicProvider::new(&api_key)
+                .with_model(model_name.as_str())
+                .with_optional_request_timeout_seconds(request_timeout_seconds);
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
@@ -6842,25 +6870,33 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             Arc::new(p)
         }
         "openrouter" => {
-            let p = OpenRouterProvider::new(&api_key).with_model(model_name.as_str());
+            let p = OpenRouterProvider::new(&api_key)
+                .with_model(model_name.as_str())
+                .with_optional_request_timeout_seconds(request_timeout_seconds);
             Arc::new(p)
         }
         "qwen" | "qwen-oauth" => {
-            let mut p = QwenProvider::new(&api_key).with_model(model_name.as_str());
+            let mut p = QwenProvider::new(&api_key)
+                .with_model(model_name.as_str())
+                .with_optional_request_timeout_seconds(request_timeout_seconds);
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
             Arc::new(p)
         }
         "kimi" | "moonshot" => {
-            let mut p = KimiProvider::new(&api_key).with_model(model_name.as_str());
+            let mut p = KimiProvider::new(&api_key)
+                .with_model(model_name.as_str())
+                .with_optional_request_timeout_seconds(request_timeout_seconds);
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
             Arc::new(p)
         }
         "minimax" => {
-            let mut p = MiniMaxProvider::new(&api_key).with_model(model_name.as_str());
+            let mut p = MiniMaxProvider::new(&api_key)
+                .with_model(model_name.as_str())
+                .with_optional_request_timeout_seconds(request_timeout_seconds);
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
@@ -6870,11 +6906,14 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             let url = base_url.unwrap_or_else(|| STEPFUN_BASE_URL.to_string());
             Arc::new(
                 GenericProvider::new(url, &api_key, model_name.as_str())
+                    .with_optional_request_timeout_seconds(request_timeout_seconds)
                     .with_provider_profile(runtime_provider.as_str()),
             )
         }
         "nous" => {
-            let mut p = NousProvider::new(&api_key).with_model(model_name.as_str());
+            let mut p = NousProvider::new(&api_key)
+                .with_model(model_name.as_str())
+                .with_optional_request_timeout_seconds(request_timeout_seconds);
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
@@ -6885,13 +6924,15 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
                 base_url.unwrap_or_else(|| COPILOT_BASE_URL.to_string()),
                 &api_key,
             )
-            .with_model(model_name.as_str());
+            .with_model(model_name.as_str())
+            .with_optional_request_timeout_seconds(request_timeout_seconds);
             Arc::new(p)
         }
         "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi" => {
             let url = base_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
             Arc::new(
                 GenericProvider::new(url, &api_key, model_name.as_str())
+                    .with_optional_request_timeout_seconds(request_timeout_seconds)
                     .with_provider_profile(runtime_provider.as_str()),
             )
         }
@@ -6899,6 +6940,7 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
             Arc::new(
                 GenericProvider::new(url, &api_key, model_name.as_str())
+                    .with_optional_request_timeout_seconds(request_timeout_seconds)
                     .with_provider_profile(runtime_provider.as_str()),
             )
         }

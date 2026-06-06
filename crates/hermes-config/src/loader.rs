@@ -563,12 +563,13 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
             || provider.extra_body.is_some()
             || provider.rate_limit.is_some()
             || !provider.credential_pool.is_empty()
+            || provider.request_timeout_seconds.is_some()
             || provider.oauth_token_url.is_some()
             || provider.oauth_client_id.is_some()
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -588,6 +589,19 @@ fn parse_config_bool(key: &str, value: &str) -> Result<bool, ConfigError> {
         _ => Err(ConfigError::ValidationError(format!(
             "{key} must be a boolean: {value}"
         ))),
+    }
+}
+
+fn parse_positive_timeout_seconds(key: &str, value: &str) -> Result<f64, ConfigError> {
+    let parsed: f64 = value.parse().map_err(|_| {
+        ConfigError::ValidationError(format!("{key} must be a positive finite number: {value}"))
+    })?;
+    if parsed.is_finite() && parsed > 0.0 {
+        Ok(parsed)
+    } else {
+        Err(ConfigError::ValidationError(format!(
+            "{key} must be a positive finite number: {value}"
+        )))
     }
 }
 
@@ -821,11 +835,15 @@ fn apply_user_config_patch_dotted(
                         .filter(|s| !s.is_empty())
                         .collect();
                 }
+                "request_timeout_seconds" => {
+                    entry.request_timeout_seconds =
+                        Some(parse_positive_timeout_seconds(key, value)?);
+                }
                 "oauth_token_url" => entry.oauth_token_url = Some(value.to_string()),
                 "oauth_client_id" => entry.oauth_client_id = Some(value.to_string()),
                 other => {
                     return Err(ConfigError::NotFound(format!(
-                        "unknown llm field: llm.{}.{} (supported: api_key, api_key_env, base_url, model, api_mode, command, args, oauth_token_url, oauth_client_id)",
+                        "unknown llm field: llm.{}.{} (supported: api_key, api_key_env, base_url, model, api_mode, command, args, request_timeout_seconds, oauth_token_url, oauth_client_id)",
                         provider, other
                     )));
                 }
@@ -1009,6 +1027,12 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .get(*provider)
             .map(|c| c.args.join(","))
             .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["llm", provider, "request_timeout_seconds"] => Ok(config
+            .llm_providers
+            .get(*provider)
+            .and_then(|c| c.request_timeout_seconds)
+            .map(|value| value.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
         ["llm", provider, "oauth_token_url"] => Ok(config
             .llm_providers
@@ -1995,6 +2019,13 @@ pub fn validate_config(config: &GatewayConfig) -> Result<(), ConfigError> {
                 ))
             })?;
         }
+        if let Some(timeout) = provider.request_timeout_seconds {
+            if !timeout.is_finite() || timeout <= 0.0 {
+                return Err(ConfigError::ValidationError(format!(
+                    "llm_providers.{name}.request_timeout_seconds must be a positive finite number"
+                )));
+            }
+        }
     }
 
     Ok(())
@@ -2112,6 +2143,49 @@ mod tests {
                 .and_then(|cfg| cfg.api_key.as_deref()),
             Some("tok-abc")
         );
+    }
+
+    #[test]
+    fn normalize_provider_secrets_keeps_timeout_only_provider_entries() {
+        let mut config = GatewayConfig::default();
+        config.llm_providers.insert(
+            "anthropic".into(),
+            crate::config::LlmProviderConfig {
+                request_timeout_seconds: Some(45.0),
+                ..Default::default()
+            },
+        );
+
+        normalize_provider_secrets(&mut config);
+
+        assert_eq!(
+            config
+                .llm_providers
+                .get("anthropic")
+                .and_then(|cfg| cfg.request_timeout_seconds),
+            Some(45.0)
+        );
+    }
+
+    #[test]
+    fn validate_llm_provider_request_timeout_seconds() {
+        let mut config = GatewayConfig::default();
+        config.llm_providers.insert(
+            "anthropic".into(),
+            crate::config::LlmProviderConfig {
+                request_timeout_seconds: Some(45.0),
+                ..Default::default()
+            },
+        );
+        assert!(validate_config(&config).is_ok());
+
+        config
+            .llm_providers
+            .get_mut("anthropic")
+            .expect("provider")
+            .request_timeout_seconds = Some(0.0);
+        let err = validate_config(&config).unwrap_err().to_string();
+        assert!(err.contains("request_timeout_seconds"));
     }
 
     #[test]
@@ -2719,6 +2793,7 @@ llm_providers:
         apply_user_config_patch(&mut c, "llm.openai.api_mode", "codex-responses").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.command", "copilot-language-server").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.args", "--stdio,--model,gpt-4o-mini").unwrap();
+        apply_user_config_patch(&mut c, "llm.openai.request_timeout_seconds", "45.5").unwrap();
         apply_user_config_patch(&mut c, "proxy.http", "http://127.0.0.1:8080").unwrap();
         apply_user_config_patch(&mut c, "budget.max_result_size_chars", "500").unwrap();
         apply_user_config_patch(&mut c, "sessions.auto_prune", "true").unwrap();
@@ -2750,6 +2825,13 @@ llm_providers:
             ]
         );
         assert_eq!(
+            c.llm_providers
+                .get("openai")
+                .unwrap()
+                .request_timeout_seconds,
+            Some(45.5)
+        );
+        assert_eq!(
             c.proxy.as_ref().unwrap().http_proxy.as_deref(),
             Some("http://127.0.0.1:8080")
         );
@@ -2774,12 +2856,22 @@ llm_providers:
             "--stdio,--model,gpt-4o-mini"
         );
         assert_eq!(
+            user_config_field_display(&c, "llm.openai.request_timeout_seconds").unwrap(),
+            "45.5"
+        );
+        assert_eq!(
             user_config_field_display(&c, "sessions.auto_prune").unwrap(),
             "true"
         );
         assert_eq!(
             user_config_field_display(&c, "sessions.retention_days").unwrap(),
             "30"
+        );
+        assert!(
+            apply_user_config_patch(&mut c, "llm.openai.request_timeout_seconds", "0").is_err()
+        );
+        assert!(
+            apply_user_config_patch(&mut c, "llm.openai.request_timeout_seconds", "fast").is_err()
         );
     }
 

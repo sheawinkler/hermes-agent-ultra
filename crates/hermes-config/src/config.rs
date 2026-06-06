@@ -899,6 +899,10 @@ pub struct LlmProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
 
+    /// Per-request timeout in seconds for this provider transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_timeout_seconds: Option<f64>,
+
     /// Optional external-process command used by runtime-provider resolvers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
@@ -952,6 +956,7 @@ impl Default for LlmProviderConfig {
             api_key: None,
             api_key_env: None,
             base_url: None,
+            request_timeout_seconds: None,
             command: None,
             args: Vec::new(),
             model: None,
@@ -1499,6 +1504,29 @@ delegation:
         let json = serde_json::to_string(&cfg).unwrap();
         let back: GatewayConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.delegation.max_spawn_depth, Some(99));
+    }
+
+    #[test]
+    fn llm_provider_config_accepts_request_timeout_seconds() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+llm_providers:
+  anthropic:
+    api_key_env: ANTHROPIC_API_KEY
+    request_timeout_seconds: 45.5
+"#,
+        )
+        .expect("provider config should deserialize");
+
+        assert_eq!(
+            cfg.llm_providers
+                .get("anthropic")
+                .and_then(|provider| provider.request_timeout_seconds),
+            Some(45.5)
+        );
+
+        let yaml = serde_yaml::to_string(&cfg).expect("serialize config");
+        assert!(yaml.contains("request_timeout_seconds: 45.5"));
     }
 
     #[test]

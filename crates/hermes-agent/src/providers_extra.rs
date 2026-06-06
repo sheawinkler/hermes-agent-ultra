@@ -77,6 +77,12 @@ impl QwenProvider {
             inner: self.inner.with_base_url(url),
         }
     }
+
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
+        Self {
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
+        }
+    }
 }
 
 #[async_trait]
@@ -147,6 +153,12 @@ impl KimiProvider {
             inner: self.inner.with_base_url(url),
         }
     }
+
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
+        Self {
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
+        }
+    }
 }
 
 #[async_trait]
@@ -214,6 +226,12 @@ impl MiniMaxProvider {
     pub fn with_base_url(self, url: impl Into<String>) -> Self {
         Self {
             inner: self.inner.with_base_url(url),
+        }
+    }
+
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
+        Self {
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
         }
     }
 }
@@ -288,6 +306,12 @@ impl NousProvider {
     pub fn with_base_url(self, url: impl Into<String>) -> Self {
         Self {
             inner: self.inner.with_base_url(url),
+        }
+    }
+
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
+        Self {
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
         }
     }
 }
@@ -367,6 +391,12 @@ impl CopilotProvider {
             inner: self.inner.with_base_url(url),
         }
     }
+
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
+        Self {
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
+        }
+    }
 }
 
 #[async_trait]
@@ -412,6 +442,7 @@ impl LlmProvider for CopilotProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn qwen_provider_defaults() {
@@ -487,5 +518,46 @@ mod tests {
         let p = CopilotProvider::new("https://copilot.example.com/v1", "token")
             .with_model("gpt-4o-mini");
         assert_eq!(p.inner.model, "gpt-4o-mini");
+    }
+
+    #[test]
+    fn openai_compatible_extra_providers_apply_request_timeout_seconds() {
+        let timeout = Some(Duration::from_secs(45));
+
+        assert_eq!(
+            QwenProvider::new("test-key")
+                .with_optional_request_timeout_seconds(Some(45.0))
+                .inner
+                .configured_request_timeout(),
+            timeout
+        );
+        assert_eq!(
+            KimiProvider::new("test-key")
+                .with_optional_request_timeout_seconds(Some(45.0))
+                .inner
+                .configured_request_timeout(),
+            timeout
+        );
+        assert_eq!(
+            MiniMaxProvider::new("test-key")
+                .with_optional_request_timeout_seconds(Some(45.0))
+                .inner
+                .configured_request_timeout(),
+            timeout
+        );
+        assert_eq!(
+            NousProvider::new("test-key")
+                .with_optional_request_timeout_seconds(Some(45.0))
+                .inner
+                .configured_request_timeout(),
+            timeout
+        );
+        assert_eq!(
+            CopilotProvider::new("https://copilot.example.com/v1", "token")
+                .with_optional_request_timeout_seconds(Some(45.0))
+                .inner
+                .configured_request_timeout(),
+            timeout
+        );
     }
 }

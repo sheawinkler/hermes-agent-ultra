@@ -196,6 +196,9 @@ pub struct RuntimeProviderConfig {
     pub api_key_env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// Per-request timeout in seconds for this provider transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_timeout_seconds: Option<f64>,
     /// Optional provider-specific wire protocol override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_mode: Option<ApiMode>,
@@ -2874,6 +2877,28 @@ impl AgentLoop {
             })
     }
 
+    fn resolve_runtime_request_timeout_seconds(&self, provider: &str) -> Option<f64> {
+        self.config
+            .runtime_providers
+            .get(provider)
+            .and_then(|c| c.request_timeout_seconds)
+            .or_else(|| {
+                let alias = match provider {
+                    "codex" => "openai-codex",
+                    "openai-codex" => "codex",
+                    "qwen" => "qwen-oauth",
+                    "qwen-oauth" => "qwen",
+                    "kimi" => "moonshot",
+                    "moonshot" => "kimi",
+                    _ => return None,
+                };
+                self.config
+                    .runtime_providers
+                    .get(alias)
+                    .and_then(|c| c.request_timeout_seconds)
+            })
+    }
+
     fn resolve_oauth_store_api_key(&self, provider: &str) -> Option<String> {
         let provider_key = match provider {
             "openai" => "openai",
@@ -3349,6 +3374,7 @@ impl AgentLoop {
                 ))
             })?;
         let base_url = self.resolve_runtime_base_url(provider, route_base_url);
+        let request_timeout_seconds = self.resolve_runtime_request_timeout_seconds(provider);
         let mode = api_mode.unwrap_or(&self.config.api_mode);
         let normalized_model_name =
             crate::model_normalize::normalize_model_for_provider(model_name, provider);
@@ -3357,7 +3383,9 @@ impl AgentLoop {
         let provider_obj: Arc<dyn LlmProvider> = match provider {
             "openai" | "codex" | "openai-codex" => {
                 if matches!(mode, ApiMode::CodexResponses) {
-                    let mut p = CodexProvider::new(&api_key).with_model(model_name);
+                    let mut p = CodexProvider::new(&api_key)
+                        .with_model(model_name)
+                        .with_optional_request_timeout_seconds(request_timeout_seconds);
                     if let Some(ref url) = base_url {
                         p = p.with_base_url(url.clone());
                     }
@@ -3366,7 +3394,9 @@ impl AgentLoop {
                     }
                     Arc::new(p)
                 } else {
-                    let mut p = OpenAiProvider::new(&api_key).with_model(model_name);
+                    let mut p = OpenAiProvider::new(&api_key)
+                        .with_model(model_name)
+                        .with_optional_request_timeout_seconds(request_timeout_seconds);
                     if let Some(url) = base_url {
                         p = p.with_base_url(url);
                     }
@@ -3377,7 +3407,9 @@ impl AgentLoop {
                 }
             }
             "anthropic" => {
-                let mut p = AnthropicProvider::new(&api_key).with_model(model_name);
+                let mut p = AnthropicProvider::new(&api_key)
+                    .with_model(model_name)
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
@@ -3387,28 +3419,36 @@ impl AgentLoop {
                 Arc::new(p)
             }
             "openrouter" => {
-                let mut p = OpenRouterProvider::new(&api_key).with_model(model_name);
+                let mut p = OpenRouterProvider::new(&api_key)
+                    .with_model(model_name)
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(pool) = credential_pool {
                     p = p.with_credential_pool(pool.clone());
                 }
                 Arc::new(p)
             }
             "qwen" | "qwen-oauth" => {
-                let mut p = QwenProvider::new(&api_key).with_model(model_name);
+                let mut p = QwenProvider::new(&api_key)
+                    .with_model(model_name)
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
                 Arc::new(p)
             }
             "kimi" | "moonshot" => {
-                let mut p = KimiProvider::new(&api_key).with_model(model_name);
+                let mut p = KimiProvider::new(&api_key)
+                    .with_model(model_name)
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
                 Arc::new(p)
             }
             "minimax" => {
-                let mut p = MiniMaxProvider::new(&api_key).with_model(model_name);
+                let mut p = MiniMaxProvider::new(&api_key)
+                    .with_model(model_name)
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
@@ -3418,11 +3458,15 @@ impl AgentLoop {
                 let url =
                     base_url.unwrap_or_else(|| "https://api.stepfun.ai/step_plan/v1".to_string());
                 Arc::new(
-                    GenericProvider::new(url, &api_key, model_name).with_provider_profile(provider),
+                    GenericProvider::new(url, &api_key, model_name)
+                        .with_optional_request_timeout_seconds(request_timeout_seconds)
+                        .with_provider_profile(provider),
                 )
             }
             "nous" => {
-                let mut p = NousProvider::new(&api_key).with_model(model_name);
+                let mut p = NousProvider::new(&api_key)
+                    .with_model(model_name)
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
@@ -3442,13 +3486,15 @@ impl AgentLoop {
                     base_url.unwrap_or_else(|| "https://api.githubcopilot.com".to_string()),
                     &api_key,
                 )
-                .with_model(model_name);
+                .with_model(model_name)
+                .with_optional_request_timeout_seconds(request_timeout_seconds);
                 Arc::new(p)
             }
             _ => {
                 let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-                let mut g =
-                    GenericProvider::new(url, &api_key, model_name).with_provider_profile(provider);
+                let mut g = GenericProvider::new(url, &api_key, model_name)
+                    .with_optional_request_timeout_seconds(request_timeout_seconds)
+                    .with_provider_profile(provider);
                 if let Some(pool) = credential_pool {
                     g = g.with_credential_pool(pool.clone());
                 }
@@ -10347,6 +10393,7 @@ mod tests {
                 provider.to_string(),
                 RuntimeProviderConfig {
                     base_url: Some(base_url.to_string()),
+                    request_timeout_seconds: None,
                     api_mode: None,
                     ..RuntimeProviderConfig::default()
                 },
@@ -11747,6 +11794,7 @@ mod tests {
                 api_key: Some("sk-test-key".to_string()),
                 api_key_env: None,
                 base_url: None,
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: None,
                 args: Vec::new(),
@@ -11829,6 +11877,7 @@ mod tests {
                 api_key: Some("sk-test-key".to_string()),
                 api_key_env: None,
                 base_url: None,
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: None,
                 args: Vec::new(),
@@ -12133,6 +12182,7 @@ mod tests {
                 api_key: Some("sk-test-key".to_string()),
                 api_key_env: None,
                 base_url: Some("https://api.openai.com/v1".to_string()),
+                request_timeout_seconds: Some(45.0),
                 api_mode: None,
                 command: Some("copilot-language-server".to_string()),
                 args: vec![
@@ -12142,6 +12192,13 @@ mod tests {
                 ],
                 oauth_token_url: None,
                 oauth_client_id: None,
+            },
+        );
+        runtime_providers.insert(
+            "openai-codex".to_string(),
+            RuntimeProviderConfig {
+                request_timeout_seconds: Some(75.0),
+                ..RuntimeProviderConfig::default()
             },
         );
 
@@ -12159,6 +12216,14 @@ mod tests {
             Arc::new(DummyProvider),
         );
         let primary = agent.primary_runtime_snapshot();
+        assert_eq!(
+            agent.resolve_runtime_request_timeout_seconds("openai"),
+            Some(45.0)
+        );
+        assert_eq!(
+            agent.resolve_runtime_request_timeout_seconds("codex"),
+            Some(75.0)
+        );
         assert_eq!(primary.command.as_deref(), Some("copilot-language-server"));
         assert_eq!(
             primary.args,
@@ -12214,6 +12279,7 @@ mod tests {
                 api_key: Some("sk-test-key".to_string()),
                 api_key_env: None,
                 base_url: Some("https://api.openai.com/v1".to_string()),
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: None,
                 args: Vec::new(),
@@ -12304,6 +12370,7 @@ mod tests {
                 api_key: Some("sk-qwen-oauth".to_string()),
                 api_key_env: None,
                 base_url: Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string()),
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: None,
                 args: Vec::new(),
@@ -12385,6 +12452,7 @@ mod tests {
                 api_key: Some("stepfun-test-key".to_string()),
                 api_key_env: None,
                 base_url: None,
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: None,
                 args: Vec::new(),
@@ -12476,6 +12544,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: None,
                 args: Vec::new(),
@@ -12582,6 +12651,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: None,
                 args: Vec::new(),
@@ -12984,6 +13054,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: Some("acp://copilot".to_string()),
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: Some("definitely-not-installed-copilot-cli".to_string()),
                 args: vec!["--acp".to_string(), "--stdio".to_string()],
@@ -13065,6 +13136,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: Some("acp+tcp://127.0.0.1:8765".to_string()),
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: Some("definitely-not-installed-copilot-cli".to_string()),
                 args: vec!["--acp".to_string(), "--stdio".to_string()],
@@ -13518,6 +13590,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: None,
                 args: Vec::new(),
@@ -13533,6 +13606,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: None,
                 args: Vec::new(),
@@ -13611,6 +13685,7 @@ mod tests {
                 api_key: None,
                 api_key_env: Some("MY_FALLBACK_KEY".to_string()),
                 base_url: None,
+                request_timeout_seconds: None,
                 api_mode: None,
                 command: None,
                 args: Vec::new(),

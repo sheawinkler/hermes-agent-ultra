@@ -951,6 +951,10 @@
     "d41427504ef04": {
       "disposition": "ported",
       "notes": "Rust delegation depth now has a first-class AgentConfig max_delegate_depth plus delegation.max_spawn_depth config bridge with floor 1 and no legacy ceiling; env/config values above the old cap pass through with agent, CLI, config, and backend tests."
+    },
+    "f1fe29d1c368": {
+      "disposition": "ported",
+      "notes": "Rust provider config now accepts llm.<provider>.request_timeout_seconds, validates and exposes it through config set/get, propagates it into AgentConfig RuntimeProviderConfig, and applies it to OpenAI-compatible, Codex Responses, Anthropic, OpenRouter, extra provider, fallback/runtime-routing, and client rebuild paths with targeted tests."
     }
   },
   "subject_patterns": [

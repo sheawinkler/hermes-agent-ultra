@@ -48,6 +48,27 @@ const ACP_MULTIMODAL_PREFIX: &str = "__hermes_acp_parts_json__:";
 pub const OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const CODEX_CLOUDFLARE_ORIGINATOR: &str = "codex_cli_rs";
 
+fn request_timeout_duration(seconds: Option<f64>) -> Option<Duration> {
+    seconds.and_then(|value| {
+        if value.is_finite() && value > 0.0 {
+            Duration::try_from_secs_f64(value).ok()
+        } else {
+            None
+        }
+    })
+}
+
+fn build_provider_http_client(request_timeout: Option<Duration>) -> Client {
+    let mut builder = Client::builder();
+    if let Some(timeout) = request_timeout {
+        builder = builder.timeout(timeout);
+    }
+    builder.build().unwrap_or_else(|err| {
+        tracing::warn!("failed to build provider HTTP client: {}", err);
+        Client::new()
+    })
+}
+
 pub fn codex_cloudflare_headers(access_token: Option<&str>) -> Vec<(String, String)> {
     let mut headers = vec![
         (
@@ -75,6 +96,15 @@ pub fn openai_codex_provider(
     model: impl Into<String>,
     base_url: Option<&str>,
 ) -> OpenAiProvider {
+    openai_codex_provider_with_timeout(api_key, model, base_url, None)
+}
+
+pub fn openai_codex_provider_with_timeout(
+    api_key: impl Into<String>,
+    model: impl Into<String>,
+    base_url: Option<&str>,
+    request_timeout_seconds: Option<f64>,
+) -> OpenAiProvider {
     let api_key = api_key.into();
     let base_url = base_url
         .map(str::trim)
@@ -83,7 +113,8 @@ pub fn openai_codex_provider(
         .to_string();
     let mut provider = OpenAiProvider::new(api_key.as_str())
         .with_model(model)
-        .with_base_url(base_url.as_str());
+        .with_base_url(base_url.as_str())
+        .with_optional_request_timeout_seconds(request_timeout_seconds);
     if is_codex_cloudflare_base_url(base_url.as_str()) {
         provider = provider.with_headers(codex_cloudflare_headers(Some(api_key.as_str())));
     }
@@ -237,6 +268,8 @@ pub struct GenericProvider {
     pub model: String,
     /// HTTP client.
     client: Arc<Mutex<Client>>,
+    /// Optional total request timeout applied to newly-built clients.
+    request_timeout: Option<Duration>,
     /// Last time we rebuilt the client transport.
     client_refreshed_at: Arc<Mutex<Instant>>,
     /// Optional custom headers to send with every request.
@@ -256,11 +289,13 @@ impl GenericProvider {
         api_key: impl Into<String>,
         model: impl Into<String>,
     ) -> Self {
+        let request_timeout = None;
         Self {
             base_url: base_url.into(),
             api_key: api_key.into(),
             model: model.into(),
-            client: Arc::new(Mutex::new(Client::new())),
+            client: Arc::new(Mutex::new(build_provider_http_client(request_timeout))),
+            request_timeout,
             client_refreshed_at: Arc::new(Mutex::new(Instant::now())),
             extra_headers: Vec::new(),
             rate_limiter: None,
@@ -285,6 +320,25 @@ impl GenericProvider {
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
         self
+    }
+
+    /// Set an optional total request timeout used by this provider and rebuilds.
+    pub fn with_optional_request_timeout_seconds(mut self, seconds: Option<f64>) -> Self {
+        self.request_timeout = request_timeout_duration(seconds);
+        if let Ok(mut client) = self.client.lock() {
+            *client = build_provider_http_client(self.request_timeout);
+        }
+        self
+    }
+
+    /// Set a total request timeout in seconds.
+    pub fn with_request_timeout_seconds(self, seconds: f64) -> Self {
+        self.with_optional_request_timeout_seconds(Some(seconds))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn configured_request_timeout(&self) -> Option<Duration> {
+        self.request_timeout
     }
 
     /// Attach a Rust-native provider profile for request shaping.
@@ -446,13 +500,13 @@ impl GenericProvider {
         self.client
             .lock()
             .map(|c| c.clone())
-            .unwrap_or_else(|_| Client::new())
+            .unwrap_or_else(|_| build_provider_http_client(self.request_timeout))
     }
 
     fn refresh_client(&self, reason: &str) {
         tracing::warn!("rebuilding primary HTTP client: {}", reason);
         if let Ok(mut c) = self.client.lock() {
-            *c = Client::new();
+            *c = build_provider_http_client(self.request_timeout);
         }
         if let Ok(mut t) = self.client_refreshed_at.lock() {
             *t = Instant::now();
@@ -1167,6 +1221,13 @@ impl OpenAiProvider {
         }
     }
 
+    /// Set an optional total request timeout used by this provider and rebuilds.
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
+        Self {
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
+        }
+    }
+
     /// Add a custom header to every OpenAI-compatible request.
     pub fn with_header(self, key: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
@@ -1252,6 +1313,8 @@ pub struct AnthropicProvider {
     pub model: String,
     /// HTTP client.
     client: Arc<Mutex<Client>>,
+    /// Optional total request timeout applied to newly-built clients.
+    request_timeout: Option<Duration>,
     /// Last time we rebuilt the client transport.
     client_refreshed_at: Arc<Mutex<Instant>>,
     /// Anthropic API version header.
@@ -1265,11 +1328,13 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     /// Create a new Anthropic provider with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
+        let request_timeout = None;
         Self {
             base_url: "https://api.anthropic.com".to_string(),
             api_key: api_key.into(),
             model: "claude-3-5-sonnet-20241022".to_string(),
-            client: Arc::new(Mutex::new(Client::new())),
+            client: Arc::new(Mutex::new(build_provider_http_client(request_timeout))),
+            request_timeout,
             client_refreshed_at: Arc::new(Mutex::new(Instant::now())),
             api_version: "2023-06-01".to_string(),
             rate_limiter: None,
@@ -1287,6 +1352,25 @@ impl AnthropicProvider {
     pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
         self
+    }
+
+    /// Set an optional total request timeout used by this provider and rebuilds.
+    pub fn with_optional_request_timeout_seconds(mut self, seconds: Option<f64>) -> Self {
+        self.request_timeout = request_timeout_duration(seconds);
+        if let Ok(mut client) = self.client.lock() {
+            *client = build_provider_http_client(self.request_timeout);
+        }
+        self
+    }
+
+    /// Set a total request timeout in seconds.
+    pub fn with_request_timeout_seconds(self, seconds: f64) -> Self {
+        self.with_optional_request_timeout_seconds(Some(seconds))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn configured_request_timeout(&self) -> Option<Duration> {
+        self.request_timeout
     }
 
     /// Attach a rate limit tracker.
@@ -1328,13 +1412,13 @@ impl AnthropicProvider {
         self.client
             .lock()
             .map(|c| c.clone())
-            .unwrap_or_else(|_| Client::new())
+            .unwrap_or_else(|_| build_provider_http_client(self.request_timeout))
     }
 
     fn refresh_client(&self, reason: &str) {
         tracing::warn!("rebuilding anthropic HTTP client: {}", reason);
         if let Ok(mut c) = self.client.lock() {
-            *c = Client::new();
+            *c = build_provider_http_client(self.request_timeout);
         }
         if let Ok(mut t) = self.client_refreshed_at.lock() {
             *t = Instant::now();
@@ -2094,6 +2178,14 @@ impl OpenRouterProvider {
         }
     }
 
+    /// Set an optional total request timeout used by this provider and rebuilds.
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
+        Self {
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
+            ..self
+        }
+    }
+
     /// Set the HTTP-Referer header (required by OpenRouter).
     pub fn with_http_referer(mut self, referer: impl Into<String>) -> Self {
         self.http_referer = Some(referer.into());
@@ -2752,6 +2844,48 @@ mod tests {
 
         assert!(request.headers().get("originator").is_none());
         assert!(request.headers().get("ChatGPT-Account-ID").is_none());
+    }
+
+    #[test]
+    fn generic_provider_request_timeout_survives_client_rebuilds() {
+        let provider = GenericProvider::new("https://api.example.com/v1", "sk-test", "model")
+            .with_optional_request_timeout_seconds(Some(45.5));
+
+        assert_eq!(
+            provider.configured_request_timeout(),
+            Some(Duration::from_secs_f64(45.5))
+        );
+
+        provider.refresh_client("unit test");
+        assert_eq!(
+            provider.configured_request_timeout(),
+            Some(Duration::from_secs_f64(45.5))
+        );
+    }
+
+    #[test]
+    fn generic_provider_ignores_invalid_request_timeout_seconds() {
+        for value in [
+            None,
+            Some(0.0),
+            Some(-1.0),
+            Some(f64::INFINITY),
+            Some(f64::NAN),
+        ] {
+            let provider = GenericProvider::new("https://api.example.com/v1", "sk-test", "model")
+                .with_optional_request_timeout_seconds(value);
+            assert_eq!(provider.configured_request_timeout(), None);
+        }
+    }
+
+    #[test]
+    fn openai_codex_provider_applies_request_timeout_seconds() {
+        let provider = openai_codex_provider_with_timeout("sk-test", "gpt-5.4", None, Some(60.0));
+
+        assert_eq!(
+            provider.inner.configured_request_timeout(),
+            Some(Duration::from_secs(60))
+        );
     }
 
     #[test]
@@ -3667,6 +3801,23 @@ mod tests {
             .expect("anthropic-beta");
         assert!(betas.contains("oauth-2025-04-20"));
         assert!(betas.contains("claude-code-20250219"));
+    }
+
+    #[test]
+    fn anthropic_provider_request_timeout_survives_client_rebuilds() {
+        let provider =
+            AnthropicProvider::new("sk-ant-api03-secret").with_request_timeout_seconds(90.0);
+
+        assert_eq!(
+            provider.configured_request_timeout(),
+            Some(Duration::from_secs(90))
+        );
+
+        provider.refresh_client("unit test");
+        assert_eq!(
+            provider.configured_request_timeout(),
+            Some(Duration::from_secs(90))
+        );
     }
 
     #[test]
