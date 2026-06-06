@@ -11,6 +11,7 @@
 
 use chrono::{DateTime, Utc};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -252,6 +253,16 @@ struct SessionRuntimeState {
     reasoning: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct GatewayProfileOverlay {
+    name: String,
+    path: PathBuf,
+    model: Option<String>,
+    provider: Option<String>,
+    personality: Option<String>,
+    home: Option<String>,
+}
+
 #[derive(Debug)]
 struct MessageDeduplicator {
     seen: HashSet<String>,
@@ -305,6 +316,150 @@ impl Default for SessionRuntimeState {
             reasoning: false,
         }
     }
+}
+
+fn gateway_profiles_dir() -> PathBuf {
+    hermes_config::hermes_home().join("profiles")
+}
+
+fn load_gateway_profile_aliases(profiles_dir: &Path) -> BTreeMap<String, String> {
+    let path = profiles_dir.join("aliases.json");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return BTreeMap::new();
+    };
+    serde_json::from_str::<BTreeMap<String, String>>(&raw).unwrap_or_default()
+}
+
+fn resolve_gateway_profile_name(
+    requested: &str,
+    aliases: &BTreeMap<String, String>,
+) -> Result<String, String> {
+    let trimmed = requested.trim();
+    if trimmed.is_empty() {
+        return Err("profile name cannot be empty".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(format!(
+            "invalid profile name '{}': path separators are not allowed",
+            trimmed
+        ));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(format!(
+            "invalid profile name '{}': use letters, numbers, '-', '_' or '.'",
+            trimmed
+        ));
+    }
+    Ok(aliases
+        .get(trimmed)
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .unwrap_or(trimmed)
+        .to_string())
+}
+
+fn resolve_gateway_profile_path(profiles_dir: &Path, name: &str) -> Option<PathBuf> {
+    let yaml = profiles_dir.join(format!("{name}.yaml"));
+    if yaml.exists() {
+        return Some(yaml);
+    }
+    let yml = profiles_dir.join(format!("{name}.yml"));
+    yml.exists().then_some(yml)
+}
+
+fn yaml_string(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
+    map.get(&serde_yaml::Value::String(key.to_string()))
+        .and_then(serde_yaml::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn load_gateway_profile_overlay(requested: &str) -> Result<GatewayProfileOverlay, String> {
+    let profiles_dir = gateway_profiles_dir();
+    let aliases = load_gateway_profile_aliases(&profiles_dir);
+    let name = resolve_gateway_profile_name(requested, &aliases)?;
+    let path = resolve_gateway_profile_path(&profiles_dir, &name).ok_or_else(|| {
+        format!(
+            "profile '{}' not found under {}",
+            name,
+            profiles_dir.display()
+        )
+    })?;
+    let raw =
+        std::fs::read_to_string(&path).map_err(|err| format!("read {}: {err}", path.display()))?;
+    let value: serde_yaml::Value =
+        serde_yaml::from_str(&raw).map_err(|err| format!("parse {}: {err}", path.display()))?;
+    let Some(map) = value.as_mapping() else {
+        return Err(format!("profile '{}' must be a YAML mapping", name));
+    };
+
+    let model = yaml_string(map, "model");
+    let provider = yaml_string(map, "provider").or_else(|| {
+        model
+            .as_deref()
+            .and_then(|value| value.split_once(':').map(|(provider, _)| provider.trim()))
+            .filter(|provider| !provider.is_empty())
+            .map(str::to_string)
+    });
+    let personality = yaml_string(map, "personality");
+    let home = yaml_string(map, "home_dir").or_else(|| yaml_string(map, "home"));
+
+    Ok(GatewayProfileOverlay {
+        name,
+        path,
+        model,
+        provider,
+        personality,
+        home,
+    })
+}
+
+fn apply_gateway_profile_overlay(state: &mut SessionRuntimeState, overlay: &GatewayProfileOverlay) {
+    state.profile = Some(overlay.name.clone());
+    if let Some(model) = &overlay.model {
+        state.model = Some(model.clone());
+    }
+    if let Some(provider) = &overlay.provider {
+        state.provider = Some(provider.clone());
+    }
+    if let Some(personality) = &overlay.personality {
+        state.personality = Some(personality.clone());
+    }
+    if let Some(home) = &overlay.home {
+        state.home = Some(home.clone());
+    }
+}
+
+fn render_profile_overlay_reply(requested: &str, overlay: &GatewayProfileOverlay) -> String {
+    let mut applied = Vec::new();
+    if let Some(model) = &overlay.model {
+        applied.push(format!("model={model}"));
+    }
+    if let Some(provider) = &overlay.provider {
+        applied.push(format!("provider={provider}"));
+    }
+    if let Some(personality) = &overlay.personality {
+        applied.push(format!("personality={personality}"));
+    }
+    if let Some(home) = &overlay.home {
+        applied.push(format!("home={home}"));
+    }
+    let applied = if applied.is_empty() {
+        "metadata only".to_string()
+    } else {
+        applied.join(", ")
+    };
+    format!(
+        "👤 Profile switched to: {} (requested '{}'; {}; {})",
+        overlay.name,
+        requested.trim(),
+        applied,
+        overlay.path.display()
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1465,10 +1620,20 @@ impl Gateway {
                 Ok(true)
             }
             GatewayCommandResult::SwitchProfile { profile, reply } => {
-                let mut states = self.runtime_state.write().await;
-                states.entry(session_key.to_string()).or_default().profile = Some(profile);
-                drop(states);
-                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                let response = match load_gateway_profile_overlay(&profile) {
+                    Ok(overlay) => {
+                        let mut states = self.runtime_state.write().await;
+                        let state = states.entry(session_key.to_string()).or_default();
+                        apply_gateway_profile_overlay(state, &overlay);
+                        render_profile_overlay_reply(&profile, &overlay)
+                    }
+                    Err(err) => {
+                        let mut states = self.runtime_state.write().await;
+                        states.entry(session_key.to_string()).or_default().profile = Some(profile);
+                        format!("{reply}\n⚠️ Profile file not applied: {err}")
+                    }
+                };
+                self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
                     .await?;
                 Ok(true)
             }
@@ -2863,7 +3028,7 @@ mod tests {
     use crate::session::SessionManager;
     use async_trait::async_trait;
     use hermes_config::session::SessionConfig;
-    use std::sync::Mutex;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     struct TestAdapter {
         messages: Arc<Mutex<Vec<(String, String)>>>,
@@ -2892,6 +3057,45 @@ mod tests {
     }
 
     struct FailingHook;
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct HermesHomeEnvGuard {
+        prev_home: Option<String>,
+        prev_ultra_home: Option<String>,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl HermesHomeEnvGuard {
+        fn set(path: &std::path::Path) -> Self {
+            let guard = ENV_LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .expect("env lock poisoned");
+            let prev_home = std::env::var("HERMES_HOME").ok();
+            let prev_ultra_home = std::env::var("HERMES_AGENT_ULTRA_HOME").ok();
+            std::env::set_var("HERMES_HOME", path);
+            std::env::remove_var("HERMES_AGENT_ULTRA_HOME");
+            Self {
+                prev_home,
+                prev_ultra_home,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for HermesHomeEnvGuard {
+        fn drop(&mut self) {
+            match &self.prev_home {
+                Some(value) => std::env::set_var("HERMES_HOME", value),
+                None => std::env::remove_var("HERMES_HOME"),
+            }
+            match &self.prev_ultra_home {
+                Some(value) => std::env::set_var("HERMES_AGENT_ULTRA_HOME", value),
+                None => std::env::remove_var("HERMES_AGENT_ULTRA_HOME"),
+            }
+        }
+    }
 
     #[async_trait]
     impl HookHandler for RecordingHook {
@@ -4452,6 +4656,124 @@ mod tests {
         assert!(status_text.contains("provider: openrouter"));
         assert!(status_text.contains("profile: prod"));
         assert!(status_text.contains("mcp generation: 1"));
+    }
+
+    #[tokio::test]
+    async fn gateway_profile_command_applies_profile_yaml_overlay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _env = HermesHomeEnvGuard::set(tmp.path());
+        let profiles_dir = tmp.path().join("profiles");
+        std::fs::create_dir_all(&profiles_dir).unwrap();
+        let profile_home = tmp.path().join("profile-home");
+        std::fs::create_dir_all(&profile_home).unwrap();
+        std::fs::write(
+            profiles_dir.join("prod.yaml"),
+            format!(
+                "name: prod\nmodel: openrouter:qwen/qwen3-coder\npersonality: strict\nhome_dir: {}\n",
+                profile_home.display()
+            ),
+        )
+        .unwrap();
+        std::fs::write(profiles_dir.join("aliases.json"), r#"{"work":"prod"}"#).unwrap();
+
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+
+        let profile = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/profile work".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&profile).await.is_ok());
+
+        let status = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/status".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&status).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        let profile_reply = msgs
+            .iter()
+            .find_map(|(_, text)| text.contains("Profile switched").then_some(text.clone()))
+            .expect("profile reply should exist");
+        assert!(profile_reply.contains("prod"));
+        assert!(profile_reply.contains("requested 'work'"));
+        assert!(profile_reply.contains("model=openrouter:qwen/qwen3-coder"));
+        assert!(profile_reply.contains("provider=openrouter"));
+        assert!(profile_reply.contains("personality=strict"));
+
+        let status_text = msgs
+            .iter()
+            .rev()
+            .find_map(|(_, text)| text.contains("Gateway status").then_some(text.clone()))
+            .expect("status response should exist");
+        assert!(status_text.contains("model: openrouter:qwen/qwen3-coder"));
+        assert!(status_text.contains("provider: openrouter"));
+        assert!(status_text.contains("profile: prod"));
+        assert!(status_text.contains("personality: strict"));
+        assert!(status_text.contains(&format!("home: {}", profile_home.display())));
+    }
+
+    #[tokio::test]
+    async fn gateway_profile_command_missing_file_preserves_label_with_warning() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _env = HermesHomeEnvGuard::set(tmp.path());
+
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+
+        let profile = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/profile scratch".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&profile).await.is_ok());
+
+        let status = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/status".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&status).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        assert!(msgs
+            .iter()
+            .any(|(_, text)| text.contains("Profile file not applied")));
+        let status_text = msgs
+            .iter()
+            .rev()
+            .find_map(|(_, text)| text.contains("Gateway status").then_some(text.clone()))
+            .expect("status response should exist");
+        assert!(status_text.contains("profile: scratch"));
     }
 
     #[tokio::test]
