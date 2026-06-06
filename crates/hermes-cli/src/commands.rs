@@ -15,7 +15,7 @@ use std::{
 
 use bytes::Bytes;
 use hermes_agent::plugins::PluginManifest;
-use hermes_agent::MemoryProviderPlugin;
+use hermes_agent::{MemoryProviderPlugin, SessionPersistence};
 use hermes_core::auth_gate::{
     load_oauth_runtime_gate_manifest_from_path,
     oauth_runtime_gate_for_provider as shared_oauth_runtime_gate_for_provider,
@@ -25298,6 +25298,14 @@ fn sentrux_mcp_status(config_dir: &Path) -> (bool, bool, bool) {
     (command_on_path(SENTRUX_MCP_COMMAND), from_json, from_yaml)
 }
 
+const CLI_SESSIONS_ACTIONS: &str = "list, export, delete, prune, optimize, stats, rename, browse";
+
+fn file_size_mb(path: &Path) -> f64 {
+    std::fs::metadata(path)
+        .map(|meta| meta.len() as f64 / (1024.0 * 1024.0))
+        .unwrap_or(0.0)
+}
+
 /// Handle `hermes sessions [action] [--id ...] [--name ...]`.
 pub async fn handle_cli_sessions(
     action: Option<String>,
@@ -25461,6 +25469,21 @@ pub async fn handle_cli_sessions(
             }
             println!("Pruned {} session(s).", pruned);
         }
+        "optimize" => {
+            let persistence = SessionPersistence::new(hermes_config::hermes_home());
+            let db_path = persistence.db_path().to_path_buf();
+            let before_mb = file_size_mb(&db_path);
+            println!("Optimizing session store (FTS merge + VACUUM)...");
+            let index_count = persistence.fts_index_count()?;
+            persistence.vacuum()?;
+            let after_mb = file_size_mb(&db_path);
+            let reclaimed_mb = before_mb - after_mb;
+            println!("Optimized {} FTS index(es).", index_count);
+            println!(
+                "Database size: {:.1} MB -> {:.1} MB (reclaimed {:.1} MB)",
+                before_mb, after_mb, reclaimed_mb
+            );
+        }
         "rename" => {
             let session_id = id.ok_or_else(|| {
                 hermes_core::AgentError::Config(
@@ -25553,7 +25576,7 @@ pub async fn handle_cli_sessions(
         }
         other => {
             println!("Sessions action '{}' is not recognized.", other);
-            println!("Available actions: list, export, delete, prune, stats, rename, browse");
+            println!("Available actions: {}", CLI_SESSIONS_ACTIONS);
         }
     }
     Ok(())

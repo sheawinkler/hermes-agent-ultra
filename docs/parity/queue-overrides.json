@@ -959,6 +959,10 @@
     "f1fe29d1c368": {
       "disposition": "ported",
       "notes": "Rust provider config now accepts llm.<provider>.request_timeout_seconds, validates and exposes it through config set/get, propagates it into AgentConfig RuntimeProviderConfig, and applies it to OpenAI-compatible, Codex Responses, Anthropic, OpenRouter, extra provider, fallback/runtime-routing, and client rebuild paths with targeted tests."
+    },
+    "38695254f851": {
+      "disposition": "ported",
+      "notes": "Rust session persistence now exposes FTS index counting and optimize_fts maintenance, VACUUM runs FTS optimization before reclaiming pages, and top-level `hermes sessions optimize` reports FTS index count plus before/after sessions.db size with Rust unit/e2e coverage."
     }
   },
   "subject_patterns": [

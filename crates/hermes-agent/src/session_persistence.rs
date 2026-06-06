@@ -74,6 +74,8 @@ pub struct UserMessageRef {
 }
 
 impl SessionPersistence {
+    const FTS_TABLES: &'static [&'static str] = &["messages_fts", "messages_fts_trigram"];
+
     fn is_fts5_unavailable_message(message: &str) -> bool {
         let lower = message.to_ascii_lowercase();
         lower.contains("no such module")
@@ -86,17 +88,49 @@ impl SessionPersistence {
     }
 
     fn fts_table_exists(conn: &rusqlite::Connection) -> Result<bool, AgentError> {
-        conn.query_row(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts' LIMIT 1",
-            [],
-            |_| Ok(true),
-        )
-        .or_else(|err| match err {
-            rusqlite::Error::QueryReturnedNoRows => Ok(false),
-            other => Err(AgentError::Io(format!(
-                "Failed to inspect messages_fts availability: {other}"
+        Self::named_fts_table_exists(conn, "messages_fts")
+    }
+
+    fn named_fts_table_exists(
+        conn: &rusqlite::Connection,
+        table: &str,
+    ) -> Result<bool, AgentError> {
+        if !Self::FTS_TABLES.contains(&table) {
+            return Err(AgentError::Config(format!(
+                "Unsupported FTS table name for sessions db maintenance: {table}"
+            )));
+        }
+        let sql = format!("SELECT 1 FROM {table} LIMIT 0");
+        match conn.prepare(&sql) {
+            Ok(_) => Ok(true),
+            Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+                if message.contains("no such table")
+                    || Self::is_fts5_unavailable_message(&message) =>
+            {
+                Ok(false)
+            }
+            Err(err) if Self::is_fts5_unavailable_error(&err) => Ok(false),
+            Err(err) => Err(AgentError::Io(format!(
+                "Failed to inspect {table} availability: {err}"
             ))),
-        })
+        }
+    }
+
+    fn optimize_fts_on_conn(conn: &rusqlite::Connection) -> Result<u32, AgentError> {
+        let mut optimized = 0u32;
+        for table in Self::FTS_TABLES {
+            if !Self::named_fts_table_exists(conn, table)? {
+                continue;
+            }
+            let sql = format!("INSERT INTO {table}({table}) VALUES('optimize')");
+            match conn.execute(&sql, []) {
+                Ok(_) => optimized += 1,
+                Err(err) => {
+                    tracing::warn!("FTS optimize failed for {}: {}", table, err);
+                }
+            }
+        }
+        Ok(optimized)
     }
 
     fn ensure_fts_schema(conn: &rusqlite::Connection, db_path: &Path) -> Result<bool, AgentError> {
@@ -209,6 +243,25 @@ impl SessionPersistence {
             sessions_dir: home.join("sessions"),
             trajectories_dir: home.join("trajectories"),
         }
+    }
+
+    /// Path to the SQLite session database.
+    pub fn db_path(&self) -> &Path {
+        &self.db_path
+    }
+
+    /// Number of queryable FTS indexes in the session database.
+    pub fn fts_index_count(&self) -> Result<u32, AgentError> {
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let mut count = 0u32;
+        for table in Self::FTS_TABLES {
+            if Self::named_fts_table_exists(&conn, table)? {
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     /// Create using default home resolution:
@@ -346,11 +399,27 @@ impl SessionPersistence {
         Ok(())
     }
 
+    /// Merge fragmented FTS5 b-tree segments in `sessions.db`.
+    ///
+    /// This is a layout-only maintenance operation. Search rows and snippets are
+    /// preserved, while long-lived FTS indexes can collapse many incremental
+    /// segments into a smaller/faster representation. Optional or unavailable
+    /// FTS indexes are skipped.
+    pub fn optimize_fts(&self) -> Result<u32, AgentError> {
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        Self::optimize_fts_on_conn(&conn)
+    }
+
     /// Reclaim free pages in `sessions.db` after large prune operations.
     pub fn vacuum(&self) -> Result<(), AgentError> {
         self.ensure_db()?;
         let conn = rusqlite::Connection::open(&self.db_path)
             .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        if let Err(err) = Self::optimize_fts_on_conn(&conn) {
+            tracing::warn!("FTS optimize before VACUUM failed: {}", err);
+        }
         conn.execute_batch("VACUUM")
             .map_err(|e| AgentError::Io(format!("Failed to VACUUM sessions db: {e}")))?;
         Ok(())
@@ -1048,6 +1117,25 @@ mod tests {
         std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
     }
 
+    fn fts_match_rows(sp: &SessionPersistence, query: &str) -> Vec<(i64, String)> {
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        if !SessionPersistence::fts_table_exists(&conn).unwrap() {
+            return Vec::new();
+        }
+        let mut stmt = conn
+            .prepare(
+                "SELECT rowid, snippet(messages_fts, 0, '[', ']', '...', 8)
+                 FROM messages_fts
+                 WHERE messages_fts MATCH ?1
+                 ORDER BY rowid",
+            )
+            .unwrap();
+        stmt.query_map(params![query], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
     #[test]
     fn test_persist_and_load_session() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1474,6 +1562,115 @@ mod tests {
             )
             .expect_err("missing virtual table module should fail");
         assert!(SessionPersistence::is_fts5_unavailable_error(&err));
+    }
+
+    #[test]
+    fn test_optimize_fts_returns_existing_index_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session(
+            "opt-count",
+            &[Message::user("hello optimized world")],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let expected = u32::from(SessionPersistence::fts_table_exists(&conn).unwrap());
+        assert_eq!(sp.optimize_fts().unwrap(), expected);
+    }
+
+    #[test]
+    fn test_optimize_fts_preserves_search_rows_and_snippets() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let messages = (0..50)
+            .map(|idx| Message::user(format!("needle alpha bravo charlie message {idx}")))
+            .collect::<Vec<_>>();
+        sp.persist_session("opt-search", &messages, None, None, None, None)
+            .unwrap();
+
+        let before = fts_match_rows(&sp, "needle");
+        if before.is_empty() {
+            assert_eq!(sp.optimize_fts().unwrap(), 0);
+            return;
+        }
+
+        assert_eq!(sp.optimize_fts().unwrap(), 1);
+        let after = fts_match_rows(&sp, "needle");
+        assert_eq!(after, before);
+        assert!(after
+            .iter()
+            .all(|(_, snippet)| snippet.contains("[needle]")));
+    }
+
+    #[test]
+    fn test_optimize_fts_skips_missing_optional_trigram_table() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session(
+            "opt-missing-trigram",
+            &[Message::user("trigram optional")],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        assert!(
+            !SessionPersistence::named_fts_table_exists(&conn, "messages_fts_trigram").unwrap()
+        );
+        let expected = u32::from(SessionPersistence::fts_table_exists(&conn).unwrap());
+        assert_eq!(sp.optimize_fts().unwrap(), expected);
+    }
+
+    #[test]
+    fn test_optimize_fts_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session(
+            "opt-idempotent",
+            &[Message::user("repeatable optimize marker")],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let expected = u32::from(SessionPersistence::fts_table_exists(&conn).unwrap());
+
+        assert_eq!(sp.optimize_fts().unwrap(), expected);
+        assert_eq!(sp.optimize_fts().unwrap(), expected);
+        assert_eq!(sp.load_session("opt-idempotent").unwrap().len(), 1);
+        if expected > 0 {
+            assert_eq!(fts_match_rows(&sp, "repeatable").len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_vacuum_runs_after_fts_optimize_without_changing_search() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session(
+            "vacuum-opt",
+            &[Message::user("vacuum needle still searchable")],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let before = fts_match_rows(&sp, "needle");
+
+        sp.vacuum().unwrap();
+
+        assert_eq!(fts_match_rows(&sp, "needle"), before);
     }
 
     #[test]

@@ -69,6 +69,29 @@ fn e2e_cli_config_set_dotted_llm_and_get_masks_key() {
 }
 
 #[test]
+fn e2e_cli_sessions_optimize_runs_against_isolated_home() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
+    cmd.env("HERMES_HOME", dir.path());
+    cmd.args(["sessions", "optimize"]);
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let text = std::str::from_utf8(&out).expect("utf8");
+    assert!(
+        text.contains("Optimizing session store"),
+        "expected optimize banner, got: {text:?}"
+    );
+    assert!(
+        text.contains("Optimized") && text.contains("FTS index"),
+        "expected FTS index summary, got: {text:?}"
+    );
+    assert!(
+        text.contains("Database size:"),
+        "expected database size summary, got: {text:?}"
+    );
+    assert!(dir.path().join("sessions.db").exists());
+}
+
+#[test]
 fn e2e_cli_interactive_without_tty_reports_actionable_diagnostic() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut cmd = Command::cargo_bin("hermes").expect("binary exists");

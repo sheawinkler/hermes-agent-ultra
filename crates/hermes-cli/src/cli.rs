@@ -625,7 +625,7 @@ pub enum CliCommand {
 
     /// Session management.
     Sessions {
-        /// Action: list/export/delete/prune/stats/rename/browse
+        /// Action: list/export/delete/prune/optimize/stats/rename/browse
         action: Option<String>,
         /// Session ID.
         #[arg(long)]
