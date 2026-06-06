@@ -69,6 +69,8 @@ pub const MODELS_DEV_MERGED_PROVIDERS: &[&str] = &[
     "nvidia",
     "huggingface",
     "zai",
+    "minimax",
+    "minimax-cn",
     "gemini",
     "google",
 ];

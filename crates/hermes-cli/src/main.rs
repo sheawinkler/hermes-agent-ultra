@@ -10090,12 +10090,12 @@ const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
     },
     SetupModelOption {
         provider: "minimax",
-        model: "minimax:MiniMax-M2.7",
+        model: "minimax:MiniMax-M3",
         label: "MiniMax",
     },
     SetupModelOption {
         provider: "minimax-cn",
-        model: "minimax-cn:MiniMax-M2.7",
+        model: "minimax-cn:MiniMax-M3",
         label: "MiniMax China",
     },
     SetupModelOption {
@@ -15652,6 +15652,24 @@ mod tests {
             );
         }
         assert!(seen.contains("nous"));
+    }
+
+    #[test]
+    fn setup_minimax_defaults_use_m3_frontier_model() {
+        let providers = setup_provider_defaults();
+        let minimax = providers
+            .iter()
+            .find(|option| option.provider == "minimax")
+            .expect("minimax setup option");
+        let minimax_cn = providers
+            .iter()
+            .find(|option| option.provider == "minimax-cn")
+            .expect("minimax-cn setup option");
+
+        assert_eq!(minimax.model, "minimax:MiniMax-M3");
+        assert_eq!(minimax_cn.model, "minimax-cn:MiniMax-M3");
+        assert!(!minimax.model.to_ascii_lowercase().contains("highspeed"));
+        assert!(!minimax_cn.model.to_ascii_lowercase().contains("highspeed"));
     }
 
     #[test]

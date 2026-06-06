@@ -28,7 +28,7 @@ mod default_models {
     pub const OPENAI: &str = "gpt-4o-mini";
     pub const ZAI: &str = "glm-4.5-flash";
     pub const KIMI: &str = "kimi-k2-turbo-preview";
-    pub const MINIMAX: &str = "MiniMax-M2.7";
+    pub const MINIMAX: &str = "MiniMax-M3";
     pub const GEMINI: &str = "gemini-3.5-flash";
     pub const GMI: &str = "google/gemini-3.1-flash-lite-preview";
     pub const TENCENT_TOKENHUB: &str = "hy3-preview";
@@ -44,6 +44,8 @@ mod default_base_urls {
     pub const GMI: &str = "https://api.gmi-serving.com/v1";
     pub const HUGGINGFACE: &str = "https://router.huggingface.co/v1";
     pub const ZAI: &str = "https://api.z.ai/api/paas/v4";
+    pub const MINIMAX: &str = "https://api.minimax.io/v1";
+    pub const MINIMAX_CN: &str = "https://api.minimaxi.com/v1";
     pub const NOVITA: &str = "https://api.novita.ai/openai/v1";
     pub const NVIDIA: &str = "https://integrate.api.nvidia.com/v1";
     pub const ARCEE: &str = "https://api.arcee.ai/api/v1";
@@ -252,7 +254,16 @@ pub fn build_auxiliary_client_with_main_runtime(
         &mut summary,
         "MINIMAX_API_KEY",
         "minimax",
-        "https://api.minimax.io/v1",
+        default_base_urls::MINIMAX,
+        default_models::MINIMAX,
+        main_label.as_deref(),
+    );
+    register_direct_key(
+        &mut builder,
+        &mut summary,
+        "MINIMAX_CN_API_KEY",
+        "minimax-cn",
+        default_base_urls::MINIMAX_CN,
         default_models::MINIMAX,
         main_label.as_deref(),
     );
@@ -470,7 +481,8 @@ fn provider_api_key_from_env(label: &str) -> Option<String> {
             "MOONSHOT_API_KEY",
             "KIMI_CN_API_KEY",
         ],
-        "minimax" => &["MINIMAX_API_KEY", "MINIMAX_CN_API_KEY"],
+        "minimax" => &["MINIMAX_API_KEY"],
+        "minimax-cn" => &["MINIMAX_CN_API_KEY", "MINIMAX_API_KEY"],
         "copilot" | "copilot-acp" => &["GITHUB_COPILOT_TOKEN", "COPILOT_GITHUB_TOKEN"],
         "deepseek" => &["DEEPSEEK_API_KEY"],
         "gemini" | "google" => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
@@ -513,6 +525,8 @@ fn default_base_url(label: &str) -> Option<&'static str> {
         "tencent-tokenhub" => Some(default_base_urls::TENCENT_TOKENHUB),
         "huggingface" => Some(default_base_urls::HUGGINGFACE),
         "zai" => Some(default_base_urls::ZAI),
+        "minimax" => Some(default_base_urls::MINIMAX),
+        "minimax-cn" => Some(default_base_urls::MINIMAX_CN),
         "novita" => Some(default_base_urls::NOVITA),
         "nvidia" => Some(default_base_urls::NVIDIA),
         "arcee" => Some(default_base_urls::ARCEE),
@@ -742,7 +756,41 @@ mod tests {
         }
         std::env::remove_var("GEMINI_API_KEY");
 
-        // Scenario 7: full chain, deterministic order.
+        // Scenario 7: MiniMax direct API defaults to M3 and avoids highspeed.
+        std::env::set_var("MINIMAX_API_KEY", "sk-minimax");
+        {
+            let (client, summary) = build_default_auxiliary_client(AuxiliaryConfig::default());
+            assert_eq!(client.chain_labels(), vec!["minimax"]);
+            assert_eq!(
+                client.chain_entries(),
+                vec![("minimax".to_string(), "MiniMax-M3".to_string(), true,)]
+            );
+            assert_eq!(summary.registered, vec!["minimax"]);
+            assert!(!client.chain_entries()[0]
+                .1
+                .to_ascii_lowercase()
+                .contains("highspeed"));
+        }
+        std::env::remove_var("MINIMAX_API_KEY");
+
+        // Scenario 8: MiniMax CN is a first-class direct-key auxiliary provider.
+        std::env::set_var("MINIMAX_CN_API_KEY", "sk-minimax-cn");
+        {
+            let (client, summary) = build_default_auxiliary_client(AuxiliaryConfig::default());
+            assert_eq!(client.chain_labels(), vec!["minimax-cn"]);
+            assert_eq!(
+                client.chain_entries(),
+                vec![("minimax-cn".to_string(), "MiniMax-M3".to_string(), true,)]
+            );
+            assert_eq!(summary.registered, vec!["minimax-cn"]);
+            assert!(!client.chain_entries()[0]
+                .1
+                .to_ascii_lowercase()
+                .contains("highspeed"));
+        }
+        std::env::remove_var("MINIMAX_CN_API_KEY");
+
+        // Scenario 9: full chain, deterministic order.
         std::env::set_var("OPENROUTER_API_KEY", "sk-or");
         std::env::set_var("HERMES_OPENAI_API_KEY", "sk-hermes-oa");
         std::env::set_var("OPENAI_API_KEY", "sk-oa-legacy");
