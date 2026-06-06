@@ -557,6 +557,8 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
             || provider.command.is_some()
             || !provider.args.is_empty()
             || provider.model.is_some()
+            || !provider.models.is_empty()
+            || !provider.discover_models
             || provider.api_mode.is_some()
             || provider.max_tokens.is_some()
             || provider.temperature.is_some()
@@ -569,7 +571,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -848,6 +850,17 @@ fn apply_user_config_patch_dotted(
                 "api_key_env" => entry.api_key_env = Some(value.to_string()),
                 "base_url" => entry.base_url = Some(value.to_string()),
                 "model" => entry.model = Some(value.to_string()),
+                "models" => {
+                    entry.models = value
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                }
+                "discover_models" => {
+                    entry.discover_models =
+                        parse_config_bool(&format!("llm.{}.discover_models", provider), value)?;
+                }
                 "api_mode" => entry.api_mode = Some(normalize_provider_api_mode(value)?),
                 "max_tokens" | "max_output_tokens" => {
                     let parsed = value.parse::<u32>().map_err(|_| {
@@ -880,7 +893,7 @@ fn apply_user_config_patch_dotted(
                 "oauth_client_id" => entry.oauth_client_id = Some(value.to_string()),
                 other => {
                     return Err(ConfigError::NotFound(format!(
-                        "unknown llm field: llm.{}.{} (supported: api_key, api_key_env, base_url, model, api_mode, max_tokens, max_output_tokens, command, args, request_timeout_seconds, oauth_token_url, oauth_client_id)",
+                        "unknown llm field: llm.{}.{} (supported: api_key, api_key_env, base_url, model, models, discover_models, api_mode, max_tokens, max_output_tokens, command, args, request_timeout_seconds, oauth_token_url, oauth_client_id)",
                         provider, other
                     )));
                 }
@@ -1083,6 +1096,17 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .and_then(|c| c.model.as_deref())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["llm", provider, "models"] => Ok(config
+            .llm_providers
+            .get(*provider)
+            .map(|c| c.models.join(","))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["llm", provider, "discover_models"] => Ok(config
+            .llm_providers
+            .get(*provider)
+            .map(|c| c.discover_models.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
         ["llm", provider, "api_mode"] => Ok(config
             .llm_providers
@@ -2223,6 +2247,11 @@ pub fn validate_config(config: &GatewayConfig) -> Result<(), ConfigError> {
                 "llm_providers.{name}.max_tokens must be a positive integer"
             )));
         }
+        if provider.models.iter().any(|model| model.trim().is_empty()) {
+            return Err(ConfigError::ValidationError(format!(
+                "llm_providers.{name}.models must not contain empty model ids"
+            )));
+        }
     }
 
     if let Some(api_key) = &config.delegation.api_key {
@@ -2370,6 +2399,28 @@ mod tests {
                 .and_then(|cfg| cfg.request_timeout_seconds),
             Some(45.0)
         );
+    }
+
+    #[test]
+    fn normalize_provider_secrets_keeps_models_only_provider_entries() {
+        let mut config = GatewayConfig::default();
+        config.llm_providers.insert(
+            "qianfan-coding".into(),
+            crate::config::LlmProviderConfig {
+                models: vec!["kimi-k2.5".into(), "glm-5".into()],
+                discover_models: false,
+                ..Default::default()
+            },
+        );
+
+        normalize_provider_secrets(&mut config);
+
+        let provider = config
+            .llm_providers
+            .get("qianfan-coding")
+            .expect("models-only provider should remain");
+        assert_eq!(provider.models, vec!["kimi-k2.5", "glm-5"]);
+        assert!(!provider.discover_models);
     }
 
     #[test]
@@ -3083,6 +3134,37 @@ llm_providers:
     }
 
     #[test]
+    fn load_user_config_file_parses_provider_models_and_discovery_flag() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(
+            &path,
+            r#"
+llm_providers:
+  qianfan-coding:
+    base_url: https://qianfan.baidubce.com/v2/coding
+    discover_models: "false"
+    models:
+      kimi-k2.5:
+        context_length: 128000
+      glm-5:
+        context_length: 128000
+"#,
+        )
+        .unwrap();
+
+        let loaded = load_user_config_file(&path).unwrap();
+        let provider = loaded
+            .llm_providers
+            .get("qianfan-coding")
+            .expect("provider");
+        assert!(!provider.discover_models);
+        assert_eq!(provider.models, vec!["kimi-k2.5", "glm-5"]);
+    }
+
+    #[test]
     fn load_user_config_file_rejects_unknown_llm_provider_api_mode() {
         use tempfile::tempdir;
 
@@ -3110,6 +3192,8 @@ llm_providers:
         apply_user_config_patch(&mut c, "llm.openai.base_url", "https://api.openai.com/v1")
             .unwrap();
         apply_user_config_patch(&mut c, "llm.openai.api_mode", "codex-responses").unwrap();
+        apply_user_config_patch(&mut c, "llm.openai.models", "gpt-4o,gpt-4o-mini").unwrap();
+        apply_user_config_patch(&mut c, "llm.openai.discover_models", "false").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.max_output_tokens", "8192").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.command", "copilot-language-server").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.args", "--stdio,--model,gpt-4o-mini").unwrap();
@@ -3136,6 +3220,11 @@ llm_providers:
             c.llm_providers.get("openai").unwrap().max_tokens,
             Some(8192)
         );
+        assert_eq!(
+            c.llm_providers.get("openai").unwrap().models,
+            vec!["gpt-4o", "gpt-4o-mini"]
+        );
+        assert!(!c.llm_providers.get("openai").unwrap().discover_models);
         assert_eq!(
             c.llm_providers.get("openai").unwrap().command.as_deref(),
             Some("copilot-language-server")
@@ -3184,6 +3273,14 @@ llm_providers:
             "8192"
         );
         assert_eq!(
+            user_config_field_display(&c, "llm.openai.models").unwrap(),
+            "gpt-4o,gpt-4o-mini"
+        );
+        assert_eq!(
+            user_config_field_display(&c, "llm.openai.discover_models").unwrap(),
+            "false"
+        );
+        assert_eq!(
             user_config_field_display(&c, "llm.openai.args").unwrap(),
             "--stdio,--model,gpt-4o-mini"
         );
@@ -3206,6 +3303,7 @@ llm_providers:
             apply_user_config_patch(&mut c, "llm.openai.request_timeout_seconds", "fast").is_err()
         );
         assert!(apply_user_config_patch(&mut c, "llm.openai.max_tokens", "0").is_err());
+        assert!(apply_user_config_patch(&mut c, "llm.openai.discover_models", "maybe").is_err());
     }
 
     #[test]

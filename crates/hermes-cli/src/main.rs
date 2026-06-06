@@ -38,9 +38,9 @@ use hermes_cli::auth::{
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
 use hermes_cli::model_switch::{
-    cached_provider_catalog_status, curated_provider_slugs, format_stale_auxiliary_warning,
-    normalize_provider_model, provider_catalog_entries, provider_model_ids,
-    provider_picker_description, provider_slug_from_provider_model,
+    cached_provider_catalog_status, format_stale_auxiliary_warning, normalize_provider_model,
+    provider_catalog_entries_for_config, provider_model_ids, provider_picker_description,
+    provider_slug_from_provider_model,
 };
 use hermes_cli::platform_toolsets::{resolve_platform_tool_schemas, tool_definition_summary};
 use hermes_cli::providers::provider_capability_for;
@@ -1655,8 +1655,7 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
             println!("Current model: {}", current);
 
             // List providers with merged models.dev-aware previews.
-            let providers = curated_provider_slugs();
-            let entries = provider_catalog_entries(&providers, 3).await;
+            let entries = provider_catalog_entries_for_config(&config, 3).await;
             println!("\nAvailable providers:");
             if entries.is_empty() {
                 println!("  openai       — OpenAI (gpt-4o, gpt-4o-mini, ...)");

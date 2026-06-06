@@ -56,7 +56,8 @@ use crate::kanban::{
 };
 use crate::model_switch::{
     cached_provider_catalog_status, curated_provider_slugs, format_stale_auxiliary_warning,
-    normalize_provider_model, provider_model_ids, provider_slug_from_provider_model,
+    normalize_provider_model, provider_catalog_entries_for_config, provider_model_ids,
+    provider_model_ids_for_config, provider_slug_from_provider_model, provider_slugs_for_config,
 };
 use crate::pairing_store::{PairingStatus, PairingStore};
 use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
@@ -4020,7 +4021,8 @@ async fn handle_model_explain_command(
     } else {
         normalize_model_target(&app.current_model, &positional[0])?
     };
-    let (guarded, remap_note) = guard_provider_model_selection(&target).await?;
+    let (guarded, remap_note) =
+        guard_provider_model_selection_for_config(&target, &app.config).await?;
     let (provider, model_id) = split_provider_model(&guarded);
     let client = default_client();
     client.fetch(false).await;
@@ -4055,7 +4057,7 @@ async fn handle_model_explain_command(
         } else {
             let _ = writeln!(out, "requirements: FAILED ({})", requirements.summary());
             let _ = writeln!(out, "missing: {}", unmet.join(", "));
-            let catalog = provider_model_ids(provider).await;
+            let catalog = provider_model_ids_for_config(provider, &app.config).await;
             let alternatives: Vec<String> = catalog
                 .into_iter()
                 .filter(|candidate| {
@@ -4094,7 +4096,10 @@ async fn handle_model_explain_command(
     Ok(CommandResult::Handled)
 }
 
-fn parse_model_switch_request(args: &[&str], known_providers: &[&str]) -> ModelSwitchRequest {
+fn parse_model_switch_request<S: AsRef<str>>(
+    args: &[&str],
+    known_providers: &[S],
+) -> ModelSwitchRequest {
     if args.is_empty() {
         return ModelSwitchRequest::PickProviderThenModel;
     }
@@ -4108,7 +4113,7 @@ fn parse_model_switch_request(args: &[&str], known_providers: &[&str]) -> ModelS
     }
     if known_providers
         .iter()
-        .any(|p| p.eq_ignore_ascii_case(trimmed))
+        .any(|p| p.as_ref().eq_ignore_ascii_case(trimmed))
     {
         return ModelSwitchRequest::PickModelFromProvider(trimmed.to_ascii_lowercase());
     }
@@ -4232,8 +4237,9 @@ fn rank_catalog_model_candidates(
         .collect()
 }
 
-async fn guard_provider_model_selection(
+async fn guard_provider_model_selection_for_config(
     provider_model: &str,
+    config: &GatewayConfig,
 ) -> Result<(String, Option<String>), AgentError> {
     if !model_catalog_guard_enabled() {
         return Ok((provider_model.to_string(), None));
@@ -4255,14 +4261,14 @@ async fn guard_provider_model_selection(
             )),
         ));
     }
-    if !curated_provider_slugs()
+    if !provider_slugs_for_config(config)
         .iter()
         .any(|slug| slug.eq_ignore_ascii_case(&provider))
     {
         return Ok((provider_model.to_string(), None));
     }
 
-    let catalog = provider_model_ids(&provider).await;
+    let catalog = provider_model_ids_for_config(&provider, config).await;
     if catalog.is_empty() {
         return Ok((provider_model.to_string(), None));
     }
@@ -4353,7 +4359,7 @@ async fn pick_model_for_provider(
     current_model: &str,
     requirements: ModelCapabilityRequirements,
 ) -> Result<bool, AgentError> {
-    let models = provider_model_ids(provider).await;
+    let models = provider_model_ids_for_config(provider, &app.config).await;
     if models.is_empty() {
         emit_command_output(
             app,
@@ -4404,7 +4410,8 @@ async fn pick_model_for_provider(
         return Ok(false);
     }
     let provider_model = format!("{}:{}", provider, filtered_models[pick.index].trim());
-    let (guarded, note) = guard_provider_model_selection(&provider_model).await?;
+    let (guarded, note) =
+        guard_provider_model_selection_for_config(&provider_model, &app.config).await?;
     app.switch_model(&guarded);
     let mut msg = format!("Model switched to: {}", guarded);
     if let Some(n) = note {
@@ -4955,11 +4962,12 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
         }
     }
     let positional_refs: Vec<&str> = positional.iter().map(String::as_str).collect();
-    let known_providers = curated_provider_slugs();
+    let known_providers = provider_slugs_for_config(&app.config);
     match parse_model_switch_request(&positional_refs, &known_providers) {
         ModelSwitchRequest::SetDirect(raw) => {
             let provider_model = normalize_model_target(&app.current_model, &raw)?;
-            let (guarded, note) = guard_provider_model_selection(&provider_model).await?;
+            let (guarded, note) =
+                guard_provider_model_selection_for_config(&provider_model, &app.config).await?;
             if !requirements.is_empty() {
                 let (provider, model_id) = split_provider_model(&guarded);
                 let client = default_client();
@@ -4996,7 +5004,7 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
         }
         ModelSwitchRequest::PickProviderThenModel => {
             emit_command_output(app, format!("Current model: {}", app.current_model));
-            let providers: Vec<String> = known_providers.iter().map(|p| (*p).to_string()).collect();
+            let providers: Vec<String> = known_providers.clone();
             if providers.is_empty() {
                 emit_command_output(app, "No providers are registered for selection.");
                 return Ok(CommandResult::Handled);
@@ -13890,12 +13898,12 @@ fn handle_context_command(app: &mut App, args: &[&str]) -> Result<CommandResult,
 }
 
 async fn handle_provider_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    let providers = curated_provider_slugs();
+    let providers = provider_slugs_for_config(&app.config);
     if providers.is_empty() {
         emit_command_output(app, "No providers registered.");
         return Ok(CommandResult::Handled);
     }
-    let entries = crate::model_switch::provider_catalog_entries(&providers, 4).await;
+    let entries = provider_catalog_entries_for_config(&app.config, 4).await;
     if entries.is_empty() {
         emit_command_output(
             app,
@@ -29037,9 +29045,12 @@ mod tests {
     async fn guard_provider_model_selection_soft_accepts_unlisted_codex_models() {
         let _guard = env_test_lock();
         std::env::set_var("HERMES_MODEL_CATALOG_GUARD", "1");
-        let (guarded, note) = guard_provider_model_selection("openai-codex:gpt-9-codex-preview")
-            .await
-            .expect("codex soft-accept");
+        let (guarded, note) = guard_provider_model_selection_for_config(
+            "openai-codex:gpt-9-codex-preview",
+            &GatewayConfig::default(),
+        )
+        .await
+        .expect("codex soft-accept");
         assert_eq!(guarded, "openai-codex:gpt-9-codex-preview");
         assert!(note
             .as_deref()
@@ -30112,6 +30123,43 @@ install_command: "uv pip install -r requirements.txt"
             req,
             ModelSwitchRequest::PickModelFromProvider("nous".to_string())
         );
+    }
+
+    #[test]
+    fn parse_model_switch_request_accepts_configured_provider_strings() {
+        let providers = vec![
+            "openai".to_string(),
+            "qianfan-coding".to_string(),
+            "my-gateway".to_string(),
+        ];
+        let req = parse_model_switch_request(&["QIANFAN-CODING"], &providers);
+        assert_eq!(
+            req,
+            ModelSwitchRequest::PickModelFromProvider("qianfan-coding".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn guard_provider_model_selection_uses_configured_provider_models() {
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "qianfan-coding".to_string(),
+            LlmProviderConfig {
+                models: vec!["kimi-k2.5".to_string(), "glm-5".to_string()],
+                discover_models: false,
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let (guarded, note) =
+            guard_provider_model_selection_for_config("qianfan-coding:kimi", &cfg)
+                .await
+                .expect("guard");
+
+        assert_eq!(guarded, "qianfan-coding:kimi-k2.5");
+        assert!(note
+            .as_deref()
+            .is_some_and(|text| text.contains("Model catalog guard remapped")));
     }
 
     #[test]

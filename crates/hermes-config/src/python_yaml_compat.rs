@@ -200,6 +200,8 @@ fn merge_custom_providers_into_llm(map: &mut Mapping) {
                 "command",
                 "args",
                 "model",
+                "models",
+                "discover_models",
                 "api_mode",
                 "max_tokens",
                 "temperature",
@@ -614,6 +616,10 @@ custom_providers:
     api_key: sk-beans
     api_key_env: BEANS_API_KEY
     model: fallback-beans-model
+    discover_models: "false"
+    models:
+      kimi-k2.5: {}
+      glm-5: {}
     api_mode: codex_responses
   - name: local
     base_url: http://localhost:8080/v1/
@@ -631,6 +637,8 @@ custom_providers:
         assert_eq!(beans.api_key.as_deref(), Some("sk-beans"));
         assert_eq!(beans.api_key_env.as_deref(), Some("BEANS_API_KEY"));
         assert_eq!(beans.model.as_deref(), Some("fallback-beans-model"));
+        assert!(!beans.discover_models);
+        assert_eq!(beans.models, vec!["kimi-k2.5", "glm-5"]);
         assert_eq!(beans.api_mode.as_deref(), Some("codex_responses"));
 
         let local = cfg.llm_providers.get("local").expect("local provider");

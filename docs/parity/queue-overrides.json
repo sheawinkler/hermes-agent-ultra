@@ -976,6 +976,14 @@
       "disposition": "ported",
       "notes": "Rust regression tests cover the max_tokens propagation chain from config parsing/set-get through build_agent_config into AgentConfig.max_tokens precedence, superseding the upstream Python gateway test-only follow-up."
     },
+    "4b2d00f845eb": {
+      "disposition": "ported",
+      "notes": "Rust custom provider catalogs now preserve `discover_models: false` from both canonical llm_providers and legacy custom_providers, keep explicit `models` subsets without probing live `/models`, and expose config-aware provider lists with Rust model-switch tests."
+    },
+    "7ae8aac3b9b2": {
+      "disposition": "ported",
+      "notes": "Rust terminal and slash/TUI model flows now include configured custom providers, use explicit provider model lists when discovery is disabled, fall back to configured models after empty probes, and guard direct switches against those configured catalogs with CLI/config tests."
+    },
     "38695254f851": {
       "disposition": "ported",
       "notes": "Rust session persistence now exposes FTS index counting and optimize_fts maintenance, VACUUM runs FTS optimization before reclaiming pages, and top-level `hermes sessions optimize` reports FTS index count plus before/after sessions.db size with Rust unit/e2e coverage."
