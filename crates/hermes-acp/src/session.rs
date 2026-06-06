@@ -66,6 +66,21 @@ pub struct SessionState {
     pub total_completion_tokens: u64,
 }
 
+/// Public metadata update for ACP sessions.
+///
+/// Optional fields intentionally preserve existing values when omitted. This
+/// mirrors upstream's `update_session_meta(..., model=None)` COALESCE behavior
+/// without exposing storage internals to callers.
+#[derive(Debug, Clone, Default)]
+pub struct SessionMetaUpdate {
+    pub cwd: Option<String>,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub api_mode: Option<String>,
+    pub base_url: Option<String>,
+    pub config_options: HashMap<String, String>,
+}
+
 impl SessionState {
     pub fn new(session_id: String, cwd: String) -> Self {
         let now = SystemTime::now()
@@ -181,24 +196,55 @@ impl SessionManager {
 
     /// Update a session's working directory.
     pub fn update_cwd(&self, session_id: &str, cwd: &str) -> Option<SessionState> {
-        let mut sessions = self.sessions.lock().unwrap();
-        if let Some(state) = sessions.get_mut(session_id) {
-            state.cwd = cwd.to_string();
-            state.touch();
-            let cloned = state.clone();
-            drop(sessions);
-            self.persist(&cloned);
-            Some(cloned)
-        } else {
-            None
-        }
+        self.update_session_meta(
+            session_id,
+            SessionMetaUpdate {
+                cwd: Some(cwd.to_string()),
+                ..SessionMetaUpdate::default()
+            },
+        )
     }
 
     /// Update a session's model identifier.
     pub fn update_model(&self, session_id: &str, model: &str) -> Option<SessionState> {
+        self.update_session_meta(
+            session_id,
+            SessionMetaUpdate {
+                model: Some(model.to_string()),
+                ..SessionMetaUpdate::default()
+            },
+        )
+    }
+
+    /// Update session metadata through the public, lock-protected manager path.
+    pub fn update_session_meta(
+        &self,
+        session_id: &str,
+        update: SessionMetaUpdate,
+    ) -> Option<SessionState> {
         let mut sessions = self.sessions.lock().unwrap();
         if let Some(state) = sessions.get_mut(session_id) {
-            state.model = Some(model.to_string());
+            if let Some(cwd) = update.cwd {
+                state.cwd = cwd;
+            }
+            if let Some(model) = update.model.filter(|value| !value.trim().is_empty()) {
+                state.model = Some(model);
+            }
+            if let Some(provider) = update.provider.filter(|value| !value.trim().is_empty()) {
+                state.provider = Some(provider);
+            }
+            if let Some(api_mode) = update.api_mode.filter(|value| !value.trim().is_empty()) {
+                state.api_mode = Some(api_mode);
+            }
+            if let Some(base_url) = update.base_url.filter(|value| !value.trim().is_empty()) {
+                state.base_url = Some(base_url);
+            }
+            for (key, value) in update.config_options {
+                let key = key.trim();
+                if !key.is_empty() {
+                    state.config_options.insert(key.to_string(), value);
+                }
+            }
             state.touch();
             let cloned = state.clone();
             drop(sessions);
@@ -453,5 +499,109 @@ mod tests {
                 .map(String::as_str),
             Some("0.2")
         );
+    }
+
+    #[test]
+    fn update_session_meta_preserves_model_when_omitted() {
+        let mgr = SessionManager::new();
+        let state = mgr.create_session("/tmp");
+        let sid = state.session_id;
+
+        mgr.update_model(&sid, "nous:gpt-5.4");
+        let updated = mgr
+            .update_session_meta(
+                &sid,
+                SessionMetaUpdate {
+                    cwd: Some("/workspace".to_string()),
+                    ..SessionMetaUpdate::default()
+                },
+            )
+            .expect("session exists");
+
+        assert_eq!(updated.cwd, "/workspace");
+        assert_eq!(updated.model.as_deref(), Some("nous:gpt-5.4"));
+        let stored = mgr.get_session(&sid).expect("session exists");
+        assert_eq!(stored.model.as_deref(), Some("nous:gpt-5.4"));
+    }
+
+    #[test]
+    fn update_session_meta_merges_fields_and_persists_once() {
+        use std::sync::{Arc, Mutex};
+
+        let persisted = Arc::new(Mutex::new(Vec::<SessionState>::new()));
+        let persisted_for_cb = persisted.clone();
+        let mgr = SessionManager::new().with_persist_callback(move |state| {
+            persisted_for_cb
+                .lock()
+                .expect("persisted lock")
+                .push(state.clone());
+        });
+        let state = mgr.create_session("/tmp");
+        let sid = state.session_id;
+        persisted.lock().expect("persisted lock").clear();
+
+        let mut config_options = HashMap::new();
+        config_options.insert("temperature".to_string(), "0.2".to_string());
+        config_options.insert("".to_string(), "ignored".to_string());
+        let updated = mgr
+            .update_session_meta(
+                &sid,
+                SessionMetaUpdate {
+                    cwd: Some("/repo".to_string()),
+                    model: Some("openai:gpt-4o".to_string()),
+                    provider: Some("openai".to_string()),
+                    api_mode: Some("responses".to_string()),
+                    base_url: Some("https://api.openai.com/v1".to_string()),
+                    config_options,
+                },
+            )
+            .expect("session exists");
+
+        assert_eq!(updated.cwd, "/repo");
+        assert_eq!(updated.model.as_deref(), Some("openai:gpt-4o"));
+        assert_eq!(updated.provider.as_deref(), Some("openai"));
+        assert_eq!(updated.api_mode.as_deref(), Some("responses"));
+        assert_eq!(
+            updated.base_url.as_deref(),
+            Some("https://api.openai.com/v1")
+        );
+        assert_eq!(
+            updated
+                .config_options
+                .get("temperature")
+                .map(String::as_str),
+            Some("0.2")
+        );
+        assert!(!updated.config_options.contains_key(""));
+
+        let persisted = persisted.lock().expect("persisted lock");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].session_id, sid);
+        assert_eq!(persisted[0].cwd, "/repo");
+    }
+
+    #[test]
+    fn update_session_meta_missing_session_is_noop() {
+        use std::sync::{Arc, Mutex};
+
+        let persisted = Arc::new(Mutex::new(Vec::<SessionState>::new()));
+        let persisted_for_cb = persisted.clone();
+        let mgr = SessionManager::new().with_persist_callback(move |state| {
+            persisted_for_cb
+                .lock()
+                .expect("persisted lock")
+                .push(state.clone());
+        });
+        assert!(mgr
+            .update_session_meta(
+                "missing",
+                SessionMetaUpdate {
+                    cwd: Some("/repo".to_string()),
+                    model: Some("openai:gpt-4o".to_string()),
+                    ..SessionMetaUpdate::default()
+                },
+            )
+            .is_none());
+        assert!(persisted.lock().expect("persisted lock").is_empty());
     }
 }
