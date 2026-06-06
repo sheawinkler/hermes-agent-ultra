@@ -62,6 +62,32 @@ pub enum ParseMode {
     Html,
 }
 
+/// Optional routing hints for platform sends.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SendMessageOptions {
+    /// Platform-native thread/topic id for adapters that support threaded replies.
+    pub thread_id: Option<String>,
+    /// True when the caller supplied the chat/topic id explicitly rather than
+    /// letting the gateway choose a configured home/publish target.
+    pub explicit_chat_id: bool,
+}
+
+impl SendMessageOptions {
+    pub fn threaded(thread_id: Option<&str>) -> Self {
+        Self {
+            thread_id: thread_id.map(ToOwned::to_owned),
+            explicit_chat_id: false,
+        }
+    }
+
+    pub fn explicit_threaded(thread_id: Option<&str>) -> Self {
+        Self {
+            thread_id: thread_id.map(ToOwned::to_owned),
+            explicit_chat_id: true,
+        }
+    }
+}
+
 /// Trait for platform communication adapters (Telegram, Discord, etc.).
 #[async_trait]
 pub trait PlatformAdapter: Send + Sync {
@@ -91,6 +117,22 @@ pub trait PlatformAdapter: Send + Sync {
     ) -> Result<(), GatewayError> {
         let _ = thread_id;
         self.send_message(chat_id, text, parse_mode).await
+    }
+
+    /// Send a text message with routing hints.
+    ///
+    /// The default preserves existing adapter behavior while allowing adapters
+    /// such as ntfy to distinguish explicit tool targets from configured home
+    /// reply targets.
+    async fn send_message_with_options(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        self.send_message_threaded(chat_id, text, parse_mode, options.thread_id.as_deref())
+            .await
     }
 
     /// Send or update a status message keyed by stable status type.
@@ -123,6 +165,20 @@ pub trait PlatformAdapter: Send + Sync {
         file_path: &str,
         caption: Option<&str>,
     ) -> Result<(), GatewayError>;
+
+    /// Send a file with routing hints.
+    ///
+    /// Adapters without explicit-target behavior inherit the plain file send.
+    async fn send_file_with_options(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        let _ = options;
+        self.send_file(chat_id, file_path, caption).await
+    }
 
     /// Send an image by URL using native platform capabilities when possible.
     ///

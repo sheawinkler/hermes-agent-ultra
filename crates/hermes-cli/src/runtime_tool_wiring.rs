@@ -215,12 +215,12 @@ mod tests {
     use serde_json::json;
     use std::sync::Mutex;
 
-    use hermes_core::{GatewayError, ParseMode, PlatformAdapter};
+    use hermes_core::{GatewayError, ParseMode, PlatformAdapter, SendMessageOptions};
     use hermes_cron::{CronRunner, FileJobPersistence, MinimalCronLlm};
     use hermes_gateway::{gateway::GatewayConfig, DmManager, SessionManager};
     use tempfile::TempDir;
 
-    type SentRecord = (String, String, Option<String>);
+    type SentRecord = (String, String, Option<String>, bool);
 
     struct RecordingAdapter {
         sent: Arc<Mutex<Vec<SentRecord>>>,
@@ -257,16 +257,16 @@ mod tests {
             self.sent
                 .lock()
                 .expect("recording adapter lock poisoned")
-                .push((chat_id.to_string(), text.to_string(), None));
+                .push((chat_id.to_string(), text.to_string(), None, false));
             Ok(())
         }
 
-        async fn send_message_threaded(
+        async fn send_message_with_options(
             &self,
             chat_id: &str,
             text: &str,
             _parse_mode: Option<ParseMode>,
-            thread_id: Option<&str>,
+            options: SendMessageOptions,
         ) -> Result<(), GatewayError> {
             self.sent
                 .lock()
@@ -274,7 +274,8 @@ mod tests {
                 .push((
                     chat_id.to_string(),
                     text.to_string(),
-                    thread_id.map(ToOwned::to_owned),
+                    options.thread_id,
+                    options.explicit_chat_id,
                 ));
             Ok(())
         }
@@ -339,6 +340,7 @@ mod tests {
         assert_eq!(sent[0].0, "12345");
         assert_eq!(sent[0].1, "hello");
         assert_eq!(sent[0].2, None);
+        assert!(sent[0].3);
     }
 
     #[tokio::test]
@@ -377,7 +379,8 @@ mod tests {
             [(
                 "C123".to_string(),
                 "reply".to_string(),
-                Some("171234.5".to_string())
+                Some("171234.5".to_string()),
+                true,
             )]
         );
     }

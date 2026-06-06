@@ -13,7 +13,7 @@ use tracing::{debug, error, warn};
 
 use crate::media::validate_media_delivery_path;
 use hermes_core::errors::GatewayError;
-use hermes_core::traits::PlatformAdapter;
+use hermes_core::traits::{PlatformAdapter, SendMessageOptions};
 
 // ---------------------------------------------------------------------------
 // DeliveryItem
@@ -348,7 +348,16 @@ impl DeliveryRouter {
         }
 
         if let Some(chat_id) = chat_id {
-            self.send_to_platform(platform_name, chat_id, message).await
+            self.send_to_platform(
+                platform_name,
+                chat_id,
+                message,
+                SendMessageOptions {
+                    thread_id: target.thread_id.clone(),
+                    explicit_chat_id: target.is_explicit,
+                },
+            )
+            .await
         } else {
             Err(GatewayError::SendFailed(format!(
                 "Delivery target '{}' has no chat_id/home channel configured",
@@ -372,6 +381,7 @@ impl DeliveryRouter {
         platform_name: &str,
         chat_id: &str,
         message: &str,
+        options: SendMessageOptions,
     ) -> Result<(), GatewayError> {
         let adapters = self.adapters.read().await;
         match adapters.get(platform_name) {
@@ -382,7 +392,9 @@ impl DeliveryRouter {
                         "Adapter is not running, attempting delivery anyway"
                     );
                 }
-                adapter.send_message(chat_id, message, None).await
+                adapter
+                    .send_message_with_options(chat_id, message, None, options)
+                    .await
             }
             None => {
                 error!(
@@ -445,7 +457,19 @@ impl DeliveryRouter {
 
         let adapters = self.adapters.read().await;
         match adapters.get(platform_name) {
-            Some(adapter) => adapter.send_file(chat_id, validated_path, caption).await,
+            Some(adapter) => {
+                adapter
+                    .send_file_with_options(
+                        chat_id,
+                        validated_path,
+                        caption,
+                        SendMessageOptions {
+                            thread_id: target.thread_id.clone(),
+                            explicit_chat_id: target.is_explicit,
+                        },
+                    )
+                    .await
+            }
             None => Err(GatewayError::SendFailed(format!(
                 "No adapter registered for platform '{}'",
                 platform_name
@@ -474,6 +498,12 @@ mod tests {
 
     struct FileRecordingAdapter {
         files: Arc<Mutex<Vec<String>>>,
+    }
+
+    type RecordedMessage = (String, String, Option<String>, bool);
+
+    struct MessageRecordingAdapter {
+        messages: Arc<Mutex<Vec<RecordedMessage>>>,
     }
 
     #[async_trait]
@@ -523,6 +553,74 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl PlatformAdapter for MessageRecordingAdapter {
+        async fn start(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn stop(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_message(
+            &self,
+            chat_id: &str,
+            text: &str,
+            _parse_mode: Option<ParseMode>,
+        ) -> Result<(), GatewayError> {
+            self.messages.lock().unwrap().push((
+                chat_id.to_string(),
+                text.to_string(),
+                None,
+                false,
+            ));
+            Ok(())
+        }
+
+        async fn send_message_with_options(
+            &self,
+            chat_id: &str,
+            text: &str,
+            _parse_mode: Option<ParseMode>,
+            options: SendMessageOptions,
+        ) -> Result<(), GatewayError> {
+            self.messages.lock().unwrap().push((
+                chat_id.to_string(),
+                text.to_string(),
+                options.thread_id,
+                options.explicit_chat_id,
+            ));
+            Ok(())
+        }
+
+        async fn edit_message(
+            &self,
+            _chat_id: &str,
+            _message_id: &str,
+            _text: &str,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_file(
+            &self,
+            _chat_id: &str,
+            _file_path: &str,
+            _caption: Option<&str>,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        fn is_running(&self) -> bool {
+            true
+        }
+
+        fn platform_name(&self) -> &str {
+            "ntfy"
+        }
+    }
+
     #[test]
     fn test_parse_target_origin() {
         let target = parse_target("origin");
@@ -557,6 +655,16 @@ mod tests {
         assert_eq!(discord.platform, "discord");
         assert_eq!(discord.chat_id, None);
         assert!(!discord.is_explicit);
+    }
+
+    #[test]
+    fn test_parse_target_ntfy_topic_is_explicit() {
+        let target = parse_target("ntfy:alerts-channel");
+
+        assert_eq!(target.platform, "ntfy");
+        assert_eq!(target.chat_id.as_deref(), Some("alerts-channel"));
+        assert_eq!(target.thread_id, None);
+        assert!(target.is_explicit);
     }
 
     #[test]
@@ -600,6 +708,30 @@ mod tests {
         let item = q.dequeue().unwrap();
         assert_eq!(item.text, "hello");
         assert!(q.is_empty());
+    }
+
+    #[tokio::test]
+    async fn route_delivery_preserves_explicit_ntfy_topic() {
+        let router = DeliveryRouter::new();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        router
+            .register_adapter(
+                "ntfy",
+                Arc::new(MessageRecordingAdapter {
+                    messages: messages.clone(),
+                }),
+            )
+            .await;
+
+        router
+            .route_delivery(&parse_target("ntfy:alerts-channel"), "done", None, None)
+            .await
+            .expect("explicit ntfy target should route");
+
+        assert_eq!(
+            messages.lock().unwrap().as_slice(),
+            &[("alerts-channel".to_string(), "done".to_string(), None, true,)]
+        );
     }
 
     #[tokio::test]

@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, Notify, RwLock};
 use tracing::{debug, info, warn};
 
 use hermes_core::errors::GatewayError;
-use hermes_core::traits::{ParseMode, PlatformAdapter};
+use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 
 use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
 use crate::gateway::IncomingMessage;
@@ -211,6 +211,20 @@ impl NtfyAdapter {
             include_echo_tag,
             markdown,
         )
+    }
+
+    fn publish_topic_for(&self, chat_id: &str, explicit_chat_id: bool) -> String {
+        if explicit_chat_id {
+            return chat_id.trim().to_string();
+        }
+        self.inner
+            .config
+            .publish_topic
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or(chat_id)
+            .trim()
+            .to_string()
     }
 
     async fn is_duplicate(inner: &NtfyInner, message_id: &str) -> bool {
@@ -420,14 +434,18 @@ impl PlatformAdapter for NtfyAdapter {
         text: &str,
         parse_mode: Option<ParseMode>,
     ) -> Result<(), GatewayError> {
-        let publish_topic = self
-            .inner
-            .config
-            .publish_topic
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or(chat_id)
-            .trim();
+        self.send_message_with_options(chat_id, text, parse_mode, SendMessageOptions::default())
+            .await
+    }
+
+    async fn send_message_with_options(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        let publish_topic = self.publish_topic_for(chat_id, options.explicit_chat_id);
         if publish_topic.is_empty() {
             return Err(GatewayError::SendFailed(
                 "ntfy publish topic is empty".into(),
@@ -477,11 +495,23 @@ impl PlatformAdapter for NtfyAdapter {
         file_path: &str,
         caption: Option<&str>,
     ) -> Result<(), GatewayError> {
+        self.send_file_with_options(chat_id, file_path, caption, SendMessageOptions::default())
+            .await
+    }
+
+    async fn send_file_with_options(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
         let text = match caption.map(str::trim).filter(|v| !v.is_empty()) {
             Some(caption) => format!("{caption}\n[Attachment: {file_path}]"),
             None => format!("[Attachment: {file_path}]"),
         };
-        self.send_message(chat_id, &text, None).await
+        self.send_message_with_options(chat_id, &text, None, options)
+            .await
     }
 
     fn is_running(&self) -> bool {
@@ -578,6 +608,85 @@ mod tests {
         let adapter = NtfyAdapter::new(test_config(server.uri())).unwrap();
         adapter
             .send_message("hermes-in", "Hello!", None)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_message_uses_configured_publish_topic_for_non_explicit_reply() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/configured-topic"))
+            .and(header("X-Tags", ECHO_TAG))
+            .and(body_string("done"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut config = test_config(server.uri());
+        config.publish_topic = Some("configured-topic".into());
+        let adapter = NtfyAdapter::new(config).unwrap();
+        adapter
+            .send_message("hermes-in", "done", None)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_send_overrides_configured_publish_topic() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/alerts-channel"))
+            .and(header("X-Tags", ECHO_TAG))
+            .and(body_string("done"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut config = test_config(server.uri());
+        config.publish_topic = Some("configured-topic".into());
+        let adapter = NtfyAdapter::new(config).unwrap();
+        adapter
+            .send_message_with_options(
+                "alerts-channel",
+                "done",
+                None,
+                SendMessageOptions {
+                    explicit_chat_id: true,
+                    ..SendMessageOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_file_send_overrides_configured_publish_topic() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/alerts-channel"))
+            .and(header("X-Tags", ECHO_TAG))
+            .and(body_string("[Attachment: /tmp/report.pdf]"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut config = test_config(server.uri());
+        config.publish_topic = Some("configured-topic".into());
+        let adapter = NtfyAdapter::new(config).unwrap();
+        adapter
+            .send_file_with_options(
+                "alerts-channel",
+                "/tmp/report.pdf",
+                None,
+                SendMessageOptions {
+                    explicit_chat_id: true,
+                    ..SendMessageOptions::default()
+                },
+            )
             .await
             .unwrap();
     }

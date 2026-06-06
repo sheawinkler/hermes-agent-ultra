@@ -1031,6 +1031,10 @@
     "a61420952e29": {
       "disposition": "ported",
       "notes": "Rust now constructs tool-result messages with the originating tool name in Message.name when the ToolCall is known, including invalid-tool and invalid-JSON result paths, persists messages.name through the SQLite session store with legacy DB migration, and regression-tests model-visible plus persisted tool-result name round trips."
+    },
+    "338c07433699": {
+      "disposition": "ported",
+      "notes": "Rust ntfy sends now distinguish explicit tool/router targets from configured publish-topic replies: gateway-backed messaging marks caller recipients explicit, DeliveryTarget routing preserves is_explicit/thread hints for text and file sends, and NtfyAdapter publishes explicit topics directly while retaining configured publish_topic for non-explicit replies."
     }
   },
   "subject_patterns": [

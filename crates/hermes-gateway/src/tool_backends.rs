@@ -50,7 +50,7 @@ impl MessagingBackend for GatewayMessagingBackend {
         thread_id: Option<&str>,
     ) -> Result<String, ToolError> {
         self.gateway
-            .send_message_threaded(platform, recipient, message, None, thread_id)
+            .send_message_explicit(platform, recipient, message, None, thread_id)
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("gateway send failed: {}", e)))?;
         let mut response = json!({

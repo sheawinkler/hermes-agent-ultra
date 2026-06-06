@@ -20,7 +20,7 @@ use tracing::{debug, error, info, warn};
 
 use hermes_config::{normalize_service_tier, DisplayConfig, QuickCommandConfig};
 use hermes_core::errors::GatewayError;
-use hermes_core::traits::{ParseMode, PlatformAdapter};
+use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 use hermes_core::types::{Message, MessageRole};
 
 use crate::background::{BackgroundTaskManager, TaskStatus};
@@ -2477,6 +2477,46 @@ impl Gateway {
         parse_mode: Option<ParseMode>,
         thread_id: Option<&str>,
     ) -> Result<(), GatewayError> {
+        self.send_message_with_options(
+            platform,
+            chat_id,
+            text,
+            parse_mode,
+            SendMessageOptions::threaded(thread_id),
+        )
+        .await
+    }
+
+    /// Send a message to a caller-supplied platform chat/topic.
+    ///
+    /// This keeps explicit tool targets distinct from gateway-origin replies
+    /// that may intentionally use platform-level home/publish overrides.
+    pub async fn send_message_explicit(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        thread_id: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        self.send_message_with_options(
+            platform,
+            chat_id,
+            text,
+            parse_mode,
+            SendMessageOptions::explicit_threaded(thread_id),
+        )
+        .await
+    }
+
+    async fn send_message_with_options(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
         let adapter = self.get_adapter(platform).await.ok_or_else(|| {
             GatewayError::Platform(format!("No adapter registered for platform: {}", platform))
         })?;
@@ -2485,17 +2525,17 @@ impl Gateway {
         if images.is_empty() && media_files.is_empty() {
             if without_media == text {
                 return adapter
-                    .send_message_threaded(chat_id, text, parse_mode, thread_id)
+                    .send_message_with_options(chat_id, text, parse_mode, options)
                     .await;
             }
             return adapter
-                .send_message_threaded(chat_id, &cleaned, parse_mode, thread_id)
+                .send_message_with_options(chat_id, &cleaned, parse_mode, options)
                 .await;
         }
 
         if !cleaned.is_empty() {
             adapter
-                .send_message_threaded(chat_id, &cleaned, parse_mode.clone(), thread_id)
+                .send_message_with_options(chat_id, &cleaned, parse_mode.clone(), options.clone())
                 .await?;
         }
 
@@ -2517,7 +2557,12 @@ impl Gateway {
                     _ => image.url.clone(),
                 };
                 adapter
-                    .send_message_threaded(chat_id, &fallback, Some(ParseMode::Plain), thread_id)
+                    .send_message_with_options(
+                        chat_id,
+                        &fallback,
+                        Some(ParseMode::Plain),
+                        options.clone(),
+                    )
                     .await?;
             }
         }
@@ -2532,11 +2577,11 @@ impl Gateway {
                     "refusing to deliver unsafe MEDIA marker path"
                 );
                 adapter
-                    .send_message_threaded(
+                    .send_message_with_options(
                         chat_id,
                         "[media attachment blocked: unsafe local file path]",
                         Some(ParseMode::Plain),
-                        thread_id,
+                        options.clone(),
                     )
                     .await?;
                 continue;
@@ -2550,17 +2595,20 @@ impl Gateway {
                     "refusing to deliver non-UTF-8 MEDIA marker path"
                 );
                 adapter
-                    .send_message_threaded(
+                    .send_message_with_options(
                         chat_id,
                         "[media attachment blocked: non-UTF-8 local file path]",
                         Some(ParseMode::Plain),
-                        thread_id,
+                        options.clone(),
                     )
                     .await?;
                 continue;
             };
 
-            if let Err(err) = adapter.send_file(chat_id, validated_path, None).await {
+            if let Err(err) = adapter
+                .send_file_with_options(chat_id, validated_path, None, options.clone())
+                .await
+            {
                 warn!(
                     platform = platform,
                     chat_id = chat_id,
@@ -2570,11 +2618,11 @@ impl Gateway {
                     "native media file send failed; falling back to plain file marker"
                 );
                 adapter
-                    .send_message_threaded(
+                    .send_message_with_options(
                         chat_id,
                         &format!("[media attachment] {validated_path}"),
                         Some(ParseMode::Plain),
-                        thread_id,
+                        options.clone(),
                     )
                     .await?;
             }

@@ -38,7 +38,8 @@ pub use schema_sanitizer::{
 
 // Re-export trait definitions
 pub use traits::{
-    LlmProvider, MemoryProvider, PlatformAdapter, SkillProvider, TerminalBackend, ToolHandler,
+    LlmProvider, MemoryProvider, PlatformAdapter, SendMessageOptions, SkillProvider,
+    TerminalBackend, ToolHandler,
 };
 
 // Re-export tool call parser public API
