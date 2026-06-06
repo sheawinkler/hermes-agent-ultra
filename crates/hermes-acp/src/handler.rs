@@ -15,7 +15,7 @@ use url::Url;
 use crate::auth::{
     build_auth_methods_for_provider, detect_provider, TERMINAL_SETUP_AUTH_METHOD_ID,
 };
-use crate::events::{plan_entries_from_todo_result, AcpEvent, EventSink};
+use crate::events::{plan_entries_from_todo_result, AcpEvent, AcpEventKind, EventSink};
 use crate::permissions::PermissionStore;
 use crate::protocol::*;
 use crate::session::{SessionManager, SessionPhase, SessionState};
@@ -971,12 +971,18 @@ impl HermesAcpHandler {
             events,
         } = prompt_result;
 
+        let streamed_message = events.iter().any(|event| {
+            matches!(
+                event.kind,
+                AcpEventKind::MessageDelta | AcpEventKind::MessageComplete
+            ) && event.text.as_deref().is_some_and(|text| !text.is_empty())
+        });
         for event in events {
             self.event_sink.push(event);
         }
 
         let response_text = response_text.trim().to_string();
-        if !response_text.is_empty() {
+        if !response_text.is_empty() && !streamed_message {
             self.event_sink
                 .push(AcpEvent::message_delta(session_id, &response_text));
             self.event_sink
@@ -1948,6 +1954,28 @@ mod tests {
                         Some("contents".to_string()),
                     ),
                 ],
+            })
+        }
+    }
+
+    struct StreamingPromptExecutor;
+
+    #[async_trait::async_trait]
+    impl AcpPromptExecutor for StreamingPromptExecutor {
+        async fn execute_prompt(
+            &self,
+            session: &SessionState,
+            _user_text: &str,
+            _history: &[Value],
+        ) -> Result<PromptExecutionOutput, String> {
+            Ok(PromptExecutionOutput {
+                response_text: "streamed answer".to_string(),
+                usage: None,
+                total_turns: Some(1),
+                events: vec![AcpEvent::message_delta(
+                    &session.session_id,
+                    "streamed answer",
+                )],
             })
         }
     }
@@ -3255,6 +3283,39 @@ mod tests {
             .as_deref()
             .and_then(|value| value.parse::<u64>().ok())
             .is_some_and(|value| value > 0));
+    }
+
+    #[tokio::test]
+    async fn test_prompt_does_not_duplicate_streamed_final_message() {
+        let handler = make_handler().with_prompt_executor(Arc::new(StreamingPromptExecutor));
+        let session_id = create_session(&handler).await;
+
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "sessionId": session_id.clone(),
+                    "text": "hello"
+                })),
+            })
+            .await;
+        assert!(resp.error.is_none());
+
+        let events = handler.event_sink.drain_for_session(&session_id);
+        let message_events = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.kind,
+                    AcpEventKind::MessageDelta | AcpEventKind::MessageComplete
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(message_events.len(), 1);
+        assert_eq!(message_events[0].kind, AcpEventKind::MessageDelta);
+        assert_eq!(message_events[0].text.as_deref(), Some("streamed answer"));
     }
 
     #[tokio::test]

@@ -26789,6 +26789,41 @@ struct CliAcpPromptExecutor {
     interrupts: Arc<Mutex<HashMap<String, hermes_agent::InterruptController>>>,
 }
 
+fn acp_stream_callbacks(
+    session_id: &str,
+    callback_events: Arc<Mutex<Vec<hermes_acp::AcpEvent>>>,
+) -> hermes_agent::AgentCallbacks {
+    let thought_events = callback_events.clone();
+    let thought_session_id = session_id.to_string();
+    let stream_events = callback_events;
+    let stream_session_id = session_id.to_string();
+    hermes_agent::AgentCallbacks {
+        on_thinking: Some(Box::new(move |thinking: &str| {
+            if thinking.trim().is_empty() {
+                return;
+            }
+            if let Ok(mut events) = thought_events.lock() {
+                events.push(hermes_acp::AcpEvent::agent_thought_chunk(
+                    &thought_session_id,
+                    thinking,
+                ));
+            }
+        })),
+        on_stream_delta: Some(Box::new(move |delta: &str| {
+            if delta.is_empty() {
+                return;
+            }
+            if let Ok(mut events) = stream_events.lock() {
+                events.push(hermes_acp::AcpEvent::message_delta(
+                    &stream_session_id,
+                    delta,
+                ));
+            }
+        })),
+        ..hermes_agent::AgentCallbacks::default()
+    }
+}
+
 #[async_trait::async_trait]
 impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
     async fn execute_prompt(
@@ -26812,8 +26847,12 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
         if let Ok(mut active) = self.interrupts.lock() {
             active.insert(session.session_id.clone(), interrupt.clone());
         }
+        let callback_events: Arc<Mutex<Vec<hermes_acp::AcpEvent>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let callbacks = acp_stream_callbacks(&session.session_id, callback_events.clone());
         let agent = hermes_agent::attach_discovered_memory(
-            hermes_agent::AgentLoop::with_interrupt(agent_config, agent_tools, provider, interrupt),
+            hermes_agent::AgentLoop::with_interrupt(agent_config, agent_tools, provider, interrupt)
+                .with_callbacks(callbacks),
         );
         let messages = acp_history_to_messages(history, user_text);
 
@@ -26831,12 +26870,20 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
             .unwrap_or_default();
 
         let usage = result.usage.as_ref().map(acp_usage_from_agent_usage);
+        let mut events = callback_events
+            .lock()
+            .map(|mut events| std::mem::take(&mut *events))
+            .unwrap_or_default();
+        events.extend(acp_events_from_agent_messages(
+            &session.session_id,
+            &result.messages,
+        ));
 
         Ok(hermes_acp::PromptExecutionOutput {
             response_text,
             usage,
             total_turns: Some(result.total_turns),
-            events: acp_events_from_agent_messages(&session.session_id, &result.messages),
+            events,
         })
     }
 
@@ -27871,6 +27918,28 @@ mod tests {
         assert_eq!(entries[0].status, "completed");
         assert_eq!(entries[1].content, "Patch renderer");
         assert_eq!(entries[1].status, "in_progress");
+    }
+
+    #[test]
+    fn test_acp_stream_callbacks_route_reasoning_and_message_deltas() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let callbacks = acp_stream_callbacks("session-1", events.clone());
+
+        callbacks.on_thinking.as_ref().unwrap()("actual reasoning");
+        callbacks.on_stream_delta.as_ref().unwrap()("streamed answer");
+        callbacks.on_thinking.as_ref().unwrap()("   ");
+        callbacks.on_stream_delta.as_ref().unwrap()("");
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, hermes_acp::AcpEventKind::AgentThoughtChunk);
+        assert_eq!(
+            events[0].session_update.as_deref(),
+            Some("agent_thought_chunk")
+        );
+        assert_eq!(events[0].text.as_deref(), Some("actual reasoning"));
+        assert_eq!(events[1].kind, hermes_acp::AcpEventKind::MessageDelta);
+        assert_eq!(events[1].text.as_deref(), Some("streamed answer"));
     }
 
     #[test]

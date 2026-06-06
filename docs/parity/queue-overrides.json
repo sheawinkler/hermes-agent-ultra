@@ -903,6 +903,10 @@
     "bd3a5873e11f084d74be876a505a406224a6ef3e": {
       "disposition": "ported",
       "notes": "Rust ACP replays native todo plan updates from persisted tool results after tool_call_complete, supports trailing human hints and empty todo lists for plan clearing, and covers replay ordering plus CLI live converter behavior."
+    },
+    "e26f9b207041c03d1aa9a982d29dbfda66df3a82": {
+      "disposition": "ported",
+      "notes": "Rust ACP routes provider reasoning callbacks to agent_thought_chunk updates, routes stream deltas to message_delta updates, and suppresses fallback final-response emission when executor streaming already delivered message content."
     }
   },
   "subject_patterns": [
