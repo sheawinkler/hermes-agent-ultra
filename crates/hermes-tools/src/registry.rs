@@ -6,7 +6,7 @@
 //! - Per-tool result size limits and global default
 //! - Dispatch with error catching that always returns JSON
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -57,6 +57,9 @@ pub struct ToolEntry {
 pub struct ToolRegistryInner {
     /// Registered tools keyed by name.
     tools: HashMap<String, ToolEntry>,
+    /// Explicit aliases for dynamic toolset names, for example an MCP server
+    /// name (`dynserver`) pointing at its canonical toolset (`mcp-dynserver`).
+    toolset_aliases: HashMap<String, String>,
     /// Global default max result size in characters.
     pub global_max_result_size_chars: usize,
     /// Centralized policy engine for tool-call governance.
@@ -84,6 +87,7 @@ impl ToolRegistry {
         Self {
             inner: Arc::new(Mutex::new(ToolRegistryInner {
                 tools: HashMap::new(),
+                toolset_aliases: HashMap::new(),
                 global_max_result_size_chars: 50_000,
                 policy: ToolPolicyEngine::from_env(),
                 policy_counters: ToolPolicyCounters::default(),
@@ -100,6 +104,7 @@ impl ToolRegistry {
         Self {
             inner: Arc::new(Mutex::new(ToolRegistryInner {
                 tools: HashMap::new(),
+                toolset_aliases: HashMap::new(),
                 global_max_result_size_chars: max,
                 policy: ToolPolicyEngine::from_env(),
                 policy_counters: ToolPolicyCounters::default(),
@@ -206,7 +211,20 @@ impl ToolRegistry {
     /// Returns `true` if the tool was present and removed.
     pub fn deregister(&self, name: &str) -> bool {
         let mut inner = self.inner.lock().unwrap();
-        inner.tools.remove(name).is_some()
+        let Some(removed) = inner.tools.remove(name) else {
+            return false;
+        };
+        let target_toolset = removed.toolset;
+        if !inner
+            .tools
+            .values()
+            .any(|entry| entry.toolset == target_toolset)
+        {
+            inner
+                .toolset_aliases
+                .retain(|_, target| target != &target_toolset);
+        }
+        true
     }
 
     /// Get tool definitions for all tools whose `check_fn` returns true.
@@ -406,9 +424,51 @@ impl ToolRegistry {
     pub fn list_toolsets(&self) -> Vec<String> {
         let inner = self.inner.lock().unwrap();
         let mut sets: Vec<String> = inner.tools.values().map(|e| e.toolset.clone()).collect();
+        sets.extend(inner.toolset_aliases.keys().cloned());
         sets.sort();
         sets.dedup();
         sets
+    }
+
+    /// Register an explicit alias from a user-facing toolset token to its
+    /// canonical live-registry toolset.
+    pub fn register_toolset_alias(&self, alias: impl Into<String>, target: impl Into<String>) {
+        let alias = alias.into().trim().to_string();
+        let target = target.into().trim().to_string();
+        if alias.is_empty() || target.is_empty() {
+            return;
+        }
+        let mut inner = self.inner.lock().unwrap();
+        inner.toolset_aliases.insert(alias, target);
+    }
+
+    /// Return the canonical target for a registered toolset alias.
+    pub fn get_toolset_alias_target(&self, alias: &str) -> Option<String> {
+        let inner = self.inner.lock().unwrap();
+        inner.toolset_aliases.get(alias).cloned()
+    }
+
+    /// Check whether the registry owns this live toolset or alias.
+    pub fn has_toolset(&self, toolset: &str) -> bool {
+        let inner = self.inner.lock().unwrap();
+        let resolved = resolve_toolset_alias_locked(&inner, toolset);
+        inner.tools.values().any(|entry| entry.toolset == resolved)
+            || inner.toolset_aliases.contains_key(toolset)
+    }
+
+    /// Return tool names belonging to a live registry-owned toolset or alias.
+    pub fn tool_names_for_toolset(&self, toolset: &str, available_only: bool) -> Vec<String> {
+        let inner = self.inner.lock().unwrap();
+        let resolved = resolve_toolset_alias_locked(&inner, toolset);
+        let mut names: Vec<String> = inner
+            .tools
+            .values()
+            .filter(|entry| entry.toolset == resolved)
+            .filter(|entry| !available_only || (entry.check_fn)())
+            .map(|entry| entry.name.clone())
+            .collect();
+        names.sort();
+        names
     }
 
     /// Check whether a tool is available (exists and check_fn passes).
@@ -534,6 +594,20 @@ fn maybe_annotate_audit(output: String, decision: &ToolPolicyDecision) -> String
     } else {
         output
     }
+}
+
+fn resolve_toolset_alias_locked(inner: &ToolRegistryInner, name: &str) -> String {
+    let mut current = name.to_string();
+    let mut seen = HashSet::new();
+    while seen.insert(current.clone()) {
+        let Some(next) = inner.toolset_aliases.get(&current) else {
+            return current;
+        };
+        current = next.clone();
+    }
+    // Alias cycles are invalid configuration; fall back to the last distinct
+    // name so resolution stays deterministic instead of looping forever.
+    current
 }
 
 fn looks_like_json(data: &str) -> bool {
@@ -679,6 +753,73 @@ mod tests {
         assert!(registry.deregister("echo"));
         assert!(!registry.deregister("echo"));
         assert!(registry.get_definitions().is_empty());
+    }
+
+    #[test]
+    fn toolset_alias_resolves_live_registry_tools() {
+        let registry = ToolRegistry::new();
+        let schema = tool_schema("mcp_dynserver_ping", "MCP ping", JsonSchema::new("object"));
+        registry.register(
+            "mcp_dynserver_ping",
+            "mcp-dynserver",
+            schema,
+            Arc::new(EchoHandler),
+            Arc::new(|| true),
+            vec![],
+            false,
+            "MCP ping",
+            "x",
+            None,
+        );
+        registry.register_toolset_alias("dynserver", "mcp-dynserver");
+
+        assert_eq!(
+            registry.get_toolset_alias_target("dynserver").as_deref(),
+            Some("mcp-dynserver")
+        );
+        assert!(registry.has_toolset("dynserver"));
+        assert_eq!(
+            registry.tool_names_for_toolset("dynserver", true),
+            vec!["mcp_dynserver_ping".to_string()]
+        );
+        let toolsets = registry.list_toolsets();
+        assert!(toolsets.contains(&"dynserver".to_string()));
+        assert!(toolsets.contains(&"mcp-dynserver".to_string()));
+    }
+
+    #[test]
+    fn toolset_alias_cleanup_waits_for_last_target_tool() {
+        let registry = ToolRegistry::new();
+        for tool_name in ["mcp_dynserver_ping", "mcp_dynserver_status"] {
+            let schema = tool_schema(tool_name, "MCP tool", JsonSchema::new("object"));
+            registry.register(
+                tool_name,
+                "mcp-dynserver",
+                schema,
+                Arc::new(EchoHandler),
+                Arc::new(|| true),
+                vec![],
+                false,
+                "MCP tool",
+                "x",
+                None,
+            );
+        }
+        registry.register_toolset_alias("dynserver", "mcp-dynserver");
+
+        assert!(registry.deregister("mcp_dynserver_ping"));
+        assert_eq!(
+            registry.get_toolset_alias_target("dynserver").as_deref(),
+            Some("mcp-dynserver")
+        );
+        assert_eq!(
+            registry.tool_names_for_toolset("dynserver", true),
+            vec!["mcp_dynserver_status".to_string()]
+        );
+
+        assert!(registry.deregister("mcp_dynserver_status"));
+        assert_eq!(registry.get_toolset_alias_target("dynserver"), None);
+        assert!(!registry.has_toolset("dynserver"));
     }
 
     #[test]

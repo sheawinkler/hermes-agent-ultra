@@ -406,11 +406,11 @@ impl ToolsetManager {
         // Handle "all" or "*" wildcard
         if name == "all" || name == "*" {
             let mut all_tools = HashSet::new();
-            for ts_name in self.toolsets.keys() {
+            for ts_name in self.list_toolsets() {
                 // Each sub-toolset gets its own visited set to avoid
                 // false cycle detection across independent branches.
                 let mut sub_visited = HashSet::new();
-                let tools = self.resolve_inner(ts_name, &mut sub_visited)?;
+                let tools = self.resolve_inner(&ts_name, &mut sub_visited)?;
                 all_tools.extend(tools);
             }
             let mut result: Vec<String> = all_tools.into_iter().collect();
@@ -424,10 +424,12 @@ impl ToolsetManager {
         }
         visited.insert(name.to_string());
 
-        let toolset = self
-            .toolsets
-            .get(name)
-            .ok_or_else(|| ToolsetError::NotFound(name.to_string()))?;
+        let Some(toolset) = self.toolsets.get(name) else {
+            if self.registry.has_toolset(name) {
+                return Ok(self.registry.tool_names_for_toolset(name, true));
+            }
+            return Err(ToolsetError::NotFound(name.to_string()));
+        };
 
         let mut resolved = HashSet::new();
 
@@ -468,11 +470,11 @@ impl ToolsetManager {
     ) -> Result<Vec<String>, ToolsetError> {
         if name == "all" || name == "*" {
             let mut all_tools = HashSet::new();
-            for ts_name in self.toolsets.keys() {
+            for ts_name in self.list_toolsets() {
                 // Each sub-toolset gets its own visited set to avoid
                 // false cycle detection across independent branches.
                 let mut sub_visited = HashSet::new();
-                let tools = self.resolve_inner_unfiltered(ts_name, &mut sub_visited)?;
+                let tools = self.resolve_inner_unfiltered(&ts_name, &mut sub_visited)?;
                 all_tools.extend(tools);
             }
             let mut result: Vec<String> = all_tools.into_iter().collect();
@@ -485,10 +487,12 @@ impl ToolsetManager {
         }
         visited.insert(name.to_string());
 
-        let toolset = self
-            .toolsets
-            .get(name)
-            .ok_or_else(|| ToolsetError::NotFound(name.to_string()))?;
+        let Some(toolset) = self.toolsets.get(name) else {
+            if self.registry.has_toolset(name) {
+                return Ok(self.registry.tool_names_for_toolset(name, false));
+            }
+            return Err(ToolsetError::NotFound(name.to_string()));
+        };
 
         let mut resolved = HashSet::new();
         for tool in &toolset.tools {
@@ -514,7 +518,9 @@ impl ToolsetManager {
     /// Get the list of all registered toolset names.
     pub fn list_toolsets(&self) -> Vec<String> {
         let mut names: Vec<String> = self.toolsets.keys().cloned().collect();
+        names.extend(self.registry.list_toolsets());
         names.sort();
+        names.dedup();
         names
     }
 
@@ -540,10 +546,49 @@ pub enum ToolsetError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
+    use serde_json::Value;
     use std::sync::Arc;
+
+    struct NoopHandler {
+        schema: ToolSchema,
+    }
+
+    #[async_trait]
+    impl ToolHandler for NoopHandler {
+        async fn execute(&self, _params: Value) -> Result<String, ToolError> {
+            Ok("ok".to_string())
+        }
+
+        fn schema(&self) -> ToolSchema {
+            self.schema.clone()
+        }
+    }
 
     fn empty_registry() -> Arc<ToolRegistry> {
         Arc::new(ToolRegistry::new())
+    }
+
+    fn register_live_tool(
+        registry: &Arc<ToolRegistry>,
+        name: &str,
+        toolset: &str,
+        available: bool,
+    ) {
+        let schema = tool_schema(name, "live tool", JsonSchema::new("object"));
+        registry.register(
+            name,
+            toolset,
+            schema.clone(),
+            Arc::new(NoopHandler { schema }),
+            Arc::new(move || available),
+            vec![],
+            false,
+            "live tool",
+            "x",
+            None,
+        );
     }
 
     #[test]
@@ -607,6 +652,51 @@ mod tests {
         );
         let tools = manager.resolve_toolset_unfiltered("my_custom").unwrap();
         assert_eq!(tools.len(), 2);
+    }
+
+    #[test]
+    fn resolves_live_registry_owned_toolset_without_static_registration() {
+        let registry = empty_registry();
+        register_live_tool(&registry, "mcp_dynserver_ping", "mcp-dynserver", true);
+        let manager = ToolsetManager::new(Arc::clone(&registry));
+
+        assert_eq!(
+            manager.resolve_toolset("mcp-dynserver").unwrap(),
+            vec!["mcp_dynserver_ping".to_string()]
+        );
+        assert_eq!(
+            manager.resolve_toolset_unfiltered("mcp-dynserver").unwrap(),
+            vec!["mcp_dynserver_ping".to_string()]
+        );
+    }
+
+    #[test]
+    fn resolves_live_registry_toolset_aliases() {
+        let registry = empty_registry();
+        register_live_tool(&registry, "mcp_dynserver_ping", "mcp-dynserver", true);
+        registry.register_toolset_alias("dynserver", "mcp-dynserver");
+        let manager = ToolsetManager::new(Arc::clone(&registry));
+
+        assert_eq!(
+            manager.resolve_toolset("dynserver").unwrap(),
+            vec!["mcp_dynserver_ping".to_string()]
+        );
+        let names = manager.list_toolsets();
+        assert!(names.contains(&"dynserver".to_string()));
+        assert!(names.contains(&"mcp-dynserver".to_string()));
+    }
+
+    #[test]
+    fn live_registry_toolset_availability_filter_returns_empty_not_missing() {
+        let registry = empty_registry();
+        register_live_tool(&registry, "mcp_dynserver_ping", "mcp-dynserver", false);
+        let manager = ToolsetManager::new(Arc::clone(&registry));
+
+        assert_eq!(manager.resolve_toolset("mcp-dynserver").unwrap().len(), 0);
+        assert_eq!(
+            manager.resolve_toolset_unfiltered("mcp-dynserver").unwrap(),
+            vec!["mcp_dynserver_ping".to_string()]
+        );
     }
 
     #[test]

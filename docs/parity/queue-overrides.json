@@ -1279,6 +1279,14 @@
     "aa948832886a": {
       "disposition": "ported",
       "notes": "Rust MCP tools/call now applies schema-aware string argument coercion before dispatch: nullable object/array/type-union fields convert literal \"null\" to JSON null only when the inputSchema permits null, while integer, boolean, object, and array string values are coerced according to the exposed schema. Both generic McpServer and hermes mcp serve paths have focused runtime regression coverage."
+    },
+    "cda64a59612f": {
+      "disposition": "ported",
+      "notes": "Rust ToolsetManager now resolves otherwise-unknown live registry-owned toolsets, including MCP-style dynamic toolsets, through ToolRegistry instead of requiring static toolset registration. Wildcard/list discovery includes live registry toolsets and focused hermes-tools tests cover filtered and unfiltered resolution."
+    },
+    "c10fea8d264e": {
+      "disposition": "ported",
+      "notes": "Rust ToolRegistry now supports explicit live toolset aliases such as server-name to mcp-server-name mappings, exposes alias targets for inspection, removes aliases only when the target toolset loses its last tool, and platform toolset filtering resolves configured MCP server aliases with hermes-tools and hermes-cli regression coverage."
     }
   },
   "subject_patterns": [
