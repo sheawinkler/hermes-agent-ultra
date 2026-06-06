@@ -3983,6 +3983,29 @@ mod tests {
     }
 
     #[test]
+    fn input_history_prev_next_restores_empty_draft_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());
+        app.input_history = vec![
+            "first prompt".to_string(),
+            "second prompt".to_string(),
+            "third prompt".to_string(),
+        ];
+        app.history_index = app.input_history.len();
+
+        assert_eq!(app.history_prev(), Some("third prompt"));
+        assert_eq!(app.history_prev(), Some("second prompt"));
+        assert_eq!(app.history_prev(), Some("first prompt"));
+        assert_eq!(app.history_prev(), None);
+
+        assert_eq!(app.history_next(), Some("second prompt"));
+        assert_eq!(app.history_next(), Some("third prompt"));
+        assert_eq!(app.history_next(), None);
+        assert_eq!(app.history_index, app.input_history.len());
+        assert_eq!(app.history_next(), None);
+    }
+
+    #[test]
     fn test_undo_last_n_soft_rewinds_and_sets_prefill() {
         let tmp = tempfile::tempdir().unwrap();
         let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());

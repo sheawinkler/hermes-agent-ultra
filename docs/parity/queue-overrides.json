@@ -1028,6 +1028,26 @@
       "disposition": "ported",
       "notes": "Rust model-provider preview surfaces now share DEFAULT_VISIBLE_MODELS_PER_PROVIDER=50 for CLI model listing, TUI provider picker details, and slash /provider output, with a regression test proving a 60-model configured provider exposes the first 50 while preserving total count."
     },
+    "f94363d1f0de": {
+      "disposition": "superseded",
+      "notes": "Desktop arrow-history UI is superseded by Rust TUI input_history navigation: Up/Down dispatch through App::history_prev/history_next for single-line prompts, Ctrl-R searches history, submitted prompts append to the ring, and a focused Rust unit test proves newest-to-oldest recall plus return to the empty draft sentinel."
+    },
+    "ce5003063474": {
+      "disposition": "superseded",
+      "notes": "Desktop queued-composer history integration is superseded by Rust's split design: TUI input history remains a sent-prompt ring while gateway BusySessionCoordinator owns busy-turn queue/steer semantics with queue, reset, finish, and fallback tests. There is no Rust desktop queued-row editor surface to port."
+    },
+    "0cbcc7593562": {
+      "disposition": "superseded",
+      "notes": "Desktop composer-message queue robustness is superseded by Rust gateway BusySessionCoordinator and CLI background queue handling: busy messages queue without interrupt, accepted steers skip the queue, rejected steers fall back to queue, reset/finish clear state deterministically, and slash/background queue tests cover user-visible status."
+    },
+    "40aef6af91e6": {
+      "disposition": "superseded",
+      "notes": "Desktop composer live-steer controls are superseded by Rust first-class /steer support in CLI/TUI/gateway/ACP: the core trusted steer marker is already ported, active-session ACP steer interrupts with that marker, and gateway busy-session steer mode accepts live steering or falls back to queue."
+    },
+    "efa53fb3be51": {
+      "disposition": "superseded",
+      "notes": "Desktop Cmd/Ctrl+Enter steer keybinding policy is not a Rust runtime surface. Rust TUI has its own terminal key contract: Enter submits, Shift+Enter and Ctrl+J insert newlines, Ctrl+Enter/Ctrl+M are submit fallbacks, and focused tests guard those shortcuts."
+    },
     "ffb53767bfff": {
       "disposition": "ported",
       "notes": "Rust config now resolves HERMES_PREFILL_MESSAGES_FILE > top-level prefill_messages_file > legacy agent.prefill_messages_file, loads JSON prefill messages relative to HERMES_HOME/config home, injects them ephemerally into CLI/HTTP/gateway/cron agent contexts through AgentConfig.prefill_messages, and strips them from returned/persisted history with focused config/CLI/HTTP/agent/cron/gateway tests."
