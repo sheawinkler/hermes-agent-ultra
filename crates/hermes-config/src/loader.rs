@@ -569,7 +569,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -782,6 +782,25 @@ fn apply_user_config_patch_dotted(
                 ))
             })?);
         }
+        ["delegation", "model"] => {
+            config.delegation.model = Some(value.to_string());
+        }
+        ["delegation", "provider"] => {
+            config.delegation.provider = Some(value.to_string());
+        }
+        ["delegation", "base_url"] => {
+            config.delegation.base_url = Some(value.to_string());
+        }
+        ["delegation", "api_key"] => {
+            config.delegation.api_key = Some(value.to_string());
+        }
+        ["delegation", "max_spawn_depth"] => {
+            config.delegation.max_spawn_depth = Some(value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "delegation.max_spawn_depth must be a non-negative integer: {value}"
+                ))
+            })?);
+        }
         ["auxiliary", task, field] => {
             let entry = config
                 .auxiliary
@@ -981,6 +1000,39 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
         ["agent", "api_max_retries"] | ["agent", "apiMaxRetries"] => Ok(config
             .agent
             .api_max_retries
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["delegation", "model"] => Ok(config
+            .delegation
+            .model
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["delegation", "provider"] => Ok(config
+            .delegation
+            .provider
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["delegation", "base_url"] => Ok(config
+            .delegation
+            .base_url
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["delegation", "api_key"] => Ok(config
+            .delegation
+            .api_key
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(mask_secret)
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["delegation", "max_spawn_depth"] => Ok(config
+            .delegation
+            .max_spawn_depth
             .map(|value| value.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
         ["llm", provider, "api_key"] => Ok(
@@ -2028,6 +2080,14 @@ pub fn validate_config(config: &GatewayConfig) -> Result<(), ConfigError> {
         }
     }
 
+    if let Some(api_key) = &config.delegation.api_key {
+        if api_key.trim().is_empty() {
+            return Err(ConfigError::ValidationError(
+                "delegation.api_key must not be empty".into(),
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -2903,6 +2963,50 @@ llm_providers:
             "7"
         );
         assert!(apply_user_config_patch(&mut c, "agent.api_max_retries", "nope").is_err());
+    }
+
+    #[test]
+    fn apply_patch_dotted_delegation_provider_model_runtime_values() {
+        let mut c = GatewayConfig::default();
+
+        apply_user_config_patch(&mut c, "delegation.model", "google/gemini-3-flash-preview")
+            .unwrap();
+        apply_user_config_patch(&mut c, "delegation.provider", "openrouter").unwrap();
+        apply_user_config_patch(&mut c, "delegation.base_url", "http://localhost:1234/v1").unwrap();
+        apply_user_config_patch(&mut c, "delegation.api_key", "local-key").unwrap();
+        apply_user_config_patch(&mut c, "delegation.max_spawn_depth", "9").unwrap();
+
+        assert_eq!(
+            c.delegation.model.as_deref(),
+            Some("google/gemini-3-flash-preview")
+        );
+        assert_eq!(c.delegation.provider.as_deref(), Some("openrouter"));
+        assert_eq!(
+            c.delegation.base_url.as_deref(),
+            Some("http://localhost:1234/v1")
+        );
+        assert_eq!(c.delegation.api_key.as_deref(), Some("local-key"));
+        assert_eq!(c.delegation.max_spawn_depth, Some(9));
+        assert_eq!(
+            user_config_field_display(&c, "delegation.model").unwrap(),
+            "google/gemini-3-flash-preview"
+        );
+        assert_eq!(
+            user_config_field_display(&c, "delegation.provider").unwrap(),
+            "openrouter"
+        );
+        assert_eq!(
+            user_config_field_display(&c, "delegation.base_url").unwrap(),
+            "http://localhost:1234/v1"
+        );
+        assert!(user_config_field_display(&c, "delegation.api_key")
+            .unwrap()
+            .starts_with("***"));
+        assert_eq!(
+            user_config_field_display(&c, "delegation.max_spawn_depth").unwrap(),
+            "9"
+        );
+        assert!(apply_user_config_patch(&mut c, "delegation.max_spawn_depth", "deep").is_err());
     }
 
     #[test]

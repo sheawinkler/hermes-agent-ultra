@@ -4569,6 +4569,28 @@ mod tests {
     }
 
     #[test]
+    fn test_build_agent_config_maps_delegation_provider_model_runtime_overrides() {
+        let mut cfg = GatewayConfig::default();
+        cfg.delegation.model = Some(" google/gemini-3-flash-preview ".to_string());
+        cfg.delegation.provider = Some(" openrouter ".to_string());
+        cfg.delegation.base_url = Some(" http://localhost:1234/v1 ".to_string());
+        cfg.delegation.api_key = Some(" local-key ".to_string());
+
+        let agent_cfg = build_agent_config(&cfg, "nous:hermes-3");
+
+        assert_eq!(
+            agent_cfg.delegation_model.as_deref(),
+            Some("google/gemini-3-flash-preview")
+        );
+        assert_eq!(agent_cfg.delegation_provider.as_deref(), Some("openrouter"));
+        assert_eq!(
+            agent_cfg.delegation_base_url.as_deref(),
+            Some("http://localhost:1234/v1")
+        );
+        assert_eq!(agent_cfg.delegation_api_key.as_deref(), Some("local-key"));
+    }
+
+    #[test]
     fn explore_first_defaults_do_not_shadow_configured_delegation_depth() {
         let _guard = env_test_lock();
         let keys = [
@@ -6101,6 +6123,34 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         provider: Some(resolved_provider),
         stream: config.streaming.enabled,
         max_delegate_depth,
+        delegation_model: config
+            .delegation
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_provider: config
+            .delegation
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_base_url: config
+            .delegation
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_api_key: config
+            .delegation
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
         skip_memory,
         skip_context_files,
         platform: Some("cli".to_string()),

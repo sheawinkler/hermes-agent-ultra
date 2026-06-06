@@ -32,6 +32,7 @@ use serde_json::json;
 use tokio::time::timeout;
 
 use crate::agent_loop::{AgentConfig, AgentLoop, ToolRegistry};
+use crate::credential_pool::CredentialPool;
 use crate::interrupt::InterruptController;
 
 /// Boxed `Send` future type alias used to short-circuit async-recursion
@@ -62,6 +63,8 @@ pub struct SubAgentLineage {
     pub toolset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     pub depth: u32,
     pub max_depth: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -116,6 +119,7 @@ pub struct SubAgentOrchestratorConfig {
     pub parent_config: AgentConfig,
     pub tool_registry: Arc<ToolRegistry>,
     pub llm_provider: Arc<dyn LlmProvider>,
+    pub parent_credential_pool: Option<Arc<CredentialPool>>,
     pub parent_interrupt: InterruptController,
     pub hermes_home: PathBuf,
     pub parent_session_id: Option<String>,
@@ -143,6 +147,7 @@ impl SubAgentOrchestrator {
                 parent_config: parent.config.clone(),
                 tool_registry: parent.tool_registry.clone(),
                 llm_provider: parent.llm_provider.clone(),
+                parent_credential_pool: parent.primary_credential_pool.clone(),
                 parent_interrupt: parent.interrupt.clone(),
                 hermes_home,
                 parent_session_id: parent.config.session_id.clone(),
@@ -179,7 +184,10 @@ impl SubAgentOrchestrator {
             task: req.task.clone(),
             context: req.context.clone(),
             toolset: req.toolset.clone(),
-            model: req.model.clone(),
+            model: clean_config_string(req.model.as_deref())
+                .or_else(|| clean_config_string(self.cfg.parent_config.delegation_model.as_deref()))
+                .map(str::to_string),
+            provider: self.effective_delegation_provider(),
             depth: req.child_depth,
             max_depth: req.max_depth,
             parent_budget_remaining_usd: req.parent_budget_remaining_usd,
@@ -282,9 +290,9 @@ impl SubAgentOrchestrator {
         });
 
         let child_config = self.build_child_config(req, sub_agent_id);
+        let child_provider = self.child_llm_provider(&child_config)?;
         let child_interrupt_for_spawn = child_interrupt.clone();
         let tool_registry = self.cfg.tool_registry.clone();
-        let llm_provider = self.cfg.llm_provider.clone();
         let child_depth = req.child_depth;
         let inherited_tools = if req.toolset.is_none() && !req.inherited_tool_schemas.is_empty() {
             Some(req.inherited_tool_schemas.clone())
@@ -303,7 +311,7 @@ impl SubAgentOrchestrator {
             let child_agent = AgentLoop::with_interrupt(
                 child_config,
                 tool_registry,
-                llm_provider,
+                child_provider,
                 child_interrupt_for_spawn,
             )
             .with_delegate_depth(child_depth);
@@ -360,12 +368,23 @@ impl SubAgentOrchestrator {
         // Children should not re-spawn grandchildren beyond the contract;
         // depth checks inside AgentLoop::execute_tool_calls still apply.
         child.skip_memory = true;
-        // Apply explicit model override if the caller requested one.
-        if let Some(model) = req.model.as_ref() {
-            if !model.is_empty() {
-                child.model = model.clone();
-            }
+
+        let requested_model = clean_config_string(req.model.as_deref())
+            .map(str::to_string)
+            .or_else(|| {
+                clean_config_string(parent.delegation_model.as_deref()).map(str::to_string)
+            });
+        let runtime_provider = self.effective_delegation_provider();
+
+        if let Some(provider) = runtime_provider {
+            let model = requested_model.unwrap_or_else(|| model_part(parent.model.as_str()));
+            child.provider = Some(provider.clone());
+            child.model = format!("{provider}:{}", strip_provider_prefix(model.as_str()));
+        } else if let Some(model) = requested_model {
+            // Model-only override inherits the parent provider and credentials.
+            child.model = model;
         }
+
         // Budget: hard-cap child by parent remaining budget when known.
         if let Some(remaining) = req.parent_budget_remaining_usd {
             let cap = remaining.max(0.0);
@@ -375,6 +394,47 @@ impl SubAgentOrchestrator {
             });
         }
         child
+    }
+
+    fn effective_delegation_provider(&self) -> Option<String> {
+        let parent = &self.cfg.parent_config;
+        clean_config_string(parent.delegation_provider.as_deref())
+            .map(str::to_string)
+            .or_else(|| {
+                let has_direct_endpoint =
+                    clean_config_string(parent.delegation_base_url.as_deref()).is_some()
+                        || clean_config_string(parent.delegation_api_key.as_deref()).is_some();
+                has_direct_endpoint.then(|| "custom".to_string())
+            })
+    }
+
+    fn child_llm_provider(
+        &self,
+        child_config: &AgentConfig,
+    ) -> Result<Arc<dyn LlmProvider>, SubAgentError> {
+        let Some(provider) = self.effective_delegation_provider() else {
+            return Ok(self.cfg.llm_provider.clone());
+        };
+
+        let model_name = strip_provider_prefix(child_config.model.as_str()).to_string();
+        let mut resolver = AgentLoop::with_interrupt(
+            child_config.clone(),
+            self.cfg.tool_registry.clone(),
+            self.cfg.llm_provider.clone(),
+            InterruptController::new(),
+        );
+        if let Some(pool) = self.cfg.parent_credential_pool.as_ref() {
+            resolver = resolver.with_primary_credential_pool(pool.clone());
+        }
+
+        resolver
+            .build_delegation_runtime_provider(
+                provider.as_str(),
+                model_name.as_str(),
+                clean_config_string(child_config.delegation_base_url.as_deref()),
+                clean_config_string(child_config.delegation_api_key.as_deref()),
+            )
+            .map_err(SubAgentError::Agent)
     }
 
     async fn persist_lineage(&self, lineage: &SubAgentLineage) {
@@ -412,6 +472,22 @@ impl std::fmt::Display for SubAgentError {
             SubAgentError::Agent(e) => write!(f, "sub-agent error: {}", e),
         }
     }
+}
+
+fn clean_config_string(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
+}
+
+fn strip_provider_prefix(model: &str) -> &str {
+    model
+        .split_once(':')
+        .map(|(_, model)| model.trim())
+        .filter(|model| !model.is_empty())
+        .unwrap_or_else(|| model.trim())
+}
+
+fn model_part(model: &str) -> String {
+    strip_provider_prefix(model).to_string()
 }
 
 fn initial_messages(task: &str, context: Option<&str>) -> Vec<Message> {
@@ -528,6 +604,7 @@ mod tests {
             llm_provider: Arc::new(RecordingProvider {
                 seen_tools: seen_tools.clone(),
             }),
+            parent_credential_pool: None,
             parent_interrupt: InterruptController::new(),
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("parent".into()),
@@ -599,6 +676,7 @@ mod tests {
             parent_config: parent_cfg,
             tool_registry: Arc::new(ToolRegistry::new()),
             llm_provider: Arc::new(SlowProvider),
+            parent_credential_pool: None,
             parent_interrupt: InterruptController::new(),
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("parent".into()),
@@ -639,6 +717,7 @@ mod tests {
             parent_config: AgentConfig::default(),
             tool_registry: Arc::new(ToolRegistry::new()),
             llm_provider: Arc::new(NoopProvider),
+            parent_credential_pool: None,
             parent_interrupt: parent_ctrl,
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: None,
@@ -673,6 +752,7 @@ mod tests {
             parent_config: parent,
             tool_registry: Arc::new(ToolRegistry::new()),
             llm_provider: Arc::new(NoopProvider),
+            parent_credential_pool: None,
             parent_interrupt: InterruptController::new(),
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("root".into()),
@@ -698,5 +778,162 @@ mod tests {
         assert_eq!(child.memory_nudge_interval, 0);
         assert_eq!(child.skill_creation_nudge_interval, 0);
         assert!(child.quiet_mode);
+    }
+
+    #[test]
+    fn build_child_config_model_only_override_inherits_parent_provider() {
+        let inherited_provider: Arc<dyn LlmProvider> = Arc::new(NoopProvider);
+        let parent = AgentConfig {
+            max_turns: 20,
+            model: "nous:hermes-3".into(),
+            provider: Some("nous".into()),
+            delegation_model: Some("google/gemini-3-flash-preview".into()),
+            ..AgentConfig::default()
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let orch = SubAgentOrchestrator::new(SubAgentOrchestratorConfig {
+            parent_config: parent,
+            tool_registry: Arc::new(ToolRegistry::new()),
+            llm_provider: inherited_provider.clone(),
+            parent_credential_pool: None,
+            parent_interrupt: InterruptController::new(),
+            hermes_home: tmp.path().to_path_buf(),
+            parent_session_id: Some("root".into()),
+            timeout: Duration::from_secs(1),
+        });
+
+        let child = orch.build_child_config(
+            &SubAgentRequest {
+                task: "t".into(),
+                child_depth: 1,
+                max_depth: 4,
+                ..Default::default()
+            },
+            "subagent-model-only",
+        );
+        let child_provider = orch
+            .child_llm_provider(&child)
+            .expect("model-only delegation inherits provider");
+
+        assert_eq!(child.model, "google/gemini-3-flash-preview");
+        assert_eq!(child.provider.as_deref(), Some("nous"));
+        assert!(Arc::ptr_eq(&child_provider, &inherited_provider));
+    }
+
+    #[test]
+    fn build_child_config_provider_override_prefixes_child_model() {
+        let parent = AgentConfig {
+            max_turns: 20,
+            model: "nous:hermes-3".into(),
+            provider: Some("nous".into()),
+            delegation_model: Some("google/gemini-3-flash-preview".into()),
+            delegation_provider: Some("openrouter".into()),
+            ..AgentConfig::default()
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let orch = SubAgentOrchestrator::new(SubAgentOrchestratorConfig {
+            parent_config: parent,
+            tool_registry: Arc::new(ToolRegistry::new()),
+            llm_provider: Arc::new(NoopProvider),
+            parent_credential_pool: None,
+            parent_interrupt: InterruptController::new(),
+            hermes_home: tmp.path().to_path_buf(),
+            parent_session_id: Some("root".into()),
+            timeout: Duration::from_secs(1),
+        });
+
+        let child = orch.build_child_config(
+            &SubAgentRequest {
+                task: "t".into(),
+                child_depth: 1,
+                max_depth: 4,
+                ..Default::default()
+            },
+            "subagent-provider",
+        );
+
+        assert_eq!(child.provider.as_deref(), Some("openrouter"));
+        assert_eq!(child.model, "openrouter:google/gemini-3-flash-preview");
+    }
+
+    #[test]
+    fn direct_endpoint_override_builds_distinct_child_provider() {
+        let inherited_provider: Arc<dyn LlmProvider> = Arc::new(NoopProvider);
+        let parent = AgentConfig {
+            max_turns: 20,
+            model: "nous:hermes-3".into(),
+            provider: Some("nous".into()),
+            delegation_model: Some("qwen2.5-coder".into()),
+            delegation_base_url: Some("http://127.0.0.1:1234/v1".into()),
+            delegation_api_key: Some("local-key".into()),
+            ..AgentConfig::default()
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let orch = SubAgentOrchestrator::new(SubAgentOrchestratorConfig {
+            parent_config: parent,
+            tool_registry: Arc::new(ToolRegistry::new()),
+            llm_provider: inherited_provider.clone(),
+            parent_credential_pool: None,
+            parent_interrupt: InterruptController::new(),
+            hermes_home: tmp.path().to_path_buf(),
+            parent_session_id: Some("root".into()),
+            timeout: Duration::from_secs(1),
+        });
+
+        let child = orch.build_child_config(
+            &SubAgentRequest {
+                task: "t".into(),
+                child_depth: 1,
+                max_depth: 4,
+                ..Default::default()
+            },
+            "subagent-direct",
+        );
+        let child_provider = orch
+            .child_llm_provider(&child)
+            .expect("direct endpoint delegation builds provider");
+
+        assert_eq!(child.provider.as_deref(), Some("custom"));
+        assert_eq!(child.model, "custom:qwen2.5-coder");
+        assert!(!Arc::ptr_eq(&child_provider, &inherited_provider));
+    }
+
+    #[tokio::test]
+    async fn unresolved_delegation_provider_returns_structured_error() {
+        let parent = AgentConfig {
+            max_turns: 2,
+            model: "nous:hermes-3".into(),
+            provider: Some("nous".into()),
+            delegation_model: Some("some-model".into()),
+            delegation_provider: Some("definitely-missing-provider".into()),
+            ..AgentConfig::default()
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let orch = Arc::new(SubAgentOrchestrator::new(SubAgentOrchestratorConfig {
+            parent_config: parent,
+            tool_registry: Arc::new(ToolRegistry::new()),
+            llm_provider: Arc::new(NoopProvider),
+            parent_credential_pool: None,
+            parent_interrupt: InterruptController::new(),
+            hermes_home: tmp.path().to_path_buf(),
+            parent_session_id: Some("root".into()),
+            timeout: Duration::from_secs(1),
+        }));
+
+        let out = orch
+            .execute(SubAgentRequest {
+                task: "t".into(),
+                child_depth: 1,
+                max_depth: 4,
+                ..Default::default()
+            })
+            .await;
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(parsed["status"], "failed");
+        assert!(parsed["error"]
+            .as_str()
+            .unwrap()
+            .contains("definitely-missing-provider"));
     }
 }

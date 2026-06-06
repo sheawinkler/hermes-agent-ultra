@@ -709,6 +709,34 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         hermes_home: config.home_dir.clone(),
         provider: provider_from_model,
         stream: config.streaming.enabled,
+        delegation_model: config
+            .delegation
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_provider: config
+            .delegation
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_base_url: config
+            .delegation
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_api_key: config
+            .delegation
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
         skip_context_files: config.agent.skip_context_files || skip_context_files_env,
         platform: Some("http".to_string()),
         pass_session_id: true,
@@ -975,6 +1003,34 @@ mod tests {
                 .get("openai")
                 .and_then(|cfg| cfg.request_timeout_seconds),
             Some(45.5)
+        );
+    }
+
+    #[test]
+    fn build_agent_config_maps_delegation_provider_model_runtime_overrides() {
+        let mut config = GatewayConfig::default();
+        config.delegation.model = Some(" meta-llama/llama-4-scout ".to_string());
+        config.delegation.provider = Some(" openrouter ".to_string());
+        config.delegation.base_url = Some(" https://openrouter.ai/api/v1 ".to_string());
+        config.delegation.api_key = Some(" sk-or-test ".to_string());
+
+        let agent_config = build_agent_config(&config, "nous:hermes-3");
+
+        assert_eq!(
+            agent_config.delegation_model.as_deref(),
+            Some("meta-llama/llama-4-scout")
+        );
+        assert_eq!(
+            agent_config.delegation_provider.as_deref(),
+            Some("openrouter")
+        );
+        assert_eq!(
+            agent_config.delegation_base_url.as_deref(),
+            Some("https://openrouter.ai/api/v1")
+        );
+        assert_eq!(
+            agent_config.delegation_api_key.as_deref(),
+            Some("sk-or-test")
         );
     }
 }

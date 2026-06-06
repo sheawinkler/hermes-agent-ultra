@@ -205,6 +205,20 @@ pub struct DelegationConfig {
     /// Maximum sub-agent spawn depth. Values below 1 are floored by runtime consumers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_spawn_depth: Option<u32>,
+    /// Optional model override for child agents. When set without a provider,
+    /// children keep the parent's provider/credentials and only switch model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Optional provider override for child agents. Runtime consumers resolve
+    /// the provider's full credential bundle before spawning the child.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Optional direct endpoint override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Optional direct API key override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1504,6 +1518,35 @@ delegation:
         let json = serde_json::to_string(&cfg).unwrap();
         let back: GatewayConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.delegation.max_spawn_depth, Some(99));
+    }
+
+    #[test]
+    fn delegation_config_accepts_provider_model_and_direct_endpoint() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+delegation:
+  model: google/gemini-3-flash-preview
+  provider: openrouter
+  base_url: http://localhost:1234/v1
+  api_key: local-key
+"#,
+        )
+        .expect("delegation provider/model config should deserialize");
+
+        assert_eq!(
+            cfg.delegation.model.as_deref(),
+            Some("google/gemini-3-flash-preview")
+        );
+        assert_eq!(cfg.delegation.provider.as_deref(), Some("openrouter"));
+        assert_eq!(
+            cfg.delegation.base_url.as_deref(),
+            Some("http://localhost:1234/v1")
+        );
+        assert_eq!(cfg.delegation.api_key.as_deref(), Some("local-key"));
+
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: GatewayConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.delegation, cfg.delegation);
     }
 
     #[test]

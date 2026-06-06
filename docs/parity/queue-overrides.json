@@ -952,6 +952,10 @@
       "disposition": "ported",
       "notes": "Rust delegation depth now has a first-class AgentConfig max_delegate_depth plus delegation.max_spawn_depth config bridge with floor 1 and no legacy ceiling; env/config values above the old cap pass through with agent, CLI, config, and backend tests."
     },
+    "9423fda5cb57": {
+      "disposition": "ported",
+      "notes": "Rust delegation config now accepts delegation.model/provider plus documented direct endpoint fields, exposes them through config set/get, propagates them through CLI/HTTP AgentConfig construction, and makes subagents either inherit the parent provider for model-only overrides or build an independent provider for provider/base_url/api_key overrides with structured credential errors."
+    },
     "f1fe29d1c368": {
       "disposition": "ported",
       "notes": "Rust provider config now accepts llm.<provider>.request_timeout_seconds, validates and exposes it through config set/get, propagates it into AgentConfig RuntimeProviderConfig, and applies it to OpenAI-compatible, Codex Responses, Anthropic, OpenRouter, extra provider, fallback/runtime-routing, and client rebuild paths with targeted tests."

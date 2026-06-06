@@ -446,6 +446,22 @@ pub struct AgentConfig {
     #[serde(default = "default_max_delegate_depth")]
     pub max_delegate_depth: u32,
 
+    /// Optional config-level model override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_model: Option<String>,
+
+    /// Optional config-level provider override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_provider: Option<String>,
+
+    /// Optional config-level base URL override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_base_url: Option<String>,
+
+    /// Optional config-level API key override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_api_key: Option<String>,
+
     /// Flush memories every N turns.
     #[serde(default = "default_memory_flush_interval")]
     pub memory_flush_interval: u32,
@@ -802,6 +818,10 @@ impl Default for AgentConfig {
             max_tokens: None,
             max_concurrent_delegates: default_max_concurrent_delegates(),
             max_delegate_depth: default_max_delegate_depth(),
+            delegation_model: None,
+            delegation_provider: None,
+            delegation_base_url: None,
+            delegation_api_key: None,
             memory_flush_interval: default_memory_flush_interval(),
             session_id: None,
             hermes_home: None,
@@ -2679,6 +2699,56 @@ impl AgentLoop {
         (fallback_provider, model)
     }
 
+    fn runtime_provider_config(&self, provider: &str) -> Option<&RuntimeProviderConfig> {
+        let provider = provider.trim();
+        if provider.is_empty() {
+            return None;
+        }
+        if let Some(cfg) = self.config.runtime_providers.get(provider) {
+            return Some(cfg);
+        }
+
+        let lower = provider.to_ascii_lowercase();
+        if let Some(cfg) = self.config.runtime_providers.get(lower.as_str()) {
+            return Some(cfg);
+        }
+
+        let canonical = hermes_core::providers::canonical_provider_id(provider);
+        if let Some(cfg) = self.config.runtime_providers.get(canonical.as_str()) {
+            return Some(cfg);
+        }
+
+        let profile = crate::provider_profiles::canonical_provider_profile_id(provider);
+        if let Some(profile) = profile {
+            if let Some(cfg) = self.config.runtime_providers.get(profile) {
+                return Some(cfg);
+            }
+        }
+
+        if let Some((_, cfg)) = self
+            .config
+            .runtime_providers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(provider))
+        {
+            return Some(cfg);
+        }
+
+        if let Some(profile) = profile {
+            if let Some((_, cfg)) = self.config.runtime_providers.iter().find(|(name, _)| {
+                crate::provider_profiles::canonical_provider_profile_id(name) == Some(profile)
+            }) {
+                return Some(cfg);
+            }
+        }
+
+        self.config
+            .runtime_providers
+            .iter()
+            .find(|(name, _)| hermes_core::providers::canonical_provider_id(name) == canonical)
+            .map(|(_, cfg)| cfg)
+    }
+
     fn resolve_runtime_api_key(
         &self,
         provider: &str,
@@ -2710,7 +2780,7 @@ impl AgentLoop {
                 }
             }
         }
-        if let Some(cfg) = self.config.runtime_providers.get(provider) {
+        if let Some(cfg) = self.runtime_provider_config(provider) {
             if let Some(ref key) = cfg.api_key {
                 let trimmed = key.trim();
                 if let Some(env_ref) = trimmed.strip_prefix("${").and_then(|s| s.strip_suffix('}'))
@@ -2793,14 +2863,37 @@ impl AgentLoop {
             "qwen" | "qwen-oauth" => std::env::var("DASHSCOPE_API_KEY")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
-            "kimi" | "moonshot" => std::env::var("MOONSHOT_API_KEY")
+            "kimi" | "moonshot" | "kimi-coding" => std::env::var("KIMI_CODING_API_KEY")
                 .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("KIMI_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("MOONSHOT_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty()),
+            "kimi-coding-cn" => std::env::var("KIMI_CN_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("KIMI_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("MOONSHOT_API_KEY").ok())
                 .filter(|v| !v.trim().is_empty()),
             "minimax" => std::env::var("MINIMAX_API_KEY")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
+            "minimax-cn" | "minimax_cn" => std::env::var("MINIMAX_CN_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("MINIMAX_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty()),
             "nous" => std::env::var("NOUS_API_KEY")
                 .ok()
+                .filter(|v| !v.trim().is_empty()),
+            "zai" | "glm" | "z-ai" | "z_ai" | "zhipu" => std::env::var("GLM_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("ZAI_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("Z_AI_API_KEY").ok())
                 .filter(|v| !v.trim().is_empty()),
             "copilot" | "copilot-acp" => std::env::var("COPILOT_GITHUB_TOKEN")
                 .ok()
@@ -2823,9 +2916,7 @@ impl AgentLoop {
         if let Some(b) = route_base_url.map(str::trim).filter(|s| !s.is_empty()) {
             return Some(b.to_string());
         }
-        self.config
-            .runtime_providers
-            .get(provider)
+        self.runtime_provider_config(provider)
             .and_then(|c| c.base_url.as_ref())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
@@ -2853,6 +2944,12 @@ impl AgentLoop {
                         .or_else(|| Some(bedrock_runtime_base_url(&resolve_bedrock_region())))
                 } else if provider == "stepfun" {
                     Some("https://api.stepfun.ai/step_plan/v1".to_string())
+                } else if provider == "kimi-coding" {
+                    Some("https://api.moonshot.ai/v1".to_string())
+                } else if provider == "kimi-coding-cn" {
+                    Some("https://api.moonshot.cn/v1".to_string())
+                } else if provider == "minimax-cn" || provider == "minimax_cn" {
+                    Some("https://api.minimaxi.com/anthropic".to_string())
                 } else if provider == "copilot" {
                     Some("https://api.githubcopilot.com".to_string())
                 } else if matches!(
@@ -2871,6 +2968,8 @@ impl AgentLoop {
                     "tencent-tokenhub" | "tencent" | "tokenhub" | "tencent-cloud" | "tencentmaas"
                 ) {
                     Some("https://tokenhub.tencentmaas.com/v1".to_string())
+                } else if matches!(provider, "zai" | "glm" | "z-ai" | "z_ai" | "zhipu") {
+                    Some("https://api.z.ai/api/paas/v4".to_string())
                 } else {
                     None
                 }
@@ -2878,9 +2977,7 @@ impl AgentLoop {
     }
 
     fn resolve_runtime_request_timeout_seconds(&self, provider: &str) -> Option<f64> {
-        self.config
-            .runtime_providers
-            .get(provider)
+        self.runtime_provider_config(provider)
             .and_then(|c| c.request_timeout_seconds)
             .or_else(|| {
                 let alias = match provider {
@@ -3311,7 +3408,7 @@ impl AgentLoop {
             .collect();
 
         if let Some(provider) = provider {
-            if let Some(cfg) = self.config.runtime_providers.get(provider) {
+            if let Some(cfg) = self.runtime_provider_config(provider) {
                 if let Some(cmd) = cfg
                     .command
                     .as_deref()
@@ -3355,7 +3452,7 @@ impl AgentLoop {
         (command, args)
     }
 
-    fn build_runtime_provider(
+    pub(crate) fn build_runtime_provider(
         &self,
         provider: &str,
         model_name: &str,
@@ -3502,6 +3599,28 @@ impl AgentLoop {
             }
         };
         Ok(provider_obj)
+    }
+
+    pub(crate) fn build_delegation_runtime_provider(
+        &self,
+        provider: &str,
+        model_name: &str,
+        route_base_url: Option<&str>,
+        explicit_api_key: Option<&str>,
+    ) -> Result<Arc<dyn LlmProvider>, AgentError> {
+        let api_mode = self
+            .runtime_provider_config(provider)
+            .and_then(|cfg| cfg.api_mode.clone())
+            .or_else(|| route_base_url.and_then(detect_api_mode_for_url));
+        self.build_runtime_provider(
+            provider,
+            model_name,
+            route_base_url,
+            None,
+            explicit_api_key,
+            api_mode.as_ref(),
+            self.primary_credential_pool.as_ref(),
+        )
     }
 
     fn credential_pool_for_route<'a>(
@@ -14138,6 +14257,89 @@ mod tests {
                 .resolve_runtime_base_url("tencentmaas", None)
                 .as_deref(),
             Some("https://tokenhub.tencentmaas.com/v1")
+        );
+    }
+
+    #[test]
+    fn runtime_provider_config_lookup_supports_delegation_aliases() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "kimi-coding".to_string(),
+            RuntimeProviderConfig {
+                api_key: Some("kimi-config-key".to_string()),
+                base_url: Some("https://api.moonshot.ai/v1".to_string()),
+                request_timeout_seconds: Some(41.0),
+                ..RuntimeProviderConfig::default()
+            },
+        );
+        runtime_providers.insert(
+            "zai".to_string(),
+            RuntimeProviderConfig {
+                api_key_env: Some("ZAI_CONFIG_KEY".to_string()),
+                base_url: Some("https://api.z.ai/api/paas/v4".to_string()),
+                ..RuntimeProviderConfig::default()
+            },
+        );
+
+        let agent = AgentLoop::new(
+            AgentConfig {
+                runtime_providers,
+                ..AgentConfig::default()
+            },
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+
+        assert_eq!(
+            agent.resolve_runtime_api_key("kimi", None, None).as_deref(),
+            Some("kimi-config-key")
+        );
+        assert_eq!(
+            agent.resolve_runtime_base_url("moonshot", None).as_deref(),
+            Some("https://api.moonshot.ai/v1")
+        );
+        assert_eq!(
+            agent.resolve_runtime_request_timeout_seconds("kimi"),
+            Some(41.0)
+        );
+        assert_eq!(
+            agent.resolve_runtime_base_url("z-ai", None).as_deref(),
+            Some("https://api.z.ai/api/paas/v4")
         );
     }
 
