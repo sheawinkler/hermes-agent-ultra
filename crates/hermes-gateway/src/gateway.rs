@@ -23,6 +23,9 @@ use hermes_config::{normalize_service_tier, DisplayConfig, QuickCommandConfig};
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 use hermes_core::types::{Message, MessageRole};
+use hermes_tools::skill_commands::{
+    resolve_installed_skill_slash_command, SkillCommandResolverConfig,
+};
 
 use crate::background::{BackgroundTaskManager, TaskStatus};
 use crate::commands::{handle_command, GatewayCommandResult};
@@ -228,6 +231,11 @@ struct UsageStats {
     input_chars: u64,
     output_chars: u64,
     last_updated_at: Option<DateTime<Utc>>,
+}
+
+enum SlashCommandOutcome {
+    Handled,
+    ForwardToAgent { message: String },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1043,10 +1051,18 @@ impl Gateway {
             .await;
         }
 
+        let mut agent_text_override: Option<String> = None;
+
         // Slash commands are executed directly by the gateway command runtime.
+        // Installed skill commands are the exception: after built-ins and quick
+        // commands decline them, they are converted into a normal agent turn
+        // containing the resolved SKILL.md content.
         if is_slash_command {
-            if self.execute_slash_command(incoming, &session_key).await? {
-                return Ok(());
+            match self.execute_slash_command(incoming, &session_key).await? {
+                SlashCommandOutcome::Handled => return Ok(()),
+                SlashCommandOutcome::ForwardToAgent { message } => {
+                    agent_text_override = Some(message);
+                }
             }
         }
 
@@ -1075,8 +1091,9 @@ impl Gateway {
             }
         }
 
-        let enriched_text = self
-            .enrich_message_with_transcription(&self.enrich_message_with_vision(&incoming.text));
+        let agent_text = agent_text_override.as_deref().unwrap_or(&incoming.text);
+        let enriched_text =
+            self.enrich_message_with_transcription(&self.enrich_message_with_vision(agent_text));
         self.maybe_apply_smart_model_routing(&session_key, &enriched_text)
             .await;
 
@@ -1084,7 +1101,7 @@ impl Gateway {
         self.session_manager
             .add_message(&session_key, Message::user(enriched_text))
             .await;
-        self.bump_input_usage(&session_key, incoming.text.chars().count())
+        self.bump_input_usage(&session_key, agent_text.chars().count())
             .await;
 
         // 4. Get all session messages for the agent loop
@@ -1329,14 +1346,46 @@ impl Gateway {
         &self,
         incoming: &IncomingMessage,
         session_key: &str,
-    ) -> Result<bool, GatewayError> {
+    ) -> Result<SlashCommandOutcome, GatewayError> {
         if let Some(reply) = self.resolve_quick_command(&incoming.text).await? {
             self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                 .await?;
-            return Ok(true);
+            return Ok(SlashCommandOutcome::Handled);
         }
 
         let result = handle_command(&incoming.text);
+        if matches!(result, GatewayCommandResult::Unknown(_)) {
+            match self.resolve_skill_slash_command(&incoming.text) {
+                Ok(Some(message)) => {
+                    if let Some(command_name) = Self::extract_command_name(&incoming.text) {
+                        self.emit_hook_event(
+                            &format!("command:{}", command_name),
+                            serde_json::json!({
+                                "platform": incoming.platform,
+                                "chat_id": incoming.chat_id,
+                                "user_id": incoming.user_id,
+                                "session_id": session_key,
+                                "command": command_name,
+                                "kind": "skill"
+                            }),
+                        )
+                        .await;
+                    }
+                    return Ok(SlashCommandOutcome::ForwardToAgent { message });
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    self.send_message(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        &format!("Skill command blocked: {err}"),
+                        None,
+                    )
+                    .await?;
+                    return Ok(SlashCommandOutcome::Handled);
+                }
+            }
+        }
         if !matches!(result, GatewayCommandResult::Unknown(_)) {
             if let Some(command_name) = Self::extract_command_name(&incoming.text) {
                 self.emit_hook_event(
@@ -1355,7 +1404,20 @@ impl Gateway {
         let handled = self
             .apply_command_result(incoming, session_key, result)
             .await?;
-        Ok(handled)
+        Ok(if handled {
+            SlashCommandOutcome::Handled
+        } else {
+            SlashCommandOutcome::ForwardToAgent {
+                message: incoming.text.clone(),
+            }
+        })
+    }
+
+    fn resolve_skill_slash_command(&self, input: &str) -> Result<Option<String>, String> {
+        let (cmd, args) = Self::split_slash_command(input);
+        let config = SkillCommandResolverConfig::default();
+        resolve_installed_skill_slash_command(&cmd, &args, &config)
+            .map(|maybe| maybe.map(|invocation| invocation.message))
     }
 
     async fn apply_command_result(
@@ -3437,6 +3499,66 @@ mod tests {
             .expect("alias reply");
 
         assert!(reply.contains("Status information"));
+    }
+
+    #[tokio::test]
+    async fn gateway_unknown_slash_invokes_installed_skill_command() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home_guard = HermesHomeEnvGuard::set(tmp.path());
+        let skill_dir = tmp.path().join("skills").join("release-captain");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: Release Captain\ndescription: Release workflow\n---\n# Release Captain\n1. Inspect changed files\n2. Run deterministic gates\n",
+        )
+        .expect("write skill");
+
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let seen_user_messages = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+        let seen_for_handler = seen_user_messages.clone();
+        gw.set_message_handler(Arc::new(move |messages| {
+            let seen = seen_for_handler.clone();
+            Box::pin(async move {
+                let user = messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == MessageRole::User)
+                    .and_then(|m| m.content.clone())
+                    .unwrap_or_default();
+                seen.lock().expect("seen lock").push(user);
+                Ok("skill-ran".to_string())
+            })
+        }))
+        .await;
+
+        gw.route_message(&IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/release_captain ship it".into(),
+            message_id: None,
+            is_dm: true,
+        })
+        .await
+        .expect("route skill command");
+
+        assert_eq!(
+            sent.lock().expect("sent lock").as_slice(),
+            &[("chat1".to_string(), "skill-ran".to_string())]
+        );
+        let seen = seen_user_messages.lock().expect("seen lock");
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].contains("Release Captain"));
+        assert!(seen[0].contains("Inspect changed files"));
+        assert!(seen[0].contains("ship it"));
     }
 
     #[async_trait]

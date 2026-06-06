@@ -2025,6 +2025,7 @@ dependencies = [
  "futures",
  "hermes-config",
  "hermes-core",
+ "hermes-skills",
  "hex",
  "indexmap",
  "proptest",

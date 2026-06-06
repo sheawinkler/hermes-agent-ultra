@@ -2223,6 +2223,13 @@ impl App {
         self.pending_image_hint = None;
     }
 
+    /// Submit text through the normal user-message path and run the agent.
+    pub async fn submit_user_message(&mut self, raw: &str) -> Result<(), AgentError> {
+        let user_message = self.prepare_user_message(raw);
+        self.messages.push(hermes_core::Message::user(user_message));
+        self.run_agent().await
+    }
+
     pub fn take_pending_input_prefill(&mut self) -> Option<String> {
         self.pending_input_prefill.take()
     }
@@ -2311,9 +2318,7 @@ impl App {
             }
         } else {
             // Regular user message
-            let user_message = self.prepare_user_message(trimmed);
-            self.messages.push(hermes_core::Message::user(user_message));
-            self.run_agent().await?;
+            self.submit_user_message(trimmed).await?;
         }
 
         Ok(())

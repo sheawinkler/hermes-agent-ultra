@@ -25,6 +25,9 @@ use hermes_core::AgentError;
 use hermes_intelligence::model_metadata::{get_model_context_length, get_model_info};
 use hermes_intelligence::models_dev::default_client;
 use hermes_intelligence::{build_swarm_execution_plan, swarm_runtime_status, SwarmExecutionMode};
+use hermes_tools::skill_commands::{
+    resolve_installed_skill_slash_command, SkillCommandResolverConfig, SkillSlashInvocation,
+};
 use hermes_tools::ToolPolicyEngine;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -3714,6 +3717,17 @@ async fn dispatch_slash_command(
             Ok(CommandResult::Quit)
         }
         _ => {
+            match resolve_cli_skill_slash_command(app, cmd, args) {
+                Ok(Some(invocation)) => {
+                    app.submit_user_message(&invocation.message).await?;
+                    return Ok(CommandResult::Handled);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    emit_command_output(app, format!("Skill command blocked: {err}"));
+                    return Ok(CommandResult::Handled);
+                }
+            }
             emit_command_output(
                 app,
                 format!(
@@ -3724,6 +3738,19 @@ async fn dispatch_slash_command(
             Ok(CommandResult::Handled)
         }
     }
+}
+
+fn resolve_cli_skill_slash_command(
+    app: &App,
+    cmd: &str,
+    args: &[&str],
+) -> Result<Option<SkillSlashInvocation>, String> {
+    let config = SkillCommandResolverConfig {
+        enabled: app.config.skills.enabled.clone(),
+        disabled: app.config.skills.disabled.clone(),
+        ..SkillCommandResolverConfig::default()
+    };
+    resolve_installed_skill_slash_command(cmd, &args.join(" "), &config)
 }
 
 fn handle_toolcards_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
@@ -27580,6 +27607,30 @@ mod tests {
             .expect("overridden help");
 
         assert_eq!(latest_ui_assistant_text(&app), "overridden");
+    }
+
+    #[tokio::test]
+    async fn cli_resolves_installed_skill_slash_command() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let skill_dir = tmp.path().join("skills").join("release-captain");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: Release Captain\ndescription: Release workflow\n---\n# Release Captain\n1. Inspect changed files\n2. Run deterministic gates\n",
+        )
+        .expect("write skill");
+        let app = build_test_app_with_stream(tmp.path()).await;
+
+        let invocation = resolve_cli_skill_slash_command(&app, "/release_captain", &["ship", "it"])
+            .expect("resolve skill command")
+            .expect("skill command");
+
+        assert_eq!(invocation.command, "/release-captain");
+        assert_eq!(invocation.skill_name, "Release Captain");
+        assert!(invocation.message.contains("Inspect changed files"));
+        assert!(invocation.message.contains("ship it"));
     }
 
     #[tokio::test]

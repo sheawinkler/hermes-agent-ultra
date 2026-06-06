@@ -1220,6 +1220,18 @@
       "disposition": "ported",
       "notes": "Rust gateway /title now persists Session.title metadata directly, bare /title reads current title, /status and /sessions expose it, and gateway tests cover the title command lifecycle. No Python TUI session.title RPC is used in the Rust runtime."
     },
+    "9350e26e681e": {
+      "disposition": "ported",
+      "notes": "Rust exposes the clarify tool as a typed ClarifyHandler with signal, stdio, and gateway channel backends, registers it in built-in/toolset/runtime wiring, and covers schema, trimming, choice normalization, empty-question rejection, stdio auto-answer, and gateway dispatcher roundtrip/timeout behavior."
+    },
+    "c36b256de56a": {
+      "disposition": "ported",
+      "notes": "Rust provides Home Assistant REST tools and backend handlers for entity listing, state lookup, service listing, and service calls, registers the homeassistant toolset and platform aliases, and includes a Home Assistant gateway adapter. Focused tests cover schemas, handler contracts, backend validation, and platform contract startup/routing."
+    },
+    "8e0c48e6d25b": {
+      "disposition": "ported",
+      "notes": "Rust CLI and gateway now resolve otherwise-unknown installed SKILL.md slash commands from configured skill roots, apply enabled/disabled/platform/security filtering, inject full skill content plus invocation args into the normal agent turn, and cover the shared resolver plus CLI and gateway routing with focused tests."
+    },
     "3824b0323793": {
       "disposition": "superseded",
       "notes": "Python TUI session.title DB/RPC edge cases are superseded by Rust gateway in-memory Session.title storage and command tests; there is no pending DB row queue or Python RPC failure mode in this runtime path."
