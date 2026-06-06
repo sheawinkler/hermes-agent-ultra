@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import re
 import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -113,6 +114,27 @@ def ensure_remote(repo_root: Path, remote: str, url: str) -> None:
     if remote in remotes:
         return
     run_git(repo_root, ["remote", "add", remote, url])
+
+
+def fetch_remote_branch(repo_root: Path, remote: str, branch: str) -> None:
+    remote_ref = f"{remote}/{branch}"
+    refspec = f"refs/heads/{branch}:refs/remotes/{remote}/{branch}"
+    proc = subprocess.run(
+        ["git", "fetch", "--no-tags", remote, refspec],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode == 0:
+        return
+    if run_git(repo_root, ["rev-parse", "--verify", remote_ref], check=False):
+        print(
+            f"warning: scoped fetch for {remote_ref} failed; using existing ref: "
+            f"{proc.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return
+    raise RuntimeError(f"git fetch {remote} {branch} failed: {proc.stderr.strip()}")
 
 
 def classify_ticket(files: list[str]) -> int:
@@ -368,7 +390,7 @@ def main() -> int:
     repo_root = Path(args.repo_root).resolve()
     ensure_remote(repo_root, args.upstream_remote, args.upstream_url)
     if not args.no_fetch:
-        run_git(repo_root, ["fetch", args.upstream_remote, "--prune"])
+        fetch_remote_branch(repo_root, args.upstream_remote, args.upstream_branch)
 
     upstream_ref = f"{args.upstream_remote}/{args.upstream_branch}"
     range_expr = f"{args.local_ref}..{upstream_ref}"
@@ -554,7 +576,6 @@ def main() -> int:
             break
     if pending_count == 0:
         md.append("| _(none)_ | - | - |")
-    md.append("")
 
     out_md.write_text("\n".join(md) + "\n", encoding="utf-8")
     print(f"Wrote {out_json}")

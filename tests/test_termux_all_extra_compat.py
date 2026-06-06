@@ -1,4 +1,4 @@
-"""Regression coverage for the Termux broad install profile."""
+"""Regression coverage for Termux in the Rust release installer."""
 
 from pathlib import Path
 
@@ -8,16 +8,15 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 INSTALL_SH = REPO_ROOT / "scripts" / "install.sh"
 
 
-def test_pyproject_defines_termux_all_without_known_blockers() -> None:
-    text = PYPROJECT.read_text()
-    assert "termux-all = [" in text
-    assert '"hermes-agent[termux]"' in text
-    assert '"hermes-agent[matrix]"' not in text.split("termux-all = [", 1)[1].split("]", 1)[0]
-    assert '"hermes-agent[voice]"' not in text.split("termux-all = [", 1)[1].split("]", 1)[0]
+def test_rust_repo_does_not_require_python_termux_extra_profile() -> None:
+    assert not PYPROJECT.exists()
+    assert "termux-all" not in INSTALL_SH.read_text()
 
 
-def test_install_script_prefers_termux_all_then_fallbacks() -> None:
+def test_install_script_uses_release_assets_for_termux_targets() -> None:
     text = INSTALL_SH.read_text()
-    assert "pip install -e '.[termux-all]' -c constraints-termux.txt" in text
-    assert "Termux broad profile (.[termux-all]) failed, trying baseline Termux profile..." in text
-    assert "Termux baseline profile (.[termux]) failed, trying base install..." in text
+    assert "detect_target()" in text
+    assert 'Linux) os="linux" ;;' in text
+    assert 'arm64|aarch64) arch="aarch64" ;;' in text
+    assert 'ASSET_CANDIDATES=("${RELEASE_BIN_BASENAME}-${TARGET}.tar.gz")' in text
+    assert '"${RELEASE_BIN_BASENAME}-linux-arm64.tar.gz"' in text

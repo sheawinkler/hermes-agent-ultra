@@ -15,6 +15,7 @@ hermes-intelligence = { workspace = true }
 hermes-tools = { workspace = true }
 hermes-skills = { workspace = true }
 hermes-telemetry = { workspace = true }
+base64 = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -37,10 +38,11 @@ shlex = "2.0.1"
 uuid = { workspace = true, features = ["v4"] }
 syn = { version = "2", features = ["full"] }
 sha1 = "0.10"
-sha2 = "0.11"
+sha2 = "0.10"
 hex = "0.4"
 rand = "0.10"
 url = { workspace = true }
+hmac = "0.12"
 
 [dev-dependencies]
 proptest = { workspace = true }

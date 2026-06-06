@@ -194,7 +194,7 @@ impl DiscordAdapter {
         &self,
         channel_id: &str,
         message_id: &str,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<bool, GatewayError> {
         self.inner.delete_message(channel_id, message_id).await
     }
 
@@ -407,7 +407,7 @@ impl PlatformAdapter for DiscordAdapter {
         &self,
         chat_id: &str,
         message_id: &str,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<bool, GatewayError> {
         self.inner.delete_message(chat_id, message_id).await
     }
 

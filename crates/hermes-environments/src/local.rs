@@ -1,6 +1,6 @@
 //! Local terminal backend – executes commands on the same host.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,102 +8,23 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use liteparse::{LiteParse, LiteParseConfig};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::ChildStdin;
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::task::JoinHandle;
 
+use hermes_config::TerminalConfig;
 use hermes_core::{AgentError, CommandOutput, TerminalBackend};
-
-/// Extensions that must not be read as UTF-8 text (images, archives, binaries).
-const BINARY_EXTENSIONS: &[&str] = &[
-    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tif", "tiff", "heic", "heif", "avif",
-    "zip", "gz", "bz2", "xz", "7z", "rar", "tar", "exe", "dll", "so", "dylib", "bin",
-    "wasm", "mp3", "mp4", "wav", "ogg", "webm", "mov", "avi", "mkv", "flac", "aac", "woff",
-    "woff2", "ttf", "otf", "eot", "pyc", "class", "o", "a", "db", "sqlite", "sqlite3",
-];
-
-fn binary_read_error(path: &str, ext: &str) -> AgentError {
-    let hint = if matches!(
-        ext,
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tif" | "tiff" | "heic"
-            | "heif" | "avif"
-    ) {
-        "Use vision_analyze for images instead of read_file."
-    } else {
-        "Use appropriate tools for binary files (not read_file)."
-    };
-    AgentError::Io(format!(
-        "Cannot read binary file '{path}' (.{ext}). {hint}"
-    ))
-}
-
-fn extension_lower(path: &std::path::Path) -> Option<String> {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-}
-
-fn is_blocked_binary_extension(ext: &str) -> bool {
-    BINARY_EXTENSIONS.contains(&ext)
-}
-
-async fn parse_pdf_with_liteparse(path: &std::path::Path) -> Result<String, AgentError> {
-    let parser = LiteParse::new(LiteParseConfig::default());
-    let path_str = path.to_string_lossy();
-    let result = parser.parse(path_str.as_ref()).await.map_err(|e| {
-        AgentError::Io(format!(
-            "LiteParse failed for '{}': {}",
-            path.display(),
-            e
-        ))
-    })?;
-    Ok(result.text)
-}
-
-fn paginate_content_lines(content: &str, offset: Option<u64>, limit: Option<u64>) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let start = offset.unwrap_or(0) as usize;
-    let start = start.min(lines.len());
-    let end = if let Some(lim) = limit {
-        (start + lim as usize).min(lines.len())
-    } else {
-        lines.len()
-    };
-    lines[start..end].join("\n")
-}
-
-fn sample_looks_binary(bytes: &[u8]) -> bool {
-    if bytes.is_empty() {
-        return false;
-    }
-    if bytes.contains(&0) {
-        return true;
-    }
-    let check_len = bytes.len().min(8192);
-    let non_text = bytes[..check_len]
-        .iter()
-        .filter(|&&b| b < 0x09 || (b > 0x0d && b < 0x20))
-        .count();
-    non_text * 10 > check_len
-}
 
 const PROCESS_OUTPUT_WINDOW_CHARS: usize = 200_000;
 const PROCESS_PREVIEW_CHARS: usize = 1_000;
 const PROCESS_WAIT_OUTPUT_CHARS: usize = 2_000;
 const PROCESS_LOG_DEFAULT_LINES: usize = 200;
-const LOCAL_SHELL_ENV: &str = "HERMES_LOCAL_SHELL";
-const TERMINAL_SHELL_ENV: &str = "HERMES_TERMINAL_SHELL";
+const FOREGROUND_DRAIN_GRACE_MS: u64 = 120;
 
 static NEXT_PROCESS_ID: AtomicU64 = AtomicU64::new(1);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ShellInvocation {
-    program: String,
-    args: Vec<&'static str>,
-}
 
 #[derive(Clone)]
 struct ProcessSession {
@@ -128,8 +49,12 @@ pub struct LocalBackend {
     default_timeout: u64,
     /// Maximum output size in bytes before truncation.
     max_output_size: usize,
-    /// Optional shell program/path for local command execution.
-    shell: Option<String>,
+    /// Explicit shell init files for local command prelude.
+    shell_init_files: Vec<String>,
+    /// Auto-source common shell startup files when no explicit list is set.
+    auto_source_bashrc: bool,
+    /// Env-var names allowed through subprocess secret sanitizers.
+    env_passthrough: Vec<String>,
     /// Background processes tracked by session id for lifecycle operations.
     background_processes: Arc<Mutex<HashMap<String, ProcessSession>>>,
 }
@@ -137,43 +62,42 @@ pub struct LocalBackend {
 impl LocalBackend {
     /// Create a new local backend with the given defaults.
     pub fn new(default_timeout: u64, max_output_size: usize) -> Self {
-        Self::new_with_shell(default_timeout, max_output_size, None)
+        let (shell_init_files, auto_source_bashrc, env_passthrough) = terminal_config_from_env();
+        Self::new_with_shell_init(
+            default_timeout,
+            max_output_size,
+            shell_init_files,
+            auto_source_bashrc,
+            env_passthrough,
+        )
     }
 
-    /// Create a new local backend with an optional shell override.
-    pub fn new_with_shell(
+    /// Create a local backend directly from terminal configuration.
+    pub fn from_terminal_config(config: &TerminalConfig) -> Self {
+        Self::new_with_shell_init(
+            config.timeout,
+            config.max_output_size,
+            config.shell_init_files.clone(),
+            config.auto_source_bashrc,
+            config.env_passthrough.clone(),
+        )
+    }
+
+    pub fn new_with_shell_init(
         default_timeout: u64,
         max_output_size: usize,
-        shell: Option<String>,
+        shell_init_files: Vec<String>,
+        auto_source_bashrc: bool,
+        env_passthrough: Vec<String>,
     ) -> Self {
         Self {
             default_timeout,
             max_output_size,
-            shell: shell.and_then(|value| {
-                let trimmed = value.trim();
-                (!trimmed.is_empty()).then(|| trimmed.to_string())
-            }),
+            shell_init_files,
+            auto_source_bashrc,
+            env_passthrough,
             background_processes: Arc::new(Mutex::new(HashMap::new())),
         }
-    }
-
-    fn shell_override(&self) -> Option<String> {
-        self.shell
-            .clone()
-            .or_else(|| std::env::var(LOCAL_SHELL_ENV).ok())
-            .or_else(|| std::env::var(TERMINAL_SHELL_ENV).ok())
-            .and_then(|value| {
-                let trimmed = value.trim();
-                (!trimmed.is_empty()).then(|| trimmed.to_string())
-            })
-    }
-
-    fn shell_command(&self, command: &str) -> TokioCommand {
-        let shell_override = self.shell_override();
-        let invocation = local_shell_invocation(shell_override.as_deref());
-        let mut cmd = TokioCommand::new(invocation.program);
-        cmd.args(invocation.args).arg(command);
-        cmd
     }
 
     fn next_process_session_id() -> String {
@@ -281,6 +205,138 @@ impl LocalBackend {
         }
     }
 
+    fn append_bytes(output: &Arc<Mutex<Vec<u8>>>, bytes: &[u8], max_bytes: usize) {
+        let mut guard = output.lock().unwrap_or_else(|e| e.into_inner());
+        let remaining = max_bytes.saturating_sub(guard.len());
+        if remaining > 0 {
+            guard.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+        }
+    }
+
+    async fn read_stream_to_bytes<R>(
+        mut stream: R,
+        output: Arc<Mutex<Vec<u8>>>,
+        max_output_bytes: usize,
+    ) where
+        R: AsyncRead + Unpin,
+    {
+        let mut chunk = [0_u8; 4096];
+        loop {
+            match stream.read(&mut chunk).await {
+                Ok(0) => break,
+                Ok(read) => Self::append_bytes(&output, &chunk[..read], max_output_bytes),
+                Err(err) => {
+                    let note = format!("\n[stream read error: {err}]");
+                    Self::append_bytes(&output, note.as_bytes(), max_output_bytes);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn decode_output(bytes: &Arc<Mutex<Vec<u8>>>) -> String {
+        let guard = bytes.lock().unwrap_or_else(|e| e.into_inner());
+        String::from_utf8_lossy(&guard).to_string()
+    }
+
+    async fn finish_or_abort_reader(mut handle: JoinHandle<()>) {
+        if tokio::time::timeout(std::time::Duration::from_millis(50), &mut handle)
+            .await
+            .is_err()
+        {
+            // A shell-backgrounded grandchild may still hold the pipe open
+            // after the parent shell exits. Abort the reader instead of
+            // waiting for EOF from an unmanaged descendant.
+            handle.abort();
+            let _ = handle.await;
+        }
+    }
+
+    async fn collect_foreground_child(
+        &self,
+        mut cmd: TokioCommand,
+        timeout_secs: u64,
+        stdin_payload: Option<Vec<u8>>,
+        spawn_label: &str,
+        timeout_label: &str,
+    ) -> Result<CommandOutput, AgentError> {
+        configure_foreground_process_group(&mut cmd);
+        let child = cmd
+            .spawn()
+            .map_err(|e| AgentError::Io(format!("Failed to spawn {spawn_label}: {e}")))?;
+        let mut child_guard = ForegroundChildGuard::new(child);
+        if let Some(payload) = stdin_payload {
+            if let Some(mut stdin) = child_guard.child_mut().stdin.take() {
+                stdin
+                    .write_all(&payload)
+                    .await
+                    .map_err(|e| AgentError::Io(format!("Failed to write stdin: {e}")))?;
+                stdin
+                    .flush()
+                    .await
+                    .map_err(|e| AgentError::Io(format!("Failed to flush stdin: {e}")))?;
+            }
+        }
+
+        let stdout = Arc::new(Mutex::new(Vec::new()));
+        let stderr = Arc::new(Mutex::new(Vec::new()));
+        let mut stdout_task = child_guard.child_mut().stdout.take().map(|stream| {
+            let stdout = stdout.clone();
+            let max = self.max_output_size;
+            tokio::spawn(async move {
+                Self::read_stream_to_bytes(stream, stdout, max).await;
+            })
+        });
+        let mut stderr_task = child_guard.child_mut().stderr.take().map(|stream| {
+            let stderr = stderr.clone();
+            let max = self.max_output_size;
+            tokio::spawn(async move {
+                Self::read_stream_to_bytes(stream, stderr, max).await;
+            })
+        });
+
+        let wait_result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            child_guard.child_mut().wait(),
+        )
+        .await;
+
+        match wait_result {
+            Ok(Ok(status)) => {
+                tokio::time::sleep(std::time::Duration::from_millis(FOREGROUND_DRAIN_GRACE_MS))
+                    .await;
+                if let Some(handle) = stdout_task.take() {
+                    Self::finish_or_abort_reader(handle).await;
+                }
+                if let Some(handle) = stderr_task.take() {
+                    Self::finish_or_abort_reader(handle).await;
+                }
+                child_guard.disarm();
+                Ok(CommandOutput {
+                    exit_code: status.code().unwrap_or(-1),
+                    stdout: Self::decode_output(&stdout),
+                    stderr: Self::decode_output(&stderr),
+                })
+            }
+            Ok(Err(e)) => Err(AgentError::Io(format!(
+                "Failed to wait for {spawn_label}: {e}"
+            ))),
+            Err(_) => {
+                terminate_child_process(child_guard.child_mut()).await;
+                child_guard.disarm();
+                if let Some(handle) = stdout_task.take() {
+                    Self::finish_or_abort_reader(handle).await;
+                }
+                if let Some(handle) = stderr_task.take() {
+                    Self::finish_or_abort_reader(handle).await;
+                }
+                Err(AgentError::Timeout(format!(
+                    "{timeout_label} timed out after {timeout_secs} seconds"
+                )))
+            }
+        }
+    }
+
     fn terminate_pid(pid: u32) -> Result<(), AgentError> {
         #[cfg(unix)]
         {
@@ -314,6 +370,96 @@ impl LocalBackend {
             }
         }
     }
+}
+
+#[cfg(unix)]
+fn configure_foreground_process_group(cmd: &mut TokioCommand) {
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_foreground_process_group(_cmd: &mut TokioCommand) {}
+
+struct ForegroundChildGuard {
+    child: Option<tokio::process::Child>,
+    pid: Option<u32>,
+}
+
+impl ForegroundChildGuard {
+    fn new(child: tokio::process::Child) -> Self {
+        let pid = child.id();
+        Self {
+            child: Some(child),
+            pid,
+        }
+    }
+
+    fn child_mut(&mut self) -> &mut tokio::process::Child {
+        self.child.as_mut().expect("foreground child present")
+    }
+
+    fn disarm(&mut self) {
+        self.child.take();
+    }
+}
+
+impl Drop for ForegroundChildGuard {
+    fn drop(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        terminate_child_process_sync(self.pid);
+        let _ = child.start_kill();
+    }
+}
+
+#[cfg(unix)]
+fn terminate_child_process_sync(pid: Option<u32>) {
+    if let Some(pid) = pid {
+        let pgid = -(pid as i32);
+        unsafe {
+            libc::kill(pgid, libc::SIGTERM);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        unsafe {
+            libc::kill(pgid, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_child_process_sync(_pid: Option<u32>) {}
+
+#[cfg(unix)]
+async fn terminate_child_process(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        let pgid = -(pid as i32);
+        unsafe {
+            libc::kill(pgid, libc::SIGTERM);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) | Err(_) => unsafe {
+                libc::kill(pgid, libc::SIGKILL);
+            },
+        }
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
+#[cfg(not(unix))]
+async fn terminate_child_process(child: &mut tokio::process::Child) {
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -379,7 +525,16 @@ fn lookup_home_for_username(username: &str) -> Option<PathBuf> {
 
 fn resolve_path(input: &str) -> Result<PathBuf, AgentError> {
     if !input.starts_with('~') {
-        return Ok(hermes_config::resolve_agent_path(input));
+        let path = PathBuf::from(input);
+        if path.is_absolute() {
+            return Ok(path);
+        }
+        if let Some(cwd) = std::env::var_os("TERMINAL_CWD") {
+            if !cwd.is_empty() {
+                return Ok(PathBuf::from(cwd).join(path));
+            }
+        }
+        return Ok(path);
     }
 
     let rest = &input[1..];
@@ -420,8 +575,75 @@ fn resolve_path(input: &str) -> Result<PathBuf, AgentError> {
 }
 
 const SUBPROCESS_ENV_BLOCKLIST_EXACT: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_TOKEN",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "BROWSERBASE_PROJECT_ID",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "COHERE_API_KEY",
+    "DAYTONA_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "DISCORD_FREE_RESPONSE_CHANNELS",
+    "DISCORD_HOME_CHANNEL",
+    "DISCORD_HOME_CHANNEL_NAME",
+    "DISCORD_REQUIRE_MENTION",
+    "EMAIL_ADDRESS",
+    "EMAIL_HOME_ADDRESS",
+    "EMAIL_HOME_ADDRESS_NAME",
+    "EMAIL_IMAP_HOST",
+    "EMAIL_PASSWORD",
+    "EMAIL_SMTP_HOST",
+    "ELEVENLABS_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "FIREWORKS_API_KEY",
+    "GATEWAY_ALLOW_ALL_USERS",
+    "GATEWAY_ALLOWED_USERS",
+    "GH_TOKEN",
+    "GITHUB_APP_ID",
+    "GITHUB_APP_INSTALLATION_ID",
+    "GITHUB_APP_PRIVATE_KEY_PATH",
+    "GITHUB_TOKEN",
+    "GLM_API_KEY",
+    "GOOGLE_API_KEY",
+    "GROQ_API_KEY",
+    "HASS_TOKEN",
+    "HASS_URL",
+    "HELICONE_API_KEY",
     "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
     "HERMES_POLICY_ADMIN_TOKEN",
+    "KIMI_API_KEY",
+    "LLM_MODEL",
+    "MINIMAX_API_KEY",
+    "MINIMAX_CN_API_KEY",
+    "MISTRAL_API_KEY",
+    "MODAL_TOKEN_ID",
+    "MODAL_TOKEN_SECRET",
+    "NVIDIA_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENROUTER_API_KEY",
+    "PERPLEXITY_API_KEY",
+    "SIGNAL_ACCOUNT",
+    "SIGNAL_ALLOWED_USERS",
+    "SIGNAL_GROUP_ALLOWED_USERS",
+    "SIGNAL_HOME_CHANNEL",
+    "SIGNAL_HOME_CHANNEL_NAME",
+    "SIGNAL_HTTP_URL",
+    "SIGNAL_IGNORE_STORIES",
+    "SLACK_ALLOWED_USERS",
+    "SLACK_APP_TOKEN",
+    "SLACK_HOME_CHANNEL",
+    "SLACK_HOME_CHANNEL_NAME",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_HOME_CHANNEL",
+    "TELEGRAM_HOME_CHANNEL_NAME",
+    "TOGETHER_API_KEY",
+    "WHATSAPP_ALLOWED_USERS",
+    "WHATSAPP_ENABLED",
+    "WHATSAPP_MODE",
+    "XAI_API_KEY",
+    "ZAI_API_KEY",
+    "Z_AI_API_KEY",
 ];
 
 const SUBPROCESS_ENV_BLOCKLIST_PREFIXES: &[&str] = &[
@@ -431,6 +653,19 @@ const SUBPROCESS_ENV_BLOCKLIST_PREFIXES: &[&str] = &[
     "HERMES_HTTP_",
 ];
 
+const SUBPROCESS_ENV_FORCE_PREFIX: &str = "_HERMES_FORCE_";
+const SUBPROCESS_ENV_PASSTHROUGH_VAR: &str = "HERMES_SUBPROCESS_ENV_PASSTHROUGH";
+
+const SANE_PATH_ENTRIES: &[&str] = &[
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+];
+
 fn should_strip_subprocess_env(key: &str) -> bool {
     SUBPROCESS_ENV_BLOCKLIST_EXACT.contains(&key)
         || SUBPROCESS_ENV_BLOCKLIST_PREFIXES
@@ -438,87 +673,313 @@ fn should_strip_subprocess_env(key: &str) -> bool {
             .any(|prefix| key.starts_with(prefix))
 }
 
-fn scrub_subprocess_env(cmd: &mut TokioCommand) {
+fn normalize_env_passthrough_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || !trimmed
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn parse_subprocess_env_passthrough(value: &str) -> BTreeSet<String> {
+    value
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ':' | ';'))
+        .filter_map(normalize_env_passthrough_name)
+        .collect()
+}
+
+fn subprocess_env_passthrough_set(configured: &[String]) -> BTreeSet<String> {
+    let mut values = std::env::var(SUBPROCESS_ENV_PASSTHROUGH_VAR)
+        .ok()
+        .map(|raw| parse_subprocess_env_passthrough(&raw))
+        .unwrap_or_default();
+    values.extend(
+        configured
+            .iter()
+            .filter_map(|name| normalize_env_passthrough_name(name)),
+    );
+    values
+}
+
+fn is_subprocess_env_passthrough(key: &str, passthrough: &BTreeSet<String>) -> bool {
+    passthrough.contains(key)
+}
+
+fn normalize_subprocess_path(path: Option<&str>) -> String {
+    let Some(path) = path.filter(|value| !value.trim().is_empty()) else {
+        return SANE_PATH_ENTRIES.join(":");
+    };
+    if std::env::split_paths(path).any(|entry| entry == std::path::Path::new("/usr/bin")) {
+        return path.to_string();
+    }
+
+    let mut entries: Vec<String> = std::env::split_paths(path)
+        .map(|entry| entry.to_string_lossy().to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    for sane in SANE_PATH_ENTRIES {
+        if !entries.iter().any(|entry| entry == sane) {
+            entries.push((*sane).to_string());
+        }
+    }
+    entries.join(":")
+}
+
+fn shell_env_cleanup_snippet(configured_passthrough: &[String]) -> String {
+    let mut snippet = String::new();
+    let configured_passthrough = configured_passthrough
+        .iter()
+        .filter_map(|name| normalize_env_passthrough_name(name))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !configured_passthrough.is_empty() {
+        snippet.push_str(
+            "HERMES_SUBPROCESS_ENV_PASSTHROUGH=\"${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-} ",
+        );
+        snippet.push_str(&configured_passthrough);
+        snippet.push_str("\"; ");
+    }
+    if !SUBPROCESS_ENV_BLOCKLIST_PREFIXES.is_empty() {
+        snippet
+            .push_str("for __hermes_env in $(env | sed 's/=.*//'); do case \"$__hermes_env\" in ");
+        for (idx, prefix) in SUBPROCESS_ENV_BLOCKLIST_PREFIXES.iter().enumerate() {
+            if idx > 0 {
+                snippet.push('|');
+            }
+            snippet.push_str(prefix);
+            snippet.push('*');
+        }
+        snippet.push_str(") case \" ${HERMES_SUBPROCESS_FORCE_TARGETS:-} ${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-} \" in *\" $__hermes_env \"*) ;; *) unset \"$__hermes_env\" ;; esac ;; esac; done; unset __hermes_env; ");
+    }
+    for key in SUBPROCESS_ENV_BLOCKLIST_EXACT {
+        snippet.push_str("case \" ${HERMES_SUBPROCESS_FORCE_TARGETS:-} ${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-} \" in *\" ");
+        snippet.push_str(key);
+        snippet.push_str(" \"*) ;; *) unset ");
+        snippet.push_str(key);
+        snippet.push_str(" ;; esac; ");
+    }
+    snippet.push_str("unset HERMES_SUBPROCESS_FORCE_TARGETS; ");
+    snippet
+}
+
+fn parse_shell_init_list(value: &str) -> Vec<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if trimmed.starts_with('[') {
+        if let Ok(values) = serde_json::from_str::<Vec<String>>(trimmed) {
+            return values
+                .into_iter()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect();
+        }
+    }
+    let delimiter = if trimmed.contains(',') { ',' } else { ':' };
+    trimmed
+        .split(delimiter)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn bool_env_or_default(name: &str, default: bool) -> bool {
+    let Some(value) = std::env::var(name).ok() else {
+        return default;
+    };
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => default,
+    }
+}
+
+fn terminal_config_from_env() -> (Vec<String>, bool, Vec<String>) {
+    let explicit = std::env::var("TERMINAL_SHELL_INIT_FILES")
+        .ok()
+        .map(|v| parse_shell_init_list(&v))
+        .unwrap_or_default();
+    let auto_source_bashrc = bool_env_or_default("TERMINAL_AUTO_SOURCE_BASHRC", true);
+    let env_passthrough = std::env::var(SUBPROCESS_ENV_PASSTHROUGH_VAR)
+        .ok()
+        .map(|v| parse_subprocess_env_passthrough(&v).into_iter().collect())
+        .unwrap_or_default();
+    (explicit, auto_source_bashrc, env_passthrough)
+}
+
+fn expand_env_refs(input: &str) -> String {
+    let mut output = String::new();
+    let mut rest = input;
+    while let Some(start) = rest.find("${") {
+        output.push_str(&rest[..start]);
+        let after_open = &rest[start + 2..];
+        let Some(end) = after_open.find('}') else {
+            output.push_str(&rest[start..]);
+            return output;
+        };
+        let name = &after_open[..end];
+        if !name.is_empty()
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        {
+            if let Ok(value) = std::env::var(name) {
+                output.push_str(&value);
+            }
+        } else {
+            output.push_str("${");
+            output.push_str(name);
+            output.push('}');
+        }
+        rest = &after_open[end + 1..];
+    }
+    output.push_str(rest);
+    output
+}
+
+fn expand_shell_init_path(input: &str) -> PathBuf {
+    let expanded = expand_env_refs(input.trim());
+    if expanded == "~" {
+        return home_dir().unwrap_or_else(|| PathBuf::from(expanded));
+    }
+    if let Some(rest) = expanded.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(expanded)
+}
+
+fn resolve_existing_shell_init_files(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    paths.into_iter().filter(|p| p.is_file()).collect()
+}
+
+fn auto_shell_init_candidates(shell: &str) -> Vec<PathBuf> {
+    let Some(home) = home_dir() else {
+        return Vec::new();
+    };
+    match shell {
+        "zsh" => [".zshenv", ".zprofile", ".zshrc", ".profile"]
+            .into_iter()
+            .map(|file| home.join(file))
+            .collect(),
+        _ => [".profile", ".bash_profile", ".bashrc"]
+            .into_iter()
+            .map(|file| home.join(file))
+            .collect(),
+    }
+}
+
+fn resolve_shell_init_files_for_shell(
+    shell: &str,
+    explicit_files: &[String],
+    auto_source_bashrc: bool,
+) -> Vec<PathBuf> {
+    if !explicit_files.is_empty() {
+        return resolve_existing_shell_init_files(
+            explicit_files
+                .iter()
+                .map(|path| expand_shell_init_path(path.as_str())),
+        );
+    }
+    if !auto_source_bashrc {
+        return Vec::new();
+    }
+    resolve_existing_shell_init_files(auto_shell_init_candidates(shell))
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn shell_source_prelude(files: &[PathBuf]) -> String {
+    let mut prelude = String::new();
+    if files.is_empty() {
+        return prelude;
+    }
+    prelude.push_str("set +e; ");
+    for file in files {
+        let quoted = shell_single_quote(&file.to_string_lossy());
+        prelude.push_str("[ -r ");
+        prelude.push_str(&quoted);
+        prelude.push_str(" ] && . ");
+        prelude.push_str(&quoted);
+        prelude.push_str(" || true; ");
+    }
+    prelude
+}
+
+fn scrub_subprocess_env(cmd: &mut TokioCommand, configured_passthrough: &[String]) {
+    let passthrough = subprocess_env_passthrough_set(configured_passthrough);
+    let mut forced = Vec::new();
     for (key, _) in std::env::vars() {
-        if should_strip_subprocess_env(&key) {
+        if should_strip_subprocess_env(&key) && !is_subprocess_env_passthrough(&key, &passthrough) {
             cmd.env_remove(key);
+        } else if let Some(target) = key.strip_prefix(SUBPROCESS_ENV_FORCE_PREFIX) {
+            cmd.env_remove(&key);
+            if !target.is_empty() && should_strip_subprocess_env(target) {
+                if let Ok(value) = std::env::var(&key) {
+                    forced.push((target.to_string(), value));
+                }
+            }
         }
     }
+    for (target, value) in forced {
+        cmd.env(target, value);
+    }
+    let forced_targets: Vec<String> = std::env::vars()
+        .filter_map(|(key, _)| {
+            key.strip_prefix(SUBPROCESS_ENV_FORCE_PREFIX)
+                .filter(|target| !target.is_empty() && should_strip_subprocess_env(target))
+                .map(ToString::to_string)
+        })
+        .collect();
+    if forced_targets.is_empty() {
+        cmd.env_remove("HERMES_SUBPROCESS_FORCE_TARGETS");
+    } else {
+        cmd.env("HERMES_SUBPROCESS_FORCE_TARGETS", forced_targets.join(" "));
+    }
+    if passthrough.is_empty() {
+        cmd.env_remove(SUBPROCESS_ENV_PASSTHROUGH_VAR);
+    } else {
+        cmd.env(
+            SUBPROCESS_ENV_PASSTHROUGH_VAR,
+            passthrough.into_iter().collect::<Vec<_>>().join(" "),
+        );
+    }
+
+    let normalized_path = normalize_subprocess_path(std::env::var("PATH").ok().as_deref());
+    cmd.env("PATH", normalized_path);
 }
 
-fn normalized_shell_name(shell: &str) -> String {
-    let file_name = shell
-        .trim()
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(shell)
-        .to_ascii_lowercase();
-    file_name
-        .strip_suffix(".exe")
-        .unwrap_or(&file_name)
-        .to_string()
-}
-
-fn local_shell_invocation(shell: Option<&str>) -> ShellInvocation {
-    let Some(shell) = shell.map(str::trim).filter(|value| !value.is_empty()) else {
-        return default_local_shell_invocation();
-    };
-
-    let name = normalized_shell_name(shell);
-    let args = match name.as_str() {
-        "cmd" => vec!["/D", "/S", "/C"],
-        "powershell" | "pwsh" => vec!["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"],
-        "sh" | "bash" | "zsh" => vec!["-c"],
-        _ => default_shell_args_for_platform(),
-    };
-
-    ShellInvocation {
-        program: shell.to_string(),
-        args,
-    }
-}
-
-fn default_local_shell_invocation() -> ShellInvocation {
-    #[cfg(windows)]
-    {
-        ShellInvocation {
-            program: "powershell.exe".to_string(),
-            args: vec!["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"],
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        ShellInvocation {
-            program: "sh".to_string(),
-            args: vec!["-c"],
-        }
-    }
-}
-
-fn default_shell_args_for_platform() -> Vec<&'static str> {
-    #[cfg(windows)]
-    {
-        vec!["-Command"]
-    }
-    #[cfg(not(windows))]
-    {
-        vec!["-c"]
-    }
-}
-
-fn with_login_profile_sources(command: &str) -> String {
+fn with_login_profile_sources(
+    command: &str,
+    explicit_files: &[String],
+    auto_source_bashrc: bool,
+    env_passthrough: &[String],
+) -> String {
     #[cfg(unix)]
     {
-        fn shell_single_quote(value: &str) -> String {
-            format!("'{}'", value.replace('\'', "'\\''"))
-        }
-
-        let bash_command = shell_single_quote(&format!(
-            "[ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\"; [ -f \"$HOME/.bash_profile\" ] && . \"$HOME/.bash_profile\"; {command}"
+        let cleanup = shell_env_cleanup_snippet(env_passthrough);
+        let bash_prelude = shell_source_prelude(&resolve_shell_init_files_for_shell(
+            "bash",
+            explicit_files,
+            auto_source_bashrc,
         ));
-        let zsh_command = shell_single_quote(&format!(
-            "[ -f \"$HOME/.zshenv\" ] && . \"$HOME/.zshenv\"; [ -f \"$HOME/.zprofile\" ] && . \"$HOME/.zprofile\"; [ -f \"$HOME/.zshrc\" ] && . \"$HOME/.zshrc\"; [ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\"; {command}"
+        let zsh_prelude = shell_source_prelude(&resolve_shell_init_files_for_shell(
+            "zsh",
+            explicit_files,
+            auto_source_bashrc,
         ));
+        let bash_command = shell_single_quote(&format!("{bash_prelude}{cleanup}{command}"));
+        let zsh_command = shell_single_quote(&format!("{zsh_prelude}{cleanup}{command}"));
         let preferred_shell = std::env::var("SHELL")
             .ok()
             .and_then(|raw| {
@@ -545,8 +1006,160 @@ else printf '%s\n' \"Hermes could not find bash or zsh in PATH. Run 'exec zsh -l
     }
     #[cfg(not(unix))]
     {
+        let _ = explicit_files;
+        let _ = auto_source_bashrc;
+        let _ = env_passthrough;
         command.to_string()
     }
+}
+
+fn rewrite_compound_background(command: &str) -> String {
+    let mut out = String::with_capacity(command.len());
+    for line in command.split_inclusive('\n') {
+        let (body, newline) = line
+            .strip_suffix('\n')
+            .map(|body| (body, "\n"))
+            .unwrap_or((line, ""));
+        out.push_str(&rewrite_compound_background_line(body));
+        out.push_str(newline);
+    }
+    out
+}
+
+fn rewrite_compound_background_line(line: &str) -> String {
+    if line.trim_start().starts_with('#') {
+        return line.to_string();
+    }
+    let Some(amp_idx) = trailing_background_ampersand(line) else {
+        return line.to_string();
+    };
+    let Some(op) = last_top_level_chain_operator(line, amp_idx) else {
+        return line.to_string();
+    };
+
+    let mut tail_start = op.end;
+    while tail_start < amp_idx {
+        let Some(ch) = line[tail_start..amp_idx].chars().next() else {
+            break;
+        };
+        if !ch.is_whitespace() {
+            break;
+        }
+        tail_start += ch.len_utf8();
+    }
+    if line[tail_start..amp_idx].trim().is_empty() {
+        return line.to_string();
+    }
+
+    let mut rewritten = String::with_capacity(line.len() + 4);
+    rewritten.push_str(&line[..tail_start]);
+    rewritten.push_str("{ ");
+    rewritten.push_str(&line[tail_start..=amp_idx]);
+    rewritten.push_str(" }");
+    rewritten.push_str(&line[amp_idx + 1..]);
+    rewritten
+}
+
+#[derive(Clone, Copy)]
+struct ChainOperator {
+    end: usize,
+}
+
+fn trailing_background_ampersand(line: &str) -> Option<usize> {
+    let mut idx = line.len();
+    while idx > 0 {
+        let (prev, ch) = line[..idx].char_indices().next_back()?;
+        if !ch.is_whitespace() {
+            idx = prev;
+            break;
+        }
+        idx = prev;
+    }
+    if line[idx..].chars().next()? != '&' || is_escaped(line, idx) {
+        return None;
+    }
+    if idx > 0 && line[..idx].ends_with('&') {
+        return None;
+    }
+    Some(idx)
+}
+
+fn is_escaped(input: &str, idx: usize) -> bool {
+    let mut count = 0usize;
+    let mut pos = idx;
+    while pos > 0 {
+        let Some((prev, ch)) = input[..pos].char_indices().next_back() else {
+            break;
+        };
+        if ch != '\\' {
+            break;
+        }
+        count += 1;
+        pos = prev;
+    }
+    count % 2 == 1
+}
+
+fn last_top_level_chain_operator(line: &str, stop: usize) -> Option<ChainOperator> {
+    let mut last = None;
+    let mut single = false;
+    let mut double = false;
+    let mut paren_depth = 0usize;
+    let mut command_sub_depth = 0usize;
+    let mut iter = line[..stop].char_indices().peekable();
+
+    while let Some((idx, ch)) = iter.next() {
+        if is_escaped(line, idx) {
+            continue;
+        }
+        if single {
+            if ch == '\'' {
+                single = false;
+            }
+            continue;
+        }
+        if double {
+            if ch == '"' {
+                double = false;
+                continue;
+            }
+            if ch == '$' && iter.peek().is_some_and(|(_, next)| *next == '(') {
+                command_sub_depth += 1;
+                iter.next();
+            }
+            continue;
+        }
+
+        match ch {
+            '\'' => single = true,
+            '"' => double = true,
+            '$' if iter.peek().is_some_and(|(_, next)| *next == '(') => {
+                command_sub_depth += 1;
+                iter.next();
+            }
+            '(' if command_sub_depth == 0 => paren_depth += 1,
+            ')' if command_sub_depth > 0 => command_sub_depth -= 1,
+            ')' if paren_depth > 0 => paren_depth -= 1,
+            ';' if paren_depth == 0 && command_sub_depth == 0 => last = None,
+            '|' if paren_depth == 0 && command_sub_depth == 0 => {
+                if iter.peek().is_some_and(|(_, next)| *next == '|') {
+                    iter.next();
+                    last = Some(ChainOperator { end: idx + 2 });
+                } else {
+                    last = None;
+                }
+            }
+            '&' if paren_depth == 0
+                && command_sub_depth == 0
+                && iter.peek().is_some_and(|(_, next)| *next == '&') =>
+            {
+                iter.next();
+                last = Some(ChainOperator { end: idx + 2 });
+            }
+            _ => {}
+        }
+    }
+    last
 }
 
 impl Default for LocalBackend {
@@ -566,7 +1179,13 @@ impl TerminalBackend for LocalBackend {
         pty: bool,
     ) -> Result<CommandOutput, AgentError> {
         let timeout_secs = timeout.unwrap_or(self.default_timeout);
-        let command_with_profiles = with_login_profile_sources(command);
+        let rewritten_command = rewrite_compound_background(command);
+        let command_with_profiles = with_login_profile_sources(
+            &rewritten_command,
+            &self.shell_init_files,
+            self.auto_source_bashrc,
+            &self.env_passthrough,
+        );
 
         if pty && !background {
             // PTY mode: allocate a pseudo-terminal for interactive commands.
@@ -584,43 +1203,21 @@ impl TerminalBackend for LocalBackend {
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .stdin(Stdio::null());
-                scrub_subprocess_env(&mut pty_cmd);
+                scrub_subprocess_env(&mut pty_cmd, &self.env_passthrough);
 
                 if let Some(dir) = workdir {
                     pty_cmd.current_dir(resolve_path(dir)?);
                 }
 
-                let result =
-                    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
-                        let output = pty_cmd.output().await.map_err(|e| {
-                            AgentError::Io(format!("Failed to spawn PTY command: {}", e))
-                        })?;
-                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                        Ok(CommandOutput {
-                            exit_code: output.status.code().unwrap_or(-1),
-                            stdout: if stdout.len() > self.max_output_size {
-                                stdout[..self.max_output_size].to_string()
-                            } else {
-                                stdout
-                            },
-                            stderr: if stderr.len() > self.max_output_size {
-                                stderr[..self.max_output_size].to_string()
-                            } else {
-                                stderr
-                            },
-                        })
-                    })
+                return self
+                    .collect_foreground_child(
+                        pty_cmd,
+                        timeout_secs,
+                        None,
+                        "PTY command",
+                        "PTY command",
+                    )
                     .await;
-
-                return match result {
-                    Ok(Ok(output)) => Ok(output),
-                    Ok(Err(e)) => Err(e),
-                    Err(_) => Err(AgentError::Timeout(format!(
-                        "PTY command timed out after {} seconds",
-                        timeout_secs
-                    ))),
-                };
             }
 
             #[cfg(not(unix))]
@@ -645,13 +1242,17 @@ impl TerminalBackend for LocalBackend {
                 tracing::warn!(
                     "PTY mode is not supported on this platform; using standard shell execution"
                 );
-                self.shell_command(&command_with_profiles)
+                let mut shell_cmd = TokioCommand::new("sh");
+                shell_cmd.arg("-c").arg(&command_with_profiles);
+                shell_cmd
             }
         } else {
-            self.shell_command(&command_with_profiles)
+            let mut shell_cmd = TokioCommand::new("sh");
+            shell_cmd.arg("-c").arg(&command_with_profiles);
+            shell_cmd
         };
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-        scrub_subprocess_env(&mut cmd);
+        scrub_subprocess_env(&mut cmd, &self.env_passthrough);
 
         if let Some(dir) = workdir {
             cmd.current_dir(resolve_path(dir)?);
@@ -664,110 +1265,78 @@ impl TerminalBackend for LocalBackend {
             cmd.stdin(Stdio::null());
         }
 
+        if !background {
+            return self
+                .collect_foreground_child(cmd, timeout_secs, None, "command", "Command")
+                .await;
+        }
+
         let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
             let mut child = cmd
                 .spawn()
                 .map_err(|e| AgentError::Io(format!("Failed to spawn command: {}", e)))?;
 
-            // In background mode, track the process session and return immediately.
-            if background {
-                let session_id = Self::next_process_session_id();
-                let pid = child.id();
-                let output = Arc::new(Mutex::new(String::new()));
-                let status = Arc::new(Mutex::new(ProcessStatus::default()));
-                let stdin = Arc::new(AsyncMutex::new(child.stdin.take()));
-                let max_output_chars = self.max_process_output_chars();
-                let session = ProcessSession {
-                    id: session_id.clone(),
-                    command: command.to_string(),
-                    pid,
-                    started_at: Self::now_unix_ts(),
-                    status: status.clone(),
-                    output: output.clone(),
-                    stdin,
-                };
-                self.background_processes
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(session_id.clone(), session);
+            let session_id = Self::next_process_session_id();
+            let pid = child.id();
+            let output = Arc::new(Mutex::new(String::new()));
+            let status = Arc::new(Mutex::new(ProcessStatus::default()));
+            let stdin = Arc::new(AsyncMutex::new(child.stdin.take()));
+            let max_output_chars = self.max_process_output_chars();
+            let session = ProcessSession {
+                id: session_id.clone(),
+                command: rewritten_command.clone(),
+                pid,
+                started_at: Self::now_unix_ts(),
+                status: status.clone(),
+                output: output.clone(),
+                stdin,
+            };
+            self.background_processes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(session_id.clone(), session);
 
-                if let Some(stdout) = child.stdout.take() {
-                    let output = output.clone();
-                    tokio::spawn(async move {
-                        Self::read_stream_to_buffer(stdout, output, max_output_chars).await;
-                    });
-                }
-                if let Some(stderr) = child.stderr.take() {
-                    let output = output.clone();
-                    tokio::spawn(async move {
-                        Self::read_stream_to_buffer(stderr, output, max_output_chars).await;
-                    });
-                }
-
+            if let Some(stdout) = child.stdout.take() {
+                let output = output.clone();
                 tokio::spawn(async move {
-                    match child.wait().await {
-                        Ok(exit) => {
-                            let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
-                            guard.exited = true;
-                            guard.exit_code = exit.code();
-                        }
-                        Err(err) => {
-                            let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
-                            guard.exited = true;
-                            guard.exit_code = Some(-1);
-                            let note = format!("\n[wait error: {err}]");
-                            Self::append_output(&output, &note, max_output_chars);
-                        }
-                    }
+                    Self::read_stream_to_buffer(stdout, output, max_output_chars).await;
                 });
-
-                let started = json!({
-                    "output": "Background process started",
-                    "session_id": session_id,
-                    "pid": pid,
-                    "exit_code": 0,
-                    "error": Value::Null
-                });
-                return Ok(CommandOutput {
-                    exit_code: 0,
-                    stdout: started.to_string(),
-                    stderr: String::new(),
+            }
+            if let Some(stderr) = child.stderr.take() {
+                let output = output.clone();
+                tokio::spawn(async move {
+                    Self::read_stream_to_buffer(stderr, output, max_output_chars).await;
                 });
             }
 
-            let output = child
-                .wait_with_output()
-                .await
-                .map_err(|e| AgentError::Io(format!("Failed to wait for command: {}", e)))?;
+            tokio::spawn(async move {
+                match child.wait().await {
+                    Ok(exit) => {
+                        let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
+                        guard.exited = true;
+                        guard.exit_code = exit.code();
+                    }
+                    Err(err) => {
+                        let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
+                        guard.exited = true;
+                        guard.exit_code = Some(-1);
+                        let note = format!("\n[wait error: {err}]");
+                        Self::append_output(&output, &note, max_output_chars);
+                    }
+                }
+            });
 
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-            // Truncate output if it exceeds max_output_size
-            let stdout = if stdout.len() > self.max_output_size {
-                tracing::warn!(
-                    "Command output exceeded max size ({} bytes), truncating",
-                    stdout.len()
-                );
-                stdout[..self.max_output_size].to_string()
-            } else {
-                stdout
-            };
-
-            let stderr = if stderr.len() > self.max_output_size {
-                tracing::warn!(
-                    "Command stderr exceeded max size ({} bytes), truncating",
-                    stderr.len()
-                );
-                stderr[..self.max_output_size].to_string()
-            } else {
-                stderr
-            };
-
+            let started = json!({
+                "output": "Background process started",
+                "session_id": session_id,
+                "pid": pid,
+                "exit_code": 0,
+                "error": Value::Null
+            });
             Ok(CommandOutput {
-                exit_code: output.status.code().unwrap_or(-1),
-                stdout,
-                stderr,
+                exit_code: 0,
+                stdout: started.to_string(),
+                stderr: String::new(),
             })
         })
         .await;
@@ -796,7 +1365,13 @@ impl TerminalBackend for LocalBackend {
                 .execute_command(command, timeout, workdir, background, pty)
                 .await;
         };
-        let command_with_profiles = with_login_profile_sources(command);
+        let rewritten_command = rewrite_compound_background(command);
+        let command_with_profiles = with_login_profile_sources(
+            &rewritten_command,
+            &self.shell_init_files,
+            self.auto_source_bashrc,
+            &self.env_passthrough,
+        );
 
         if background {
             let started = self
@@ -830,55 +1405,21 @@ impl TerminalBackend for LocalBackend {
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .stdin(Stdio::piped());
-                scrub_subprocess_env(&mut pty_cmd);
+                scrub_subprocess_env(&mut pty_cmd, &self.env_passthrough);
 
                 if let Some(dir) = workdir {
                     pty_cmd.current_dir(resolve_path(dir)?);
                 }
 
-                let result =
-                    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
-                        let mut child = pty_cmd.spawn().map_err(|e| {
-                            AgentError::Io(format!("Failed to spawn PTY command: {}", e))
-                        })?;
-                        if let Some(mut stdin) = child.stdin.take() {
-                            stdin.write_all(stdin_owned.as_bytes()).await.map_err(|e| {
-                                AgentError::Io(format!("Failed to write PTY stdin: {e}"))
-                            })?;
-                            stdin.flush().await.map_err(|e| {
-                                AgentError::Io(format!("Failed to flush PTY stdin: {e}"))
-                            })?;
-                        }
-
-                        let output = child.wait_with_output().await.map_err(|e| {
-                            AgentError::Io(format!("Failed to wait for PTY command: {}", e))
-                        })?;
-                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                        Ok(CommandOutput {
-                            exit_code: output.status.code().unwrap_or(-1),
-                            stdout: if stdout.len() > self.max_output_size {
-                                stdout[..self.max_output_size].to_string()
-                            } else {
-                                stdout
-                            },
-                            stderr: if stderr.len() > self.max_output_size {
-                                stderr[..self.max_output_size].to_string()
-                            } else {
-                                stderr
-                            },
-                        })
-                    })
+                return self
+                    .collect_foreground_child(
+                        pty_cmd,
+                        timeout_secs,
+                        Some(stdin_owned.as_bytes().to_vec()),
+                        "PTY command",
+                        "PTY command",
+                    )
                     .await;
-
-                return match result {
-                    Ok(Ok(output)) => Ok(output),
-                    Ok(Err(e)) => Err(e),
-                    Err(_) => Err(AgentError::Timeout(format!(
-                        "PTY command timed out after {} seconds",
-                        timeout_secs
-                    ))),
-                };
             }
 
             #[cfg(not(unix))]
@@ -889,60 +1430,25 @@ impl TerminalBackend for LocalBackend {
             }
         }
 
-        let mut cmd = self.shell_command(&command_with_profiles);
-        cmd.stdout(Stdio::piped())
+        let mut cmd = TokioCommand::new("sh");
+        cmd.arg("-c")
+            .arg(&command_with_profiles)
+            .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::piped());
-        scrub_subprocess_env(&mut cmd);
+        scrub_subprocess_env(&mut cmd, &self.env_passthrough);
         if let Some(dir) = workdir {
             cmd.current_dir(resolve_path(dir)?);
         }
 
-        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
-            let mut child = cmd
-                .spawn()
-                .map_err(|e| AgentError::Io(format!("Failed to spawn command: {}", e)))?;
-            if let Some(mut stdin) = child.stdin.take() {
-                stdin
-                    .write_all(stdin_owned.as_bytes())
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to write stdin: {e}")))?;
-                stdin
-                    .flush()
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to flush stdin: {e}")))?;
-            }
-
-            let output = child
-                .wait_with_output()
-                .await
-                .map_err(|e| AgentError::Io(format!("Failed to wait for command: {}", e)))?;
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Ok(CommandOutput {
-                exit_code: output.status.code().unwrap_or(-1),
-                stdout: if stdout.len() > self.max_output_size {
-                    stdout[..self.max_output_size].to_string()
-                } else {
-                    stdout
-                },
-                stderr: if stderr.len() > self.max_output_size {
-                    stderr[..self.max_output_size].to_string()
-                } else {
-                    stderr
-                },
-            })
-        })
-        .await;
-
-        match result {
-            Ok(Ok(output)) => Ok(output),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(AgentError::Timeout(format!(
-                "Command timed out after {} seconds",
-                timeout_secs
-            ))),
-        }
+        self.collect_foreground_child(
+            cmd,
+            timeout_secs,
+            Some(stdin_owned.into_bytes()),
+            "command",
+            "Command",
+        )
+        .await
     }
 
     async fn read_file(
@@ -952,27 +1458,25 @@ impl TerminalBackend for LocalBackend {
         limit: Option<u64>,
     ) -> Result<String, AgentError> {
         let resolved = resolve_path(path)?;
-        if extension_lower(&resolved).as_deref() == Some("pdf") {
-            let content = parse_pdf_with_liteparse(&resolved).await?;
-            return Ok(paginate_content_lines(&content, offset, limit));
-        }
-        if let Some(ext) = extension_lower(&resolved) {
-            if is_blocked_binary_extension(&ext) {
-                return Err(binary_read_error(path, &ext));
-            }
-        }
-        let raw = tokio::fs::read(&resolved)
+        let content = tokio::fs::read_to_string(&resolved)
             .await
             .map_err(|e| AgentError::Io(format!("Failed to read file '{}': {}", path, e)))?;
-        if sample_looks_binary(&raw) {
-            let ext = extension_lower(&resolved).unwrap_or_else(|| "bin".into());
-            return Err(binary_read_error(path, &ext));
-        }
-        let content = String::from_utf8(raw).map_err(|_| {
-            let ext = extension_lower(&resolved).unwrap_or_else(|| "unknown".into());
-            binary_read_error(path, &ext)
-        })?;
-        Ok(paginate_content_lines(&content, offset, limit))
+
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Apply offset (0-indexed line number to start from)
+        let start = offset.unwrap_or(0) as usize;
+        let start = start.min(lines.len());
+
+        // Apply limit (max number of lines to return)
+        let end = if let Some(lim) = limit {
+            (start + lim as usize).min(lines.len())
+        } else {
+            lines.len()
+        };
+
+        let selected_lines = &lines[start..end];
+        Ok(selected_lines.join("\n"))
     }
 
     async fn write_file(&self, path: &str, content: &str) -> Result<(), AgentError> {
@@ -1245,6 +1749,49 @@ mod tests {
     use std::path::Path;
     use tempfile::tempdir;
 
+    static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
+    }
+
+    #[cfg(unix)]
+    fn pids_for_marker(marker: &str) -> Vec<u32> {
+        let output = std::process::Command::new("ps")
+            .args(["-axo", "pid=,command="])
+            .output()
+            .expect("ps output");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|line| line.contains(marker))
+            .filter_map(|line| line.split_whitespace().next()?.parse::<u32>().ok())
+            .collect()
+    }
+
+    #[cfg(unix)]
+    async fn wait_for_marker(marker: &str, present: bool, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            let found = !pids_for_marker(marker).is_empty();
+            if found == present {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let found = !pids_for_marker(marker).is_empty();
+        found == present
+    }
+
     struct EnvGuard {
         key: &'static str,
         original: Option<OsString>,
@@ -1253,7 +1800,13 @@ mod tests {
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
             let original = std::env::var_os(key);
-            unsafe { std::env::set_var(key, value) };
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let original = std::env::var_os(key);
+            std::env::remove_var(key);
             Self { key, original }
         }
     }
@@ -1261,8 +1814,8 @@ mod tests {
     impl Drop for EnvGuard {
         fn drop(&mut self) {
             match &self.original {
-                Some(v) => unsafe { std::env::set_var(self.key, v) },
-                None => unsafe { std::env::remove_var(self.key) },
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
             }
         }
     }
@@ -1270,21 +1823,29 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_with_login_profile_sources_prepends_profile_loads() {
-        let wrapped = with_login_profile_sources("echo hi");
+        let _lock = lock_env();
+        let td = tempdir().unwrap();
+        for file in [".profile", ".bash_profile", ".bashrc", ".zshrc"] {
+            std::fs::write(td.path().join(file), "export HERMES_TEST=1\n").unwrap();
+        }
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+        let wrapped = with_login_profile_sources("echo hi", &[], true, &[]);
         assert!(wrapped.contains("command -v bash"));
         assert!(wrapped.contains("exec bash -lc"));
-        assert!(wrapped.contains(". \"$HOME/.bash_profile\""));
+        assert!(wrapped.contains(".bash_profile"));
+        assert!(wrapped.contains(".bashrc"));
         assert!(wrapped.contains("command -v zsh"));
         assert!(wrapped.contains("exec zsh -lc"));
-        assert!(wrapped.contains(". \"$HOME/.zshrc\""));
+        assert!(wrapped.contains(".zshrc"));
         assert!(wrapped.contains("echo hi"));
     }
 
     #[cfg(unix)]
     #[test]
     fn test_with_login_profile_sources_prefers_user_shell_when_supported() {
+        let _lock = lock_env();
         let _shell = EnvGuard::set("SHELL", "/bin/zsh");
-        let wrapped = with_login_profile_sources("echo hi");
+        let wrapped = with_login_profile_sources("echo hi", &[], true, &[]);
         let preferred = "if command -v zsh >/dev/null 2>&1; then exec zsh -lc";
         let fallback = "if command -v bash >/dev/null 2>&1; then exec bash -lc";
         let preferred_idx = wrapped.find(preferred).expect("preferred zsh branch");
@@ -1295,45 +1856,211 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_resolve_shell_init_files_auto_profile_before_bashrc() {
+        let _lock = lock_env();
+        let td = tempdir().unwrap();
+        for file in [".profile", ".bash_profile", ".bashrc"] {
+            std::fs::write(td.path().join(file), "export HERMES_TEST=1\n").unwrap();
+        }
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+
+        let resolved = resolve_shell_init_files_for_shell("bash", &[], true);
+        let names = resolved
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|name| name.to_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(names, [".profile", ".bash_profile", ".bashrc"]);
+    }
+
+    #[test]
+    fn test_resolve_shell_init_files_explicit_list_wins_over_auto() {
+        let _lock = lock_env();
+        let td = tempdir().unwrap();
+        std::fs::write(td.path().join(".bashrc"), "export FROM_BASHRC=1\n").unwrap();
+        let custom = td.path().join("custom.sh");
+        std::fs::write(&custom, "export FROM_CUSTOM=1\n").unwrap();
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+
+        let resolved = resolve_shell_init_files_for_shell(
+            "bash",
+            &[custom.to_string_lossy().to_string()],
+            true,
+        );
+        assert_eq!(resolved, [custom]);
+    }
+
+    #[test]
+    fn test_resolve_shell_init_files_auto_source_off_suppresses_defaults() {
+        let _lock = lock_env();
+        let td = tempdir().unwrap();
+        std::fs::write(td.path().join(".bashrc"), "export FROM_BASHRC=1\n").unwrap();
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+
+        let resolved = resolve_shell_init_files_for_shell("bash", &[], false);
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_shell_init_files_expands_home_and_env_vars() {
+        let _lock = lock_env();
+        let td = tempdir().unwrap();
+        let rc_dir = td.path().join("rc");
+        std::fs::create_dir_all(&rc_dir).unwrap();
+        let custom = rc_dir.join("custom.sh");
+        std::fs::write(&custom, "export FROM_CUSTOM=1\n").unwrap();
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+        let _custom_dir = EnvGuard::set("CUSTOM_RC_DIR", rc_dir.to_string_lossy().as_ref());
+
+        let home_resolved =
+            resolve_shell_init_files_for_shell("bash", &["~/rc/custom.sh".to_string()], false);
+        let env_resolved = resolve_shell_init_files_for_shell(
+            "bash",
+            &["${CUSTOM_RC_DIR}/custom.sh".to_string()],
+            false,
+        );
+        assert_eq!(home_resolved.as_slice(), std::slice::from_ref(&custom));
+        assert_eq!(env_resolved, [custom]);
+    }
+
+    #[test]
+    fn test_subprocess_env_passthrough_parses_configured_and_env_values() {
+        let _lock = lock_env();
+        let _passthrough = EnvGuard::set(
+            SUBPROCESS_ENV_PASSTHROUGH_VAR,
+            "OPENAI_API_KEY,ANTHROPIC_TOKEN:BAD-NAME VALID_NAME",
+        );
+        let parsed = subprocess_env_passthrough_set(&["GOOGLE_API_KEY".to_string()]);
+        assert!(parsed.contains("OPENAI_API_KEY"));
+        assert!(parsed.contains("ANTHROPIC_TOKEN"));
+        assert!(parsed.contains("VALID_NAME"));
+        assert!(parsed.contains("GOOGLE_API_KEY"));
+        assert!(!parsed.contains("BAD-NAME"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_shell_cleanup_keeps_configured_passthrough() {
+        let wrapped = with_login_profile_sources(
+            "echo hi",
+            &[],
+            true,
+            &[
+                "OPENAI_API_KEY".to_string(),
+                "HERMES_GATEWAY_SECRET".to_string(),
+            ],
+        );
+        assert!(wrapped.contains("HERMES_SUBPROCESS_ENV_PASSTHROUGH"));
+        assert!(wrapped.contains("OPENAI_API_KEY"));
+        assert!(wrapped.contains("HERMES_GATEWAY_SECRET"));
+        assert!(wrapped.contains(
+            "${HERMES_SUBPROCESS_FORCE_TARGETS:-} ${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-}"
+        ));
+    }
+
+    #[test]
+    fn test_terminal_sanitizer_blocks_provider_env_by_default() {
+        let _lock = lock_env();
+        let _api = EnvGuard::set("OPENAI_API_KEY", "secret-value");
+        let _passthrough = EnvGuard::remove(SUBPROCESS_ENV_PASSTHROUGH_VAR);
+        let backend =
+            LocalBackend::new_with_shell_init(10, 1_048_576, Vec::new(), true, Vec::new());
+
+        let output = block_on(backend.execute_command(
+            "printf '%s' \"${OPENAI_API_KEY-unset}\"",
+            Some(10),
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "unset");
+    }
+
+    #[test]
+    fn test_terminal_config_passthrough_allows_blocklisted_env() {
+        let _lock = lock_env();
+        let _api = EnvGuard::set("OPENAI_API_KEY", "secret-value");
+        let _passthrough = EnvGuard::remove(SUBPROCESS_ENV_PASSTHROUGH_VAR);
+        let backend = LocalBackend::new_with_shell_init(
+            10,
+            1_048_576,
+            Vec::new(),
+            true,
+            vec!["OPENAI_API_KEY".to_string()],
+        );
+
+        let output = block_on(backend.execute_command(
+            "printf '%s' \"$OPENAI_API_KEY\"",
+            Some(10),
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "secret-value");
+    }
+
+    #[test]
+    fn test_terminal_registry_env_passthrough_allows_prefix_blocked_env() {
+        let _lock = lock_env();
+        let _gateway = EnvGuard::set("HERMES_GATEWAY_SECRET", "gateway-secret");
+        let _passthrough = EnvGuard::set(SUBPROCESS_ENV_PASSTHROUGH_VAR, "HERMES_GATEWAY_SECRET");
+        let backend =
+            LocalBackend::new_with_shell_init(10, 1_048_576, Vec::new(), true, Vec::new());
+
+        let output = block_on(backend.execute_command(
+            "printf '%s' \"$HERMES_GATEWAY_SECRET\"",
+            Some(10),
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "gateway-secret");
+    }
+
+    #[test]
+    fn test_rewrite_compound_background_contract() {
+        assert_eq!(rewrite_compound_background("A && B &"), "A && { B & }");
+        assert_eq!(rewrite_compound_background("A || B &"), "A || { B & }");
+        assert_eq!(
+            rewrite_compound_background("A && B && C &"),
+            "A && B && { C & }"
+        );
+        assert_eq!(
+            rewrite_compound_background("cd /tmp && server &\nsleep 1"),
+            "cd /tmp && { server & }\nsleep 1"
+        );
+        assert_eq!(rewrite_compound_background("sleep 5 &"), "sleep 5 &");
+        assert_eq!(rewrite_compound_background("A && B | C &"), "A && B | C &");
+        assert_eq!(
+            rewrite_compound_background("A && B &>/dev/null &"),
+            "A && { B &>/dev/null & }"
+        );
+        assert_eq!(
+            rewrite_compound_background("echo 'A && B &'"),
+            "echo 'A && B &'"
+        );
+        assert_eq!(
+            rewrite_compound_background("   A && B &"),
+            "   A && { B & }"
+        );
+        let once = rewrite_compound_background("A && B &");
+        assert_eq!(rewrite_compound_background(&once), once);
+    }
+
     #[cfg(not(unix))]
     #[test]
     fn test_with_login_profile_sources_is_passthrough_off_unix() {
-        let wrapped = with_login_profile_sources("echo hi");
+        let wrapped = with_login_profile_sources("echo hi", &[], true, &[]);
         assert_eq!(wrapped, "echo hi");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_default_local_shell_is_powershell_on_windows() {
-        let invocation = local_shell_invocation(None);
-        assert_eq!(invocation.program, "powershell.exe");
-        assert_eq!(invocation.args.last(), Some(&"-Command"));
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn test_default_local_shell_is_sh_off_windows() {
-        let invocation = local_shell_invocation(None);
-        assert_eq!(invocation.program, "sh");
-        assert_eq!(invocation.args, vec!["-c"]);
-    }
-
-    #[test]
-    fn test_local_shell_invocation_supports_cmd() {
-        let invocation = local_shell_invocation(Some(r"C:\Windows\System32\cmd.exe"));
-        assert_eq!(invocation.program, r"C:\Windows\System32\cmd.exe");
-        assert_eq!(invocation.args, vec!["/D", "/S", "/C"]);
-    }
-
-    #[test]
-    fn test_local_shell_invocation_supports_powershell_paths() {
-        let invocation = local_shell_invocation(Some(
-            r"C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.EXE",
-        ));
-        assert_eq!(
-            invocation.args,
-            vec!["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
-        );
     }
 
     #[tokio::test]
@@ -1370,6 +2097,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_execute_command_sources_explicit_shell_init_file() {
+        let td = tempdir().unwrap();
+        let init = td.path().join("custom-init.sh");
+        std::fs::write(
+            &init,
+            "export HERMES_SHELL_INIT_PROBE=probe-ok\nexport PATH=\"/opt/shell-init-probe/bin:$PATH\"\n",
+        )
+        .unwrap();
+        let backend = LocalBackend::new_with_shell_init(
+            10,
+            1_048_576,
+            vec![init.to_string_lossy().to_string()],
+            false,
+            Vec::new(),
+        );
+
+        let output = backend
+            .execute_command(
+                "printf '%s|%s' \"$HERMES_SHELL_INIT_PROBE\" \"$PATH\"",
+                Some(10),
+                Some(td.path().to_string_lossy().as_ref()),
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stdout.contains("probe-ok"));
+        assert!(output.stdout.contains("/opt/shell-init-probe/bin"));
+    }
+
+    #[tokio::test]
     async fn test_execute_command_timeout() {
         let backend = LocalBackend::new(1, 1_048_576);
         let result = backend
@@ -1380,6 +2140,101 @@ mod tests {
             Err(AgentError::Timeout(_)) => {}
             _ => panic!("Expected timeout error"),
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_foreground_child_group_is_killed_when_future_is_aborted() {
+        let backend = Arc::new(LocalBackend::new(60, 1_048_576));
+        let marker = format!("hermes_abort_guard_{}", std::process::id());
+        let command = format!("python3 -c 'import time; time.sleep(60)' {marker}");
+        let task = {
+            let backend = backend.clone();
+            tokio::spawn(async move {
+                backend
+                    .execute_command(&command, Some(60), None, false, false)
+                    .await
+            })
+        };
+
+        assert!(
+            wait_for_marker(&marker, true, std::time::Duration::from_secs(5)).await,
+            "test setup failed to observe marker process"
+        );
+        task.abort();
+        let _ = task.await;
+        assert!(
+            wait_for_marker(&marker, false, std::time::Duration::from_secs(5)).await,
+            "foreground process marker survived future cancellation: {:?}",
+            pids_for_marker(&marker)
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_plain_shell_background_child_does_not_hang_foreground_collection() {
+        let backend = LocalBackend::new(10, 1_048_576);
+        let marker = "hermes_bg_nohang_marker";
+        let probe = "hermes_bg_nohang_probe";
+        let command = format!("python3 -c 'import time; time.sleep(60)' {probe} & echo {marker}");
+        let started = std::time::Instant::now();
+        let output = backend
+            .execute_command(&command, Some(5), None, false, false)
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", probe])
+            .status();
+
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "foreground collection hung for {elapsed:?}"
+        );
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stdout.contains(marker), "stdout={:?}", output.stdout);
+    }
+
+    #[tokio::test]
+    async fn test_foreground_collection_preserves_multibyte_utf8_boundaries() {
+        let backend = LocalBackend::new(10, 100_000);
+        let command = "python3 -c 'import sys; sys.stdout.buffer.write(chr(0x65e5).encode(\"utf-8\") * 10000); sys.stdout.buffer.write(b\"\\n\")'";
+        let output = backend
+            .execute_command(command, Some(10), None, false, false)
+            .await
+            .unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout.matches('\u{65e5}').count(), 10_000);
+        assert!(!output.stdout.contains("binary output detected"));
+    }
+
+    #[tokio::test]
+    async fn test_foreground_collection_preserves_high_volume_line_output() {
+        let backend = LocalBackend::new(10, 1_048_576);
+        let output = backend
+            .execute_command("seq 1 3000", Some(10), None, false, false)
+            .await
+            .unwrap();
+        let lines = output.stdout.trim().split('\n').collect::<Vec<_>>();
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(lines.len(), 3000);
+        assert_eq!(lines.first().copied(), Some("1"));
+        assert_eq!(lines.last().copied(), Some("3000"));
+    }
+
+    #[tokio::test]
+    async fn test_foreground_collection_replaces_invalid_utf8() {
+        let backend = LocalBackend::new(10, 1_048_576);
+        let command = "python3 -c 'import sys; sys.stdout.buffer.write(b\"before \"); sys.stdout.buffer.write(b\"\\xff\\xfe\"); sys.stdout.buffer.write(b\" after\\n\")'";
+        let output = backend
+            .execute_command(command, Some(5), None, false, false)
+            .await
+            .unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stdout.contains("before"));
+        assert!(output.stdout.contains("after"));
+        assert!(output.stdout.contains('\u{fffd}'));
+        assert!(!output.stdout.contains("binary output detected"));
     }
 
     #[tokio::test]
@@ -1424,6 +2279,28 @@ mod tests {
         let _ = std::fs::remove_dir(&dir);
     }
 
+    #[test]
+    fn test_relative_file_paths_use_terminal_cwd() {
+        let _lock = lock_env();
+        let td = tempdir().unwrap();
+        let terminal_cwd = td.path().join("worktree");
+        std::fs::create_dir_all(&terminal_cwd).unwrap();
+        let _cwd_guard = EnvGuard::set("TERMINAL_CWD", terminal_cwd.to_string_lossy().as_ref());
+        let backend = LocalBackend::default();
+
+        block_on(backend.write_file("nested/file.txt", "from terminal cwd")).unwrap();
+
+        let expected = terminal_cwd.join("nested/file.txt");
+        assert_eq!(
+            std::fs::read_to_string(&expected).unwrap(),
+            "from terminal cwd"
+        );
+        assert_eq!(
+            block_on(backend.read_file("nested/file.txt", None, None)).unwrap(),
+            "from terminal cwd"
+        );
+    }
+
     #[tokio::test]
     async fn test_file_exists() {
         let backend = LocalBackend::default();
@@ -1448,6 +2325,7 @@ mod tests {
 
     #[test]
     fn test_resolve_path_expands_tilde_username_with_suffix() {
+        let _lock = lock_env();
         let Some(user) = current_username() else {
             return;
         };
@@ -1460,40 +2338,165 @@ mod tests {
         assert!(resolved.ends_with("workspace/file.txt"));
     }
 
-    #[tokio::test]
-    async fn test_write_file_expands_tilde_home() {
+    #[test]
+    fn test_write_file_expands_tilde_home() {
+        let _lock = lock_env();
         let td = tempdir().unwrap();
         let _home_guard = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
         let backend = LocalBackend::default();
         let file = "~/nested/path/test.txt";
 
-        backend.write_file(file, "ok").await.unwrap();
+        block_on(backend.write_file(file, "ok")).unwrap();
         let expanded = td.path().join("nested/path/test.txt");
         let content = std::fs::read_to_string(&expanded).unwrap();
         assert_eq!(content, "ok");
     }
 
-    #[tokio::test]
-    async fn test_execute_command_strips_gateway_env_vars() {
+    #[test]
+    fn test_execute_command_strips_gateway_env_vars() {
+        let _lock = lock_env();
         let _token_guard = EnvGuard::set("TOOL_GATEWAY_USER_TOKEN", "should-not-leak");
         let _managed_guard = EnvGuard::set("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
         let _http_guard = EnvGuard::set("HERMES_HTTP_API_KEY", "secret-http-key");
         let _safe_guard = EnvGuard::set("SAFE_PASSTHRU_TEST", "ok");
         let backend = LocalBackend::default();
 
-        let output = backend
-            .execute_command(
+        let output = block_on(backend.execute_command(
                 "printf '%s|%s|%s|%s' \"${TOOL_GATEWAY_USER_TOKEN:-}\" \"${HERMES_ENABLE_NOUS_MANAGED_TOOLS:-}\" \"${HERMES_HTTP_API_KEY:-}\" \"${SAFE_PASSTHRU_TEST:-}\"",
                 None,
                 None,
                 false,
                 false,
-            )
-            .await
-            .unwrap();
+        ))
+        .unwrap();
 
         assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout, "|||ok");
+    }
+
+    #[test]
+    fn test_execute_command_strips_provider_tool_and_gateway_env_vars() {
+        let _lock = lock_env();
+        let _openai_key = EnvGuard::set("OPENAI_API_KEY", "sk-should-not-leak");
+        let _openai_base = EnvGuard::set("OPENAI_BASE_URL", "http://localhost:8000/v1");
+        let _bedrock_bearer = EnvGuard::set("AWS_BEARER_TOKEN_BEDROCK", "bedrock-secret");
+        let _github = EnvGuard::set("GITHUB_TOKEN", "ghp-secret");
+        let _modal = EnvGuard::set("MODAL_TOKEN_SECRET", "modal-secret");
+        let _gateway = EnvGuard::set("GATEWAY_ALLOWED_USERS", "alice,bob");
+        let _safe_guard = EnvGuard::set("SAFE_PASSTHRU_TEST", "ok");
+        let backend = LocalBackend::default();
+
+        let output = block_on(backend.execute_command(
+                "printf '%s|%s|%s|%s|%s|%s|%s' \"${OPENAI_API_KEY:-}\" \"${OPENAI_BASE_URL:-}\" \"${AWS_BEARER_TOKEN_BEDROCK:-}\" \"${GITHUB_TOKEN:-}\" \"${MODAL_TOKEN_SECRET:-}\" \"${GATEWAY_ALLOWED_USERS:-}\" \"${SAFE_PASSTHRU_TEST:-}\"",
+                None,
+                None,
+                false,
+                false,
+        ))
+        .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "||||||ok");
+    }
+
+    #[test]
+    fn test_execute_command_preserves_general_aws_credentials() {
+        let _lock = lock_env();
+        let _access_key = EnvGuard::set("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE");
+        let _secret_key = EnvGuard::set("AWS_SECRET_ACCESS_KEY", "aws-secret");
+        let _session = EnvGuard::set("AWS_SESSION_TOKEN", "aws-session");
+        let backend = LocalBackend::default();
+
+        let output = block_on(backend.execute_command(
+                "printf '%s|%s|%s' \"${AWS_ACCESS_KEY_ID:-}\" \"${AWS_SECRET_ACCESS_KEY:-}\" \"${AWS_SESSION_TOKEN:-}\"",
+                None,
+                None,
+                false,
+                false,
+        ))
+        .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "AKIAIOSFODNN7EXAMPLE|aws-secret|aws-session");
+        for var in [
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "AWS_PROFILE",
+            "AWS_DEFAULT_REGION",
+            "AWS_REGION",
+            "AWS_SHARED_CREDENTIALS_FILE",
+            "AWS_CONFIG_FILE",
+            "AWS_WEB_IDENTITY_TOKEN_FILE",
+            "AWS_ROLE_ARN",
+        ] {
+            assert!(
+                !should_strip_subprocess_env(var),
+                "{var} must not be in the Hermes subprocess blocklist"
+            );
+        }
+    }
+
+    #[test]
+    fn test_execute_command_force_prefix_reinjects_blocked_var() {
+        let _lock = lock_env();
+        let _blocked = EnvGuard::set("OPENAI_API_KEY", "sk-should-not-leak");
+        let _forced = EnvGuard::set("_HERMES_FORCE_OPENAI_API_KEY", "sk-explicit");
+        let backend = LocalBackend::default();
+
+        let output = block_on(backend.execute_command(
+            "printf '%s|%s' \"${OPENAI_API_KEY:-}\" \"${_HERMES_FORCE_OPENAI_API_KEY:-}\"",
+            None,
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "sk-explicit|");
+    }
+
+    #[test]
+    fn test_execute_command_cleans_profile_reintroduced_blocked_vars() {
+        let _lock = lock_env();
+        let td = tempdir().unwrap();
+        std::fs::write(
+            td.path().join(".profile"),
+            "export OPENAI_API_KEY=from-profile\nexport SAFE_PASSTHRU_TEST=ok\n",
+        )
+        .unwrap();
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+        let backend = LocalBackend::default();
+
+        let output = block_on(backend.execute_command(
+            "printf '%s|%s' \"${OPENAI_API_KEY:-}\" \"${SAFE_PASSTHRU_TEST:-}\"",
+            None,
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "|ok");
+    }
+
+    #[test]
+    fn test_subprocess_path_appends_homebrew_when_path_is_minimal() {
+        let normalized = normalize_subprocess_path(Some("/some/custom/bin"));
+        assert!(normalized.contains("/some/custom/bin"));
+        assert!(normalized.contains("/usr/bin"));
+        assert!(normalized.contains("/opt/homebrew/bin"));
+        assert!(normalized.contains("/opt/homebrew/sbin"));
+    }
+
+    #[test]
+    fn test_subprocess_path_preserves_full_path() {
+        assert_eq!(
+            normalize_subprocess_path(Some("/usr/bin:/bin")),
+            "/usr/bin:/bin"
+        );
     }
 
     #[tokio::test]
@@ -1531,54 +2534,6 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("hello from stdin"));
-    }
-
-    #[tokio::test]
-    async fn test_read_file_rejects_png_extension() {
-        let td = tempdir().unwrap();
-        let png = td.path().join("test.png");
-        std::fs::write(&png, &[0x89, 0x50, 0x4E, 0x47]).unwrap();
-        let backend = LocalBackend::default();
-        let err = backend
-            .read_file(png.to_str().unwrap(), None, None)
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("Cannot read binary file"));
-        assert!(err.contains("vision_analyze"));
-    }
-
-    #[test]
-    fn test_pdf_extension_not_blocked_by_binary_guard() {
-        assert!(!is_blocked_binary_extension("pdf"));
-    }
-
-    #[tokio::test]
-    async fn test_read_file_pdf_surfaces_liteparse_error() {
-        let td = tempdir().unwrap();
-        let pdf = td.path().join("test.pdf");
-        std::fs::write(&pdf, b"not a valid pdf").unwrap();
-        let backend = LocalBackend::default();
-        let err = backend
-            .read_file(pdf.to_str().unwrap(), None, None)
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("LiteParse failed for"));
-    }
-
-    #[tokio::test]
-    async fn test_read_file_rejects_binary_content_without_known_ext() {
-        let td = tempdir().unwrap();
-        let bin = td.path().join("data.dat");
-        std::fs::write(&bin, &[0x00, 0x01, 0x02, 0x03]).unwrap();
-        let backend = LocalBackend::default();
-        let err = backend
-            .read_file(bin.to_str().unwrap(), None, None)
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("Cannot read binary file"));
     }
 
     #[tokio::test]

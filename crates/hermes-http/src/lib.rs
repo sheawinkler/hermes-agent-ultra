@@ -36,8 +36,10 @@ use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
 use hermes_agent::session_persistence::SessionPersistence;
+use hermes_agent::smart_model_routing::ApiMode;
 use hermes_agent::{
-    split_messages_for_run_conversation, AgentConfig, AgentLoop, RunConversationParams,
+    leading_system_prompt_for_persist, split_messages_for_run_conversation, AgentConfig,
+    AgentLoop, RunConversationParams,
 };
 use hermes_config::GatewayConfig;
 use hermes_core::errors::GatewayError;
@@ -54,6 +56,12 @@ use serde_json::Value;
 
 pub const HTTP_PLATFORM: &str = "http";
 const SESSION_KEY_HEADER: &str = "x-hermes-session-key";
+const COPILOT_BASE_URL: &str = "https://api.githubcopilot.com";
+const GEMINI_OPENAI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
+const GMI_BASE_URL: &str = "https://api.gmi-serving.com/v1";
+const ARCEE_BASE_URL: &str = "https://api.arcee.ai/api/v1";
+const XIAOMI_BASE_URL: &str = "https://api.xiaomimimo.com/v1";
+const TENCENT_TOKENHUB_BASE_URL: &str = "https://tokenhub.tencentmaas.com/v1";
 
 #[derive(Clone, Default)]
 pub struct ChatOutboundBuffer {
@@ -142,6 +150,8 @@ impl HttpServerState {
         run_sessions_db_auto_maintenance(&config);
         let runtime_gateway_config = RuntimeGatewayConfig {
             streaming_enabled: config.streaming.enabled,
+            display: config.display.clone(),
+            service_tier: config.agent.normalized_service_tier(),
             ..RuntimeGatewayConfig::default()
         };
         let session_manager = Arc::new(gateway_session_manager_with_persistence(&config));
@@ -802,6 +812,16 @@ impl IntoResponse for HttpError {
     }
 }
 
+fn parse_provider_api_mode(value: &str) -> Option<ApiMode> {
+    match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "chat_completions" => Some(ApiMode::ChatCompletions),
+        "anthropic_messages" => Some(ApiMode::AnthropicMessages),
+        "codex_responses" => Some(ApiMode::CodexResponses),
+        "bedrock_converse" => Some(ApiMode::BedrockConverse),
+        _ => None,
+    }
+}
+
 pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
     let provider_from_model = model.split_once(':').map(|(p, _)| p.to_string());
     let skip_context_files_env = std::env::var("HERMES_SKIP_CONTEXT_FILES")
@@ -830,6 +850,8 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                         api_key: cfg.api_key.clone(),
                         api_key_env: cfg.api_key_env.clone(),
                         base_url: cfg.base_url.clone(),
+                        request_timeout_seconds: cfg.request_timeout_seconds,
+                        api_mode: cfg.api_mode.as_deref().and_then(parse_provider_api_mode),
                         command: cfg.command.clone(),
                         args: cfg.args.clone(),
                         oauth_token_url: cfg.oauth_token_url.clone(),
@@ -897,8 +919,12 @@ pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
 }
 
 pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvider> {
-    let (provider_name, model_name) = model.split_once(':').unwrap_or(("openai", model));
-    let provider_config = config.llm_providers.get(provider_name);
+    let (raw_provider_name, model_name) = model.split_once(':').unwrap_or(("openai", model));
+    let provider_name = canonical_gateway_provider_name(raw_provider_name);
+    let provider_config = config
+        .llm_providers
+        .get(raw_provider_name)
+        .or_else(|| config.llm_providers.get(provider_name));
     let api_key = provider_config
         .and_then(|c| c.api_key.clone())
         .unwrap_or_default();
@@ -939,15 +965,39 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
         "nous" => Arc::new(NousProvider::new(&api_key).with_model(model_name)),
         "copilot" => Arc::new(
             CopilotProvider::new(
-                base_url.unwrap_or_else(|| "https://api.github.com/copilot".to_string()),
+                base_url.unwrap_or_else(|| COPILOT_BASE_URL.to_string()),
                 &api_key,
             )
             .with_model(model_name),
         ),
         _ => {
-            let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+            let url = base_url
+                .or_else(|| default_gateway_base_url(provider_name).map(str::to_string))
+                .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
             Arc::new(GenericProvider::new(url, &api_key, model_name))
         }
+    }
+}
+
+fn canonical_gateway_provider_name(provider: &str) -> &str {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "google" | "google-gemini" | "google-ai-studio" => "gemini",
+        "gmi-cloud" | "gmicloud" => "gmi",
+        "arcee-ai" | "arceeai" => "arcee",
+        "mimo" | "xiaomi-mimo" => "xiaomi",
+        "tencent" | "tokenhub" | "tencent-cloud" | "tencentmaas" => "tencent-tokenhub",
+        _ => provider,
+    }
+}
+
+fn default_gateway_base_url(provider: &str) -> Option<&'static str> {
+    match provider {
+        "gemini" => Some(GEMINI_OPENAI_BASE_URL),
+        "gmi" => Some(GMI_BASE_URL),
+        "arcee" => Some(ARCEE_BASE_URL),
+        "xiaomi" => Some(XIAOMI_BASE_URL),
+        "tencent-tokenhub" => Some(TENCENT_TOKENHUB_BASE_URL),
+        _ => None,
     }
 }
 
@@ -1044,5 +1094,49 @@ fn resolve_model(default_model: &str, provider: Option<&str>, model: Option<&str
         }
         (None, Some(m)) => m.to_string(),
         (None, None) => default_model.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hermes_config::LlmProviderConfig;
+
+    #[test]
+    fn gateway_provider_aliases_resolve_to_direct_provider_defaults() {
+        let cases = [
+            ("google-ai-studio", "gemini", GEMINI_OPENAI_BASE_URL),
+            ("gmicloud", "gmi", GMI_BASE_URL),
+            ("arcee-ai", "arcee", ARCEE_BASE_URL),
+            ("mimo", "xiaomi", XIAOMI_BASE_URL),
+            ("tencentmaas", "tencent-tokenhub", TENCENT_TOKENHUB_BASE_URL),
+        ];
+
+        for (alias, canonical, base_url) in cases {
+            assert_eq!(canonical_gateway_provider_name(alias), canonical);
+            assert_eq!(default_gateway_base_url(canonical), Some(base_url));
+        }
+    }
+
+    #[test]
+    fn build_agent_config_maps_provider_request_timeout_seconds() {
+        let mut config = GatewayConfig::default();
+        config.llm_providers.insert(
+            "openai".to_string(),
+            LlmProviderConfig {
+                request_timeout_seconds: Some(45.5),
+                ..Default::default()
+            },
+        );
+
+        let agent_config = build_agent_config(&config, "openai:gpt-4o");
+
+        assert_eq!(
+            agent_config
+                .runtime_providers
+                .get("openai")
+                .and_then(|cfg| cfg.request_timeout_seconds),
+            Some(45.5)
+        );
     }
 }

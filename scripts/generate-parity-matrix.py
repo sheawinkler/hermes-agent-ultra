@@ -13,6 +13,7 @@ import datetime as dt
 import json
 import re
 import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Iterable
@@ -114,6 +115,27 @@ def ensure_remote(repo_root: Path, remote: str, url: str) -> None:
     if remote in remotes:
         return
     run_git(repo_root, ["remote", "add", remote, url])
+
+
+def fetch_remote_branch(repo_root: Path, remote: str, branch: str) -> None:
+    remote_ref = f"{remote}/{branch}"
+    refspec = f"refs/heads/{branch}:refs/remotes/{remote}/{branch}"
+    proc = subprocess.run(
+        ["git", "fetch", "--no-tags", remote, refspec],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode == 0:
+        return
+    if run_git(repo_root, ["rev-parse", "--verify", remote_ref], check=False):
+        print(
+            f"warning: scoped fetch for {remote_ref} failed; using existing ref: "
+            f"{proc.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return
+    raise RuntimeError(f"git fetch {remote} {branch} failed: {proc.stderr.strip()}")
 
 
 def parse_shortstat(text: str) -> dict[str, int]:
@@ -398,7 +420,7 @@ def render_markdown(data: dict, top_n: int) -> str:
     md.append("- Data is computed directly from git refs in this repository.")
     md.append("- Tree-level parity classification does not require a merge-base.")
     md.append("- Commit representation/missing uses patch-id equivalence from `git cherry`.")
-    md.append("- Default behavior fetches latest upstream refs (`git fetch upstream --prune`).")
+    md.append("- Default behavior fetches the configured upstream branch into `upstream/main`.")
     return "\n".join(md) + "\n"
 
 
@@ -438,7 +460,7 @@ def main() -> int:
 
     ensure_remote(repo_root, args.upstream_remote, args.upstream_url)
     if not args.no_fetch:
-        run_git(repo_root, ["fetch", args.upstream_remote, "--prune"])
+        fetch_remote_branch(repo_root, args.upstream_remote, args.upstream_branch)
 
     local_sha = run_git(repo_root, ["rev-parse", local_ref])
     upstream_sha = run_git(repo_root, ["rev-parse", upstream_ref])

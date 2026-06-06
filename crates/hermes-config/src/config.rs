@@ -1,8 +1,9 @@
 //! Gateway configuration: the top-level config struct and its sub-types.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use serde::{Deserialize, Serialize};
+use serde::de::{Error as DeError, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use hermes_core::BudgetConfig;
 
@@ -10,7 +11,6 @@ use crate::interest::InterestConfig;
 use crate::platform::PlatformConfig;
 use crate::session::SessionConfig;
 use crate::streaming::StreamingConfig;
-use crate::voice::{SttConfig, TtsConfig};
 
 // ---------------------------------------------------------------------------
 // GatewayConfig
@@ -43,6 +43,10 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub budget: BudgetConfig,
 
+    /// Configurable raw tool-output truncation limits.
+    #[serde(default)]
+    pub tool_output: ToolOutputConfig,
+
     /// Per-platform configuration (keyed by platform name, e.g. "discord").
     #[serde(default)]
     pub platforms: HashMap<String, PlatformConfig>,
@@ -50,6 +54,10 @@ pub struct GatewayConfig {
     /// Per-platform toolset selection (e.g. cli/hermes-cli, telegram/hermes-telegram).
     #[serde(default = "default_platform_toolsets")]
     pub platform_toolsets: HashMap<String, Vec<String>>,
+
+    /// Sub-agent delegation controls.
+    #[serde(default)]
+    pub delegation: DelegationConfig,
 
     /// Session management settings.
     #[serde(default)]
@@ -63,17 +71,58 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub streaming: StreamingConfig,
 
+    /// Display controls shared by CLI/gateway surfaces.
+    #[serde(default)]
+    pub display: DisplayConfig,
+
     /// Terminal / command-execution backend settings.
     #[serde(default)]
     pub terminal: TerminalConfig,
+
+    /// Web search/extract/crawl backend selection.
+    #[serde(default)]
+    pub web: WebConfig,
 
     /// Named LLM provider configurations.
     #[serde(default)]
     pub llm_providers: HashMap<String, LlmProviderConfig>,
 
+    /// Legacy single fallback model spec, e.g. `openrouter:anthropic/claude-sonnet-4.6`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_model: Option<String>,
+
+    /// Ordered fallback model specs tried after primary retries fail.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_models: Vec<String>,
+
     /// Optional per-turn smart model routing (cheap-vs-strong).
     #[serde(default)]
     pub smart_model_routing: SmartModelRoutingConfig,
+
+    /// Per-task auxiliary model/direct-endpoint overrides.
+    ///
+    /// Keys match the user-facing `auxiliary.<task>.*` config.yaml surface
+    /// used by side tasks such as `vision`, `web_extract`, and `approval`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub auxiliary: BTreeMap<String, AuxiliaryTaskConfig>,
+
+    /// User-defined slash commands that bypass the agent loop.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub quick_commands: BTreeMap<String, QuickCommandConfig>,
+
+    /// Kanban dispatcher/notifier behavior for multi-gateway deployments.
+    #[serde(default)]
+    pub kanban: KanbanConfig,
+
+    /// Upstream-compatible TTS configuration block.
+    ///
+    /// Kept as structured JSON because upstream accepts provider-specific
+    /// nested maps (`tts.openai`, `tts.providers.<name>`, `tts.piper`, etc.).
+    /// Runtime consumers validate the subkeys they understand and ignore the
+    /// rest so future upstream TTS knobs do not get dropped during config
+    /// round-trips.
+    #[serde(default, skip_serializing_if = "is_json_null")]
+    pub tts: serde_json::Value,
 
     /// Optional HTTP/SOCKS proxy settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -123,14 +172,6 @@ pub struct GatewayConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_dir: Option<String>,
 
-    /// Text-to-speech provider configuration (Python `tts` block).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tts: Option<TtsConfig>,
-
-    /// Speech-to-text provider configuration (Python `stt` block).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stt: Option<SttConfig>,
-
     /// IANA timezone for user-facing wall clock (e.g. `Asia/Shanghai`). Overridden by `HERMES_TIMEZONE`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
@@ -145,14 +186,24 @@ impl Default for GatewayConfig {
             system_prompt: None,
             tools: default_tools(),
             budget: BudgetConfig::default(),
+            tool_output: ToolOutputConfig::default(),
             platforms: HashMap::new(),
             platform_toolsets: default_platform_toolsets(),
+            delegation: DelegationConfig::default(),
             session: SessionConfig::default(),
             sessions: SessionsMaintenanceConfig::default(),
             streaming: StreamingConfig::default(),
+            display: DisplayConfig::default(),
             terminal: TerminalConfig::default(),
+            web: WebConfig::default(),
             llm_providers: HashMap::new(),
+            fallback_model: None,
+            fallback_models: Vec::new(),
             smart_model_routing: SmartModelRoutingConfig::default(),
+            auxiliary: BTreeMap::new(),
+            quick_commands: BTreeMap::new(),
+            kanban: KanbanConfig::default(),
+            tts: serde_json::Value::Null,
             proxy: None,
             approval: ApprovalConfig::default(),
             security: SecurityConfig::default(),
@@ -165,9 +216,403 @@ impl Default for GatewayConfig {
             insights: crate::insights::InsightsConfig::default(),
             prompt_caching: PromptCachingConfig::default(),
             home_dir: None,
-            tts: None,
-            stt: None,
             timezone: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DelegationConfig {
+    /// Maximum sub-agent spawn depth. Values below 1 are floored by runtime consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_spawn_depth: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KanbanConfig {
+    /// When false, this process must not own Kanban dispatch/notifier polling.
+    #[serde(default = "default_true")]
+    pub dispatch_in_gateway: bool,
+}
+
+impl Default for KanbanConfig {
+    fn default() -> Self {
+        Self {
+            dispatch_in_gateway: true,
+        }
+    }
+}
+
+pub const DEFAULT_TOOL_OUTPUT_MAX_BYTES: usize = 50_000;
+pub const DEFAULT_TOOL_OUTPUT_MAX_LINES: usize = 2_000;
+pub const DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH: usize = 2_000;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ToolOutputConfig {
+    pub max_bytes: usize,
+    pub max_lines: usize,
+    pub max_line_length: usize,
+}
+
+impl Default for ToolOutputConfig {
+    fn default() -> Self {
+        Self {
+            max_bytes: DEFAULT_TOOL_OUTPUT_MAX_BYTES,
+            max_lines: DEFAULT_TOOL_OUTPUT_MAX_LINES,
+            max_line_length: DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ToolOutputConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(Self::from_value(&value))
+    }
+}
+
+impl ToolOutputConfig {
+    pub fn from_value(value: &serde_json::Value) -> Self {
+        let mut config = Self::default();
+        let Some(map) = value.as_object() else {
+            return config;
+        };
+
+        if let Some(max_bytes) = map.get("max_bytes").and_then(Self::positive_usize) {
+            config.max_bytes = max_bytes;
+        }
+        if let Some(max_lines) = map.get("max_lines").and_then(Self::positive_usize) {
+            config.max_lines = max_lines;
+        }
+        if let Some(max_line_length) = map.get("max_line_length").and_then(Self::positive_usize) {
+            config.max_line_length = max_line_length;
+        }
+
+        config
+    }
+
+    fn positive_usize(value: &serde_json::Value) -> Option<usize> {
+        if let Some(raw) = value.as_u64() {
+            return usize::try_from(raw).ok().filter(|v| *v > 0);
+        }
+        value
+            .as_str()
+            .and_then(|raw| raw.trim().parse::<usize>().ok())
+            .filter(|v| *v > 0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct DisplayConfig {
+    /// Enable `/verbose` as a runtime tool-progress cycling command.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_boolish",
+        skip_serializing_if = "is_false"
+    )]
+    pub tool_progress_command: bool,
+
+    /// Global tool-progress display mode: `off`, `new`, `all`, or `verbose`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_progress: Option<String>,
+
+    /// Per-platform display overrides keyed by normalized platform name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub platforms: BTreeMap<String, PlatformDisplayConfig>,
+}
+
+impl DisplayConfig {
+    pub fn tool_progress_command_enabled(&self) -> bool {
+        self.tool_progress_command
+    }
+
+    pub fn platform_tool_progress(&self, platform: &str) -> Option<&str> {
+        let key = platform.trim().to_ascii_lowercase().replace('-', "_");
+        self.platforms
+            .get(&key)
+            .and_then(|cfg| cfg.tool_progress.as_deref())
+            .or(self.tool_progress.as_deref())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PlatformDisplayConfig {
+    /// Platform-specific tool-progress mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_progress: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuickCommandConfig {
+    /// Command kind. Supported runtime kinds: `exec` and `alias`.
+    #[serde(
+        default = "default_quick_command_type",
+        rename = "type",
+        alias = "kind"
+    )]
+    pub kind: String,
+
+    /// Shell command to run for `exec`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+
+    /// Slash command target for `alias`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+
+    /// Optional execution timeout in seconds. Defaults to 30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+
+    /// Back-compat alias for `timeout_secs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+}
+
+impl Default for QuickCommandConfig {
+    fn default() -> Self {
+        Self {
+            kind: default_quick_command_type(),
+            command: None,
+            target: None,
+            timeout_secs: None,
+            timeout: None,
+        }
+    }
+}
+
+impl QuickCommandConfig {
+    pub fn timeout_secs(&self) -> u64 {
+        self.timeout_secs.or(self.timeout).unwrap_or(30)
+    }
+}
+
+fn default_quick_command_type() -> String {
+    "exec".to_string()
+}
+
+fn is_json_null(value: &serde_json::Value) -> bool {
+    value.is_null()
+}
+
+/// User-facing override for one auxiliary side task.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AuxiliaryTaskConfig {
+    /// `auto` means resolve through the standard auxiliary chain.
+    #[serde(
+        default = "default_auxiliary_provider",
+        deserialize_with = "deserialize_provider_or_default"
+    )]
+    pub provider: String,
+    /// Empty means use the selected provider's default auxiliary model.
+    #[serde(default, deserialize_with = "deserialize_string_or_empty")]
+    pub model: String,
+    /// Direct OpenAI-compatible endpoint. When set, it takes precedence over provider.
+    #[serde(default, deserialize_with = "deserialize_string_or_empty")]
+    pub base_url: String,
+    /// API key for a direct endpoint or explicit task provider.
+    #[serde(default, deserialize_with = "deserialize_string_or_empty")]
+    pub api_key: String,
+    /// Per-attempt timeout in seconds. Accepts both `timeout` and legacy `timeout_secs`.
+    #[serde(
+        default,
+        alias = "timeout_secs",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timeout: Option<u64>,
+    /// Provider-specific OpenAI-compatible request body additions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_body: Option<serde_json::Value>,
+    /// Vision-only image download timeout in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_timeout: Option<u64>,
+    /// Preserve unknown future task keys without dropping user config.
+    #[serde(default, flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+impl Default for AuxiliaryTaskConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_auxiliary_provider(),
+            model: String::new(),
+            base_url: String::new(),
+            api_key: String::new(),
+            timeout: None,
+            extra_body: None,
+            download_timeout: None,
+            extra: BTreeMap::new(),
+        }
+    }
+}
+
+impl AuxiliaryTaskConfig {
+    pub fn with_timeout(mut self, timeout: u64) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn with_download_timeout(mut self, timeout: u64) -> Self {
+        self.download_timeout = Some(timeout);
+        self
+    }
+}
+
+fn default_auxiliary_provider() -> String {
+    "auto".to_string()
+}
+
+fn deserialize_string_or_empty<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Option::<serde_json::Value>::deserialize(deserializer)? {
+        None | Some(serde_json::Value::Null) => Ok(String::new()),
+        Some(serde_json::Value::String(value)) => Ok(value),
+        Some(value) => Err(D::Error::custom(format!(
+            "expected string or null, got {value}"
+        ))),
+    }
+}
+
+fn deserialize_provider_or_default<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Option::<serde_json::Value>::deserialize(deserializer)? {
+        None | Some(serde_json::Value::Null) => Ok(default_auxiliary_provider()),
+        Some(serde_json::Value::String(value)) => Ok(value),
+        Some(value) => Err(D::Error::custom(format!(
+            "expected provider string or null, got {value}"
+        ))),
+    }
+}
+
+/// Upstream-shaped default auxiliary task table used by setup/config UIs.
+///
+/// `GatewayConfig::default()` intentionally keeps `auxiliary` empty so normal
+/// config layering does not treat defaults as user overrides. Runtime
+/// resolution still defaults each missing task to provider=`auto`, model=`""`.
+pub fn default_auxiliary_task_configs() -> BTreeMap<String, AuxiliaryTaskConfig> {
+    let mut tasks = BTreeMap::new();
+    tasks.insert(
+        "vision".to_string(),
+        AuxiliaryTaskConfig::default()
+            .with_timeout(120)
+            .with_download_timeout(30),
+    );
+    tasks.insert(
+        "web_extract".to_string(),
+        AuxiliaryTaskConfig::default().with_timeout(360),
+    );
+    tasks.insert(
+        "compression".to_string(),
+        AuxiliaryTaskConfig::default().with_timeout(120),
+    );
+    tasks.insert(
+        "skills_hub".to_string(),
+        AuxiliaryTaskConfig::default().with_timeout(30),
+    );
+    tasks.insert(
+        "approval".to_string(),
+        AuxiliaryTaskConfig::default().with_timeout(30),
+    );
+    tasks.insert(
+        "mcp".to_string(),
+        AuxiliaryTaskConfig::default().with_timeout(30),
+    );
+    tasks.insert(
+        "title_generation".to_string(),
+        AuxiliaryTaskConfig::default().with_timeout(30),
+    );
+    tasks.insert(
+        "triage_specifier".to_string(),
+        AuxiliaryTaskConfig::default().with_timeout(120),
+    );
+    tasks.insert(
+        "kanban_decomposer".to_string(),
+        AuxiliaryTaskConfig::default().with_timeout(180),
+    );
+    tasks.insert(
+        "profile_describer".to_string(),
+        AuxiliaryTaskConfig::default().with_timeout(60),
+    );
+    tasks.insert(
+        "curator".to_string(),
+        AuxiliaryTaskConfig::default().with_timeout(600),
+    );
+    tasks
+}
+
+const BUILTIN_AUXILIARY_ENV_BRIDGE_TASKS: &[&str] = &["approval", "vision", "web_extract"];
+
+impl GatewayConfig {
+    /// Return config-derived environment overrides for the built-in auxiliary
+    /// bridge set (`vision`, `web_extract`, `approval`).
+    pub fn builtin_auxiliary_env_overrides(&self) -> Vec<(String, String)> {
+        self.auxiliary_env_overrides_for(std::iter::empty::<&str>())
+    }
+
+    /// Return config-derived `AUXILIARY_<TASK>_*` assignments for built-ins
+    /// plus caller-provided plugin task keys.
+    ///
+    /// The helper mirrors Python's gateway/CLI bridge contract without forcing
+    /// Rust runtime code to rely on process-global env mutation.
+    pub fn auxiliary_env_overrides_for<I, S>(&self, extra_task_keys: I) -> Vec<(String, String)>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut bridged: BTreeSet<String> = BUILTIN_AUXILIARY_ENV_BRIDGE_TASKS
+            .iter()
+            .map(|task| (*task).to_string())
+            .collect();
+        for task in extra_task_keys {
+            let normalized = normalize_auxiliary_task_key(task.as_ref());
+            if !normalized.is_empty() {
+                bridged.insert(normalized);
+            }
+        }
+
+        let mut overrides = Vec::new();
+        for task_key in bridged {
+            let Some(task_cfg) = self.auxiliary.get(task_key.as_str()) else {
+                continue;
+            };
+            push_auxiliary_task_env_overrides(&mut overrides, &task_key, task_cfg);
+        }
+        overrides
+    }
+}
+
+fn normalize_auxiliary_task_key(task: &str) -> String {
+    task.trim().to_ascii_lowercase()
+}
+
+fn auxiliary_task_env_suffix(task: &str) -> String {
+    task.trim().to_ascii_uppercase()
+}
+
+fn push_auxiliary_task_env_overrides(
+    overrides: &mut Vec<(String, String)>,
+    task_key: &str,
+    task_cfg: &AuxiliaryTaskConfig,
+) {
+    let upper = auxiliary_task_env_suffix(task_key);
+    let provider = task_cfg.provider.trim();
+    if !provider.is_empty() && !provider.eq_ignore_ascii_case("auto") {
+        overrides.push((format!("AUXILIARY_{upper}_PROVIDER"), provider.to_string()));
+    }
+    for (field, value) in [
+        ("MODEL", task_cfg.model.trim()),
+        ("BASE_URL", task_cfg.base_url.trim()),
+        ("API_KEY", task_cfg.api_key.trim()),
+    ] {
+        if !value.is_empty() {
+            overrides.push((format!("AUXILIARY_{upper}_{field}"), value.to_string()));
         }
     }
 }
@@ -223,6 +668,7 @@ pub fn default_platform_toolsets() -> HashMap<String, Vec<String>> {
     map.insert("feishu".to_string(), vec!["hermes-feishu".to_string()]);
     map.insert("weixin".to_string(), vec!["hermes-weixin".to_string()]);
     map.insert("wecom".to_string(), vec!["hermes-wecom".to_string()]);
+    map.insert("cron".to_string(), vec!["hermes-cron".to_string()]);
     map
 }
 
@@ -291,6 +737,16 @@ pub struct AgentLoopBehaviorConfig {
     /// Adaptive web research planner/evaluator and per-message budgets.
     #[serde(default)]
     pub web_research: crate::web_research::WebResearchConfig,
+    /// Optional provider request service tier. `fast` maps to provider `priority`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+    /// Upstream-compatible API retry count for provider calls.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "apiMaxRetries"
+    )]
+    pub api_max_retries: Option<u32>,
 }
 
 fn default_agent_memory_nudge_interval() -> u32 {
@@ -347,12 +803,129 @@ impl Default for AgentLoopBehaviorConfig {
             lsp_context_max_chars: default_agent_lsp_context_max_chars(),
             image_input_mode: default_agent_image_input_mode(),
             web_research: crate::web_research::WebResearchConfig::default(),
+            service_tier: None,
+            api_max_retries: None,
         }
+    }
+}
+
+impl AgentLoopBehaviorConfig {
+    pub fn normalized_service_tier(&self) -> Option<String> {
+        normalize_service_tier(self.service_tier.as_deref())
+    }
+}
+
+pub fn normalize_service_tier(raw: Option<&str>) -> Option<String> {
+    let value = raw?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "fast" | "priority" => Some("priority".to_string()),
+        "off" | "normal" | "standard" | "default" | "none" => None,
+        other => Some(other.to_string()),
     }
 }
 
 fn default_max_turns() -> u32 {
     250
+}
+
+fn deserialize_boolish<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct BoolishVisitor;
+
+    impl<'de> Visitor<'de> for BoolishVisitor {
+        type Value = bool;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a bool or a bool-like string")
+        }
+
+        fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+            Ok(value)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+            Ok(value != 0)
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+            Ok(value != 0)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            match value.trim().to_ascii_lowercase().as_str() {
+                "" | "0" | "false" | "no" | "off" => Ok(false),
+                "1" | "true" | "yes" | "on" => Ok(true),
+                other => Err(E::custom(format!("invalid bool-like value `{other}`"))),
+            }
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            self.visit_str(&value)
+        }
+    }
+
+    deserializer.deserialize_any(BoolishVisitor)
+}
+
+fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct StringListVisitor;
+
+    impl<'de> Visitor<'de> for StringListVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a string, comma-separated string, or list of strings")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            Ok(value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(ToString::to_string)
+                .collect())
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            self.visit_str(&value)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some(value) = seq.next_element::<String>()? {
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    values.push(trimmed.to_string());
+                }
+            }
+            Ok(values)
+        }
+    }
+
+    deserializer.deserialize_any(StringListVisitor)
 }
 
 fn default_tools() -> Vec<String> {
@@ -387,6 +960,10 @@ pub struct LlmProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
 
+    /// Per-request timeout in seconds for this provider transport.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_timeout_seconds: Option<f64>,
+
     /// Optional external-process command used by runtime-provider resolvers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
@@ -398,6 +975,10 @@ pub struct LlmProviderConfig {
     /// Default model to use for this provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+
+    /// Explicit provider wire protocol, e.g. `chat_completions` or `codex_responses`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_mode: Option<String>,
 
     /// Maximum tokens in the completion response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -436,9 +1017,11 @@ impl Default for LlmProviderConfig {
             api_key: None,
             api_key_env: None,
             base_url: None,
+            request_timeout_seconds: None,
             command: None,
             args: Vec::new(),
             model: None,
+            api_mode: None,
             max_tokens: None,
             temperature: None,
             extra_body: None,
@@ -531,11 +1114,25 @@ impl Default for TerminalBackendType {
     }
 }
 
+impl TerminalBackendType {
+    pub fn from_env_name(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "local" => Some(Self::Local),
+            "docker" => Some(Self::Docker),
+            "ssh" => Some(Self::Ssh),
+            "daytona" => Some(Self::Daytona),
+            "modal" => Some(Self::Modal),
+            "singularity" | "apptainer" => Some(Self::Singularity),
+            _ => None,
+        }
+    }
+}
+
 /// Configuration for terminal/command-execution backends.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TerminalConfig {
     /// Which backend type to use.
-    #[serde(default)]
+    #[serde(default, alias = "env_type")]
     pub backend: TerminalBackendType,
 
     /// Timeout in seconds for a single command.
@@ -551,8 +1148,107 @@ pub struct TerminalConfig {
     pub shell: Option<String>,
 
     /// Working directory override for command execution.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "cwd")]
     pub workdir: Option<String>,
+
+    /// Docker container id/name to reuse instead of creating a new one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker_container_id: Option<String>,
+
+    /// Docker image used when the Docker backend creates a container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker_image: Option<String>,
+
+    /// Mount the current host directory into Docker at `/workspace`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub docker_mount_cwd_to_workspace: bool,
+
+    /// Run Docker containers as the host uid/gid where supported.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub docker_run_as_host_user: bool,
+
+    /// Docker container CPU limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_cpu: Option<u32>,
+
+    /// Docker/container memory limit in MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_memory: Option<u64>,
+
+    /// Docker/container disk limit in MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_disk: Option<u64>,
+
+    /// Whether container-backed terminal sessions should persist.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub container_persistent: bool,
+
+    /// Extra env-vars for Docker/container execution, kept as a portable string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker_env: Option<String>,
+
+    /// Host env-var names to forward into Docker/container execution.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub docker_forward_env: Vec<String>,
+
+    /// Extra Docker volume specs.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub docker_volumes: Vec<String>,
+
+    /// Runtime name for Vercel-backed terminal execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vercel_runtime: Option<String>,
+
+    /// Modal backend selection mode: auto, direct, or managed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modal_mode: Option<String>,
+
+    /// Explicit shell init files to source before local commands.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub shell_init_files: Vec<String>,
+
+    /// Auto-source common shell startup files when no explicit list is set.
+    #[serde(
+        default = "default_auto_source_bashrc",
+        skip_serializing_if = "is_true"
+    )]
+    pub auto_source_bashrc: bool,
+
+    /// Host env-var names allowed through provider/tool subprocess sanitizers.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub env_passthrough: Vec<String>,
+
+    /// SSH backend host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_host: Option<String>,
+
+    /// SSH backend port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_port: Option<u16>,
+
+    /// SSH backend username.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_user: Option<String>,
+
+    /// SSH backend private-key path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_key_path: Option<String>,
 }
 
 impl Default for TerminalConfig {
@@ -563,16 +1259,92 @@ impl Default for TerminalConfig {
             max_output_size: default_max_output_size(),
             shell: None,
             workdir: None,
+            docker_container_id: None,
+            docker_image: None,
+            docker_mount_cwd_to_workspace: false,
+            docker_run_as_host_user: false,
+            container_cpu: None,
+            container_memory: None,
+            container_disk: None,
+            container_persistent: false,
+            docker_env: None,
+            docker_forward_env: Vec::new(),
+            docker_volumes: Vec::new(),
+            vercel_runtime: None,
+            modal_mode: None,
+            shell_init_files: Vec::new(),
+            auto_source_bashrc: default_auto_source_bashrc(),
+            env_passthrough: Vec::new(),
+            ssh_host: None,
+            ssh_port: None,
+            ssh_user: None,
+            ssh_key_path: None,
         }
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_terminal_timeout() -> u64 {
     120
 }
 
+fn default_auto_source_bashrc() -> bool {
+    true
+}
+
 fn default_max_output_size() -> usize {
     1_048_576 // 1 MiB
+}
+
+// ---------------------------------------------------------------------------
+// WebConfig
+// ---------------------------------------------------------------------------
+
+/// Web backend selection knobs aligned with Python config shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct WebConfig {
+    /// Shared legacy backend selector.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_empty",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub backend: String,
+
+    /// Search-specific backend selector.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_empty",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub search_backend: String,
+
+    /// Extract-specific backend selector.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_empty",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub extract_backend: String,
+
+    /// Crawl-specific backend selector.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_empty",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub crawl_backend: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -620,14 +1392,35 @@ pub struct SecurityConfig {
     /// RFC1918/CGNAT/benchmark ranges.
     #[serde(default)]
     pub allow_private_urls: bool,
+
+    /// Website/domain blocklist used by web-facing tools.
+    #[serde(default)]
+    pub website_blocklist: WebsiteBlocklistConfig,
 }
 
 impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
             allow_private_urls: false,
+            website_blocklist: WebsiteBlocklistConfig::default(),
         }
     }
+}
+
+/// Website/domain blocklist configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct WebsiteBlocklistConfig {
+    /// Enable domain blocklist enforcement.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Inline blocked domains or wildcard domain patterns.
+    #[serde(default)]
+    pub domains: Vec<String>,
+
+    /// Additional newline-delimited blocklist files.
+    #[serde(default)]
+    pub shared_files: Vec<String>,
 }
 
 /// Skills configuration.
@@ -711,6 +1504,10 @@ mod tests {
         assert_eq!(cfg.max_turns, 250);
         assert!(!cfg.tools.is_empty());
         assert!(cfg.model.is_none());
+        assert_eq!(cfg.tool_output, ToolOutputConfig::default());
+        assert!(cfg.auxiliary.is_empty());
+        assert!(cfg.delegation.max_spawn_depth.is_none());
+        assert!(cfg.tts.is_null());
         assert!(cfg.proxy.is_none());
         assert_eq!(
             cfg.platform_toolsets
@@ -726,15 +1523,358 @@ mod tests {
                 .unwrap_or_default(),
             vec!["hermes-telegram".to_string()]
         );
+        assert_eq!(
+            cfg.platform_toolsets
+                .get("cron")
+                .cloned()
+                .unwrap_or_default(),
+            vec!["hermes-cron".to_string()]
+        );
     }
 
     #[test]
     fn gateway_config_serde_roundtrip() {
-        let cfg = GatewayConfig::default();
+        let mut cfg = GatewayConfig::default();
+        cfg.auxiliary.insert(
+            "vision".to_string(),
+            AuxiliaryTaskConfig {
+                provider: "openrouter".to_string(),
+                model: "google/gemini-2.5-flash".to_string(),
+                ..Default::default()
+            },
+        );
+        cfg.tts = serde_json::json!({
+            "provider": "piper",
+            "piper": {"voice": "en_US-lessac-medium"}
+        });
         let json = serde_json::to_string(&cfg).unwrap();
         let back: GatewayConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.max_turns, cfg.max_turns);
         assert_eq!(back.tools, cfg.tools);
+        assert_eq!(back.auxiliary["vision"].model, "google/gemini-2.5-flash");
+        assert_eq!(back.tts["provider"], "piper");
+    }
+
+    #[test]
+    fn delegation_config_accepts_uncapped_max_spawn_depth() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+delegation:
+  max_spawn_depth: 99
+"#,
+        )
+        .expect("delegation config should deserialize");
+
+        assert_eq!(cfg.delegation.max_spawn_depth, Some(99));
+
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: GatewayConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.delegation.max_spawn_depth, Some(99));
+    }
+
+    #[test]
+    fn llm_provider_config_accepts_request_timeout_seconds() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+llm_providers:
+  anthropic:
+    api_key_env: ANTHROPIC_API_KEY
+    request_timeout_seconds: 45.5
+"#,
+        )
+        .expect("provider config should deserialize");
+
+        assert_eq!(
+            cfg.llm_providers
+                .get("anthropic")
+                .and_then(|provider| provider.request_timeout_seconds),
+            Some(45.5)
+        );
+
+        let yaml = serde_yaml::to_string(&cfg).expect("serialize config");
+        assert!(yaml.contains("request_timeout_seconds: 45.5"));
+    }
+
+    #[test]
+    fn default_auxiliary_task_configs_match_upstream_shape() {
+        let tasks = default_auxiliary_task_configs();
+        for key in ["vision", "web_extract", "approval"] {
+            let task = tasks.get(key).expect("built-in task default");
+            assert_eq!(task.provider, "auto");
+            assert_eq!(task.model, "");
+            assert_eq!(task.base_url, "");
+            assert_eq!(task.api_key, "");
+        }
+        assert_eq!(tasks["vision"].timeout, Some(120));
+        assert_eq!(tasks["vision"].download_timeout, Some(30));
+        assert_eq!(tasks["web_extract"].timeout, Some(360));
+        assert_eq!(tasks["curator"].timeout, Some(600));
+    }
+
+    #[test]
+    fn builtin_auxiliary_env_overrides_bridge_non_default_values() {
+        let mut cfg = GatewayConfig::default();
+        cfg.auxiliary.insert(
+            "vision".to_string(),
+            AuxiliaryTaskConfig {
+                provider: "  openrouter  ".to_string(),
+                model: "  google/gemini-2.5-flash  ".to_string(),
+                ..Default::default()
+            },
+        );
+        cfg.auxiliary.insert(
+            "web_extract".to_string(),
+            AuxiliaryTaskConfig {
+                provider: "auto".to_string(),
+                model: "custom-llm".to_string(),
+                ..Default::default()
+            },
+        );
+        cfg.auxiliary.insert(
+            "approval".to_string(),
+            AuxiliaryTaskConfig {
+                base_url: "http://localhost:1234/v1".to_string(),
+                api_key: "local-key".to_string(),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            cfg.builtin_auxiliary_env_overrides(),
+            vec![
+                (
+                    "AUXILIARY_APPROVAL_BASE_URL".to_string(),
+                    "http://localhost:1234/v1".to_string()
+                ),
+                (
+                    "AUXILIARY_APPROVAL_API_KEY".to_string(),
+                    "local-key".to_string()
+                ),
+                (
+                    "AUXILIARY_VISION_PROVIDER".to_string(),
+                    "openrouter".to_string()
+                ),
+                (
+                    "AUXILIARY_VISION_MODEL".to_string(),
+                    "google/gemini-2.5-flash".to_string()
+                ),
+                (
+                    "AUXILIARY_WEB_EXTRACT_MODEL".to_string(),
+                    "custom-llm".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn auxiliary_env_overrides_skip_compression_until_registered() {
+        let mut cfg = GatewayConfig::default();
+        cfg.auxiliary.insert(
+            "compression".to_string(),
+            AuxiliaryTaskConfig {
+                provider: "openrouter".to_string(),
+                model: "compressor".to_string(),
+                ..Default::default()
+            },
+        );
+
+        assert!(cfg.builtin_auxiliary_env_overrides().is_empty());
+        assert_eq!(
+            cfg.auxiliary_env_overrides_for(["compression"]),
+            vec![
+                (
+                    "AUXILIARY_COMPRESSION_PROVIDER".to_string(),
+                    "openrouter".to_string()
+                ),
+                (
+                    "AUXILIARY_COMPRESSION_MODEL".to_string(),
+                    "compressor".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn config_null_string_guards_match_python_tool_defaults() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+web:
+  backend: null
+  search_backend: null
+  extract_backend: null
+  crawl_backend: null
+auxiliary:
+  compression:
+    provider: null
+    model: null
+    base_url: null
+    api_key: null
+tts:
+  provider: null
+mcp_servers:
+  - name: local
+    command: hermes-mcp
+    auth: null
+"#,
+        )
+        .expect("null-valued config fields should deserialize");
+
+        assert_eq!(cfg.web, WebConfig::default());
+        let compression = cfg.auxiliary.get("compression").expect("compression task");
+        assert_eq!(compression.provider, "auto");
+        assert_eq!(compression.model, "");
+        assert_eq!(compression.base_url, "");
+        assert_eq!(compression.api_key, "");
+        assert_eq!(cfg.tts["provider"], serde_json::Value::Null);
+        assert_eq!(cfg.mcp_servers.len(), 1);
+        assert_eq!(cfg.mcp_servers[0].name, "local");
+    }
+
+    #[test]
+    fn config_null_guards_preserve_valid_strings() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+web:
+  backend: tavily
+  search_backend: brave-free
+  extract_backend: firecrawl
+  crawl_backend: tavily
+auxiliary:
+  vision:
+    provider: OPENROUTER
+    model: google/gemini-2.5-flash
+    base_url: https://router.example/v1
+    api_key: local-key
+"#,
+        )
+        .expect("valid string-valued config fields should deserialize");
+
+        assert_eq!(cfg.web.backend, "tavily");
+        assert_eq!(cfg.web.search_backend, "brave-free");
+        assert_eq!(cfg.web.extract_backend, "firecrawl");
+        assert_eq!(cfg.web.crawl_backend, "tavily");
+        let vision = cfg.auxiliary.get("vision").expect("vision task");
+        assert_eq!(vision.provider, "OPENROUTER");
+        assert_eq!(vision.model, "google/gemini-2.5-flash");
+        assert_eq!(vision.base_url, "https://router.example/v1");
+        assert_eq!(vision.api_key, "local-key");
+    }
+
+    #[test]
+    fn quick_commands_deserialize_exec_and_alias_configs() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+quick_commands:
+  dn:
+    type: exec
+    command: echo daily-note
+    timeout_secs: 5
+  sc:
+    type: alias
+    target: /context
+"#,
+        )
+        .expect("quick command config");
+
+        let exec = cfg.quick_commands.get("dn").expect("exec command");
+        assert_eq!(exec.kind, "exec");
+        assert_eq!(exec.command.as_deref(), Some("echo daily-note"));
+        assert_eq!(exec.timeout_secs(), 5);
+
+        let alias = cfg.quick_commands.get("sc").expect("alias command");
+        assert_eq!(alias.kind, "alias");
+        assert_eq!(alias.target.as_deref(), Some("/context"));
+    }
+
+    #[test]
+    fn display_config_accepts_boolish_verbose_gate_and_platform_modes() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+display:
+  tool_progress_command: "true"
+  tool_progress: all
+  platforms:
+    telegram:
+      tool_progress: off
+agent:
+  service_tier: fast
+"#,
+        )
+        .expect("display config");
+
+        assert!(cfg.display.tool_progress_command_enabled());
+        assert_eq!(cfg.display.platform_tool_progress("telegram"), Some("off"));
+        assert_eq!(cfg.display.platform_tool_progress("slack"), Some("all"));
+        assert_eq!(
+            cfg.agent.normalized_service_tier().as_deref(),
+            Some("priority")
+        );
+
+        let disabled: GatewayConfig = serde_yaml::from_str(
+            r#"
+display:
+  tool_progress_command: "false"
+"#,
+        )
+        .expect("quoted false");
+        assert!(!disabled.display.tool_progress_command_enabled());
+    }
+
+    #[test]
+    fn tool_output_config_default_matches_upstream_limits() {
+        let tool_output = ToolOutputConfig::default();
+        assert_eq!(tool_output.max_bytes, DEFAULT_TOOL_OUTPUT_MAX_BYTES);
+        assert_eq!(tool_output.max_lines, DEFAULT_TOOL_OUTPUT_MAX_LINES);
+        assert_eq!(
+            tool_output.max_line_length,
+            DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH
+        );
+    }
+
+    #[test]
+    fn tool_output_config_accepts_partial_positive_overrides() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+tool_output:
+  max_bytes: "75000"
+  max_lines: 50
+"#,
+        )
+        .expect("tool_output config");
+
+        assert_eq!(cfg.tool_output.max_bytes, 75_000);
+        assert_eq!(cfg.tool_output.max_lines, 50);
+        assert_eq!(
+            cfg.tool_output.max_line_length,
+            DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH
+        );
+    }
+
+    #[test]
+    fn tool_output_config_rejects_invalid_values_to_field_defaults() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+tool_output:
+  max_bytes: null
+  max_lines: -1
+  max_line_length: 0
+"#,
+        )
+        .expect("tool_output fallback config");
+
+        assert_eq!(cfg.tool_output, ToolOutputConfig::default());
+    }
+
+    #[test]
+    fn tool_output_config_non_object_falls_back_to_defaults() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+tool_output: nonsense
+"#,
+        )
+        .expect("non-object tool_output fallback");
+
+        assert_eq!(cfg.tool_output, ToolOutputConfig::default());
     }
 
     #[test]
@@ -744,6 +1884,24 @@ mod tests {
         assert_eq!(json, "\"docker\"");
         let back: TerminalBackendType = serde_json::from_str(&json).unwrap();
         assert_eq!(back, TerminalBackendType::Docker);
+    }
+
+    #[test]
+    fn terminal_config_accepts_env_passthrough_list() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+terminal:
+  env_passthrough:
+    - OPENAI_API_KEY
+    - TENOR_API_KEY
+"#,
+        )
+        .expect("terminal env passthrough config");
+
+        assert_eq!(
+            cfg.terminal.env_passthrough,
+            vec!["OPENAI_API_KEY".to_string(), "TENOR_API_KEY".to_string()]
+        );
     }
 
     #[test]
@@ -758,6 +1916,18 @@ mod tests {
     fn security_config_default() {
         let s = SecurityConfig::default();
         assert!(!s.allow_private_urls);
+        assert!(!s.website_blocklist.enabled);
+        assert!(s.website_blocklist.domains.is_empty());
+        assert!(s.website_blocklist.shared_files.is_empty());
+    }
+
+    #[test]
+    fn web_config_default_matches_upstream_empty_selectors() {
+        let web = WebConfig::default();
+        assert_eq!(web.backend, "");
+        assert_eq!(web.search_backend, "");
+        assert_eq!(web.extract_backend, "");
+        assert_eq!(web.crawl_backend, "");
     }
 
     #[test]

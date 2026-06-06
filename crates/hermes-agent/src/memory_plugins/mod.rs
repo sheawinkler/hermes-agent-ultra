@@ -5,6 +5,7 @@
 //! External providers are additive and can run side-by-side.
 
 pub mod byterover;
+mod config_io;
 pub mod contextlattice;
 pub mod hindsight;
 pub mod holographic;

@@ -363,6 +363,9 @@ pub fn maybe_apply_codex_app_server_runtime(
 /// Heuristic from Python `_detect_api_mode_for_url` (OpenAI direct host → Codex/Responses).
 pub fn detect_api_mode_for_url(base_url: &str) -> Option<ApiMode> {
     let normalized = base_url.trim().to_lowercase();
+    if normalized.contains("bedrock-runtime.") || normalized.contains("bedrock-runtime-") {
+        return Some(ApiMode::BedrockConverse);
+    }
     if normalized.contains("api.openai.com") && !normalized.contains("openrouter") {
         return Some(ApiMode::CodexResponses);
     }
@@ -450,6 +453,14 @@ mod tests {
         assert!(
             choose_cheap_model_route(prompt, &cfg).is_none(),
             "jailbreak/tool-abuse language should never take cheap route"
+        );
+    }
+
+    #[test]
+    fn detects_bedrock_converse_api_mode_from_runtime_url() {
+        assert_eq!(
+            detect_api_mode_for_url("https://bedrock-runtime.us-east-1.amazonaws.com"),
+            Some(ApiMode::BedrockConverse)
         );
     }
 

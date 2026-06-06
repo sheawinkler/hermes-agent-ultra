@@ -233,6 +233,15 @@ fn official_pricing_db() -> HashMap<(&'static str, &'static str), PricingEntry> 
         None,
         None,
     );
+    add(
+        &mut db,
+        "deepseek",
+        "deepseek-v4-pro",
+        1.74,
+        3.48,
+        Some(0.0145),
+        None,
+    );
 
     db
 }
@@ -372,6 +381,22 @@ pub fn calculate_cost(
     }
     if let Some(output_cost) = entry.output_cost_per_million {
         amount += (usage.output_tokens as f64) * output_cost / million;
+    }
+    if usage.cache_read_tokens > 0 && entry.cache_read_cost_per_million.is_none() {
+        return CostResult {
+            amount_usd: None,
+            status: CostStatus::Unknown,
+            source: CostSource::None,
+            label: "n/a".into(),
+        };
+    }
+    if usage.cache_write_tokens > 0 && entry.cache_write_cost_per_million.is_none() {
+        return CostResult {
+            amount_usd: None,
+            status: CostStatus::Unknown,
+            source: CostSource::None,
+            label: "n/a".into(),
+        };
     }
     if let Some(cache_read_cost) = entry.cache_read_cost_per_million {
         amount += (usage.cache_read_tokens as f64) * cache_read_cost / million;
@@ -622,6 +647,35 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_usage_anthropic_keeps_cache_buckets_separate() {
+        let raw = serde_json::json!({
+            "input_tokens": 1000,
+            "output_tokens": 500,
+            "cache_read_input_tokens": 2000,
+            "cache_creation_input_tokens": 400,
+        });
+        let usage = normalize_usage(&raw, Some("anthropic"), Some("anthropic_messages"));
+        assert_eq!(usage.input_tokens, 1000);
+        assert_eq!(usage.output_tokens, 500);
+        assert_eq!(usage.cache_read_tokens, 2000);
+        assert_eq!(usage.cache_write_tokens, 400);
+        assert_eq!(usage.prompt_tokens(), 3400);
+    }
+
+    #[test]
+    fn test_normalize_usage_openai_subtracts_cached_prompt_tokens() {
+        let raw = serde_json::json!({
+            "prompt_tokens": 3000,
+            "completion_tokens": 700,
+            "prompt_tokens_details": { "cached_tokens": 1800 }
+        });
+        let usage = normalize_usage(&raw, Some("openai"), Some("chat_completions"));
+        assert_eq!(usage.input_tokens, 1200);
+        assert_eq!(usage.cache_read_tokens, 1800);
+        assert_eq!(usage.output_tokens, 700);
+    }
+
+    #[test]
     fn test_normalize_usage_openai_top_level_write_with_nested_read() {
         let raw = serde_json::json!({
             "prompt_tokens": 1000,
@@ -666,6 +720,41 @@ mod tests {
         assert_eq!(usage.cache_read_tokens, 600);
         assert_eq!(usage.cache_write_tokens, 150);
         assert_eq!(usage.input_tokens, 250);
+    }
+
+    #[test]
+    fn test_cache_usage_without_matching_rate_is_unknown() {
+        let usage = CanonicalUsage {
+            input_tokens: 1000,
+            output_tokens: 500,
+            cache_read_tokens: 100,
+            request_count: 1,
+            ..Default::default()
+        };
+        let result = calculate_cost("gemini-2.5-pro", &usage, Some("google"), None);
+        assert_eq!(result.status, CostStatus::Unknown);
+        assert_eq!(result.amount_usd, None);
+    }
+
+    #[test]
+    fn test_deepseek_v4_pro_pricing_entry_exists() {
+        let entry = get_pricing_entry("deepseek-v4-pro", Some("deepseek"), None).unwrap();
+        assert_eq!(entry.input_cost_per_million, Some(1.74));
+        assert_eq!(entry.output_cost_per_million, Some(3.48));
+        assert_eq!(entry.cache_read_cost_per_million, Some(0.0145));
+    }
+
+    #[test]
+    fn test_deepseek_v4_pro_calculate_cost() {
+        let usage = CanonicalUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 500_000,
+            request_count: 1,
+            ..Default::default()
+        };
+        let result = calculate_cost("deepseek-v4-pro", &usage, Some("deepseek"), None);
+        assert_eq!(result.status, CostStatus::Estimated);
+        assert_eq!(result.amount_usd, Some(3.48));
     }
 
     #[test]

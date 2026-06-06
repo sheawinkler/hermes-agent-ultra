@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 use crate::model_metadata::estimate_tokens_rough;
+pub use crate::model_metadata::IMAGE_TOKEN_ESTIMATE;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -464,6 +465,13 @@ impl ContextEngine for ImportanceBasedEngine {
 // Token counting helpers
 // ---------------------------------------------------------------------------
 
+fn is_image_content_block(block: &Value) -> bool {
+    matches!(
+        block.get("type").and_then(|t| t.as_str()),
+        Some("image") | Some("image_url") | Some("input_image")
+    ) || block.get("image_url").is_some()
+}
+
 /// Count tokens for content that may be a string or an array of content blocks.
 pub fn count_content_tokens(content: &Value) -> u64 {
     if let Some(s) = content.as_str() {
@@ -473,10 +481,15 @@ pub fn count_content_tokens(content: &Value) -> u64 {
         return arr
             .iter()
             .map(|block| {
+                if is_image_content_block(block) {
+                    return IMAGE_TOKEN_ESTIMATE;
+                }
+                if let Some(s) = block.as_str() {
+                    return estimate_tokens_rough(s);
+                }
                 if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                     estimate_tokens_rough(text)
                 } else {
-                    // Image blocks, tool results, etc. — rough estimate
                     estimate_tokens_rough(&block.to_string())
                 }
             })
@@ -569,6 +582,33 @@ mod tests {
                 {"type": "text", "text": "world"},
             ])) > 0
         );
+    }
+
+    #[test]
+    fn image_blocks_charge_fixed_budget_without_counting_base64_payload() {
+        let huge_data = format!("data:image/png;base64,{}", "a".repeat(100_000));
+        let content = json!([
+            {"type": "text", "text": "look at this"},
+            {"type": "image_url", "image_url": {"url": huge_data}},
+            {"type": "input_image", "image_url": "https://example.com/a.png"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "b".repeat(100_000)}}
+        ]);
+        let text_only = estimate_tokens_rough("look at this");
+        assert_eq!(
+            count_content_tokens(&content),
+            text_only + IMAGE_TOKEN_ESTIMATE * 3
+        );
+    }
+
+    #[test]
+    fn mixed_content_blocks_count_text_and_bare_strings() {
+        let content = json!([
+            {"type": "text", "text": "hello"},
+            "world",
+            {"type": "tool_result", "value": "ok"}
+        ]);
+        let estimate = count_content_tokens(&content);
+        assert!(estimate >= estimate_tokens_rough("hello") + estimate_tokens_rough("world"));
     }
 
     #[test]

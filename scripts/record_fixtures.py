@@ -13,8 +13,8 @@ Requires a checkout of Hermes Python next to this repo::
 The script imports `agent.anthropic_adapter` when available and prints JSON
 blobs that should match `crates/hermes-parity-tests/fixtures/**/*.json`.
 
-Always-emitted cases (no Python package needed): `checkpoint_shadow_dir_id`
-(SHA-256 hex prefix — same as `tools/checkpoint_manager._shadow_repo_path` dir component).
+Always-emitted cases (no Python package needed): checkpoint-manager pure
+helpers (`checkpoint_shadow_dir_id`, commit-hash validation, shortstat parsing).
 
 With `research/hermes-agent`: also emits Anthropic adapter cases
 (`normalize_model_name`, `_sanitize_tool_id`, `_is_oauth_token`,
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -42,6 +43,35 @@ def checkpoint_shadow_dir_id(abs_path: str) -> str:
     return hashlib.sha256(abs_path.encode()).hexdigest()[:16]
 
 
+_COMMIT_HASH_RE = re.compile(r"^[0-9a-fA-F]{4,64}$")
+
+
+def checkpoint_validate_commit_hash(commit_hash: str) -> str | None:
+    """Match Python `tools.checkpoint_manager._validate_commit_hash`."""
+    if not commit_hash or not commit_hash.strip():
+        return "Empty commit hash"
+    if commit_hash.startswith("-"):
+        return f"Invalid commit hash (must not start with '-'): {commit_hash!r}"
+    if not _COMMIT_HASH_RE.match(commit_hash):
+        return f"Invalid commit hash (expected 4-64 hex characters): {commit_hash!r}"
+    return None
+
+
+def checkpoint_parse_shortstat(stat_line: str) -> dict[str, int]:
+    """Match Python `CheckpointManager._parse_shortstat`."""
+    entry = {"files_changed": 0, "insertions": 0, "deletions": 0}
+    match = re.search(r"(\d+) file", stat_line)
+    if match:
+        entry["files_changed"] = int(match.group(1))
+    match = re.search(r"(\d+) insertion", stat_line)
+    if match:
+        entry["insertions"] = int(match.group(1))
+    match = re.search(r"(\d+) deletion", stat_line)
+    if match:
+        entry["deletions"] = int(match.group(1))
+    return entry
+
+
 def main() -> int:
     py_root = python_agent_root()
     agent_pkg = py_root / "agent" / "anthropic_adapter.py"
@@ -51,6 +81,33 @@ def main() -> int:
             "op": "checkpoint_shadow_dir_id",
             "input": {"abs_path": "/workspace/demo"},
             "py": checkpoint_shadow_dir_id("/workspace/demo"),
+        },
+        {
+            "op": "checkpoint_validate_commit_hash",
+            "input": {"commit_hash": "abc"},
+            "py": checkpoint_validate_commit_hash("abc"),
+        },
+        {
+            "op": "checkpoint_validate_commit_hash",
+            "input": {"commit_hash": "-abc123"},
+            "py": checkpoint_validate_commit_hash("-abc123"),
+        },
+        {
+            "op": "checkpoint_validate_commit_hash",
+            "input": {"commit_hash": "ABCDEF1234"},
+            "py": checkpoint_validate_commit_hash("ABCDEF1234"),
+        },
+        {
+            "op": "checkpoint_parse_shortstat",
+            "input": {"stat_line": "1 file changed, 2 insertions(+), 3 deletions(-)"},
+            "py": checkpoint_parse_shortstat(
+                "1 file changed, 2 insertions(+), 3 deletions(-)"
+            ),
+        },
+        {
+            "op": "checkpoint_parse_shortstat",
+            "input": {"stat_line": "2 files changed, 10 insertions(+)"},
+            "py": checkpoint_parse_shortstat("2 files changed, 10 insertions(+)"),
         },
     ]
 

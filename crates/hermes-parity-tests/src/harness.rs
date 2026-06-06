@@ -166,6 +166,62 @@ pub fn checkpoint_shadow_dir_id(abs_path_str: &str) -> String {
     let digest = Sha256::digest(abs_path_str.as_bytes());
     digest[..8].iter().map(|b| format!("{:02x}", b)).collect()
 }
+/// Match Python `tools/checkpoint_manager._validate_commit_hash`.
+pub fn checkpoint_validate_commit_hash(commit_hash: &str) -> Option<String> {
+    if commit_hash.is_empty() || commit_hash.trim().is_empty() {
+        return Some("Empty commit hash".to_string());
+    }
+    if commit_hash.starts_with('-') {
+        return Some(format!(
+            "Invalid commit hash (must not start with '-'): {}",
+            checkpoint_python_repr(commit_hash)
+        ));
+    }
+    let valid_len = (4..=64).contains(&commit_hash.len());
+    let valid_hex = commit_hash.chars().all(|c| c.is_ascii_hexdigit());
+    if !valid_len || !valid_hex {
+        return Some(format!(
+            "Invalid commit hash (expected 4-64 hex characters): {}",
+            checkpoint_python_repr(commit_hash)
+        ));
+    }
+    None
+}
+
+fn checkpoint_python_repr(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckpointShortstat {
+    pub files_changed: u64,
+    pub insertions: u64,
+    pub deletions: u64,
+}
+
+/// Match Python `CheckpointManager._parse_shortstat` for git shortstat lines.
+pub fn checkpoint_parse_shortstat(stat_line: &str) -> CheckpointShortstat {
+    CheckpointShortstat {
+        files_changed: extract_shortstat_count(stat_line, "file"),
+        insertions: extract_shortstat_count(stat_line, "insertion"),
+        deletions: extract_shortstat_count(stat_line, "deletion"),
+    }
+}
+
+fn extract_shortstat_count(stat_line: &str, marker: &str) -> u64 {
+    let Some(marker_idx) = stat_line.find(marker) else {
+        return 0;
+    };
+    let prefix = stat_line[..marker_idx].trim_end();
+    let digits_start = prefix
+        .rfind(|c: char| !c.is_ascii_digit())
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+    prefix[digits_start..].parse().unwrap_or(0)
+}
+
+
+
 
 /// Execute one logical op and return JSON [`Value`] for comparison.
 pub fn dispatch_case(op: &str, input: &Value) -> Result<Value, String> {
@@ -559,6 +615,25 @@ pub fn dispatch_case(op: &str, input: &Value) -> Result<Value, String> {
             }))
         }
 
+
+        "checkpoint_validate_commit_hash" => {
+            let commit_hash = input
+                .get("commit_hash")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing input.commit_hash".to_string())?;
+            match checkpoint_validate_commit_hash(commit_hash) {
+                None => Ok(Value::Null),
+                Some(err) => Ok(Value::String(err)),
+            }
+        }
+        "checkpoint_parse_shortstat" => {
+            let stat_line = input
+                .get("stat_line")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing input.stat_line".to_string())?;
+            serde_json::to_value(checkpoint_parse_shortstat(stat_line)).map_err(|e| e.to_string())
+        }
+
         _ => Err(format!("unknown op: {}", op)),
     }
 }
@@ -637,6 +712,40 @@ mod tests {
     }
 
     #[test]
+
+    #[test]
+    fn checkpoint_commit_hash_validation_matches_python_samples() {
+        assert_eq!(
+            checkpoint_validate_commit_hash("abc"),
+            Some("Invalid commit hash (expected 4-64 hex characters): 'abc'".to_string())
+        );
+        assert_eq!(checkpoint_validate_commit_hash("abcd"), None);
+        assert_eq!(
+            checkpoint_validate_commit_hash("-abc123"),
+            Some("Invalid commit hash (must not start with '-'): '-abc123'".to_string())
+        );
+    }
+
+    #[test]
+    fn checkpoint_shortstat_parser_matches_python_samples() {
+        assert_eq!(
+            checkpoint_parse_shortstat("1 file changed, 2 insertions(+), 3 deletions(-)"),
+            CheckpointShortstat {
+                files_changed: 1,
+                insertions: 2,
+                deletions: 3,
+            }
+        );
+        assert_eq!(
+            checkpoint_parse_shortstat("2 files changed, 10 insertions(+)"),
+            CheckpointShortstat {
+                files_changed: 2,
+                insertions: 10,
+                deletions: 0,
+            }
+        );
+    }
+
     fn checkpoint_shadow_dir_id_matches_python_sample() {
         assert_eq!(
             checkpoint_shadow_dir_id("/workspace/demo"),

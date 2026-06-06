@@ -26,6 +26,7 @@ jobs:
           python3 scripts/generate-test-intent-mapping.py
           python3 scripts/generate-adapter-matrix.py
           python3 scripts/validate-intentional-divergence.py --check --allow-warnings
+          python3 scripts/generate-shared-diff-backlog.py --local-ref HEAD --no-fetch
           python3 scripts/generate-upstream-patch-queue.py --local-ref HEAD --max-commits 0
           python3 scripts/generate-global-parity-proof.py
       - name: Format check
@@ -42,6 +43,8 @@ jobs:
         run: cargo test -p hermes-parity-tests --test cli_command_contract
       - name: Upstream slash-command parity gate
         run: python3 scripts/run-upstream-slash-parity-gate.py --upstream-ref upstream/main
+      - name: Upstream surface coverage gate
+        run: python3 scripts/run-upstream-surface-coverage-gate.py --repo-root . --upstream-ref upstream/main --local-ref HEAD
       - name: Global parity governance contract
         run: cargo test -p hermes-parity-tests --test global_parity_governance
       - name: Upstream webhook sync script lint
@@ -50,6 +53,8 @@ jobs:
           python3 -m py_compile scripts/publish_automation_summary.py
           python3 -m py_compile scripts/run-golden-parity-harness.py
           python3 -m py_compile scripts/run-upstream-slash-parity-gate.py
+          python3 -m py_compile scripts/run-upstream-surface-coverage-gate.py
+          python3 -m py_compile scripts/generate-shared-diff-backlog.py
           python3 -m py_compile scripts/release_secret_scan.py
 
   cross-build:

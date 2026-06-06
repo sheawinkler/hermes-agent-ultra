@@ -116,6 +116,13 @@ def _parse_bool(value: Any, *, default: bool = False) -> bool:
     return default
 
 
+def _coerce_port(value: Any, *, default: int = _DEFAULT_PORT) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class _StaticAccessTokenProvider:
     """Minimal token-provider shim so outbound Graph delivery can reuse the shared client."""
 
@@ -512,11 +519,25 @@ async def _standalone_send(
     env var.  ``chat_id`` is validated to match the documented Bot
     Framework ID character set so it cannot escape the URL path.
 
-    ``media_files`` and ``force_document`` are accepted for signature
-    parity but not implemented for the standalone path; messages with
-    attachments will send as text-only.  The live adapter handles
-    attachments via the SDK.
+    Standalone mode sends text-only activities. Attachment requests are
+    rejected explicitly so callers do not mistake a text-only fallback for
+    successful media delivery. The live adapter handles attachments via the SDK.
     """
+    if media_files:
+        return {
+            "error": (
+                "Teams standalone send supports text only; run the live "
+                "gateway adapter for attachment delivery"
+            )
+        }
+    if force_document:
+        return {
+            "error": (
+                "Teams standalone send does not support force_document; run "
+                "the live gateway adapter for document delivery"
+            )
+        }
+
     extra = getattr(pconfig, "extra", {}) or {}
     client_id = os.getenv("TEAMS_CLIENT_ID") or extra.get("client_id", "")
     client_secret = os.getenv("TEAMS_CLIENT_SECRET") or extra.get("client_secret", "")
@@ -559,7 +580,7 @@ async def _standalone_send(
         # Per-request timeouts so a slow STS endpoint cannot starve the
         # subsequent activity POST of its budget.
         per_request_timeout = _aiohttp.ClientTimeout(total=15.0)
-        async with _aiohttp.ClientSession() as session:
+        async with _aiohttp.ClientSession(trust_env=True) as session:
             async with session.post(
                 token_url,
                 data={
@@ -623,7 +644,9 @@ class TeamsAdapter(BasePlatformAdapter):
         self._client_id = extra.get("client_id") or os.getenv("TEAMS_CLIENT_ID", "")
         self._client_secret = extra.get("client_secret") or os.getenv("TEAMS_CLIENT_SECRET", "")
         self._tenant_id = extra.get("tenant_id") or os.getenv("TEAMS_TENANT_ID", "")
-        self._port = int(extra.get("port") or os.getenv("TEAMS_PORT", str(_DEFAULT_PORT)))
+        self._port = _coerce_port(
+            extra.get("port") or os.getenv("TEAMS_PORT", str(_DEFAULT_PORT))
+        )
         self._app: Optional["App"] = None
         self._runner: Optional["web.AppRunner"] = None
         self._dedup = MessageDeduplicator(max_size=1000)

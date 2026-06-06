@@ -133,7 +133,7 @@ impl ToolPolicyEngine {
             .ok()
             .as_deref()
             .and_then(ToolPolicyPreset::parse)
-            .unwrap_or(ToolPolicyPreset::Dev);
+            .unwrap_or(ToolPolicyPreset::Relaxed);
         let mut policy = Self::from_preset(preset);
 
         if let Ok(path) = std::env::var("HERMES_TOOL_POLICY_FILE") {
@@ -727,7 +727,10 @@ pub fn annotate_policy_simulation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use std::time::Instant;
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[derive(Clone, Copy)]
     struct XorShift64(u64);
@@ -1098,6 +1101,7 @@ mod tests {
 
     #[test]
     fn policy_from_env_uses_preset_defaults() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
         let mode_orig = std::env::var("HERMES_TOOL_POLICY_MODE").ok();
         let preset_orig = std::env::var("HERMES_TOOL_POLICY_PRESET").ok();
         let patterns_orig = std::env::var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS").ok();
@@ -1143,6 +1147,7 @@ mod tests {
 
     #[test]
     fn policy_from_env_defaults_to_relaxed_when_unset() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
         let mode_orig = std::env::var("HERMES_TOOL_POLICY_MODE").ok();
         let preset_orig = std::env::var("HERMES_TOOL_POLICY_PRESET").ok();
         let patterns_orig = std::env::var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS").ok();
@@ -1183,6 +1188,7 @@ mod tests {
 
     #[test]
     fn strict_sandbox_profile_blocks_remote_command_channels() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
         let profile_orig = std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE").ok();
         let preset_orig = std::env::var("HERMES_TOOL_POLICY_PRESET").ok();
         hermes_core::test_env::set_var("HERMES_TOOL_POLICY_PRESET", "strict");

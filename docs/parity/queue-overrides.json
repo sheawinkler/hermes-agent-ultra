@@ -479,6 +479,482 @@
     "c1eb2dcda7d7": {
       "disposition": "superseded",
       "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "7f1b2b456953": {
+      "disposition": "ported",
+      "notes": "Rust terminal approval path denies confirmation-required commands without consent and now pins the same no-retry/no-rephrase/no-same-outcome 'Silence is not consent' contract in crates/hermes-tools/src/tools/terminal.rs."
+    },
+    "7245bc77eb3b": {
+      "disposition": "ported",
+      "notes": "Rust config loading now normalizes Python-style fallback_providers plus legacy fallback_model into a merged fallback_models chain, preserves fallback provider metadata in llm_providers, and forwards that chain into AgentConfig unless HERMES_FALLBACK_MODEL(S) overrides it."
+    },
+    "39fe4ecee3d0": {
+      "disposition": "ported",
+      "notes": "Rust kanban store loading now refuses malformed or semantically empty existing boards.json state, preserves the original bytes, and writes a same-directory boards.json.corrupt.<timestamp> backup before returning an error."
+    },
+    "c4b8f5efee8c": {
+      "disposition": "ported",
+      "notes": "Rust corrupt-store backup derives the backup filename from the canonical store basename and writes only within the original store parent directory, matching the upstream path-injection hardening intent."
+    },
+    "e97a4c8f3795": {
+      "disposition": "ported",
+      "notes": "README.md and local Chinese README now include the upstream Nous Portal setup/status section adapted to hermes-agent-ultra command names."
+    },
+    "cae7537359c0": {
+      "disposition": "superseded",
+      "notes": "Upstream subsequently removed committed infographic assets; hermes-agent-ultra now follows that repo hygiene policy and keeps generated infographics out of tree."
+    },
+    "5772e638c9ba": {
+      "disposition": "ported",
+      "notes": "Removed the tracked infographic/ asset tree and added infographic/ to .gitignore so generated PR infographics stay in PR bodies rather than the repository."
+    },
+    "3589960e03d0": {
+      "disposition": "ported",
+      "notes": "Rust GenericProvider now maps OpenCode Go reasoning controls by model: Kimi K2 and DeepSeek thinking models receive provider-native thinking/reasoning_effort fields while non-target models drop unsupported controls."
+    },
+    "70aaa774be92": {
+      "disposition": "ported",
+      "notes": "Rust reasoning configuration now preserves raw opencode-go effort levels for runtime model-specific mapping, including Kimi xhigh/max to high and minimal omission."
+    },
+    "11e6dd3c606e": {
+      "disposition": "superseded",
+      "notes": "Upstream Python release AUTHOR_MAP maintenance is not part of the Rust release pipeline in hermes-agent-ultra."
+    },
+    "7a4dc8e8d610": {
+      "disposition": "superseded",
+      "notes": "Upstream Python release AUTHOR_MAP maintenance is not part of the Rust release pipeline in hermes-agent-ultra."
+    },
+    "e42fcc562596": {
+      "disposition": "ported",
+      "notes": "Rust startup model resolution now pins provider selection to config-derived provider:model state and overwrites stale HERMES_INFERENCE_PROVIDER handoff env during runtime sync; CLI --provider remains the per-invocation override."
+    },
+    "b10f17bf1e93": {
+      "disposition": "ported",
+      "notes": "Imported ntfy as a platform plugin under plugins/platforms/ntfy with standalone send, env enablement, identity hardening, and local plugin regression tests."
+    },
+    "6a8e131a0ab4": {
+      "disposition": "ported",
+      "notes": "Hermes Ultra uses the upstream platform-plugin ntfy shape rather than a bundled core adapter; tests/gateway/test_ntfy_plugin.py covers plugin registration and standalone delivery."
+    },
+    "3b096d6f6dbe": {
+      "disposition": "ported",
+      "notes": "Ntfy robustness and docs are represented by plugins/platforms/ntfy, tests/gateway/test_ntfy_plugin.py, website ntfy messaging docs, sidebars, and environment-variable reference entries."
+    },
+    "9405cdc8dd03": {
+      "disposition": "ported",
+      "notes": "Rust ntfy gateway adapter now tags outgoing messages with X-Tags: hermes-agent and skips incoming events carrying that tag to prevent self-echo loops."
+    },
+    "8055d0f09246": {
+      "disposition": "ported",
+      "notes": "Rust ntfy gateway tests cover echo-tag outbound headers, inbound echo filtering, genuine tagged messages, and env-driven platform enablement; Python release AUTHOR_MAP updates are not part of the Rust release pipeline."
+    },
+    "d473e7c9385e": {
+      "disposition": "ported",
+      "notes": "Rust disk-cleanup auto categorization only marks cron/cronjobs output subtrees as cron-output and explicitly leaves cron/jobs.json plus .tick.lock as control-plane state; covered by hermes-tools disk_cleanup tests."
+    },
+    "c14c37d46b902": {
+      "disposition": "ported",
+      "notes": "Rust OpenViking memory provider now scopes direct content-write URIs under viking://user/{user}/agent/{agent}/memories/{subdir}/..., sends X-OpenViking-Agent and bearer auth headers, maps memory-write targets to OpenViking subdirectories, and covers URI/header/body contracts in crates/hermes-agent/src/memory_plugins/openviking.rs tests."
+    },
+    "7de8cd4c5f67": {
+      "disposition": "ported",
+      "notes": "TUI voice TTS state now flows through SlashHandlerContext into useMainApp status rendering, with createSlashHandler coverage for /voice tts state sync."
+    },
+    "5ad2b4c6dab7": {
+      "disposition": "ported",
+      "notes": "Rust SessionPersistence now treats SQLite FTS5 as optional: base session persistence remains available without FTS, FTS deletes are guarded, and tests cover no-FTS degradation helpers."
+    },
+    "97ecfa0fc487": {
+      "disposition": "ported",
+      "notes": "Rust session search degrades content search when FTS is unavailable while keeping recent/session-id lookup live; no separate trigram table exists in Rust."
+    },
+    "355af2c20f49": {
+      "disposition": "ported",
+      "notes": "Rust session DB and search survive missing FTS5 by creating base tables first, optional FTS schema second, and returning search_degraded=fts5_unavailable rather than failing registration/search."
+    },
+    "794519c6ad49": {
+      "disposition": "ported",
+      "notes": "Rust SessionPersistence updates sessions.model on persisted session conflicts, exposes update_session_model/get_session_model, and App::switch_model immediately refreshes existing persisted session metadata."
+    },
+    "3e59be0c412b": {
+      "disposition": "ported",
+      "notes": "Rust SessionPersistence now adds messages.active and sessions.rewind_count, filters loads/search to active rows, preserves inactive audit rows, and exposes soft rewind/recent-user/restore primitives with regression coverage."
+    },
+    "243e836dce95": {
+      "disposition": "ported",
+      "notes": "Rust TUI consumes App pending prefill after /rewind or /undo, restoring the rewound prompt into the composer without auto-submitting while App soft-rewinds active session rows."
+    },
+    "3f7d1c801ddf": {
+      "disposition": "ported",
+      "notes": "Rust /undo [N] and /rewind [N] clamp to active user turns, truncate in-memory context, soft-delete persisted rows, preserve inactive audit rows, and stage the backed-up prompt for editing."
+    },
+    "6a72af044c44": {
+      "disposition": "ported",
+      "notes": "Rust managed gateway availability now uses peek_nous_access_token/is_managed_tool_gateway_ready so Firecrawl and Browser Use availability checks do not run refresh-capable Nous OAuth readers; actual request resolution remains refresh-aware and tests cover expired cached token availability."
+    },
+    "6d2727ef1ce1": {
+      "disposition": "ported",
+      "notes": "Rust config loading normalizes Discord allow_from aliases from platforms.discord.allow_from and platforms.discord.extra.allow_from into allowed_users while preserving DISCORD_ALLOWED_USERS/env precedence, with loader regression coverage."
+    },
+    "8bd00607dc53": {
+      "disposition": "superseded",
+      "notes": "Gmail header casing delta applies to upstream Python Google Workspace bridge; this Rust workspace has no Gmail/Google Workspace runtime tool surface in crates beyond bundled skill synchronization/reference content, so there is no Rust header parser/sender to port."
+    },
+    "cbf851ae1d72": {
+      "disposition": "superseded",
+      "notes": "Upstream patch bounds Python TUI startup MCP discovery; Rust TUI startup does not connect/discover configured MCP servers on App::new, and hermes-mcp discovery remains explicit client/CLI behavior with transport/call timeouts, so the freeze path is absent in current Rust runtime."
+    },
+    "47d2d05892ef": {
+      "disposition": "ported",
+      "notes": "Rust provider picker copy now has provider_picker_description wired into hermes model output, setup provider labels, and the TUI provider modal; tests pin refreshed Nous/OpenRouter/Gemini/xAI/Qwen descriptions."
+    },
+    "e946f49ab550": {
+      "disposition": "ported",
+      "notes": "Rust Gemini API-key and google-gemini-cli OAuth model catalogs now expose gemini-3.5-flash and stop offering retired gemini-3-flash-preview; Gemini auxiliary direct-key default also uses gemini-3.5-flash with regression coverage."
+    },
+    "8104b202691": {
+      "disposition": "ported",
+      "notes": "Rust xAI video generation routes default text vs image models by modality, honors explicit overrides, normalizes local image files to data:image URLs, and has focused video_gen regression coverage for those contracts."
+    },
+    "fabca0bdd82b": {
+      "disposition": "ported",
+      "notes": "Rust TUI already drives model selection through canonical /model provider/model modals; this batch added /session and /switch aliases to the existing /sessions surface while preserving /provider as a distinct provider-status command rather than the removed Python /model alias."
+    },
+    "2ed96372ade3": {
+      "disposition": "ported",
+      "notes": "ported in Rust: hermes-skills sync honors .no-bundled-skills, exposes marker toggle and safe pristine bundled-skill removal; hermes-cli adds skills sync/opt-out/opt-in CLI and slash surfaces with tier-gated destructive removal tests."
+    },
+    "f24b7ed9d953": {
+      "disposition": "ported",
+      "notes": "ported/superseded by Rust Honcho architecture: initialize only loads config and never blocks on network session startup; regression test proves fail-open startup while tools/context remain available."
+    },
+    "32032e1e2d9b": {
+      "disposition": "superseded",
+      "notes": "upstream SimpleX websocket reconnect delta is Python plugin-only in this fork; no Rust SimpleX platform adapter exists under crates, so there is no Rust runtime surface to port under the Rust-only parity policy."
+    },
+    "827ce602dbed": {
+      "disposition": "ported",
+      "notes": "Rust Honcho runtime now strips trailing /vN baseUrl suffixes, derives underscore-safe profile host keys while reading legacy dot-form host blocks, skips loopback auth unless hosts.<host>.apiKey explicitly opts in, and setup/config writes remain owner-only with targeted regression coverage."
+    },
+    "b47cb1bbf279": {
+      "disposition": "ported",
+      "notes": "Rust Kanban JSON store now supports per-task file attachments with path-safe copy, unique filenames, metadata, list/remove commands, worker-context absolute path surfacing, and regression tests for copy/collision/delete/context behavior."
+    },
+    "0cd7d54b0010": {
+      "disposition": "ported",
+      "notes": "Rust Kanban tasks now carry goal_mode and goal_max_turns, CLI add parses --goal/--goal-max-turns, dispatch worker context emits goal-loop instructions, and a callback-injected Rust goal loop covers continue, completion, finalize, and budget-block behavior."
+    },
+    "a5aecf26fa21": {
+      "disposition": "ported",
+      "notes": "Rust config/runtime gateway surface now exposes kanban.dispatch_in_gateway with HERMES_KANBAN_DISPATCH_IN_GATEWAY env override, propagates it into GatewayConfig, and includes it in gateway agent cache-busting signatures; Rust has no separate Kanban DB notifier loop to gate."
+    },
+    "165b2e481afa": {
+      "disposition": "ported",
+      "notes": "Rust config/runtime now exposes agent.api_max_retries with apiMaxRetries alias, config patch/display support, HERMES_AGENT_API_MAX_RETRIES env override, and build_agent_config propagation into RetryConfig.max_retries with focused hermes-config/hermes-cli regression coverage."
+    },
+    "9ff21437a03a": {
+      "disposition": "ported",
+      "notes": "Rust MCP tools/call now coerces stringified object/array arguments before dispatch in both exported MCP server paths, leaves non-object scalar strings untouched, and has focused helper plus JSON-RPC runtime regression coverage."
+    },
+    "e02a6038a420": {
+      "disposition": "ported",
+      "notes": "Rust hermes dump now resolves real session snapshots, defaults exports under HERMES_HOME/sessions/saved/hermes_conversation_<timestamp>.json, and includes system_prompt, session_id, session_start, source_path, model/personality, exported_at, and messages with regression coverage."
+    },
+    "e76d8bf5aaa9": {
+      "disposition": "ported",
+      "notes": "Rust TUI tool-output rendering now defaults to a small 16-line/1KiB retained preview while preserving full agent context/session storage; regression coverage pins truncation and preview-size behavior."
+    },
+    "98903d03139d": {
+      "disposition": "superseded",
+      "notes": "Upstream Python/Node TUI gateway live-session reuse fix targets a separate gateway/socket runtime; Rust resume restores persisted snapshots directly into a single App under the interactive-session lock with existing load_resume_payload/run_resume coverage."
+    },
+    "bd6d0987629e": {
+      "disposition": "superseded",
+      "notes": "Upstream Python TUI gateway live-history hydration race is absent in Rust's direct resume path: resumed messages become App.messages before the TUI loop starts, and subsequent turns append to the same Rust state vector."
+    },
+    "8077e7d2fbbb": {
+      "disposition": "superseded",
+      "notes": "Upstream _session_resume_lock narrowing applies to Python TUI gateway concurrent live-agent construction; Rust interactive resume is guarded by the process-level interactive session lock and has no session.close RPC lock path to port."
+    },
+    "30412a9771cc": {
+      "disposition": "ported",
+      "notes": "Rust disk-cleanup revalidates stale cron-output entries at dry-run and quick-clean time, drops stale control-plane tracked rows, hard-protects cron/jobs.json plus .tick.lock, and deletes only cron/output payloads; covered by crates/hermes-tools disk_cleanup tests."
+    },
+    "46b2afc56b79": {
+      "disposition": "ported",
+      "notes": "Rust session persistence now runs PRAGMA wal_checkpoint(TRUNCATE) after startup auto-maintenance and exposes truncate_wal_checkpoint(); regression tests force WAL growth and assert the sessions.db-wal sidecar shrinks to zero."
+    },
+    "86c64cfb5bd5": {
+      "disposition": "superseded",
+      "notes": "Upstream Discord timeout fix targets Python discord.ui.View message editing. Rust Discord interactions are stateless REST responses/edits and have no discord.ui.View lifecycle; the existing model-picker edit contract already clears components when edits are sent."
+    },
+    "fff0561441d2": {
+      "disposition": "superseded",
+      "notes": "Google Chat OAuth client-secret anchoring is Python adapter-only in upstream; this Rust gateway surface has no Google Chat platform adapter or OAuth helper under crates/hermes-gateway, so no Rust runtime path exists to port."
+    },
+    "7309f3bef7d7": {
+      "disposition": "superseded",
+      "notes": "LINE inbound message-type mapping is Python adapter-only in upstream; this Rust gateway surface has no LINE platform adapter under crates/hermes-gateway and no MessageType.IMAGE crash path to port."
+    },
+    "f736d2be86b8": {
+      "disposition": "ported",
+      "notes": "Rust provider profiles now expose Xiaomi/MiMo as vision-capable, supports_vision can be overridden locally without leaking to provider requests, Xiaomi MiMo models carry vision metadata, and focused Rust tests prove ACP multimodal image parts stay native for vision providers."
+    },
+    "96cd37e212e8": {
+      "disposition": "superseded",
+      "notes": "Upstream leak fix targets Python TUI gateway detached transports and _SlashWorker subprocesses. Rust HTTP websocket handling has no detached slash-worker subprocess lifecycle; in-process SessionManager already exposes explicit remove/idle-expire cleanup APIs."
+    },
+    "122d8788ae23": {
+      "disposition": "ported",
+      "notes": "rust terminal handler provides first-class terminal command execution through TerminalHandler, TOOLSET_TERMINAL, and builtin registry coverage; upstream_core_tool_contracts verifies command/timeout/background/pty/stdin_data schema surface"
+    },
+    "a49596cbb2c1": {
+      "disposition": "ported",
+      "notes": "rust terminal tool refinement is covered by the same TerminalHandler/runtime registry surface, with tests for foreground timeout caps, background guidance, stdin_data, and schema parity"
+    },
+    "20f287547275": {
+      "disposition": "superseded",
+      "notes": "rust browser runtime does not use the Python browser_tool session supervisor; Browserbase/Browser Use backends manage sessions with provider timeout/close contracts and builtin browser surface tests cover the current browser commands without legacy browser_close"
+    },
+    "971ed2bbdf61": {
+      "disposition": "ported",
+      "notes": "rust terminal handler supports sudo password transformation via SUDO_PASSWORD with shell quoting and approval safeguards; crates/hermes-tools/src/tools/terminal.rs tests cover sudo denial, yolo boundaries, and password quoting"
+    },
+    "76d929e17725": {
+      "disposition": "ported",
+      "notes": "rust approval manager and terminal handler implement dangerous command confirmation/denial, hardline blocks, gateway approvals, and session yolo controls with extensive tests in crates/hermes-tools/src/approval.rs and terminal handler tests"
+    },
+    "f5be6177b231": {
+      "disposition": "ported",
+      "notes": "rust text_to_speech/tts_premium tools, MultiTtsBackend providers, gateway voice send surfaces, and voice-compatible media tags cover the upstream TTS product surface; new registry/schema contract proves first-class TTS exposure"
+    },
+    "061fa7090720": {
+      "disposition": "ported",
+      "notes": "rust terminal/process/process_registry surface implements background=true, process list/poll/log/wait/kill/write/submit/close, PTY, stdin_data, and registry exposure; new core runtime schema contract plus terminal/process tests cover it"
+    },
+    "e184f5ab3a51": {
+      "disposition": "ported",
+      "notes": "rust TodoHandler and FileTodoBackend provide create/update/list task management with TOOLSET_TODO and builtin registry exposure; new schema contract proves first-class todo runtime surface"
+    },
+    "9e85408c7bfd": {
+      "disposition": "ported",
+      "notes": "rust todo tool remains first-class in CLI/API toolsets and builtin registration; existing toolset tests and new registry/schema contract cover create/update/list parity"
+    },
+    "ada0b4f131ba": {
+      "disposition": "ported",
+      "notes": "rust gateway/platform adapter surface sends inline image URLs natively and now strips/delivers local MEDIA image markers through validated send_file paths; tests cover inline image extraction and media marker delivery"
+    },
+    "5404a8fcd8a5": {
+      "disposition": "ported",
+      "notes": "rust gateway already supports vision/image URL handling and platform media send paths; this slice adds MEDIA marker extraction/routing with unsafe path blocking to close generated screenshot/image delivery parity"
+    },
+    "b8c3bc78417c": {
+      "disposition": "ported",
+      "notes": "rust browser screenshot/TTS output markers can now be delivered as native platform files via Gateway::send_message_threaded MEDIA extraction; tests cover MEDIA path stripping, canonicalized file delivery, blocked unsafe paths, and existing inline image routing"
+    },
+    "586b0a7047ea": {
+      "disposition": "ported",
+      "notes": "rust text_to_speech/tts_premium providers and gateway MEDIA marker delivery cover TTS audio handoff without Python Edge TTS runtime; existing TTS tests plus gateway media marker tests prove audio file delivery path"
+    },
+    "eb49936a60aa": {
+      "disposition": "superseded",
+      "notes": "upstream docs/install audio-format update is superseded by rust-native TTS providers, media_category/send_file adapter routing, and gateway MEDIA marker delivery tests; no Python install-script runtime remains to port"
+    },
+    "bdac541d1ee2": {
+      "disposition": "ported",
+      "notes": "Rust OpenAI audio key resolution already prefers HERMES_OPENAI_API_KEY over legacy OPENAI_API_KEY and this slice aligns gateway voice STT/TTS error paths with the shared resolver while preserving legacy fallback."
+    },
+    "0858ee2f2701": {
+      "disposition": "ported",
+      "notes": "Rust OpenAI audio key resolution now consistently uses VOICE_TOOLS_OPENAI_KEY first for transcription and gateway voice STT/TTS, then HERMES_OPENAI_API_KEY, then OPENAI_API_KEY; focused tests cover precedence and schema/error visibility."
+    },
+    "ec32e9a5406d": {
+      "disposition": "ported",
+      "notes": "Rust transcription now exposes provider-aware Groq STT with GROQ_API_KEY, Groq OpenAI-compatible endpoint/model defaults, model normalization, schema coverage, and gateway SttProvider::GroqWhisper credential/error handling tests."
+    },
+    "b8f8d3ef9e55": {
+      "disposition": "ported",
+      "notes": "Rust transcription now implements the valuable provider fallback portion of the three-provider STT surface: explicit/provider-env OpenAI, Groq, and Mistral/Voxtral with deterministic model normalization and tests. Python faster-whisper local runtime is intentionally not embedded in the Rust runtime."
+    },
+    "5f4b93c20f41": {
+      "disposition": "ported",
+      "notes": "Rust transcription now exposes Mistral/Voxtral STT with MISTRAL_API_KEY, /v1/audio/transcriptions endpoint construction, voxtral model defaults, no unsupported response_format multipart field, schema coverage, and gateway SttProvider::MistralVoxtral tests."
+    },
+    "0f597dd12796": {
+      "disposition": "ported",
+      "notes": "Rust STT provider/model normalization prevents OpenAI whisper-1 from being sent to Groq or Mistral/Voxtral and prevents Groq/Voxtral models from leaking to OpenAI; tool and gateway tests cover mismatch normalization."
+    },
+    "3260413cc7fa": {
+      "disposition": "ported",
+      "notes": "Rust STT override env vars are first-class runtime knobs: HERMES_STT_PROVIDER/STT_PROVIDER, STT_OPENAI_MODEL, STT_GROQ_MODEL, STT_MISTRAL_MODEL, and provider base-url overrides are resolved in the Rust transcription/gateway voice surfaces with tests."
+    },
+    "e27b0b76517c903541af20d0bd606fa7b3c83005": {
+      "disposition": "ported",
+      "notes": "Rust ACP now advertises /steer and /queue, queues prompts without racing active sessions, drains queued turns FIFO after current completion, and exposes an AcpPromptExecutor steer hook; hermes-acp queue/steer tests cover slash discovery, no-run queueing, active queueing, active steer signaling, and queued drain."
+    },
+    "78886365c2a04f3367028190b71c5b4a96433279": {
+      "disposition": "ported",
+      "notes": "Rust ACP cancel now captures the interrupted user prompt and idle /steer replays it with explicit correction/guidance; hermes-acp tests cover cancel replay and clearing interrupted_prompt_text."
+    },
+    "41fa1f1b5cf560c22a7e9adb06eb463d7122f9e0": {
+      "disposition": "ported",
+      "notes": "Rust ACP rewrites idle /steer into a regular user prompt instead of silently queueing it, matching upstream editor-client behavior; hermes-acp idle steer test proves the prompt runs immediately and leaves the queue empty."
+    },
+    "bc5f0e62d9e6c36f8f14a43e5e6c70982f280069": {
+      "disposition": "ported",
+      "notes": "Rust ToolsetManager resolves all/* to the union of registered toolsets and this slice proves the configured platform-toolset path also accepts all/* while preserving custom-token fallback; platform_toolsets tests cover both aliases."
+    },
+    "3078053795e838e47797ede02b44e6dead731aac": {
+      "disposition": "ported",
+      "notes": "Rust mixture_of_agents is now a first-class OpenAI-compatible two-layer MoA runtime with env/model/base-url configuration, parallel reference fanout, retries, minimum-success threshold, aggregator prompt synthesis, toolset/distribution exposure, and deterministic mock HTTP tests."
+    },
+    "ef5eaf8d8757a5e75fa571042abc287430192f53": {
+      "disposition": "ported",
+      "notes": "Rust cron now honors the cron platform_toolsets config path, adds the hermes-cron default platform/toolset surface, hard-denies recursive and interactive cron tools, preserves direct custom-tool fallback, and covers default/configured cron filtering with targeted tests."
+    },
+    "f75b1d21b4c8cacc2b9b9fb87227ff315365cd90": {
+      "disposition": "ported",
+      "notes": "Rust agent loop now treats advertised tool schemas as the runtime allowlist, rejects registered-but-disabled fabricated tool calls in non-streaming and streaming loops, and makes delegate_task inherit the parent enabled tool surface when no explicit child toolset is requested; execute_code schema remains Rust-only and does not advertise disabled sandbox helper tools."
+    },
+    "e7a7872a874837ca36105ca3e90db464cf7c125a": {
+      "disposition": "ported",
+      "notes": "Rust process_registry now exposes deduplicated process notification receipts via notify/record_event/list_events/clear_events. Completion events are one-shot per process session, watch_match identities include command/pattern/output/suppressed/message_id so distinct matches are preserved, and focused tests cover replay dedup plus distinct watch-match emission."
+    },
+    "5bcb63e400987e937e696b385e01285339b565c5": {
+      "disposition": "superseded",
+      "notes": "The Python TUI global _sessions/_pending lock fix is structurally superseded by Rust session managers and pending stores that already use Mutex/RwLock for compound mutations (hermes-acp SessionManager/PermissionStore, hermes-gateway SessionManager/BusySessionCoordinator). This slice also adds a Mutex-backed process notification receipt store for the overlapping process-event flood path."
+    },
+    "19db9cd0760e05dafcd1ae637db946cdd65322ce": {
+      "disposition": "ported",
+      "notes": "Rust ACP SessionManager now exposes a public lock-protected update_session_meta API with COALESCE-style optional model preservation, merges cwd/provider/api_mode/base_url/config options, routes existing update_cwd/update_model through it, and tests missing-session no-op plus single persist callback behavior."
+    },
+    "375c7f9cc379f940f3923ac967793675bdfd2b5c": {
+      "disposition": "ported",
+      "notes": "Rust ACP now renders structured JSON tool results into compact readable completion text, including todo summaries, read_file fenced content, search_files matches/files with JSON-prefix hint handling, skill summaries, browser/media/edit helpers, and generic nested JSON bullets without leaking raw blobs."
+    },
+    "b38d2d133bbb76fb9d91f08c3b1a838f5ce0a5b9": {
+      "disposition": "ported",
+      "notes": "Rust ACP tool completions compute failed status from structured success=false, ok=false, and nonzero exit_code/returncode while keeping status calculation separate from display formatting; focused tests cover the status path."
+    },
+    "eda1c97a1ef8c7d8505f40be1839929e130ad4c4": {
+      "disposition": "ported",
+      "notes": "Rust ACP marks canonical raised-exception outputs beginning with Error executing tool as failed while preserving plain Error: terminal/test output as completed; completion-status tests cover the positive and negative cases."
+    },
+    "9cf1140caaefa6f275667ed1b11a61aabb6199dd": {
+      "disposition": "ported",
+      "notes": "Rust ACP polished tool errors are treated as failed for core tool outputs while generic optional JSON error payloads remain completed; completion-status tests cover both sides of the conservative rule."
+    },
+    "0b9526b4761bbabc98ca48f5c0a3f2dfda765314": {
+      "disposition": "ported",
+      "notes": "Rust ACP session/set_model now has handler-level regression coverage proving model switches preserve existing provider/base_url/api_mode route metadata through the public SessionManager update_session_meta path instead of recreating or clearing provider state."
+    },
+    "f92298fe955fe2ddbea27f4c504ce310ec46545b": {
+      "disposition": "ported",
+      "notes": "Rust ACP maps typed top-level AgentResult usage into PromptResponse.usage through the CLI ACP executor boundary; regression coverage proves prompt/completion/total fields populate ACP input/output/total tokens without relying on a nested result usage dict."
+    },
+    "4e78963fe86a5f2758bf754a7979dc31aaf1a3db": {
+      "disposition": "superseded",
+      "notes": "The dead Python nested usage dict path is structurally superseded by Rust's typed AgentResult.usage and PromptExecutionOutput.usage flow; the CLI ACP usage test proves only the top-level typed fields are converted."
+    },
+    "1bcc87a1535cd4c17dc2bfe45fd198863404e892": {
+      "disposition": "ported",
+      "notes": "Rust ACP initialize advertises loadSession and sessionCapabilities.resume in the wire-format agentCapabilities object; handler tests assert the ACP aliases so editor clients can discover load/resume support."
+    },
+    "c71b1d197f446e264a94f962fd55f285c9dc231f": {
+      "disposition": "ported",
+      "notes": "Rust ACP now converts its slash command table into availableCommands updates with input hints and emits available_commands_update after session new/load/resume/fork; handler and server run_on tests prove the lifecycle and JSON-RPC notification path."
+    },
+    "4764e06fdefa65cb75961da64da1ed63c99a0a2a": {
+      "disposition": "ported",
+      "notes": "Rust ACP exposes the editor session-management surface with load/resume/fork/list plus model/mode/config updates, now including the stable session/set_config_option method alias; handler tests cover camelCase routing and persisted session config."
+    },
+    "d2536a72bf27b3ca01d1b48957e58cb0202b6dfb": {
+      "disposition": "ported",
+      "notes": "Rust ACP replays persisted user and assistant session history on session/load and session/resume as session/update message chunks, skipping non-displayable system messages and preserving malformed-history tolerance."
+    },
+    "f3a4af9cf2a626cb3e055766cb1cff60168d295d": {
+      "disposition": "ported",
+      "notes": "Rust ACP replays assistant reasoning_content/reasoning as agent_thought_chunk before assistant message text and reconstructs persisted tool-call start/completion events during load/resume history replay."
+    },
+    "3034eee38ec516109566c00975be4d0276747c34": {
+      "disposition": "ported",
+      "notes": "Rust ACP server now flushes session/load and session/resume replay notifications before the JSON-RPC response, with run_on coverage proving clients receive transcript updates within the request lifetime."
+    },
+    "741a34945810a7cb5142804660f9e6108e2d49ec": {
+      "disposition": "ported",
+      "notes": "Rust ACP now emits session_info_update after prompt turns refresh session metadata, using the Rust-derived session title so editor clients can update their session list without waiting for a separate list refresh."
+    },
+    "2057977102da26cbf0fa9e699fa4432dbf017566": {
+      "disposition": "ported",
+      "notes": "Rust ACP session_info_update uses the notification refresh moment for updatedAt instead of relying on stored session updated_at fields; prompt-turn coverage asserts a non-empty fresh numeric timestamp."
+    },
+    "658947480a01dc59a2aa7a6a06a6434d7214edff": {
+      "disposition": "ported",
+      "notes": "Rust ACP replay chunk events no longer carry the invalid messageId field; the typed event model omits the field and load replay tests assert serialized user/agent chunks match the ACP schema."
+    },
+    "cdf9793d6d6b97aa99e1b2f27629e52d89eac41d": {
+      "disposition": "ported",
+      "notes": "Rust ACP forwards image prompt blocks as OpenAI-style image_url multimodal content, preserves text-only slash command interception, treats image-bearing slash text as a model prompt, and now advertises promptCapabilities.image during initialize with protocol and handler tests."
+    },
+    "4444d5fe4f65dcbca939a1f39ae58438205e7dad": {
+      "disposition": "ported",
+      "notes": "Rust ACP emits native sessionUpdate=plan events after live todo tool completions, using typed PlanEntry values and shared parser tests for status mapping, cancelled preservation, and wire serialization."
+    },
+    "bd3a5873e11f084d74be876a505a406224a6ef3e": {
+      "disposition": "ported",
+      "notes": "Rust ACP replays native todo plan updates from persisted tool results after tool_call_complete, supports trailing human hints and empty todo lists for plan clearing, and covers replay ordering plus CLI live converter behavior."
+    },
+    "e26f9b207041c03d1aa9a982d29dbfda66df3a82": {
+      "disposition": "ported",
+      "notes": "Rust ACP routes provider reasoning callbacks to agent_thought_chunk updates, routes stream deltas to message_delta updates, and suppresses fallback final-response emission when executor streaming already delivered message content."
+    },
+    "72c8037a24b58b7b1a38a99903cc0bf8a3d7595c": {
+      "disposition": "ported",
+      "notes": "Rust ACP now has dedicated compact completion renderers for web_search, process, delegate_task, session_search, memory, media/cron, plus expanded tool kind/title mappings; tests assert raw JSON/private entry dumps are avoided."
+    },
+    "b294d1d0229ff6026838a04c4cb59c3b13e4827f": {
+      "disposition": "superseded",
+      "notes": "Rust ACP start events already carry compact title/kind/arguments only and do not synthesize read_file output content; existing title tests cover read_file start compactness."
+    },
+    "19854c7cd2f00e3d591e72ccbe2e456ad10c4886": {
+      "disposition": "superseded",
+      "notes": "Rust ACP already fences read_file completion content and intentionally flushes load/resume replay before the RPC response for deterministic local clients; server tests cover replay flushing and read_file formatting."
+    },
+    "9987f3d82486b04151dee2d27d640b3ae01b7b16": {
+      "disposition": "ported",
+      "notes": "Rust ACP now keeps successful web_extract completions silent while rendering compact per-URL failures; read_file fenced completion and compact replay rendering are covered by hermes-acp tools tests."
+    },
+    "6622277f11ca1dee03e868b064fb1851e5598b77": {
+      "disposition": "ported",
+      "notes": "Rust ACP browser_navigate starts already expose polished navigate titles without raw content, and this slice adds regression coverage plus corrected tool kind mappings for polished browser and delegate tools."
+    },
+    "eb612f55748d8f0888f09f055abd86afef925150": {
+      "disposition": "ported",
+      "notes": "Rust ACP web_extract rendering now matches the compact contract: success omits extracted content, structured failures show URL/title/error summaries, and tests prevent raw result dumps."
+    },
+    "ef9a08a872d1ed87eb4c91cf8ad8e8f4ef5a6e2b": {
+      "disposition": "ported",
+      "notes": "Rust ACP now emits native usage_update events with size/used on session lifecycle, model switch, slash-command, and prompt completion paths, enriches /context with usage and compaction threshold text, and ports polished common tool rendering/kind/title behavior with hermes-acp tests."
+    },
+    "9c1bb8d2c729": {
+      "disposition": "ported",
+      "notes": "Rust now exposes /version through CLI/TUI slash dispatch, gateway slash dispatch, and ACP slash handling via a shared hermes-core version_label helper with targeted Rust tests."
+    },
+    "30340eae2f6e": {
+      "disposition": "ported",
+      "notes": "Rust shared version_label includes the workspace package version and optional build git SHA captured by hermes-core build.rs, so CLI/gateway/ACP version surfaces share the same label helper."
+    },
+    "0f45509daf72": {
+      "disposition": "ported",
+      "notes": "Rust agent loop now treats formatted /steer redirects as trusted mid-turn out-of-band user messages appended to the last tool result, adds the shared steer channel system-prompt note when tools are available, and wires ACP active-session steer through the shared marker with regression tests preventing the old User guidance label."
+    },
+    "d41427504ef04": {
+      "disposition": "ported",
+      "notes": "Rust delegation depth now has a first-class AgentConfig max_delegate_depth plus delegation.max_spawn_depth config bridge with floor 1 and no legacy ceiling; env/config values above the old cap pass through with agent, CLI, config, and backend tests."
+    },
+    "f1fe29d1c368": {
+      "disposition": "ported",
+      "notes": "Rust provider config now accepts llm.<provider>.request_timeout_seconds, validates and exposes it through config set/get, propagates it into AgentConfig RuntimeProviderConfig, and applies it to OpenAI-compatible, Codex Responses, Anthropic, OpenRouter, extra provider, fallback/runtime-routing, and client rebuild paths with targeted tests."
     }
   },
   "subject_patterns": [

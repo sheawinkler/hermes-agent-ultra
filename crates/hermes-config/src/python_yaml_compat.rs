@@ -1,11 +1,10 @@
-//! Normalize Python Hermes `config.yaml` into shapes `GatewayConfig` can deserialize.
+﻿//! Normalize Python Hermes `config.yaml` into shapes `GatewayConfig` can deserialize.
 //!
-//! Python 版常用：嵌套 `model:`、`toolsets:`、`agent.max_turns`、`session_reset`、`providers`、
-//! 根级 `telegram` / `discord` / `weixin` 等平台块（而非 `platforms:` 下）等；
-//! Rust 字段能直接对齐的保留，其余在归一化层映射；平台专有键经 [`crate::platform::PlatformConfig`]
-//! 的 `#[serde(flatten)] extra` 保留。
-
+//! Python 鐗堝父鐢細宓屽 `model:`銆乣toolsets:`銆乣agent.max_turns`銆乣session_reset`銆乣providers`銆?//! 鏍圭骇 `telegram` / `discord` / `weixin` 绛夊钩鍙板潡锛堣€岄潪 `platforms:` 涓嬶級绛夛紱
+//! Rust 瀛楁鑳界洿鎺ュ榻愮殑淇濈暀锛屽叾浣欏湪褰掍竴鍖栧眰鏄犲皠锛涘钩鍙颁笓鏈夐敭缁?[`crate::platform::PlatformConfig`]
+//! 鐨?`#[serde(flatten)] extra` 淇濈暀銆?
 use serde_yaml::{Mapping, Value};
+use std::collections::HashSet;
 
 fn key(s: &str) -> Value {
     Value::String(s.to_string())
@@ -28,6 +27,24 @@ fn scalar_to_string(v: &Value) -> Option<String> {
     }
 }
 
+fn normalized_base_url(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn canonical_custom_provider_name(provider: &str) -> String {
+    provider
+        .trim()
+        .strip_prefix("custom:")
+        .unwrap_or_else(|| provider.trim())
+        .trim()
+        .to_string()
+}
+
 /// Lift `agent.max_turns` to root `max_turns` when the latter is absent.
 fn lift_agent_max_turns(map: &mut Mapping) {
     let max_key = key("max_turns");
@@ -43,7 +60,7 @@ fn lift_agent_max_turns(map: &mut Mapping) {
     map.insert(max_key, mt.clone());
 }
 
-/// `toolsets: [a, b]` → `tools: [a, b]` when root `tools` is absent or empty.
+/// `toolsets: [a, b]` 鈫?`tools: [a, b]` when root `tools` is absent or empty.
 fn lift_toolsets_to_tools(map: &mut Mapping) {
     let tools_key = key("tools");
     let keep_existing = match map.get(&tools_key) {
@@ -88,21 +105,22 @@ fn normalize_model_block(map: &mut Mapping) {
                 .and_then(as_str)
                 .map(str::trim)
                 .filter(|s| !s.is_empty());
-            let base_url = m
-                .get(&key("base_url"))
-                .and_then(as_str)
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-            let model_api_key = m
+            let base_url = m.get(&key("base_url")).and_then(normalized_base_url);
+            let api_key = m
                 .get(&key("api_key"))
                 .and_then(as_str)
-                .map(|s| s.trim().to_string())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let api_key_env = m
+                .get(&key("api_key_env"))
+                .and_then(as_str)
+                .map(str::trim)
                 .filter(|s| !s.is_empty());
 
             let model_str = match (provider, default) {
-                (Some(p), Some(d)) => format!("{p}:{d}"),
+                (Some(p), Some(d)) => format!("{}:{d}", canonical_custom_provider_name(p)),
                 (None, Some(d)) => d.to_string(),
-                (Some(p), None) => format!("{p}:"),
+                (Some(p), None) => format!("{}:", canonical_custom_provider_name(p)),
                 (None, None) => {
                     map.insert(model_key, Value::Mapping(m));
                     return;
@@ -110,24 +128,27 @@ fn normalize_model_block(map: &mut Mapping) {
             };
             map.insert(model_key, Value::String(model_str));
 
-            if let Some(p) = provider {
+            if let Some(p) = provider
+                .filter(|_| base_url.is_some() || api_key.is_some() || api_key_env.is_some())
+            {
+                let provider_name = canonical_custom_provider_name(p);
                 let llm_key = key("llm_providers");
                 let mut llm = match map.get(&llm_key).cloned() {
                     Some(Value::Mapping(x)) => x,
                     _ => Mapping::new(),
                 };
                 let prov_entry = llm
-                    .entry(Value::String(p.to_string()))
+                    .entry(Value::String(provider_name))
                     .or_insert_with(|| Value::Mapping(Mapping::new()));
                 if let Value::Mapping(em) = prov_entry {
                     if let Some(bu) = base_url {
                         em.insert(key("base_url"), Value::String(bu));
                     }
-                    if let Some(ak) = model_api_key {
-                        em.insert(key("api_key"), Value::String(ak));
+                    if let Some(key_value) = api_key {
+                        em.insert(key("api_key"), Value::String(key_value.to_string()));
                     }
-                    if let Some(d) = default {
-                        em.insert(key("model"), Value::String(d.to_string()));
+                    if let Some(env_name) = api_key_env {
+                        em.insert(key("api_key_env"), Value::String(env_name.to_string()));
                     }
                 }
                 map.insert(llm_key, Value::Mapping(llm));
@@ -139,7 +160,73 @@ fn normalize_model_block(map: &mut Mapping) {
     }
 }
 
-/// `providers: { openai: { api_key: ... } }` → merge into `llm_providers`.
+/// `custom_providers: [{ name, base_url, ... }]` 鈫?merge into `llm_providers`.
+fn merge_custom_providers_into_llm(map: &mut Mapping) {
+    let Some(Value::Sequence(providers)) = map.remove(&key("custom_providers")) else {
+        return;
+    };
+    if providers.is_empty() {
+        return;
+    }
+
+    let llm_key = key("llm_providers");
+    let mut llm = match map.get(&llm_key).cloned() {
+        Some(Value::Mapping(x)) => x,
+        _ => Mapping::new(),
+    };
+
+    for entry in providers {
+        let Value::Mapping(src) = entry else {
+            continue;
+        };
+        let Some(provider_name) = src
+            .get(&key("name"))
+            .and_then(as_str)
+            .map(canonical_custom_provider_name)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let slot = llm
+            .entry(Value::String(provider_name))
+            .or_insert_with(|| Value::Mapping(Mapping::new()));
+        if let Value::Mapping(provider_cfg) = slot {
+            for field in [
+                "api_key",
+                "api_key_env",
+                "base_url",
+                "command",
+                "args",
+                "model",
+                "api_mode",
+                "max_tokens",
+                "temperature",
+                "extra_body",
+                "rate_limit",
+                "credential_pool",
+                "oauth_token_url",
+                "oauth_client_id",
+            ] {
+                let field_key = key(field);
+                let Some(value) = src.get(&field_key) else {
+                    continue;
+                };
+                let normalized = if field == "base_url" {
+                    normalized_base_url(value).map(Value::String)
+                } else {
+                    Some(value.clone())
+                };
+                if let Some(value) = normalized {
+                    provider_cfg.insert(field_key, value);
+                }
+            }
+        }
+    }
+
+    map.insert(llm_key, Value::Mapping(llm));
+}
+
+/// `providers: { openai: { api_key: ... } }` 鈫?merge into `llm_providers`.
 fn merge_providers_into_llm(map: &mut Mapping) {
     let Some(Value::Mapping(providers)) = map.remove(&key("providers")) else {
         return;
@@ -171,7 +258,131 @@ fn merge_providers_into_llm(map: &mut Mapping) {
     map.insert(llm_key, Value::Mapping(llm));
 }
 
-/// Python `session_reset: { mode, idle_minutes, at_hour }` → `session.reset_policy` (tagged enum shape).
+fn merge_fallback_provider_metadata(map: &mut Mapping, provider: &str, entry: &Mapping) {
+    let provider = provider.trim();
+    if provider.is_empty() {
+        return;
+    }
+
+    let llm_key = key("llm_providers");
+    let mut llm = match map.get(&llm_key).cloned() {
+        Some(Value::Mapping(x)) => x,
+        _ => Mapping::new(),
+    };
+    let slot = llm
+        .entry(Value::String(provider.to_string()))
+        .or_insert_with(|| Value::Mapping(Mapping::new()));
+    if let Value::Mapping(provider_cfg) = slot {
+        for field in [
+            "api_key",
+            "api_key_env",
+            "base_url",
+            "command",
+            "args",
+            "oauth_token_url",
+            "oauth_client_id",
+        ] {
+            let field_key = key(field);
+            let Some(value) = entry.get(&field_key) else {
+                continue;
+            };
+            let normalized = if field == "base_url" {
+                normalized_base_url(value).map(Value::String)
+            } else {
+                Some(value.clone())
+            };
+            if let Some(value) = normalized {
+                provider_cfg.insert(field_key, value);
+            }
+        }
+    }
+    map.insert(llm_key, Value::Mapping(llm));
+}
+
+fn push_fallback_spec(spec: String, chain: &mut Vec<Value>, seen: &mut HashSet<String>) {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let identity = trimmed.to_ascii_lowercase();
+    if seen.insert(identity) {
+        chain.push(Value::String(trimmed.to_string()));
+    }
+}
+
+fn collect_fallback_entries(
+    raw: Value,
+    map: &mut Mapping,
+    chain: &mut Vec<Value>,
+    seen: &mut HashSet<String>,
+) {
+    match raw {
+        Value::String(spec) => push_fallback_spec(spec, chain, seen),
+        Value::Sequence(seq) => {
+            for entry in seq {
+                collect_fallback_entries(entry, map, chain, seen);
+            }
+        }
+        Value::Mapping(entry) => {
+            let provider = entry
+                .get(&key("provider"))
+                .and_then(as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let model = entry
+                .get(&key("model"))
+                .and_then(as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+
+            let Some(model) = model else {
+                return;
+            };
+
+            let spec = match provider {
+                Some(provider) if !model.contains(':') => {
+                    merge_fallback_provider_metadata(map, provider, &entry);
+                    format!("{provider}:{model}")
+                }
+                Some(provider) => {
+                    merge_fallback_provider_metadata(map, provider, &entry);
+                    model.to_string()
+                }
+                None => model.to_string(),
+            };
+            push_fallback_spec(spec, chain, seen);
+        }
+        _ => {}
+    }
+}
+
+/// Python supports `fallback_providers` plus legacy `fallback_model`; Rust uses
+/// string model specs in `fallback_models`, so normalize and merge the effective
+/// chain before deserializing.
+fn normalize_fallback_chain(map: &mut Mapping) {
+    let fallback_models_key = key("fallback_models");
+    let mut chain: Vec<Value> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    if let Some(existing) = map.remove(&fallback_models_key) {
+        collect_fallback_entries(existing, map, &mut chain, &mut seen);
+    }
+    if let Some(providers) = map.remove(&key("fallback_providers")) {
+        collect_fallback_entries(providers, map, &mut chain, &mut seen);
+    }
+    if let Some(legacy) = map.remove(&key("fallback_model")) {
+        collect_fallback_entries(legacy, map, &mut chain, &mut seen);
+    }
+
+    if let Some(Value::String(first)) = chain.first().cloned() {
+        map.insert(key("fallback_model"), Value::String(first));
+    }
+    if !chain.is_empty() {
+        map.insert(fallback_models_key, Value::Sequence(chain));
+    }
+}
+
+/// Python `session_reset: { mode, idle_minutes, at_hour }` 鈫?`session.reset_policy` (tagged enum shape).
 fn normalize_session_reset(map: &mut Mapping) {
     let Some(Value::Mapping(sr)) = map.get(&key("session_reset")).cloned() else {
         return;
@@ -327,7 +538,9 @@ fn lift_root_platform_blocks(map: &mut Mapping) {
 pub(crate) fn normalize_config_yaml_root(map: &mut Mapping) {
     // Order matters: model before merge_providers (may touch llm_providers)
     normalize_model_block(map);
+    merge_custom_providers_into_llm(map);
     merge_providers_into_llm(map);
+    normalize_fallback_chain(map);
     lift_agent_max_turns(map);
     lift_toolsets_to_tools(map);
     normalize_platform_toolsets(map);
@@ -358,6 +571,69 @@ max_turns: 99
         assert_eq!(cfg.max_turns, 99);
         let or = cfg.llm_providers.get("openrouter").expect("openrouter");
         assert_eq!(or.base_url.as_deref(), Some("https://openrouter.ai/api/v1"));
+    }
+
+    #[test]
+    fn python_model_block_lifts_provider_credentials() {
+        let raw = r#"
+model:
+  default: deepseek-chat
+  provider: deepseek
+  base_url: https://api.deepseek.com/
+  api_key: sk-local
+  api_key_env: DEEPSEEK_API_KEY
+"#;
+        let mut root: Value = serde_yaml::from_str(raw).unwrap();
+        let Value::Mapping(ref mut m) = root else {
+            panic!();
+        };
+        normalize_config_yaml_root(m);
+        let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+
+        assert_eq!(cfg.model.as_deref(), Some("deepseek:deepseek-chat"));
+        let provider = cfg.llm_providers.get("deepseek").expect("deepseek");
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://api.deepseek.com")
+        );
+        assert_eq!(provider.api_key.as_deref(), Some("sk-local"));
+        assert_eq!(provider.api_key_env.as_deref(), Some("DEEPSEEK_API_KEY"));
+    }
+
+    #[test]
+    fn python_custom_providers_merge_into_llm_provider_config() {
+        let raw = r#"
+model:
+  default: my-model
+  provider: custom:beans
+custom_providers:
+  - name: beans
+    base_url: http://beans.local/v1/
+    api_key: sk-beans
+    api_key_env: BEANS_API_KEY
+    model: fallback-beans-model
+    api_mode: codex_responses
+  - name: local
+    base_url: http://localhost:8080/v1/
+"#;
+        let mut root: Value = serde_yaml::from_str(raw).unwrap();
+        let Value::Mapping(ref mut m) = root else {
+            panic!();
+        };
+        normalize_config_yaml_root(m);
+        let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+
+        assert_eq!(cfg.model.as_deref(), Some("beans:my-model"));
+        let beans = cfg.llm_providers.get("beans").expect("beans provider");
+        assert_eq!(beans.base_url.as_deref(), Some("http://beans.local/v1"));
+        assert_eq!(beans.api_key.as_deref(), Some("sk-beans"));
+        assert_eq!(beans.api_key_env.as_deref(), Some("BEANS_API_KEY"));
+        assert_eq!(beans.model.as_deref(), Some("fallback-beans-model"));
+        assert_eq!(beans.api_mode.as_deref(), Some("codex_responses"));
+
+        let local = cfg.llm_providers.get("local").expect("local provider");
+        assert_eq!(local.base_url.as_deref(), Some("http://localhost:8080/v1"));
+        assert!(local.api_key.is_none());
     }
 
     #[test]
@@ -446,9 +722,18 @@ platform_toolsets:
     }
 
     #[test]
-    fn root_timezone_roundtrips() {
+    fn fallback_providers_and_legacy_model_are_merged() {
         let raw = r#"
-timezone: Asia/Shanghai
+fallback_providers:
+  - provider: openrouter
+    model: anthropic/claude-sonnet-4.6
+    base_url: https://openrouter.ai/api/v1/
+  - provider: openrouter
+    model: anthropic/claude-sonnet-4.6
+fallback_model:
+  provider: nous
+  model: Hermes-4
+  api_key_env: NOUS_API_KEY
 "#;
         let mut root: Value = serde_yaml::from_str(raw).unwrap();
         let Value::Mapping(ref mut m) = root else {
@@ -456,6 +741,29 @@ timezone: Asia/Shanghai
         };
         normalize_config_yaml_root(m);
         let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
-        assert_eq!(cfg.timezone.as_deref(), Some("Asia/Shanghai"));
+
+        assert_eq!(
+            cfg.fallback_models,
+            vec![
+                "openrouter:anthropic/claude-sonnet-4.6".to_string(),
+                "nous:Hermes-4".to_string()
+            ]
+        );
+        assert_eq!(
+            cfg.fallback_model.as_deref(),
+            Some("openrouter:anthropic/claude-sonnet-4.6")
+        );
+        assert_eq!(
+            cfg.llm_providers
+                .get("openrouter")
+                .and_then(|p| p.base_url.as_deref()),
+            Some("https://openrouter.ai/api/v1")
+        );
+        assert_eq!(
+            cfg.llm_providers
+                .get("nous")
+                .and_then(|p| p.api_key_env.as_deref()),
+            Some("NOUS_API_KEY")
+        );
     }
 }

@@ -1,7 +1,7 @@
 {
   "source_repo": "NousResearch/hermes-agent",
-  "source_ref": "upstream/main@6f1eed3968318dc1d6ca3fb3ded2de6fc8e50308",
-  "captured_on": "2026-04-24",
+  "source_ref": "upstream/main@cae7537359c0ba8fceedc0a6423a4d9f30972100",
+  "captured_on": "2026-05-23",
   "required_known_provider_ids": [
     "ai-gateway",
     "alibaba",
@@ -18,6 +18,7 @@
     "kimi-coding-cn",
     "minimax",
     "minimax-cn",
+    "novita",
     "nous",
     "nvidia",
     "ollama-cloud",

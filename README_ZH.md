@@ -220,6 +220,27 @@ hermes gateway start  # 启动多平台网关
 hermes doctor       # 检查依赖和配置
 ```
 
+## Nous Portal：减少 API Key 配置
+
+Hermes Agent Ultra 仍然支持直接配置任意 provider 和单独的工具 Key。如果你希望用一个托管订阅覆盖模型访问和工具后端，可以使用 [Nous Portal](https://portal.nousresearch.com)：
+
+- 300+ 模型，可用 `/model <name>` 切换。
+- Tool Gateway 可托管网页搜索、图像生成、文本转语音和云浏览器后端。
+
+全新安装后可运行：
+
+```bash
+hermes setup --portal
+```
+
+该命令会启动 Nous OAuth 设置、把 Nous 设为 provider，并启用 Tool Gateway 路由。查看当前状态：
+
+```bash
+hermes portal status
+```
+
+你仍然可以为单个工具使用自己的 Key；Gateway 路由按后端生效，不是一刀切。
+
 ## 测试
 
 ```bash

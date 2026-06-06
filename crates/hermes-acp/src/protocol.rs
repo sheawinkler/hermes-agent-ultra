@@ -2,7 +2,6 @@
 //!
 //! Defines the full set of ACP JSON-RPC methods, request/response types,
 //! capability declarations, content blocks, and session update structures.
-//! Mirrors the Python `acp.schema` module.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -118,7 +117,9 @@ impl From<&str> for AcpMethod {
             "prompt" => Self::Prompt,
             "session/set_model" | "set_session_model" => Self::SetSessionModel,
             "session/set_mode" | "set_session_mode" => Self::SetSessionMode,
-            "session/set_config" | "set_config_option" => Self::SetConfigOption,
+            "session/set_config" | "session/set_config_option" | "set_config_option" => {
+                Self::SetConfigOption
+            }
 
             // Legacy methods
             "conversation.create" => Self::CreateConversation,
@@ -140,9 +141,21 @@ impl From<&str> for AcpMethod {
 /// Agent capabilities advertised during `initialize`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentCapabilities {
-    #[serde(default)]
+    #[serde(rename = "loadSession", alias = "load_session", default)]
     pub load_session: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "promptCapabilities",
+        alias = "prompt_capabilities",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prompt_capabilities: Option<PromptCapabilities>,
+    #[serde(default)]
+    #[serde(
+        rename = "sessionCapabilities",
+        alias = "session_capabilities",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub session_capabilities: Option<SessionCapabilities>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<String>>,
@@ -150,6 +163,13 @@ pub struct AgentCapabilities {
     pub streaming: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub models: Option<Vec<String>>,
+}
+
+/// Prompt-level capabilities.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PromptCapabilities {
+    #[serde(default)]
+    pub image: bool,
 }
 
 /// Session-level capabilities.
@@ -184,6 +204,10 @@ pub struct AuthMethod {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub method_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -192,10 +216,18 @@ pub struct AuthMethod {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitializeResponse {
+    #[serde(rename = "protocolVersion", alias = "protocol_version")]
     pub protocol_version: u32,
+    #[serde(rename = "agentInfo", alias = "agent_info")]
     pub agent_info: Implementation,
+    #[serde(rename = "agentCapabilities", alias = "agent_capabilities")]
     pub agent_capabilities: AgentCapabilities,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "authMethods",
+        alias = "auth_methods",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub auth_methods: Option<Vec<AuthMethod>>,
 }
 
@@ -211,7 +243,12 @@ pub enum ContentBlock {
         text: String,
     },
     Image {
+        #[serde(default)]
         url: String,
+        #[serde(default)]
+        data: Option<String>,
+        #[serde(rename = "mimeType", alias = "mime_type", default)]
+        mime_type: Option<String>,
         #[serde(default)]
         alt: Option<String>,
     },
@@ -281,8 +318,21 @@ pub enum SessionUpdate {
 pub struct AvailableCommand {
     pub name: String,
     pub description: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "inputHint",
+        alias = "input_hint",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub input_hint: Option<String>,
+}
+
+/// Entry in a native ACP plan update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanEntry {
+    pub content: String,
+    pub priority: String,
+    pub status: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -292,15 +342,25 @@ pub struct AvailableCommand {
 /// Token usage statistics.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Usage {
-    #[serde(default)]
+    #[serde(rename = "inputTokens", alias = "input_tokens", default)]
     pub input_tokens: u64,
-    #[serde(default)]
+    #[serde(rename = "outputTokens", alias = "output_tokens", default)]
     pub output_tokens: u64,
-    #[serde(default)]
+    #[serde(rename = "totalTokens", alias = "total_tokens", default)]
     pub total_tokens: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "thoughtTokens",
+        alias = "thought_tokens",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub thought_tokens: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "cachedReadTokens",
+        alias = "cached_read_tokens",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cached_read_tokens: Option<u64>,
 }
 
@@ -322,6 +382,7 @@ pub enum StopReason {
 /// Response to a `prompt` request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptResponse {
+    #[serde(rename = "stopReason", alias = "stop_reason")]
     pub stop_reason: StopReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
@@ -370,6 +431,7 @@ pub struct EnvVar {
 /// Session info for listing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcpSessionInfo {
+    #[serde(rename = "sessionId", alias = "session_id")]
     pub session_id: String,
     pub cwd: String,
 }
@@ -385,6 +447,10 @@ mod tests {
         assert_eq!(AcpMethod::from("new_session"), AcpMethod::NewSession);
         assert_eq!(AcpMethod::from("prompt"), AcpMethod::Prompt);
         assert_eq!(AcpMethod::from("cancel"), AcpMethod::Cancel);
+        assert_eq!(
+            AcpMethod::from("session/set_config_option"),
+            AcpMethod::SetConfigOption
+        );
         assert_eq!(
             AcpMethod::from("conversation.create"),
             AcpMethod::CreateConversation
@@ -417,11 +483,33 @@ mod tests {
             ContentBlock::text("hello"),
             ContentBlock::Image {
                 url: "http://img.png".into(),
+                data: None,
+                mime_type: None,
                 alt: None,
             },
             ContentBlock::text("world"),
         ];
         assert_eq!(extract_text(&blocks), "hello\nworld");
+
+        let image: ContentBlock = serde_json::from_value(serde_json::json!({
+            "type": "image",
+            "data": "aGVsbG8=",
+            "mimeType": "image/png"
+        }))
+        .unwrap();
+        match image {
+            ContentBlock::Image {
+                url,
+                data,
+                mime_type,
+                ..
+            } => {
+                assert_eq!(url, "");
+                assert_eq!(data.as_deref(), Some("aGVsbG8="));
+                assert_eq!(mime_type.as_deref(), Some("image/png"));
+            }
+            _ => panic!("expected image block"),
+        }
     }
 
     #[test]
@@ -441,6 +529,7 @@ mod tests {
     fn test_capabilities_serde() {
         let caps = AgentCapabilities {
             load_session: true,
+            prompt_capabilities: Some(PromptCapabilities { image: true }),
             session_capabilities: Some(SessionCapabilities {
                 fork: true,
                 list: true,
@@ -450,7 +539,9 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_value(&caps).unwrap();
-        assert_eq!(json["load_session"], true);
+        assert_eq!(json["loadSession"], true);
+        assert_eq!(json["promptCapabilities"]["image"], true);
+        assert_eq!(json["sessionCapabilities"]["fork"], true);
         assert_eq!(json["streaming"], true);
     }
 }

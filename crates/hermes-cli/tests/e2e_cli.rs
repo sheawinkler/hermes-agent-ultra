@@ -1,6 +1,5 @@
 use assert_cmd::Command;
 use std::fs;
-use std::process::Command as StdCommand;
 
 #[test]
 fn e2e_cli_model_command_prints_current_model() {
@@ -70,25 +69,74 @@ fn e2e_cli_config_set_dotted_llm_and_get_masks_key() {
 }
 
 #[test]
-fn e2e_cli_interactive_refuses_parallel_session_when_lock_pid_is_alive() {
+fn e2e_cli_interactive_without_tty_reports_actionable_diagnostic() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let lock_path = dir.path().join("interactive.session.lock");
-    let mut sleeper = StdCommand::new("sleep")
-        .arg("30")
-        .spawn()
-        .expect("spawn sleep process");
-
-    fs::write(&lock_path, format!("{}\n", sleeper.id())).expect("write lock");
-
     let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
     cmd.env("HERMES_HOME", dir.path());
+    cmd.env_remove("HERMES_ALLOW_PARALLEL_INTERACTIVE");
     let assert = cmd.assert().failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     assert!(
-        stderr.contains("Another Hermes interactive session is running"),
-        "expected lock guard error in stderr, got: {stderr:?}"
+        stderr.contains("interactive Hermes requires a terminal (TTY)"),
+        "expected TTY diagnostic in stderr, got: {stderr:?}"
     );
+    assert!(
+        stderr.contains("hermes-ultra chat --query"),
+        "expected non-interactive prompt guidance in stderr, got: {stderr:?}"
+    );
+    assert!(
+        stderr.contains("hermes-ultra doctor --deep --snapshot --bundle"),
+        "expected doctor bundle guidance in stderr, got: {stderr:?}"
+    );
+}
 
-    let _ = sleeper.kill();
-    let _ = sleeper.wait();
+#[test]
+fn e2e_cli_systems_status_and_reports_are_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    for args in [
+        vec!["systems", "status", "--json"],
+        vec!["systems", "release", "--json"],
+        vec!["systems", "agent-card", "card", "--json"],
+        vec!["systems", "mcp", "conformance", "--json"],
+        vec!["systems", "acp", "conformance", "--json"],
+        vec!["systems", "providers", "--json"],
+        vec!["systems", "handoff", "template", "--json"],
+        vec!["systems", "provenance", "--json"],
+    ] {
+        let mut cmd = Command::cargo_bin("hermes-agent-ultra").expect("binary exists");
+        cmd.env("HERMES_HOME", dir.path());
+        cmd.args(args);
+        let out = cmd.assert().success().get_output().stdout.clone();
+        let text = std::str::from_utf8(&out).expect("utf8");
+        let value: serde_json::Value = serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("json parse failed: {err}; {text}"));
+        assert!(
+            value.get("kind").is_some() || value.get("name").is_some(),
+            "expected report/card json, got {value}"
+        );
+    }
+}
+
+#[test]
+fn e2e_cli_systems_replay_reports_existing_trace() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let replay_dir = dir.path().join("logs").join("replay");
+    fs::create_dir_all(&replay_dir).expect("mkdir replay");
+    fs::write(
+        replay_dir.join("session.jsonl"),
+        concat!(
+            "{\"seq\":1,\"event\":\"start\",\"trace_id\":\"t\",\"prev_hash\":null,\"event_hash\":\"a\"}\n",
+            "{\"seq\":2,\"event\":\"stop\",\"trace_id\":\"t\",\"prev_hash\":\"a\",\"event_hash\":\"b\"}\n"
+        ),
+    )
+    .expect("write replay");
+
+    let mut show = Command::cargo_bin("hermes-agent-ultra").expect("binary exists");
+    show.env("HERMES_HOME", dir.path());
+    show.args(["systems", "replay", "--json"]);
+    let out = show.assert().success().get_output().stdout.clone();
+    let text = std::str::from_utf8(&out).expect("utf8");
+    let report: serde_json::Value = serde_json::from_str(text).expect("show json");
+    assert_eq!(report.get("log_count").and_then(|v| v.as_u64()), Some(1));
+    assert_eq!(report.get("passed").and_then(|v| v.as_bool()), Some(true));
 }

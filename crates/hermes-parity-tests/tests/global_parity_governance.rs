@@ -102,3 +102,40 @@ fn test_shared_diff_classification_covers_matrix_items() {
         );
     }
 }
+
+#[test]
+fn test_exact_file_functional_classifications_are_current_shared_diffs() {
+    let backlog = read_json("docs/parity/shared-diff-backlog.json");
+    let classification = read_json("docs/parity/shared-different-classification.json");
+
+    let backlog_entries = backlog["entries"]
+        .as_array()
+        .expect("entries should be array");
+    let active_paths: std::collections::BTreeSet<String> = backlog_entries
+        .iter()
+        .filter_map(|entry| entry["path"].as_str().map(|s| s.to_string()))
+        .collect();
+    let active_classification_paths: std::collections::BTreeSet<String> = backlog_entries
+        .iter()
+        .filter_map(|entry| entry["classification_path"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    let class_items = classification["items"]
+        .as_array()
+        .expect("classification items should be array");
+    for item in class_items {
+        if item["classification"].as_str() != Some("functional") {
+            continue;
+        }
+        let path = item["path"].as_str().expect("path should be string");
+        let basename = path.rsplit('/').next().unwrap_or(path);
+        if !basename.contains('.') {
+            continue;
+        }
+        assert!(
+            active_paths.contains(path) || active_classification_paths.contains(path),
+            "exact-file functional classification is stale or unbacked by the current shared-diff backlog: {}",
+            path
+        );
+    }
+}

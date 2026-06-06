@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::McpError;
+use crate::{coerce_mcp_tool_arguments, McpError};
 
 // ---------------------------------------------------------------------------
 // EventBridge — in-memory event queue with cursor-based polling
@@ -591,7 +591,9 @@ impl HermesMcpServe {
                     .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| McpError::InvalidParams("missing tool name".into()))?;
-                let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+                let arguments = coerce_mcp_tool_arguments(
+                    params.get("arguments").cloned().unwrap_or(json!({})),
+                );
                 let result = self.handle_tool_call(tool_name, arguments).await?;
                 Ok(json!({
                     "content": [{"type": "text", "text": serde_json::to_string(&result).unwrap_or_default()}],
@@ -738,5 +740,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["events"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_tools_call_coerces_stringified_object_args() {
+        let store = Arc::new(InMemorySessionStore::new());
+        let serve = HermesMcpServe::new(store);
+
+        let result = serve
+            .handle_request(
+                "tools/call",
+                json!({
+                    "name": "session_send",
+                    "arguments": "{\"session_key\":\"s1\",\"message\":\"hello\"}"
+                }),
+            )
+            .await
+            .expect("tools/call with stringified object args");
+
+        assert!(!result["isError"].as_bool().unwrap_or(true));
+        let text = result["content"][0]["text"].as_str().unwrap_or("");
+        let payload: Value = serde_json::from_str(text).expect("tool result json");
+        assert_eq!(payload["sent"], true);
+        assert_eq!(payload["session_key"], "s1");
+
+        let (events, _) = serve.event_bridge.poll(0, Some("s1"), 10);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data["content"], "hello");
     }
 }

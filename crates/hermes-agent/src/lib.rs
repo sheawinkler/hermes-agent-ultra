@@ -10,6 +10,7 @@ pub mod api_bridge;
 pub mod api_message_oracle;
 pub mod api_messages;
 pub mod auxiliary_builder;
+pub mod bedrock;
 pub mod budget;
 pub mod chat_completion_helpers;
 pub mod code_index;
@@ -33,6 +34,7 @@ pub mod lsp_context;
 pub mod memory_manager;
 pub mod memory_plugins;
 pub mod message_sanitization;
+pub mod model_normalize;
 pub mod transports;
 pub use message_sanitization as python_alignment;
 mod error_classifier;
@@ -42,7 +44,7 @@ pub mod plugins;
 mod prompt_builder;
 pub mod prompt_caching;
 pub mod provider;
-mod provider_serialize_cache;
+pub mod provider_profiles;
 pub mod providers_extra;
 pub mod rate_limit;
 pub mod reasoning;
@@ -59,6 +61,7 @@ pub mod stream_scrubber;
 pub mod sub_agent_orchestrator;
 pub mod subdirectory_hints;
 mod system_prompt;
+pub mod tool_call_args;
 pub mod tool_executor;
 pub mod tool_guardrails;
 pub mod tools_wiring;
@@ -100,9 +103,11 @@ pub use api_message_oracle::{
     assert_dual_run_eq, assert_messages_oracle_eq, canonical_messages_json,
 };
 pub use auxiliary_builder::{
-    AuxiliaryBuildParams, AuxiliaryWiringSummary, build_auxiliary_client,
-    build_default_auxiliary_client,
+    build_auxiliary_client, build_auxiliary_client_with_main_runtime,
+    build_default_auxiliary_client, AuxiliaryBuildParams, AuxiliaryMainRuntime,
+    AuxiliaryWiringSummary,
 };
+pub use bedrock::BedrockProvider;
 pub use inbound_prepare::AgentInboundPreparer;
 pub use prompt_caching::{
     anthropic_prompt_cache_policy, apply_anthropic_cache_control, build_cache_marker,
@@ -129,16 +134,19 @@ pub use reasoning::parse_reasoning;
 
 // Re-export interrupt controller
 pub use interrupt::InterruptController;
-pub use steer::{PendingSteer, STEER_GUIDANCE_MARKER};
+pub use steer::{
+    format_steer_marker, is_formatted_steer_marker, PendingSteer, STEER_CHANNEL_NOTE,
+    STEER_GUIDANCE_MARKER, STEER_MARKER_CLOSE, STEER_MARKER_OPEN,
+};
 
 // Re-export memory manager
 pub use memory_manager::{
-    MemoryManager, MemoryProviderPlugin, build_memory_context_block, sanitize_context,
+    build_memory_context_block, sanitize_context, MemoryManager, MemoryProviderPlugin,
+    StreamingContextScrubber,
 };
 pub use user_interest::{
-    ExtractOptions, InterestMemoryPlugin, InterestStore, InterestTopic, TopicStatus,
-    extract_signals_from_text, filter_persistable_signals, is_rejected_poi_topic,
-    load_interest_snapshot,
+    extract_signals_from_text, filter_persistable_signals, ExtractOptions, InterestMemoryPlugin,
+    InterestStore, InterestTopic, is_rejected_poi_topic, load_interest_snapshot, TopicStatus,
 };
 
 // Re-export plugin system

@@ -6,8 +6,6 @@
 //! - [`NousProvider`]: Nous Research
 //! - [`CopilotProvider`]: GitHub Copilot ACP
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde_json::Value;
@@ -15,7 +13,6 @@ use serde_json::Value;
 use hermes_core::{AgentError, LlmProvider, LlmResponse, Message, StreamChunk, ToolSchema};
 
 use crate::provider::GenericProvider;
-use crate::provider_serialize_cache::ProviderSerializeCache;
 
 fn openrouter_compatible_extra_body(extra_body: Option<&Value>) -> Option<Value> {
     let Some(Value::Object(map)) = extra_body else {
@@ -64,7 +61,8 @@ impl QwenProvider {
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 api_key,
                 "qwen-turbo",
-            ),
+            )
+            .with_provider_profile("qwen-oauth"),
         }
     }
 
@@ -80,9 +78,9 @@ impl QwenProvider {
         }
     }
 
-    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
         Self {
-            inner: self.inner.with_serialize_cache(cache),
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
         }
     }
 }
@@ -139,7 +137,8 @@ pub struct KimiProvider {
 impl KimiProvider {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            inner: GenericProvider::new("https://api.moonshot.cn/v1", api_key, "moonshot-v1-8k"),
+            inner: GenericProvider::new("https://api.moonshot.cn/v1", api_key, "moonshot-v1-8k")
+                .with_provider_profile("kimi-coding"),
         }
     }
 
@@ -155,9 +154,9 @@ impl KimiProvider {
         }
     }
 
-    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
         Self {
-            inner: self.inner.with_serialize_cache(cache),
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
         }
     }
 }
@@ -230,9 +229,9 @@ impl MiniMaxProvider {
         }
     }
 
-    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
         Self {
-            inner: self.inner.with_serialize_cache(cache),
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
         }
     }
 }
@@ -293,7 +292,8 @@ impl NousProvider {
                 "https://inference-api.nousresearch.com/v1",
                 api_key,
                 "hermes-3-llama-3.1-405b",
-            ),
+            )
+            .with_provider_profile("nous"),
         }
     }
 
@@ -309,9 +309,9 @@ impl NousProvider {
         }
     }
 
-    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
         Self {
-            inner: self.inner.with_serialize_cache(cache),
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
         }
     }
 }
@@ -392,9 +392,9 @@ impl CopilotProvider {
         }
     }
 
-    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
         Self {
-            inner: self.inner.with_serialize_cache(cache),
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
         }
     }
 }
@@ -442,6 +442,7 @@ impl LlmProvider for CopilotProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn qwen_provider_defaults() {
@@ -517,5 +518,46 @@ mod tests {
         let p = CopilotProvider::new("https://copilot.example.com/v1", "token")
             .with_model("gpt-4o-mini");
         assert_eq!(p.inner.model, "gpt-4o-mini");
+    }
+
+    #[test]
+    fn openai_compatible_extra_providers_apply_request_timeout_seconds() {
+        let timeout = Some(Duration::from_secs(45));
+
+        assert_eq!(
+            QwenProvider::new("test-key")
+                .with_optional_request_timeout_seconds(Some(45.0))
+                .inner
+                .configured_request_timeout(),
+            timeout
+        );
+        assert_eq!(
+            KimiProvider::new("test-key")
+                .with_optional_request_timeout_seconds(Some(45.0))
+                .inner
+                .configured_request_timeout(),
+            timeout
+        );
+        assert_eq!(
+            MiniMaxProvider::new("test-key")
+                .with_optional_request_timeout_seconds(Some(45.0))
+                .inner
+                .configured_request_timeout(),
+            timeout
+        );
+        assert_eq!(
+            NousProvider::new("test-key")
+                .with_optional_request_timeout_seconds(Some(45.0))
+                .inner
+                .configured_request_timeout(),
+            timeout
+        );
+        assert_eq!(
+            CopilotProvider::new("https://copilot.example.com/v1", "token")
+                .with_optional_request_timeout_seconds(Some(45.0))
+                .inner
+                .configured_request_timeout(),
+            timeout
+        );
     }
 }

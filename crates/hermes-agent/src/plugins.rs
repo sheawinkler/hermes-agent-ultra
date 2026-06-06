@@ -483,7 +483,18 @@ impl PluginManager {
                 "Hook payload does not match recommended schema"
             );
         }
-        callbacks.iter().map(|cb| cb(context)).collect()
+        callbacks
+            .iter()
+            .filter_map(|cb| {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cb(context))) {
+                    Ok(result) => Some(result),
+                    Err(_) => {
+                        tracing::warn!(hook = hook.as_str(), "Plugin hook panicked");
+                        None
+                    }
+                }
+            })
+            .collect()
     }
 
     /// Get all tools registered via plugin contexts.
@@ -800,6 +811,32 @@ mod tests {
         }
     }
 
+    struct PanicHookPlugin;
+
+    #[async_trait::async_trait]
+    impl Plugin for PanicHookPlugin {
+        fn meta(&self) -> PluginMeta {
+            PluginMeta {
+                name: "panic_hook_test".to_string(),
+                version: "0.1.0".to_string(),
+                description: "Panic hook test plugin".to_string(),
+                author: None,
+            }
+        }
+        async fn initialize(&self) -> Result<(), AgentError> {
+            Ok(())
+        }
+        async fn shutdown(&self) -> Result<(), AgentError> {
+            Ok(())
+        }
+        fn register(&self, ctx: &mut PluginContext) {
+            ctx.on(
+                HookType::OnSessionFinalize,
+                Arc::new(|_ctx| panic!("hook failed")),
+            );
+        }
+    }
+
     #[test]
     fn test_plugin_register() {
         let mut mgr = PluginManager::new();
@@ -866,6 +903,17 @@ mod tests {
     }
 
     #[test]
+    fn test_invoke_hook_contains_panics() {
+        let mut mgr = PluginManager::new();
+        mgr.register(Arc::new(PanicHookPlugin));
+        let results = mgr.invoke_hook(
+            HookType::OnSessionFinalize,
+            &serde_json::json!({"session_id": "test", "platform": "cli"}),
+        );
+        assert!(results.is_empty());
+    }
+
+    #[test]
     fn test_is_disabled() {
         let mgr = PluginManager::new();
         let disabled = vec!["foo".to_string(), "bar".to_string()];
@@ -887,6 +935,10 @@ mod tests {
     fn test_hook_type_as_str() {
         assert_eq!(HookType::PreToolCall.as_str(), "pre_tool_call");
         assert_eq!(HookType::OnSessionEnd.as_str(), "on_session_end");
+        assert_eq!(HookType::OnSessionFinalize.as_str(), "on_session_finalize");
+        assert_eq!(HookType::OnSessionReset.as_str(), "on_session_reset");
+        assert!(HookType::all().contains(&HookType::OnSessionFinalize));
+        assert!(HookType::all().contains(&HookType::OnSessionReset));
     }
 
     #[test]
@@ -961,6 +1013,27 @@ dependencies:
         let discovered = PluginManager::discover_plugins(tmp.path());
         assert_eq!(discovered.len(), 1);
         assert_eq!(discovered[0].0.kind.as_deref(), Some("standalone"));
+    }
+
+    #[test]
+    fn test_discover_plugins_preserves_model_provider_kind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin_dir = tmp.path().join("plugins").join("test-model-provider");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.yaml"),
+            "name: test-model-provider\nversion: \"0.1.0\"\ndescription: Test\nkind: model-provider\n",
+        )
+        .unwrap();
+        std::fs::write(
+            plugin_dir.join("__init__.py"),
+            "raise AssertionError('model-provider plugins are profile manifests, not generic runtime plugins')\n",
+        )
+        .unwrap();
+
+        let discovered = PluginManager::discover_plugins(tmp.path());
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].0.kind.as_deref(), Some("model-provider"));
     }
 
     #[test]

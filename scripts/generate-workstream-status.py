@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,34 @@ def ensure_remote(remote: str, url: str) -> None:
     if remote in remotes:
         return
     run_git(["remote", "add", remote, url])
+
+
+def branch_from_remote_ref(remote: str, upstream_ref: str) -> str:
+    prefix = f"{remote}/"
+    if upstream_ref.startswith(prefix) and len(upstream_ref) > len(prefix):
+        return upstream_ref[len(prefix) :]
+    return "main"
+
+
+def fetch_remote_branch(remote: str, branch: str) -> None:
+    remote_ref = f"{remote}/{branch}"
+    refspec = f"refs/heads/{branch}:refs/remotes/{remote}/{branch}"
+    proc = subprocess.run(
+        ["git", "fetch", "--no-tags", remote, refspec],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode == 0:
+        return
+    if run_git(["rev-parse", "--verify", remote_ref], check=False):
+        print(
+            f"warning: scoped fetch for {remote_ref} failed; using existing ref: "
+            f"{proc.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return
+    raise RuntimeError(f"git fetch {remote} {branch} failed: {proc.stderr.strip()}")
 
 
 def read_text(path: Path) -> str:
@@ -329,7 +358,10 @@ def main() -> int:
 
     ensure_remote(args.upstream_remote, args.upstream_url)
     if not args.no_fetch:
-        run_git(["fetch", args.upstream_remote, "--prune"])
+        fetch_remote_branch(
+            args.upstream_remote,
+            branch_from_remote_ref(args.upstream_remote, args.upstream_ref),
+        )
 
     summary, md = build_status(args.upstream_ref)
     out_json = (REPO_ROOT / args.out_json).resolve()

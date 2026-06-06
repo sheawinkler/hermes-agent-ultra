@@ -72,7 +72,7 @@ pip uninstall xformers -y
 
 Run Qwen3-Coder-30B-A3B-Instruct and 480B-A35B locally with Unsloth Dynamic quants.
 
-Qwen3-Coder is Qwen’s new series of coding agent models, available in 30B (**Qwen3-Coder-Flash**) and 480B parameters. **Qwen3-480B-A35B-Instruct** achieves SOTA coding performance rivalling Claude Sonnet-4, GPT-4.1, and [Kimi K2](https://docs.unsloth.ai/models/tutorials-how-to-fine-tune-and-run-llms/kimi-k2-how-to-run-locally), with 61.8% on Aider Polygot and support for 256K (extendable to 1M) token context.
+Qwen3-Coder is Qwen’s new series of coding agent models, available in 30B (**Qwen3-Coder-Flash**) and 480B parameters. **Qwen3-480B-A35B-Instruct** achieves top-tier coding performance rivalling Claude Sonnet-4, GPT-4.1, and [Kimi K2](https://docs.unsloth.ai/models/tutorials-how-to-fine-tune-and-run-llms/kimi-k2-how-to-run-locally), with 61.8% on Aider Polygot and support for 256K (extendable to 1M) token context.
 
 We also uploaded Qwen3-Coder with native <mark style="background-color:purple;">**1M context length**</mark> extended by YaRN and full-precision 8bit and 16bit versions. [Unsloth](https://github.com/unslothai/unsloth) also now supports fine-tuning and [RL](https://docs.unsloth.ai/get-started/reinforcement-learning-rl-guide) of Qwen3-Coder.
 
@@ -1175,7 +1175,7 @@ Run Qwen3-30B-A3B-2507 and 235B-A22B Thinking and Instruct versions locally on y
 
 Qwen released 2507 (July 2025) updates for their [Qwen3](https://docs.unsloth.ai/models/qwen3-how-to-run-and-fine-tune) 4B, 30B and 235B models, introducing both "thinking" and "non-thinking" variants. The non-thinking '**Qwen3-30B-A3B-Instruct-2507**' and '**Qwen3-235B-A22B-Instruct-2507'** features a 256K context window, improved instruction following, multilingual capabilities and alignment.
 
-The thinking models '**Qwen3-30B-A3B-Thinking-2507**' and '**Qwen3-235B-A22B-Thinking-2507**' excel at reasoning, with the 235B achieving SOTA results in logic, math, science, coding, and advanced academic tasks.
+The thinking models '**Qwen3-30B-A3B-Thinking-2507**' and '**Qwen3-235B-A22B-Thinking-2507**' excel at reasoning, with the 235B achieving top-tier results in logic, math, science, coding, and advanced academic tasks.
 
 [Unsloth](https://github.com/unslothai/unsloth) also now supports fine-tuning and [Reinforcement Learning (RL)](https://docs.unsloth.ai/get-started/reinforcement-learning-rl-guide) of Qwen3-2507 models — 2x faster, with 70% less VRAM, and 8x longer context lengths
 
@@ -3020,11 +3020,11 @@ if __name__ == '__main__':
 
 Guide on running Kimi K2 and Kimi-K2-Instruct-0905 on your own local device!
 
-Kimi-K2-Instruct-0905 the new version of K2 achieves SOTA performance in knowledge, reasoning, coding, and agentic tasks. The full 1T parameter model from Moonshot AI requires 1.09TB of disk space, while the quantized **Unsloth Dynamic 1.8-bit** version reduces this to just 245GB (-80% size)**:** [**Kimi-K2-GGUF**](https://huggingface.co/unsloth/Kimi-K2-Instruct-GGUF)
+Kimi-K2-Instruct-0905 the new version of K2 achieves top-tier performance in knowledge, reasoning, coding, and agentic tasks. The full 1T parameter model from Moonshot AI requires 1.09TB of disk space, while the quantized **Unsloth Dynamic 1.8-bit** version reduces this to just 245GB (-80% size)**:** [**Kimi-K2-GGUF**](https://huggingface.co/unsloth/Kimi-K2-Instruct-GGUF)
 
 You can now run **Kimi-K2-Instruct-0905** with our new GGUFs. Use our same settings below but ensure you change the model name from 'Kimi-K2-Instruct' to 'Kimi-K2-Instruct-0905': [K2-0905 GGUFs](https://huggingface.co/unsloth/Kimi-K2-Instruct-0905-GGUF)
 
-All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for SOTA 5-shot MMLU and KL Divergence performance, meaning you can run quantized LLMs with minimal accuracy loss.
+All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for top-tier 5-shot MMLU and KL Divergence performance, meaning you can run quantized LLMs with minimal accuracy loss.
 
 <a href="https://docs.unsloth.ai/basics/kimi-k2-how-to-run-locally#run-kimi-k2-tutorials" class="button primary">Run in llama.cpp</a>
 
@@ -4356,7 +4356,7 @@ DeepSeek-R1-0528 is DeepSeek's new update to their R1 reasoning model. The full 
 
 DeepSeek also released a R1-0528 distilled version by fine-tuning Qwen3 (8B). The distill achieves similar performance to Qwen3 (235B). ***You can also*** [***fine-tune Qwen3 Distill***](#fine-tuning-deepseek-r1-0528-with-unsloth) ***with Unsloth***. Qwen3 GGUF: [DeepSeek-R1-0528-Qwen3-8B-GGUF](https://huggingface.co/unsloth/DeepSeek-R1-0528-Qwen3-8B-GGUF)
 
-All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for SOTA 5-shot MMLU and KL Divergence performance, meaning you can run & fine-tune quantized DeepSeek LLMs with minimal accuracy loss.
+All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for top-tier 5-shot MMLU and KL Divergence performance, meaning you can run & fine-tune quantized DeepSeek LLMs with minimal accuracy loss.
 
 **Tutorials navigation:**
 
@@ -4496,17 +4496,17 @@ ollama run hf.co/unsloth/DeepSeek-R1-0528-Qwen3-8B-GGUF:Q4_K_XL
 
 A guide on how to run Z.ai's new GLM-4.6 model on your own local device!
 
-GLM-4.6 is the latest reasoning model from **Z.ai**, achieving SOTA performance on coding and agent benchmarks while offering improved conversational chats. The full 355B parameter model requires **400GB** of disk space, while the Unsloth Dynamic 2-bit GGUF reduces the size to **135GB** (-**75%)**. [**GLM-4.6-GGUF**](https://huggingface.co/unsloth/GLM-4.6-GGUF)
+GLM-4.6 is the latest reasoning model from **Z.ai**, achieving top-tier performance on coding and agent benchmarks while offering improved conversational chats. The full 355B parameter model requires **400GB** of disk space, while the Unsloth Dynamic 2-bit GGUF reduces the size to **135GB** (-**75%)**. [**GLM-4.6-GGUF**](https://huggingface.co/unsloth/GLM-4.6-GGUF)
 
 There is currently no smaller **GLM-4.6-Air** model available, however Z.ai's team says that it is expected soon.
 
 {% hint style="success" %}
 We did multiple [**chat template fixes**](#unsloth-chat-template-fixes) for GLM-4.6 to make `llama.cpp/llama-cli --jinja` work - please only use `--jinja` otherwise the output will be wrong!
 
-You asked for benchmarks on our quants, so we’re showcasing Aider Polyglot results! Our Dynamic 3-bit DeepSeek V3.1 GGUF scores **75.6%**, surpassing many full-precision SOTA LLMs. [Read more.](https://docs.unsloth.ai/new/unsloth-dynamic-ggufs-on-aider-polyglot)
+You asked for benchmarks on our quants, so we’re showcasing Aider Polyglot results! Our Dynamic 3-bit DeepSeek V3.1 GGUF scores **75.6%**, surpassing many full-precision top-tier LLMs. [Read more.](https://docs.unsloth.ai/new/unsloth-dynamic-ggufs-on-aider-polyglot)
 {% endhint %}
 
-All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for SOTA 5-shot MMLU and Aider performance, meaning you can run & fine-tune quantized GLM LLMs with minimal accuracy loss.
+All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for top-tier 5-shot MMLU and Aider performance, meaning you can run & fine-tune quantized GLM LLMs with minimal accuracy loss.
 
 **Tutorials navigation:**
 
@@ -5305,7 +5305,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 
 Learn to fine-tune and run Qwen3-VL locally with Unsloth.
 
-Qwen3-VL is Qwen’s new vision models with **instruct** and **thinking** versions. The 2B, 4B, 8B and 32B models are dense, while 30B and 235B are MoE. The 235B thinking LLM delivers SOTA vision and coding performance rivaling GPT-5 (high) and Gemini 2.5 Pro.\
+Qwen3-VL is Qwen’s new vision models with **instruct** and **thinking** versions. The 2B, 4B, 8B and 32B models are dense, while 30B and 235B are MoE. The 235B thinking LLM delivers top-tier vision and coding performance rivaling GPT-5 (high) and Gemini 2.5 Pro.\
 \
 Qwen3-VL has vision, video and OCR capabilities as well as 256K context (can be extended to 1M).\
 \
@@ -6584,7 +6584,7 @@ delta=1.5 # two sided
 
 Run & fine-tune OpenAI's new open-source models!
 
-OpenAI releases '**gpt-oss-120b'** and '**gpt-oss-20b'**, two SOTA open language models under the Apache 2.0 license. Both 128k context models outperform similarly sized open models in reasoning, tool use, and agentic tasks. You can now run & fine-tune them locally with Unsloth!
+OpenAI releases '**gpt-oss-120b'** and '**gpt-oss-20b'**, two top-tier open language models under the Apache 2.0 license. Both 128k context models outperform similarly sized open models in reasoning, tool use, and agentic tasks. You can now run & fine-tune them locally with Unsloth!
 
 <a href="#run-gpt-oss-20b" class="button secondary">Run gpt-oss-20b</a><a href="#run-gpt-oss-120b" class="button secondary">Run gpt-oss-120b</a><a href="#fine-tuning-gpt-oss-with-unsloth" class="button primary">Fine-tune gpt-oss</a>
 
@@ -6832,7 +6832,7 @@ Now with Vision support! We worked with Mistral again with the release of Magist
 **If you're using llama.cpp, please use `--jinja` to enable the system prompt!**
 {% endhint %}
 
-All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for SOTA 5-shot MMLU and KL Divergence performance, meaning you can run & fine-tune quantized Mistral LLMs with minimal accuracy loss.
+All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for top-tier 5-shot MMLU and KL Divergence performance, meaning you can run & fine-tune quantized Mistral LLMs with minimal accuracy loss.
 
 #### Magistral-Small **- Unsloth Dynamic** uploads:
 
@@ -7676,12 +7676,12 @@ DeepSeek’s V3.1 and **Terminus** update introduces hybrid reasoning inference,
 {% hint style="success" %}
 **NEW:** DeepSeek-V3.1-Terminus out now: [DeepSeek-V3.1-Terminus-GGUF](https://huggingface.co/unsloth/DeepSeek-V3.1-Terminus-GGUF)\
 \
-[**Sept 10, 2025 update:**](https://docs.unsloth.ai/new/unsloth-dynamic-ggufs-on-aider-polyglot) You asked for tougher benchmarks, so we’re showcasing Aider Polyglot results! Our Dynamic 3-bit DeepSeek V3.1 GGUF scores **75.6%**, surpassing many full-precision SOTA LLMs. [Read more.](https://docs.unsloth.ai/new/unsloth-dynamic-ggufs-on-aider-polyglot)
+[**Sept 10, 2025 update:**](https://docs.unsloth.ai/new/unsloth-dynamic-ggufs-on-aider-polyglot) You asked for tougher benchmarks, so we’re showcasing Aider Polyglot results! Our Dynamic 3-bit DeepSeek V3.1 GGUF scores **75.6%**, surpassing many full-precision top-tier LLMs. [Read more.](https://docs.unsloth.ai/new/unsloth-dynamic-ggufs-on-aider-polyglot)
 
 Our DeepSeek-V3.1 GGUFs include Unsloth [chat template fixes](#chat-template-bug-fixes) for llama.cpp supported backends.
 {% endhint %}
 
-All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for SOTA 5-shot MMLU and KL Divergence performance, meaning you can run & fine-tune quantized DeepSeek LLMs with minimal accuracy loss.
+All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for top-tier 5-shot MMLU and KL Divergence performance, meaning you can run & fine-tune quantized DeepSeek LLMs with minimal accuracy loss.
 
 **Tutorials navigation:**
 
@@ -8759,7 +8759,7 @@ def formatting_prompts_func(examples):
 
 Performance of Unsloth Dynamic GGUFs on Aider Polyglot Benchmarks
 
-We’re excited to share that Unsloth Dynamic GGUFs shows how it's possible to quantize LLMs like [DeepSeek-V3.1](https://docs.unsloth.ai/models/deepseek-v3.1-how-to-run-locally) (671B) down to just **1-bit** or **3-bit**, and still be able to outperform SOTA models like **GPT-4.5, GPT-4.1** (April 2025) and **Claude-4-Opus** (May 2025).
+We’re excited to share that Unsloth Dynamic GGUFs shows how it's possible to quantize LLMs like [DeepSeek-V3.1](https://docs.unsloth.ai/models/deepseek-v3.1-how-to-run-locally) (671B) down to just **1-bit** or **3-bit**, and still be able to outperform top-tier models like **GPT-4.5, GPT-4.1** (April 2025) and **Claude-4-Opus** (May 2025).
 
 Previously, [we demonstrated](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) how Unsloth Dynamic GGUFs outperform other quantization methods on 5-shot MMLU and KL Divergence. Now, we’re showcasing their performance on independent third-party evaluations using the **Aider Polyglot** **benchmark.**
 
@@ -9461,7 +9461,7 @@ We're excited to introduce our Dynamic v2.0 quantization method - a major upgrad
 This means you can now run + fine-tune quantized LLMs while preserving as much accuracy as possible! You can run the 2.0 GGUFs on any inference engine like llama.cpp, Ollama, Open WebUI etc.
 
 {% hint style="success" %}
-[**Sept 10, 2025 update:**](https://docs.unsloth.ai/new/unsloth-dynamic-ggufs-on-aider-polyglot) You asked for tougher benchmarks, so we’re showcasing Aider Polyglot results! Our Dynamic 3-bit DeepSeek V3.1 GGUF scores **75.6%**, surpassing many full-precision SOTA LLMs. [Read more.](https://docs.unsloth.ai/new/unsloth-dynamic-ggufs-on-aider-polyglot)
+[**Sept 10, 2025 update:**](https://docs.unsloth.ai/new/unsloth-dynamic-ggufs-on-aider-polyglot) You asked for tougher benchmarks, so we’re showcasing Aider Polyglot results! Our Dynamic 3-bit DeepSeek V3.1 GGUF scores **75.6%**, surpassing many full-precision top-tier LLMs. [Read more.](https://docs.unsloth.ai/new/unsloth-dynamic-ggufs-on-aider-polyglot)
 
 The **key advantage** of using the Unsloth package and models is our active role in ***fixing critical bugs*** in major models. We've collaborated directly with teams behind [Qwen3](https://www.reddit.com/r/LocalLLaMA/comments/1kaodxu/qwen3_unsloth_dynamic_ggufs_128k_context_bug_fixes/), [Meta (Llama 4)](https://github.com/ggml-org/llama.cpp/pull/12889), [Mistral (Devstral)](https://app.gitbook.com/o/HpyELzcNe0topgVLGCZY/s/xhOjnexMCB3dmuQFQ2Zq/~/changes/618/basics/tutorials-how-to-fine-tune-and-run-llms/devstral-how-to-run-and-fine-tune), [Google (Gemma 1–3)](https://news.ycombinator.com/item?id=39671146) and [Microsoft (Phi-3/4)](https://simonwillison.net/2025/Jan/11/phi-4-bug-fixes), contributing essential fixes that significantly boost accuracy.
 {% endhint %}
@@ -10048,7 +10048,7 @@ Qwen's new Qwen3 models deliver state-of-the-art advancements in reasoning, inst
 **NEW!** Qwen3 got an update in July 2025. Run & fine-tune the latest model: [**Qwen-2507**](https://docs.unsloth.ai/models/qwen3-how-to-run-and-fine-tune/qwen3-2507)
 {% endhint %}
 
-All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for SOTA 5-shot MMLU and KL Divergence performance, meaning you can run & fine-tune quantized Qwen LLMs with minimal accuracy loss.
+All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for top-tier 5-shot MMLU and KL Divergence performance, meaning you can run & fine-tune quantized Qwen LLMs with minimal accuracy loss.
 
 We also uploaded Qwen3 with native 128K context length. Qwen achieves this by using YaRN to extend its original 40K window to 128K.
 
@@ -10362,7 +10362,7 @@ You can now run **Grok 2** (aka Grok 2.5), the 270B parameter model by xAI. Full
 
 The **3-bit Q3\_K\_XL** model runs on a single **128GB Mac** or **24GB VRAM + 128GB RAM**, achieving **5+ tokens/s** inference. Thanks to the llama.cpp team and community for [supporting Grok 2](https://github.com/ggml-org/llama.cpp/pull/15539) and making this possible. We were also glad to have helped a little along the way!&#x20;
 
-All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for SOTA 5-shot MMLU and KL Divergence performance, meaning you can run quantized Grok LLMs with minimal accuracy loss.
+All uploads use Unsloth [Dynamic 2.0](https://docs.unsloth.ai/basics/unsloth-dynamic-2.0-ggufs) for top-tier 5-shot MMLU and KL Divergence performance, meaning you can run quantized Grok LLMs with minimal accuracy loss.
 
 <a href="#run-in-llama.cpp" class="button secondary">Run in llama.cpp Tutorial</a>
 

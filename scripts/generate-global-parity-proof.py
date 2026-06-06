@@ -245,7 +245,6 @@ def main() -> int:
         "max_commits_behind": float(parity_summary.get("commits_behind", 0)),
         "max_upstream_patch_missing": float(parity_summary.get("upstream_patch_missing", 0)),
         "max_files_only_upstream": float(parity_summary.get("files_only_upstream", 0)),
-        "max_shared_different": float(parity_summary.get("files_shared_different", 0)),
         "max_unowned_divergences": float(divergence_summary.get("unowned", 0)),
         "max_divergence_review_overdue": float(divergence_summary.get("review_overdue", 0)),
         "min_test_intent_mapping_ratio": float(intent_summary.get("mapping_ratio", 0.0)),

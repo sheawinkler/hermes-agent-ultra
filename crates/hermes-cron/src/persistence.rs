@@ -96,7 +96,8 @@ impl FileJobPersistence {
 
     /// Ensure the data directory exists.
     async fn ensure_dir(&self) -> Result<(), std::io::Error> {
-        fs::create_dir_all(&self.data_dir).await
+        fs::create_dir_all(&self.data_dir).await?;
+        secure_dir(&self.data_dir).await
     }
 
     /// Return the file path for a given job ID.
@@ -115,9 +116,39 @@ impl FileJobPersistence {
         let tmp = self.temp_job_path(id);
         let dst = self.job_path(id);
         fs::write(&tmp, contents).await?;
+        secure_file(&tmp).await?;
         fs::rename(&tmp, &dst).await?;
+        secure_file(&dst).await?;
         Ok(())
     }
+}
+
+#[cfg(unix)]
+async fn secure_dir(path: &std::path::Path) -> Result<(), std::io::Error> {
+    use std::os::unix::fs::PermissionsExt;
+    if fs::try_exists(path).await.unwrap_or(false) {
+        fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).await?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn secure_dir(_path: &std::path::Path) -> Result<(), std::io::Error> {
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn secure_file(path: &std::path::Path) -> Result<(), std::io::Error> {
+    use std::os::unix::fs::PermissionsExt;
+    if fs::try_exists(path).await.unwrap_or(false) {
+        fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn secure_file(_path: &std::path::Path) -> Result<(), std::io::Error> {
+    Ok(())
 }
 
 impl Default for FileJobPersistence {
@@ -451,6 +482,27 @@ mod tests {
             let name = name.to_string_lossy();
             assert!(!name.ends_with(".tmp"), "unexpected temp file: {name}");
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_file_persistence_hardens_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let cron_dir = dir.path().join("cron");
+        let persistence = FileJobPersistence::with_dir(cron_dir.clone());
+        let job = crate::job::CronJob::new("0 9 * * *", "Private job");
+        persistence.save_job(&job).await.unwrap();
+
+        let dir_mode = std::fs::metadata(&cron_dir).unwrap().permissions().mode() & 0o777;
+        let file_mode = std::fs::metadata(persistence.job_path(&job.id))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(dir_mode, 0o700);
+        assert_eq!(file_mode, 0o600);
     }
 
     #[tokio::test]

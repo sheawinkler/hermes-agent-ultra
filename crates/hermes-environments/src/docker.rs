@@ -1,5 +1,7 @@
 //! Docker terminal backend – executes commands inside Docker containers.
 
+use std::sync::Mutex;
+
 use async_trait::async_trait;
 use tokio::process::Command as TokioCommand;
 
@@ -8,9 +10,27 @@ use hermes_core::{AgentError, CommandOutput, TerminalBackend};
 /// A [`TerminalBackend`] that runs commands inside a Docker container.
 pub struct DockerBackend {
     /// Active container ID (or name).
-    container_id: Option<String>,
+    container_id: Mutex<Option<String>>,
     /// Docker image to use if creating a new container.
     image: Option<String>,
+    /// Mount the host cwd at /workspace when creating a container.
+    mount_cwd_to_workspace: bool,
+    /// Run the container as the host uid/gid when supported.
+    run_as_host_user: bool,
+    /// CPU limit for newly-created containers.
+    container_cpu: Option<u32>,
+    /// Memory limit in MiB for newly-created containers.
+    container_memory: Option<u64>,
+    /// Disk limit in MiB for newly-created containers.
+    container_disk: Option<u64>,
+    /// Keep container after it stops.
+    container_persistent: bool,
+    /// Extra env vars to pass to Docker as KEY=VALUE entries.
+    docker_env: Option<String>,
+    /// Host env-var names to forward.
+    docker_forward_env: Vec<String>,
+    /// Extra Docker volume specs.
+    docker_volumes: Vec<String>,
     /// Default timeout in seconds.
     default_timeout: u64,
     /// Maximum output size in bytes.
@@ -27,22 +47,111 @@ impl DockerBackend {
     pub fn new(
         container_id: Option<String>,
         image: Option<String>,
+        mount_cwd_to_workspace: bool,
+        run_as_host_user: bool,
+        container_cpu: Option<u32>,
+        container_memory: Option<u64>,
+        container_disk: Option<u64>,
+        container_persistent: bool,
+        docker_env: Option<String>,
+        docker_forward_env: Vec<String>,
+        docker_volumes: Vec<String>,
         default_timeout: u64,
         max_output_size: usize,
     ) -> Self {
         Self {
-            container_id,
+            container_id: Mutex::new(container_id),
             image: image.or_else(|| Some("ubuntu:22.04".to_string())),
+            mount_cwd_to_workspace,
+            run_as_host_user,
+            container_cpu,
+            container_memory,
+            container_disk,
+            container_persistent,
+            docker_env,
+            docker_forward_env,
+            docker_volumes,
             default_timeout,
             max_output_size,
         }
     }
 
+    fn docker_env_pairs(&self) -> Vec<String> {
+        self.docker_env
+            .as_deref()
+            .unwrap_or("")
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty() && entry.contains('='))
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    fn build_run_args(&self, image: &str) -> Vec<String> {
+        let mut args = vec!["run".to_string(), "-d".to_string(), "--tty".to_string()];
+        if !self.container_persistent {
+            args.push("--rm".to_string());
+        }
+        if self.run_as_host_user {
+            #[cfg(unix)]
+            {
+                let uid = unsafe { libc::getuid() };
+                let gid = unsafe { libc::getgid() };
+                args.push("--user".to_string());
+                args.push(format!("{uid}:{gid}"));
+            }
+        }
+        if let Some(cpu) = self.container_cpu {
+            args.push("--cpus".to_string());
+            args.push(cpu.to_string());
+        }
+        if let Some(memory) = self.container_memory {
+            args.push("--memory".to_string());
+            args.push(format!("{memory}m"));
+        }
+        if let Some(disk) = self.container_disk {
+            args.push("--storage-opt".to_string());
+            args.push(format!("size={disk}m"));
+        }
+        for env_pair in self.docker_env_pairs() {
+            args.push("-e".to_string());
+            args.push(env_pair);
+        }
+        for env_name in &self.docker_forward_env {
+            if let Ok(value) = std::env::var(env_name) {
+                args.push("-e".to_string());
+                args.push(format!("{env_name}={value}"));
+            }
+        }
+        for volume in &self.docker_volumes {
+            args.push("-v".to_string());
+            args.push(volume.clone());
+        }
+        if self.mount_cwd_to_workspace {
+            if let Ok(cwd) = std::env::current_dir() {
+                args.push("-v".to_string());
+                args.push(format!("{}:/workspace", cwd.display()));
+                args.push("-w".to_string());
+                args.push("/workspace".to_string());
+            }
+        }
+        args.push(image.to_string());
+        args.push("tail".to_string());
+        args.push("-f".to_string());
+        args.push("/dev/null".to_string());
+        args
+    }
+
     /// Ensure we have a running container. If `container_id` is None,
     /// create one from the configured image.
-    async fn ensure_container(&mut self) -> Result<String, AgentError> {
-        if let Some(ref id) = self.container_id {
-            return Ok(id.clone());
+    async fn ensure_container(&self) -> Result<String, AgentError> {
+        if let Some(id) = self
+            .container_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+        {
+            return Ok(id);
         }
 
         let image = self
@@ -52,8 +161,10 @@ impl DockerBackend {
 
         tracing::info!("Creating Docker container from image: {}", image);
 
+        let args = self.build_run_args(image);
+
         let output = TokioCommand::new("docker")
-            .args(["run", "-d", "--tty", image, "tail", "-f", "/dev/null"])
+            .args(&args)
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to create Docker container: {}", e)))?;
@@ -68,15 +179,8 @@ impl DockerBackend {
 
         let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
         tracing::info!("Created container: {}", id);
-        self.container_id = Some(id.clone());
+        *self.container_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(id.clone());
         Ok(id)
-    }
-
-    /// Get the container ID, returning an error if not available.
-    fn container_id(&self) -> Result<&str, AgentError> {
-        self.container_id
-            .as_deref()
-            .ok_or_else(|| AgentError::Config("No Docker container ID available".into()))
     }
 
     fn truncate_output(&self, s: String) -> String {
@@ -86,21 +190,24 @@ impl DockerBackend {
             s
         }
     }
-}
 
-#[async_trait]
-impl TerminalBackend for DockerBackend {
-    async fn execute_command(
+    fn clear_container_id(&self) {
+        *self.container_id.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn should_recreate_after_exec_output(&self, output: &CommandOutput) -> bool {
+        self.container_persistent && output_indicates_container_gone(output)
+    }
+
+    async fn execute_in_container(
         &self,
+        container_id: &str,
         command: &str,
-        timeout: Option<u64>,
+        timeout_secs: u64,
         workdir: Option<&str>,
         background: bool,
         pty: bool,
     ) -> Result<CommandOutput, AgentError> {
-        let container_id = self.container_id()?;
-        let timeout_secs = timeout.unwrap_or(self.default_timeout);
-
         let mut args = vec!["exec".to_string()];
 
         if pty {
@@ -150,6 +257,64 @@ impl TerminalBackend for DockerBackend {
             ))),
         }
     }
+}
+
+fn container_gone_message(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("no such container")
+        || lower.contains("no such object")
+        || lower.contains("is not running")
+}
+
+fn output_indicates_container_gone(output: &CommandOutput) -> bool {
+    output.exit_code != 0
+        && (container_gone_message(&output.stderr) || container_gone_message(&output.stdout))
+}
+
+#[async_trait]
+impl TerminalBackend for DockerBackend {
+    async fn execute_command(
+        &self,
+        command: &str,
+        timeout: Option<u64>,
+        workdir: Option<&str>,
+        background: bool,
+        pty: bool,
+    ) -> Result<CommandOutput, AgentError> {
+        let timeout_secs = timeout.unwrap_or(self.default_timeout);
+        let mut container_id = self.ensure_container().await?;
+        let mut output = self
+            .execute_in_container(
+                &container_id,
+                command,
+                timeout_secs,
+                workdir,
+                background,
+                pty,
+            )
+            .await?;
+
+        if self.should_recreate_after_exec_output(&output) {
+            tracing::warn!(
+                container_id = container_id,
+                "Docker persistent container disappeared; recreating and retrying command once"
+            );
+            self.clear_container_id();
+            container_id = self.ensure_container().await?;
+            output = self
+                .execute_in_container(
+                    &container_id,
+                    command,
+                    timeout_secs,
+                    workdir,
+                    background,
+                    pty,
+                )
+                .await?;
+        }
+
+        Ok(output)
+    }
 
     async fn read_file(
         &self,
@@ -157,7 +322,7 @@ impl TerminalBackend for DockerBackend {
         offset: Option<u64>,
         limit: Option<u64>,
     ) -> Result<String, AgentError> {
-        let container_id = self.container_id()?;
+        let container_id = self.ensure_container().await?;
 
         // Use docker exec cat to read the file
         let mut cat_cmd = format!("cat {}", shlex_quote(path));
@@ -177,7 +342,7 @@ impl TerminalBackend for DockerBackend {
         }
 
         let output = TokioCommand::new("docker")
-            .args(["exec", container_id, "sh", "-c", &cat_cmd])
+            .args(["exec", container_id.as_str(), "sh", "-c", &cat_cmd])
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to read file via docker: {}", e)))?;
@@ -194,7 +359,7 @@ impl TerminalBackend for DockerBackend {
     }
 
     async fn write_file(&self, path: &str, content: &str) -> Result<(), AgentError> {
-        let container_id = self.container_id()?;
+        let container_id = self.ensure_container().await?;
 
         // Use docker exec to write the file. We pipe the content through stdin.
         // First ensure the parent directory exists.
@@ -206,7 +371,7 @@ impl TerminalBackend for DockerBackend {
         if !parent_dir.is_empty() {
             let mkdir_cmd = format!("mkdir -p {}", shlex_quote(&parent_dir));
             let mkdir_output = TokioCommand::new("docker")
-                .args(["exec", container_id, "sh", "-c", &mkdir_cmd])
+                .args(["exec", container_id.as_str(), "sh", "-c", &mkdir_cmd])
                 .output()
                 .await
                 .map_err(|e| {
@@ -232,7 +397,7 @@ impl TerminalBackend for DockerBackend {
         );
 
         let output = TokioCommand::new("docker")
-            .args(["exec", container_id, "sh", "-c", &write_cmd])
+            .args(["exec", container_id.as_str(), "sh", "-c", &write_cmd])
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to write file via docker: {}", e)))?;
@@ -249,16 +414,80 @@ impl TerminalBackend for DockerBackend {
     }
 
     async fn file_exists(&self, path: &str) -> Result<bool, AgentError> {
-        let container_id = self.container_id()?;
+        let container_id = self.ensure_container().await?;
 
         let output = TokioCommand::new("docker")
-            .args(["exec", container_id, "test", "-e", path])
+            .args(["exec", container_id.as_str(), "test", "-e", path])
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to check file via docker: {}", e)))?;
 
         // test -e returns 0 if file exists, 1 otherwise
         Ok(output.status.success())
+    }
+}
+
+#[cfg(test)]
+mod quote_tests {
+    use super::*;
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(old) = &self.old {
+                std::env::set_var(self.key, old);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    #[test]
+    fn build_run_args_include_terminal_config_env_and_resource_flags() {
+        let _forward = EnvGuard::set("HERMES_DOCKER_FORWARD_TEST", "forwarded");
+        let backend = DockerBackend::new(
+            None,
+            Some("rust:1.90".to_string()),
+            false,
+            true,
+            Some(2),
+            Some(4096),
+            Some(51200),
+            true,
+            Some("FOO=bar,BAZ=qux".to_string()),
+            vec!["HERMES_DOCKER_FORWARD_TEST".to_string()],
+            vec!["/host/cache:/cache".to_string()],
+            120,
+            1_048_576,
+        );
+
+        let args = backend.build_run_args("rust:1.90");
+        assert!(args.windows(2).any(|w| w == ["--cpus", "2"]));
+        assert!(args.windows(2).any(|w| w == ["--memory", "4096m"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--storage-opt", "size=51200m"]));
+        assert!(args.windows(2).any(|w| w == ["-e", "FOO=bar"]));
+        assert!(args.windows(2).any(|w| w == ["-e", "BAZ=qux"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["-e", "HERMES_DOCKER_FORWARD_TEST=forwarded"]));
+        assert!(args.windows(2).any(|w| w == ["-v", "/host/cache:/cache"]));
+        assert!(!args.iter().any(|arg| arg == "--rm"));
+        #[cfg(unix)]
+        assert!(args.iter().any(|arg| arg == "--user"));
     }
 }
 
@@ -286,5 +515,78 @@ mod tests {
         assert_eq!(shlex_quote(""), "''");
         assert_eq!(shlex_quote("/path/with spaces"), "'/path/with spaces'");
         assert_eq!(shlex_quote("/path/with'quote"), "'/path/with'\\''quote'");
+    }
+
+    #[test]
+    fn detects_docker_container_removed_or_stopped_messages() {
+        let missing = CommandOutput {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "Error response from daemon: No such container: abc".to_string(),
+        };
+        assert!(output_indicates_container_gone(&missing));
+
+        let stopped = CommandOutput {
+            exit_code: 1,
+            stdout: "Container abc is not running".to_string(),
+            stderr: String::new(),
+        };
+        assert!(output_indicates_container_gone(&stopped));
+
+        let normal_failure = CommandOutput {
+            exit_code: 2,
+            stdout: String::new(),
+            stderr: "command not found".to_string(),
+        };
+        assert!(!output_indicates_container_gone(&normal_failure));
+
+        let successful_text_match = CommandOutput {
+            exit_code: 0,
+            stdout: "No such container appeared in command output".to_string(),
+            stderr: String::new(),
+        };
+        assert!(!output_indicates_container_gone(&successful_text_match));
+    }
+
+    #[test]
+    fn retry_after_missing_container_is_persistent_only() {
+        let gone = CommandOutput {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "No such object: abc".to_string(),
+        };
+        let persistent = DockerBackend::new(
+            None,
+            Some("ubuntu:22.04".to_string()),
+            false,
+            false,
+            None,
+            None,
+            None,
+            true,
+            None,
+            Vec::new(),
+            Vec::new(),
+            30,
+            1024,
+        );
+        assert!(persistent.should_recreate_after_exec_output(&gone));
+
+        let ephemeral = DockerBackend::new(
+            None,
+            Some("ubuntu:22.04".to_string()),
+            false,
+            false,
+            None,
+            None,
+            None,
+            false,
+            None,
+            Vec::new(),
+            Vec::new(),
+            30,
+            1024,
+        );
+        assert!(!ephemeral.should_recreate_after_exec_output(&gone));
     }
 }

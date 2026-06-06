@@ -72,7 +72,7 @@ Environment controls:
 
 ## Backend best-practice overlays (vLLM, mistral.rs, and local servers)
 
-Use backend overlays to quickly apply SOTA defaults inspired by leading local runtimes:
+Use backend overlays to quickly apply performance defaults inspired by leading local runtimes:
 
 ```bash
 /model backend list

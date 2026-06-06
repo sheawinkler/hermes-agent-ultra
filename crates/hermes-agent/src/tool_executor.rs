@@ -104,6 +104,7 @@ impl AgentLoop {
                     child_depth: current_delegate_depth + 1,
                     max_depth: max_delegate_depth,
                     parent_budget_remaining_usd,
+                    inherited_tool_schemas: Vec::new(),
                 };
                 // Orchestrator internally runs the child on its own
                 // `tokio::spawn` task, which erases the child future and breaks

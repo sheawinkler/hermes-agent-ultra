@@ -58,6 +58,17 @@ Ultra keeps parity work separate from intentional extensions.
 curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | bash
 ```
 
+The one-line installer is safe to run on machines that also have upstream
+NousResearch Hermes installed as `hermes`: by default it installs
+`hermes-agent-ultra` and `hermes-ultra` only, leaving any existing `hermes`
+command untouched. In non-interactive `curl | bash` installs, post-install
+doctor/auth/setup probes are skipped by default; run setup later with
+`hermes-ultra setup`, or opt in during install with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | bash -s -- --setup
+```
+
 Custom install path:
 
 ```bash
@@ -67,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main
 ### From source
 
 ```bash
-cargo install --git https://github.com/sheawinkler/hermes-agent-ultra hermes-cli --locked --bin hermes-agent-ultra --bin hermes-ultra --bin hermes
+cargo install --git https://github.com/sheawinkler/hermes-agent-ultra hermes-cli --locked --bin hermes-agent-ultra --bin hermes-ultra
 ```
 
 ## Quick Start
@@ -104,6 +115,27 @@ Gateway mode:
 ```bash
 hermes-ultra gateway --live
 ```
+
+## Skip API-key collection With Nous Portal
+
+Hermes Agent Ultra still supports direct provider and per-tool keys. If you prefer one managed subscription for model access plus hosted tool backends, [Nous Portal](https://portal.nousresearch.com) can cover:
+
+- 300+ models, selectable with `/model <name>`.
+- Tool Gateway routing for web search, image generation, text-to-speech, and cloud browser backends.
+
+Fresh install path:
+
+```bash
+hermes-ultra setup --portal
+```
+
+That starts Nous OAuth setup, sets Nous as the provider, and enables Tool Gateway routing. Inspect the current state with:
+
+```bash
+hermes-ultra portal status
+```
+
+You can still bring your own keys for individual tools; gateway routing is per backend, not all-or-nothing.
 
 Deep diagnostics bundle:
 
@@ -274,6 +306,10 @@ Ultra uses controlled sync workflows, not blind merges.
 <!-- END:ULTRA_SYNC_STATUS -->
 
 Note: this repository intentionally tracks parity via queue/gate workflows because upstream and ultra history can diverge materially.
+
+## Contributing
+
+Interested in helping? Start with [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, PR expectations, parity rules, and the no-stub completeness gate.
 
 ## Official References and Attribution
 

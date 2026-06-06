@@ -30,9 +30,9 @@ This tranche reformulates the prior 16-item intelligence/performance set so memo
   - Included ContextLattice policy in objective status output.
 - `crates/hermes-agent/src/agent_loop.rs`
   - Added ContextLattice-first intelligence system hint for objective/repo/connect intents when tools are available.
-- `scripts/run-performance-autopilot.py`
-  - Added ContextLattice preflight/telemetry section.
-  - Added ContextLattice-aware recommendations and adaptive-index penalties.
+- Native `/ops autopilot run|recommend|apply`
+  - Runs the ContextLattice preflight/telemetry section from Rust.
+  - Emits ContextLattice-aware recommendations and adaptive-index penalties without Python runtime dispatch.
 
 ## Operator Usage
 - Show current policy: `/objective context status`
@@ -41,3 +41,4 @@ This tranche reformulates the prior 16-item intelligence/performance set so memo
 - Balanced mode: `/objective context balanced`
 - Speed-focused mode: `/objective context fast`
 - Run adaptive loop: `/ops autopilot run` then `/ops autopilot recommend` or `/ops autopilot apply`
+  - Emits JSON/Markdown diagnostics under `.sync-reports/performance-autopilot-<timestamp>.*`.

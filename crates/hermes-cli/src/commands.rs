@@ -24780,6 +24780,7 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
             response_text,
             usage,
             total_turns: Some(result.total_turns),
+            events: Vec::new(),
         })
     }
 }

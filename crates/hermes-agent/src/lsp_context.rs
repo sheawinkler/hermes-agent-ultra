@@ -6,7 +6,6 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -236,31 +235,10 @@ fn diagnose_rust(path: &Path) -> String {
 }
 
 fn diagnose_python(path: &Path) -> String {
-    let output = Command::new("python3")
-        .args(["-m", "py_compile"])
-        .arg(path)
-        .output();
-    match output {
-        Ok(out) if out.status.success() => {
-            format!(
-                "- Diagnostics [{}]\n  - python syntax: ok\n",
-                path.display()
-            )
-        }
-        Ok(out) => {
-            let err = String::from_utf8_lossy(&out.stderr);
-            format!(
-                "- Diagnostics [{}]\n  - python syntax: error: {}\n",
-                path.display(),
-                truncate(err.trim(), 240)
-            )
-        }
-        Err(e) => format!(
-            "- Diagnostics [{}]\n  - python syntax: check unavailable: {}\n",
-            path.display(),
-            e
-        ),
-    }
+    format!(
+        "- Diagnostics [{}]\n  - python syntax: skipped (Rust-only runtime does not spawn Python)\n",
+        path.display()
+    )
 }
 
 fn build_reference_section(

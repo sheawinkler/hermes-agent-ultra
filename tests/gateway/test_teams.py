@@ -796,6 +796,42 @@ class TestTeamsStandaloneSend:
         assert activity_kwargs["json"]["type"] == "message"
 
     @pytest.mark.asyncio
+    async def test_standalone_send_rejects_media_files_before_http(self, monkeypatch):
+        for var in ("TEAMS_CLIENT_ID", "TEAMS_CLIENT_SECRET", "TEAMS_TENANT_ID"):
+            monkeypatch.delenv(var, raising=False)
+        session = _FakeAiohttpSession([])
+        _install_fake_aiohttp(monkeypatch, session)
+
+        result = await _teams_mod._standalone_send(
+            PlatformConfig(enabled=True, extra={}),
+            "19:abc@thread.skype",
+            "hi",
+            media_files=["/tmp/report.pdf"],
+        )
+
+        assert "error" in result
+        assert "text only" in result["error"]
+        assert len(session.calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_standalone_send_rejects_force_document_before_http(self, monkeypatch):
+        for var in ("TEAMS_CLIENT_ID", "TEAMS_CLIENT_SECRET", "TEAMS_TENANT_ID"):
+            monkeypatch.delenv(var, raising=False)
+        session = _FakeAiohttpSession([])
+        _install_fake_aiohttp(monkeypatch, session)
+
+        result = await _teams_mod._standalone_send(
+            PlatformConfig(enabled=True, extra={}),
+            "19:abc@thread.skype",
+            "hi",
+            force_document=True,
+        )
+
+        assert "error" in result
+        assert "force_document" in result["error"]
+        assert len(session.calls) == 0
+
+    @pytest.mark.asyncio
     async def test_standalone_send_returns_error_when_unconfigured(self, monkeypatch):
         for var in ("TEAMS_CLIENT_ID", "TEAMS_CLIENT_SECRET", "TEAMS_TENANT_ID"):
             monkeypatch.delenv(var, raising=False)

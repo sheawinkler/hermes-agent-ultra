@@ -29,7 +29,7 @@ pub mod usage_pricing;
 pub use error_classifier::{ErrorCategory, ErrorClassifier, RetryStrategy};
 pub use insights::Insights;
 pub use prompt::PromptBuilder;
-pub use redact::{RedactionPattern, Redactor};
+pub use redact::{redact_sensitive_text, RedactionPattern, Redactor};
 pub use router::{
     ModelCapability, ModelInfo as RouterModelInfo, ModelRequirements, RouterError, SmartModelRouter,
 };

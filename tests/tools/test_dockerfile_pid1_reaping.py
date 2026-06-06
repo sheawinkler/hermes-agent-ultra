@@ -1,6 +1,6 @@
 """Contract tests for the container Dockerfile.
 
-These tests assert invariants about how the Dockerfile composes its runtime —
+These tests assert invariants about how the Dockerfile composes its runtime -
 they deliberately avoid snapshotting specific package versions, line numbers,
 or exact flag choices.  What they DO assert is that the Dockerfile maintains
 the properties required for correct production behaviour:
@@ -10,6 +10,8 @@ the properties required for correct production behaviour:
   instead of accumulating as zombies (#15012).
 - Signal forwarding runs through the init so ``docker stop`` triggers
   hermes's own graceful-shutdown path.
+- The container builds and ships the Rust CLI binary directly.  Ultra does
+  not vendor upstream's Python/uv/s6 image stack.
 """
 
 from __future__ import annotations
@@ -105,42 +107,31 @@ def test_dockerfile_entrypoint_routes_through_the_init(dockerfile_text):
     )
 
 
-def test_dockerfile_installs_tui_dependencies(dockerfile_text):
-    # The TUI workspace manifests must be present so ``npm install`` can
-    # resolve dependencies. The bundled ``hermes-ink`` workspace package is
-    # now COPIED into the image as a whole tree (not just its lockfile)
-    # because it's referenced as a ``file:`` workspace dependency from
-    # ``ui-tui/package.json`` — copying the tree avoids npm stopping at a
-    # bare ``package.json`` shell.
-    assert "ui-tui/package.json" in dockerfile_text
-    assert "ui-tui/package-lock.json" in dockerfile_text
-    assert "ui-tui/packages/hermes-ink/" in dockerfile_text
+def test_dockerfile_builds_rust_workspace_binary(dockerfile_text):
+    assert "FROM rust:" in dockerfile_text
+    assert "COPY Cargo.toml Cargo.lock ./" in dockerfile_text
+    assert "COPY crates crates" in dockerfile_text
     assert any(
-        "ui-tui" in step and "npm" in step and (" install" in step or " ci" in step)
+        "cargo build --release" in step and "telegram,discord,slack" in step
         for step in _run_steps(dockerfile_text)
     )
 
 
-def test_dockerfile_builds_tui_assets(dockerfile_text):
-    assert any(
-        "ui-tui" in step and "npm" in step and "run build" in step
-        for step in _run_steps(dockerfile_text)
+def test_dockerfile_runtime_installs_rust_binary(dockerfile_text):
+    assert (
+        "COPY --from=builder /app/target/release/hermes /usr/local/bin/hermes"
+        in dockerfile_text
     )
+    assert "uv sync" not in dockerfile_text
+    assert "pyproject.toml" not in dockerfile_text
+    assert ".venv" not in dockerfile_text
 
 
-def test_dockerfile_materializes_local_tui_ink_package(dockerfile_text):
-    # ``hermes-ink`` is a bundled workspace package referenced from
-    # ``ui-tui/package.json`` via ``file:`` — not pulled from the npm
-    # registry. The contract this test pins is just that the image
-    # actually carries the package source so ``await import('@hermes/ink')``
-    # can resolve at runtime; the previous, much pickier assertion (manual
-    # ``rm -rf`` + ``npm install --omit=dev --prefix node_modules/@hermes/ink``)
-    # baked in implementation details of an older materialisation flow that
-    # was simplified once npm workspaces handled the resolution natively.
-    assert "ui-tui/packages/hermes-ink/" in dockerfile_text, (
-        "Dockerfile must COPY the bundled hermes-ink workspace package "
-        "so ``await import('@hermes/ink')`` resolves at runtime."
-    )
+def test_dockerfile_uses_ultra_data_home(dockerfile_text):
+    assert "ENV HERMES_HOME=/data" in dockerfile_text
+    assert 'VOLUME ["/data"]' in dockerfile_text
+    assert "useradd -u 10000" in dockerfile_text
+    assert "hermes" in dockerfile_text
 
 
 def test_dockerignore_excludes_nested_dependency_dirs():

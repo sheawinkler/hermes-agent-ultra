@@ -5288,6 +5288,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                         args: cfg.args.clone(),
                         oauth_token_url: cfg.oauth_token_url.clone(),
                         oauth_client_id: cfg.oauth_client_id.clone(),
+                        request_timeout_seconds: cfg.request_timeout_seconds,
                     },
                 )
             })

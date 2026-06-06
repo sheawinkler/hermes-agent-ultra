@@ -60,14 +60,14 @@ impl PlatformAdapter for MockDiscordAdapter {
         &self,
         chat_id: &str,
         message_id: &str,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<bool, GatewayError> {
         if !self.delete_ok {
             return Err(GatewayError::SendFailed("delete failed".into()));
         }
         let mut msgs = self.messages.lock().unwrap();
         msgs.retain(|(c, t)| !(c == chat_id && t == "partial-stream"));
         let _ = message_id;
-        Ok(())
+        Ok(true)
     }
 
     async fn send_file(

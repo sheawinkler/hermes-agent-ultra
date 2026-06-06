@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from hermes_constants import get_hermes_home
+from plugins.google_meet._hermes_home import get_hermes_home
 
 # File + directory layout (under $HERMES_HOME):
 #

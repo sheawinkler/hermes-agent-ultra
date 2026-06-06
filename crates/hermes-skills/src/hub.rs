@@ -3,6 +3,8 @@
 use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use tracing::{debug, instrument};
 
 use hermes_core::types::{Skill, SkillMeta};
@@ -75,6 +77,33 @@ pub struct SkillUpdate {
     pub changelog: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegistrySkillMeta {
+    pub name: String,
+    pub description: String,
+    pub source: String,
+    pub identifier: String,
+    pub trust_level: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClawHubBundle {
+    pub name: String,
+    pub version: Option<String>,
+    pub files: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClawHubFileRef {
+    pub path: String,
+    pub content: Option<String>,
+    pub raw_url: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct UploadRequest {
     name: String,
@@ -88,6 +117,204 @@ struct UploadRequest {
 #[derive(Debug, Deserialize)]
 struct UploadResponse {
     id: String,
+}
+
+fn value_str<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
+}
+
+fn clawhub_tags(value: &Value) -> Vec<String> {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|tag| !tag.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+        Value::Object(map) => {
+            let mut tags: Vec<String> = map
+                .keys()
+                .filter(|key| key.as_str() != "latest")
+                .cloned()
+                .collect();
+            tags.sort();
+            tags
+        }
+        _ => Vec::new(),
+    }
+}
+
+pub fn clawhub_meta_from_payload(
+    payload: &Value,
+    fallback_slug: &str,
+) -> Option<RegistrySkillMeta> {
+    let skill = payload.get("skill").unwrap_or(payload);
+    let identifier = value_str(skill, &["slug", "id", "identifier"])
+        .unwrap_or(fallback_slug)
+        .trim();
+    if identifier.is_empty() {
+        return None;
+    }
+    let name = value_str(skill, &["displayName", "display_name", "name", "slug"])
+        .unwrap_or(identifier)
+        .trim()
+        .to_string();
+    let description = value_str(skill, &["summary", "description"])
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let version = payload
+        .get("latestVersion")
+        .and_then(|v| value_str(v, &["version"]))
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string);
+    Some(RegistrySkillMeta {
+        name,
+        description,
+        source: "clawhub".to_string(),
+        identifier: identifier.to_string(),
+        trust_level: "community".to_string(),
+        tags: skill.get("tags").map(clawhub_tags).unwrap_or_default(),
+        version,
+    })
+}
+
+pub fn clawhub_metas_from_listing(payload: &Value) -> Vec<RegistrySkillMeta> {
+    payload
+        .get("items")
+        .or_else(|| payload.get("skills"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let fallback = value_str(item, &["slug", "id", "identifier"]).unwrap_or("");
+            clawhub_meta_from_payload(item, fallback)
+        })
+        .collect()
+}
+
+fn normalize_search_key(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn clawhub_score(meta: &RegistrySkillMeta, query: &str) -> i32 {
+    let q = normalize_search_key(query);
+    if q.is_empty() {
+        return 1;
+    }
+    let id = normalize_search_key(&meta.identifier);
+    let name = normalize_search_key(&meta.name);
+    let desc = meta.description.to_ascii_lowercase();
+    if id == q || name == q {
+        1000
+    } else if id.starts_with(&q) || name.starts_with(&q) {
+        800
+    } else if id.contains(&q) || name.contains(&q) {
+        650
+    } else if desc.contains(&query.to_ascii_lowercase()) {
+        250
+    } else {
+        0
+    }
+}
+
+pub fn clawhub_finalize_search_results(
+    query: &str,
+    mut candidates: Vec<RegistrySkillMeta>,
+    exact_slug: Option<RegistrySkillMeta>,
+    limit: usize,
+) -> Vec<RegistrySkillMeta> {
+    let q = normalize_search_key(query);
+    let best_score = candidates
+        .iter()
+        .map(|meta| clawhub_score(meta, query))
+        .max()
+        .unwrap_or(0);
+    if let Some(exact) = exact_slug {
+        let exact_id = normalize_search_key(&exact.identifier);
+        if !q.is_empty() && (exact_id == q || best_score == 0) {
+            if best_score == 0 {
+                candidates = vec![exact];
+            } else {
+                candidates.retain(|meta| meta.identifier != exact.identifier);
+                candidates.insert(0, exact);
+            }
+        }
+    }
+    candidates.sort_by(|a, b| {
+        clawhub_score(b, query)
+            .cmp(&clawhub_score(a, query))
+            .then_with(|| a.identifier.cmp(&b.identifier))
+    });
+    candidates.dedup_by(|a, b| a.identifier == b.identifier);
+    candidates.truncate(limit);
+    candidates
+}
+
+pub fn clawhub_latest_version(payload: &Value) -> Option<String> {
+    payload
+        .get("latestVersion")
+        .and_then(|v| value_str(v, &["version"]))
+        .or_else(|| value_str(payload, &["version"]))
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            payload
+                .get("versions")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|v| value_str(v, &["version"]))
+                .map(ToString::to_string)
+        })
+}
+
+pub fn clawhub_file_refs(payload: &Value) -> Vec<ClawHubFileRef> {
+    let Some(files) = payload.get("files") else {
+        return Vec::new();
+    };
+    match files {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|item| {
+                let path = value_str(item, &["path", "name"])?.trim();
+                if path.is_empty() {
+                    return None;
+                }
+                Some(ClawHubFileRef {
+                    path: path.to_string(),
+                    content: value_str(item, &["content"]).map(ToString::to_string),
+                    raw_url: value_str(item, &["rawUrl", "raw_url"]).map(ToString::to_string),
+                })
+            })
+            .collect(),
+        Value::Object(map) => map
+            .iter()
+            .filter_map(|(path, content)| {
+                if path.trim().is_empty() {
+                    return None;
+                }
+                Some(ClawHubFileRef {
+                    path: path.clone(),
+                    content: content.as_str().map(ToString::to_string),
+                    raw_url: None,
+                })
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -616,6 +843,95 @@ mod tests {
         let hex = raw.iter().map(|b| format!("{:02x}", b)).collect::<String>();
         let got = decode_base64_or_hex_32(&hex).unwrap();
         assert_eq!(got, raw);
+    }
+
+    #[test]
+    fn clawhub_listing_maps_display_name_summary_and_tags() {
+        let payload = serde_json::json!({
+            "items": [
+                {
+                    "slug": "caldav-calendar",
+                    "displayName": "CalDAV Calendar",
+                    "summary": "Calendar integration",
+                    "tags": ["calendar", "productivity"]
+                }
+            ]
+        });
+        let metas = clawhub_metas_from_listing(&payload);
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0].identifier, "caldav-calendar");
+        assert_eq!(metas[0].name, "CalDAV Calendar");
+        assert_eq!(metas[0].description, "Calendar integration");
+        assert_eq!(metas[0].tags, vec!["calendar", "productivity"]);
+    }
+
+    #[test]
+    fn clawhub_nested_detail_payload_excludes_latest_tag() {
+        let payload = serde_json::json!({
+            "skill": {
+                "slug": "self-improving-agent",
+                "displayName": "self-improving-agent",
+                "summary": "Captures learnings and errors for continuous improvement.",
+                "tags": {"latest": "3.0.2", "automation": "3.0.2"}
+            },
+            "latestVersion": {"version": "3.0.2"}
+        });
+        let meta = clawhub_meta_from_payload(&payload, "self-improving-agent").unwrap();
+        assert_eq!(meta.identifier, "self-improving-agent");
+        assert_eq!(meta.version.as_deref(), Some("3.0.2"));
+        assert_eq!(meta.tags, vec!["automation"]);
+        assert!(meta.description.contains("continuous improvement"));
+    }
+
+    #[test]
+    fn clawhub_finalize_repairs_irrelevant_cached_results_with_exact_slug() {
+        let poisoned = RegistrySkillMeta {
+            name: "Apple Music DJ".to_string(),
+            description: "Unrelated".to_string(),
+            source: "clawhub".to_string(),
+            identifier: "apple-music-dj".to_string(),
+            trust_level: "community".to_string(),
+            tags: Vec::new(),
+            version: None,
+        };
+        let exact = RegistrySkillMeta {
+            name: "self-improving-agent".to_string(),
+            description: "Captures learnings and errors for continuous improvement.".to_string(),
+            source: "clawhub".to_string(),
+            identifier: "self-improving-agent".to_string(),
+            trust_level: "community".to_string(),
+            tags: vec!["automation".to_string()],
+            version: None,
+        };
+        let results =
+            clawhub_finalize_search_results("self improving", vec![poisoned], Some(exact), 5);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].identifier, "self-improving-agent");
+    }
+
+    #[test]
+    fn clawhub_version_and_files_support_inline_and_raw_refs() {
+        let detail = serde_json::json!({"latestVersion": {"version": "1.0.1"}});
+        assert_eq!(clawhub_latest_version(&detail).as_deref(), Some("1.0.1"));
+        let version_payload = serde_json::json!({
+            "files": [
+                {"path": "SKILL.md", "rawUrl": "https://files.example/skill-md"},
+                {"path": "README.md", "content": "hello"}
+            ]
+        });
+        let refs = clawhub_file_refs(&version_payload);
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].path, "SKILL.md");
+        assert_eq!(
+            refs[0].raw_url.as_deref(),
+            Some("https://files.example/skill-md")
+        );
+        assert_eq!(refs[1].content.as_deref(), Some("hello"));
+
+        let object_payload = serde_json::json!({"files": {"SKILL.md": "# Skill"}});
+        let refs = clawhub_file_refs(&object_payload);
+        assert_eq!(refs[0].path, "SKILL.md");
+        assert_eq!(refs[0].content.as_deref(), Some("# Skill"));
     }
 
     #[test]

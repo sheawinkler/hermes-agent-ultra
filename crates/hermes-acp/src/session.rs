@@ -1,13 +1,11 @@
-//! ACP session state management.
+﻿//! ACP session state management.
 //!
 //! Maps ACP sessions to Hermes agent instances with persistence support.
-//! Mirrors the Python `acp_adapter/session.py` implementation.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use hermes_agent::session_persistence::SessionPersistence;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -56,12 +54,31 @@ pub struct SessionState {
     pub history: Vec<Value>,
     pub mode: Option<String>,
     pub config_options: HashMap<String, String>,
+    /// Prompts queued by `/queue` to run after the current prompt completes.
+    pub queued_prompts: Vec<String>,
+    /// Last interrupted prompt text that `/steer` can replay with guidance.
+    pub interrupted_prompt_text: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
     /// Total prompt tokens across all turns.
     pub total_prompt_tokens: u64,
     /// Total completion tokens across all turns.
     pub total_completion_tokens: u64,
+}
+
+/// Public metadata update for ACP sessions.
+///
+/// Optional fields intentionally preserve existing values when omitted. This
+/// mirrors upstream's `update_session_meta(..., model=None)` COALESCE behavior
+/// without exposing storage internals to callers.
+#[derive(Debug, Clone, Default)]
+pub struct SessionMetaUpdate {
+    pub cwd: Option<String>,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub api_mode: Option<String>,
+    pub base_url: Option<String>,
+    pub config_options: HashMap<String, String>,
 }
 
 impl SessionState {
@@ -81,6 +98,8 @@ impl SessionState {
             history: Vec::new(),
             mode: None,
             config_options: HashMap::new(),
+            queued_prompts: Vec::new(),
+            interrupted_prompt_text: None,
             created_at: now,
             updated_at: now,
             total_prompt_tokens: 0,
@@ -137,9 +156,6 @@ impl From<&SessionState> for SessionInfo {
 pub struct SessionManager {
     sessions: Mutex<HashMap<String, SessionState>>,
     on_persist: Option<Box<dyn Fn(&SessionState) + Send + Sync>>,
-    on_restore: Option<Box<dyn Fn(&str) -> Option<SessionState> + Send + Sync>>,
-    on_delete: Option<Box<dyn Fn(&str) -> bool + Send + Sync>>,
-    on_list: Option<Box<dyn Fn() -> Vec<SessionInfo> + Send + Sync>>,
 }
 
 impl SessionManager {
@@ -147,33 +163,7 @@ impl SessionManager {
         Self {
             sessions: Mutex::new(HashMap::new()),
             on_persist: None,
-            on_restore: None,
-            on_delete: None,
-            on_list: None,
         }
-    }
-
-    /// Create a session manager with ACP session persistence enabled.
-    ///
-    /// This mirrors Python ACP behavior: session state survives process restart.
-    pub fn new_with_default_persistence() -> Self {
-        let sp = Arc::new(SessionPersistence::default_home());
-        if let Err(err) = sp.ensure_db() {
-            tracing::warn!("ACP session persistence initialization failed: {}", err);
-        }
-
-        let persist_sp = sp.clone();
-        let restore_sp = sp.clone();
-        let list_sp = sp.clone();
-        let delete_sp = sp;
-
-        Self::new()
-            .with_persist_callback(move |state| {
-                persist_session_state(&persist_sp, state);
-            })
-            .with_restore_callback(move |session_id| restore_session_state(&restore_sp, session_id))
-            .with_list_callback(move || list_persisted_sessions(&list_sp))
-            .with_delete_callback(move |session_id| delete_persisted_session(&delete_sp, session_id))
     }
 
     /// Set a callback invoked whenever a session is persisted.
@@ -182,33 +172,6 @@ impl SessionManager {
         cb: impl Fn(&SessionState) + Send + Sync + 'static,
     ) -> Self {
         self.on_persist = Some(Box::new(cb));
-        self
-    }
-
-    /// Set a callback to restore a session by ID.
-    pub fn with_restore_callback(
-        mut self,
-        cb: impl Fn(&str) -> Option<SessionState> + Send + Sync + 'static,
-    ) -> Self {
-        self.on_restore = Some(Box::new(cb));
-        self
-    }
-
-    /// Set a callback to delete a persisted session by ID.
-    pub fn with_delete_callback(
-        mut self,
-        cb: impl Fn(&str) -> bool + Send + Sync + 'static,
-    ) -> Self {
-        self.on_delete = Some(Box::new(cb));
-        self
-    }
-
-    /// Set a callback to list persisted sessions.
-    pub fn with_list_callback(
-        mut self,
-        cb: impl Fn() -> Vec<SessionInfo> + Send + Sync + 'static,
-    ) -> Self {
-        self.on_list = Some(Box::new(cb));
         self
     }
 
@@ -227,45 +190,61 @@ impl SessionManager {
 
     /// Get a session by ID, or `None` if not found.
     pub fn get_session(&self, session_id: &str) -> Option<SessionState> {
-        {
-            let sessions = self.sessions.lock().unwrap();
-            if let Some(state) = sessions.get(session_id) {
-                return Some(state.clone());
-            }
-        }
-
-        let restored = self
-            .on_restore
-            .as_ref()
-            .and_then(|restore| restore(session_id))?;
-
-        let mut sessions = self.sessions.lock().unwrap();
-        let entry = sessions
-            .entry(session_id.to_string())
-            .or_insert_with(|| restored.clone());
-        Some(entry.clone())
+        let sessions = self.sessions.lock().unwrap();
+        sessions.get(session_id).cloned()
     }
 
     /// Update a session's working directory.
     pub fn update_cwd(&self, session_id: &str, cwd: &str) -> Option<SessionState> {
-        let mut sessions = self.sessions.lock().unwrap();
-        if let Some(state) = sessions.get_mut(session_id) {
-            state.cwd = cwd.to_string();
-            state.touch();
-            let cloned = state.clone();
-            drop(sessions);
-            self.persist(&cloned);
-            Some(cloned)
-        } else {
-            None
-        }
+        self.update_session_meta(
+            session_id,
+            SessionMetaUpdate {
+                cwd: Some(cwd.to_string()),
+                ..SessionMetaUpdate::default()
+            },
+        )
     }
 
     /// Update a session's model identifier.
     pub fn update_model(&self, session_id: &str, model: &str) -> Option<SessionState> {
+        self.update_session_meta(
+            session_id,
+            SessionMetaUpdate {
+                model: Some(model.to_string()),
+                ..SessionMetaUpdate::default()
+            },
+        )
+    }
+
+    /// Update session metadata through the public, lock-protected manager path.
+    pub fn update_session_meta(
+        &self,
+        session_id: &str,
+        update: SessionMetaUpdate,
+    ) -> Option<SessionState> {
         let mut sessions = self.sessions.lock().unwrap();
         if let Some(state) = sessions.get_mut(session_id) {
-            state.model = Some(model.to_string());
+            if let Some(cwd) = update.cwd {
+                state.cwd = cwd;
+            }
+            if let Some(model) = update.model.filter(|value| !value.trim().is_empty()) {
+                state.model = Some(model);
+            }
+            if let Some(provider) = update.provider.filter(|value| !value.trim().is_empty()) {
+                state.provider = Some(provider);
+            }
+            if let Some(api_mode) = update.api_mode.filter(|value| !value.trim().is_empty()) {
+                state.api_mode = Some(api_mode);
+            }
+            if let Some(base_url) = update.base_url.filter(|value| !value.trim().is_empty()) {
+                state.base_url = Some(base_url);
+            }
+            for (key, value) in update.config_options {
+                let key = key.trim();
+                if !key.is_empty() {
+                    state.config_options.insert(key.to_string(), value);
+                }
+            }
             state.touch();
             let cloned = state.clone();
             drop(sessions);
@@ -331,7 +310,66 @@ impl SessionManager {
         }
     }
 
-    /// Fork a session — deep-copy history into a new session.
+    /// Queue a prompt to execute after the current turn.
+    pub fn push_queued_prompt(&self, session_id: &str, prompt: &str) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            let prompt = prompt.trim();
+            if !prompt.is_empty() {
+                state.queued_prompts.push(prompt.to_string());
+                state.touch();
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Drain queued prompts in FIFO order.
+    pub fn take_queued_prompts(&self, session_id: &str) -> Vec<String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            state.touch();
+            return std::mem::take(&mut state.queued_prompts);
+        }
+        Vec::new()
+    }
+
+    /// Pop one queued prompt in FIFO order.
+    pub fn pop_queued_prompt(&self, session_id: &str) -> Option<String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            if !state.queued_prompts.is_empty() {
+                state.touch();
+                return Some(state.queued_prompts.remove(0));
+            }
+        }
+        None
+    }
+
+    /// Store an interrupted prompt for subsequent `/steer` replay.
+    pub fn set_interrupted_prompt_text(&self, session_id: &str, prompt: Option<String>) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            state.interrupted_prompt_text = prompt
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            state.touch();
+            return true;
+        }
+        false
+    }
+
+    /// Take and clear the interrupted prompt text.
+    pub fn take_interrupted_prompt_text(&self, session_id: &str) -> Option<String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            state.touch();
+            return state.interrupted_prompt_text.take();
+        }
+        None
+    }
+
+    /// Fork a session 鈥?deep-copy history into a new session.
     pub fn fork_session(&self, session_id: &str, cwd: &str) -> Option<SessionState> {
         let original = self.get_session(session_id)?;
         let new_id = uuid::Uuid::new_v4().to_string();
@@ -350,34 +388,19 @@ impl SessionManager {
     /// Remove a session.
     pub fn remove_session(&self, session_id: &str) -> bool {
         let mut sessions = self.sessions.lock().unwrap();
-        let removed_memory = sessions.remove(session_id).is_some();
-        drop(sessions);
-        let removed_persisted = self
-            .on_delete
-            .as_ref()
-            .map(|delete| delete(session_id))
-            .unwrap_or(false);
-        removed_memory || removed_persisted
+        sessions.remove(session_id).is_some()
     }
 
     /// List all sessions.
     pub fn list_sessions(&self) -> Vec<SessionInfo> {
-        let mut listed: HashMap<String, SessionInfo> = {
-            let sessions = self.sessions.lock().unwrap();
-            sessions
-                .values()
-                .map(SessionInfo::from)
-                .map(|info| (info.session_id.clone(), info))
-                .collect()
-        };
+        let sessions = self.sessions.lock().unwrap();
+        sessions.values().map(SessionInfo::from).collect()
+    }
 
-        if let Some(list) = &self.on_list {
-            for info in list() {
-                listed.entry(info.session_id.clone()).or_insert(info);
-            }
-        }
-
-        listed.into_values().collect()
+    /// List all session states.
+    pub fn list_session_states(&self) -> Vec<SessionState> {
+        let sessions = self.sessions.lock().unwrap();
+        sessions.values().cloned().collect()
     }
 
     /// Persist a session state via the registered callback.
@@ -410,199 +433,9 @@ impl Default for SessionManager {
     }
 }
 
-const ACP_SESSION_INDEX_KEY: &str = "acp:sessions:index";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedSessionState {
-    session_id: String,
-    cwd: String,
-    model: Option<String>,
-    provider: Option<String>,
-    api_mode: Option<String>,
-    base_url: Option<String>,
-    phase: SessionPhase,
-    history: Vec<Value>,
-    mode: Option<String>,
-    config_options: HashMap<String, String>,
-    created_at: u64,
-    updated_at: u64,
-    total_prompt_tokens: u64,
-    total_completion_tokens: u64,
-}
-
-impl From<&SessionState> for PersistedSessionState {
-    fn from(s: &SessionState) -> Self {
-        Self {
-            session_id: s.session_id.clone(),
-            cwd: s.cwd.clone(),
-            model: s.model.clone(),
-            provider: s.provider.clone(),
-            api_mode: s.api_mode.clone(),
-            base_url: s.base_url.clone(),
-            phase: s.phase,
-            history: s.history.clone(),
-            mode: s.mode.clone(),
-            config_options: s.config_options.clone(),
-            created_at: s.created_at,
-            updated_at: s.updated_at,
-            total_prompt_tokens: s.total_prompt_tokens,
-            total_completion_tokens: s.total_completion_tokens,
-        }
-    }
-}
-
-impl From<PersistedSessionState> for SessionState {
-    fn from(s: PersistedSessionState) -> Self {
-        Self {
-            session_id: s.session_id,
-            cwd: s.cwd,
-            model: s.model,
-            provider: s.provider,
-            api_mode: s.api_mode,
-            base_url: s.base_url,
-            phase: s.phase,
-            history: s.history,
-            mode: s.mode,
-            config_options: s.config_options,
-            created_at: s.created_at,
-            updated_at: s.updated_at,
-            total_prompt_tokens: s.total_prompt_tokens,
-            total_completion_tokens: s.total_completion_tokens,
-        }
-    }
-}
-
-fn session_state_meta_key(session_id: &str) -> String {
-    format!("acp:session:{}", session_id)
-}
-
-fn read_persisted_session_ids(sp: &SessionPersistence) -> HashSet<String> {
-    match sp.get_meta(ACP_SESSION_INDEX_KEY) {
-        Ok(Some(raw)) => serde_json::from_str::<Vec<String>>(&raw)
-            .unwrap_or_default()
-            .into_iter()
-            .collect(),
-        _ => HashSet::new(),
-    }
-}
-
-fn write_persisted_session_ids(sp: &SessionPersistence, ids: HashSet<String>) {
-    let mut list: Vec<String> = ids.into_iter().collect();
-    list.sort();
-    if let Ok(raw) = serde_json::to_string(&list) {
-        if let Err(err) = sp.set_meta(ACP_SESSION_INDEX_KEY, &raw) {
-            tracing::warn!("Failed writing ACP session index: {}", err);
-        }
-    }
-}
-
-fn persist_session_state(sp: &SessionPersistence, state: &SessionState) {
-    let persisted = PersistedSessionState::from(state);
-    let key = session_state_meta_key(&state.session_id);
-    let raw = match serde_json::to_string(&persisted) {
-        Ok(v) => v,
-        Err(err) => {
-            tracing::warn!(
-                session_id = %state.session_id,
-                "Failed serializing ACP session state: {}",
-                err
-            );
-            return;
-        }
-    };
-    if let Err(err) = sp.set_meta(&key, &raw) {
-        tracing::warn!(
-            session_id = %state.session_id,
-            "Failed persisting ACP session state: {}",
-            err
-        );
-        return;
-    }
-    let mut ids = read_persisted_session_ids(sp);
-    ids.insert(state.session_id.clone());
-    write_persisted_session_ids(sp, ids);
-}
-
-fn restore_session_state(sp: &SessionPersistence, session_id: &str) -> Option<SessionState> {
-    let key = session_state_meta_key(session_id);
-    let raw = sp.get_meta(&key).ok().flatten()?;
-    let parsed = serde_json::from_str::<PersistedSessionState>(&raw).ok()?;
-    Some(parsed.into())
-}
-
-fn delete_persisted_session(sp: &SessionPersistence, session_id: &str) -> bool {
-    let key = session_state_meta_key(session_id);
-    let existed = sp
-        .get_meta(&key)
-        .ok()
-        .flatten()
-        .map(|v| !v.trim().is_empty())
-        .unwrap_or(false);
-    if existed {
-        let _ = sp.set_meta(&key, "");
-    }
-    let mut ids = read_persisted_session_ids(sp);
-    let removed_id = ids.remove(session_id);
-    if removed_id {
-        write_persisted_session_ids(sp, ids);
-    }
-    existed || removed_id
-}
-
-fn list_persisted_sessions(sp: &SessionPersistence) -> Vec<SessionInfo> {
-    let mut infos = Vec::new();
-    for session_id in read_persisted_session_ids(sp) {
-        if let Some(state) = restore_session_state(sp, &session_id) {
-            infos.push(SessionInfo::from(&state));
-        }
-    }
-    infos
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    #[derive(Default)]
-    struct InMemoryPersistStore {
-        by_id: HashMap<String, SessionState>,
-    }
-
-    fn new_test_persistent_manager(
-        store: Arc<Mutex<InMemoryPersistStore>>,
-    ) -> SessionManager {
-        let persist_store = store.clone();
-        let restore_store = store.clone();
-        let list_store = store.clone();
-        let delete_store = store;
-        SessionManager::new()
-            .with_persist_callback(move |state| {
-                if let Ok(mut s) = persist_store.lock() {
-                    s.by_id.insert(state.session_id.clone(), state.clone());
-                }
-            })
-            .with_restore_callback(move |sid| {
-                restore_store
-                    .lock()
-                    .ok()
-                    .and_then(|s| s.by_id.get(sid).cloned())
-            })
-            .with_list_callback(move || {
-                list_store
-                    .lock()
-                    .ok()
-                    .map(|s| s.by_id.values().map(SessionInfo::from).collect())
-                    .unwrap_or_default()
-            })
-            .with_delete_callback(move |sid| {
-                delete_store
-                    .lock()
-                    .ok()
-                    .and_then(|mut s| s.by_id.remove(sid))
-                    .is_some()
-            })
-    }
 
     #[test]
     fn test_create_and_get_session() {
@@ -669,18 +502,106 @@ mod tests {
     }
 
     #[test]
-    fn test_restore_session_from_persistence_when_memory_is_empty() {
-        let store = Arc::new(Mutex::new(InMemoryPersistStore::default()));
-        let mgr = new_test_persistent_manager(store.clone());
+    fn update_session_meta_preserves_model_when_omitted() {
+        let mgr = SessionManager::new();
         let state = mgr.create_session("/tmp");
-        let sid = state.session_id.clone();
-        mgr.set_history(&sid, vec![serde_json::json!({"role":"user","content":"hello"})]);
-        mgr.save_session(&sid);
+        let sid = state.session_id;
 
-        let mgr2 = new_test_persistent_manager(store);
-        let restored = mgr2.get_session(&sid).expect("should restore from persistence");
-        assert_eq!(restored.session_id, sid);
-        assert_eq!(restored.history.len(), 1);
-        assert_eq!(restored.cwd, "/tmp");
+        mgr.update_model(&sid, "nous:gpt-5.4");
+        let updated = mgr
+            .update_session_meta(
+                &sid,
+                SessionMetaUpdate {
+                    cwd: Some("/workspace".to_string()),
+                    ..SessionMetaUpdate::default()
+                },
+            )
+            .expect("session exists");
+
+        assert_eq!(updated.cwd, "/workspace");
+        assert_eq!(updated.model.as_deref(), Some("nous:gpt-5.4"));
+        let stored = mgr.get_session(&sid).expect("session exists");
+        assert_eq!(stored.model.as_deref(), Some("nous:gpt-5.4"));
+    }
+
+    #[test]
+    fn update_session_meta_merges_fields_and_persists_once() {
+        use std::sync::{Arc, Mutex};
+
+        let persisted = Arc::new(Mutex::new(Vec::<SessionState>::new()));
+        let persisted_for_cb = persisted.clone();
+        let mgr = SessionManager::new().with_persist_callback(move |state| {
+            persisted_for_cb
+                .lock()
+                .expect("persisted lock")
+                .push(state.clone());
+        });
+        let state = mgr.create_session("/tmp");
+        let sid = state.session_id;
+        persisted.lock().expect("persisted lock").clear();
+
+        let mut config_options = HashMap::new();
+        config_options.insert("temperature".to_string(), "0.2".to_string());
+        config_options.insert("".to_string(), "ignored".to_string());
+        let updated = mgr
+            .update_session_meta(
+                &sid,
+                SessionMetaUpdate {
+                    cwd: Some("/repo".to_string()),
+                    model: Some("openai:gpt-4o".to_string()),
+                    provider: Some("openai".to_string()),
+                    api_mode: Some("responses".to_string()),
+                    base_url: Some("https://api.openai.com/v1".to_string()),
+                    config_options,
+                },
+            )
+            .expect("session exists");
+
+        assert_eq!(updated.cwd, "/repo");
+        assert_eq!(updated.model.as_deref(), Some("openai:gpt-4o"));
+        assert_eq!(updated.provider.as_deref(), Some("openai"));
+        assert_eq!(updated.api_mode.as_deref(), Some("responses"));
+        assert_eq!(
+            updated.base_url.as_deref(),
+            Some("https://api.openai.com/v1")
+        );
+        assert_eq!(
+            updated
+                .config_options
+                .get("temperature")
+                .map(String::as_str),
+            Some("0.2")
+        );
+        assert!(!updated.config_options.contains_key(""));
+
+        let persisted = persisted.lock().expect("persisted lock");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].session_id, sid);
+        assert_eq!(persisted[0].cwd, "/repo");
+    }
+
+    #[test]
+    fn update_session_meta_missing_session_is_noop() {
+        use std::sync::{Arc, Mutex};
+
+        let persisted = Arc::new(Mutex::new(Vec::<SessionState>::new()));
+        let persisted_for_cb = persisted.clone();
+        let mgr = SessionManager::new().with_persist_callback(move |state| {
+            persisted_for_cb
+                .lock()
+                .expect("persisted lock")
+                .push(state.clone());
+        });
+        assert!(mgr
+            .update_session_meta(
+                "missing",
+                SessionMetaUpdate {
+                    cwd: Some("/repo".to_string()),
+                    model: Some("openai:gpt-4o".to_string()),
+                    ..SessionMetaUpdate::default()
+                },
+            )
+            .is_none());
+        assert!(persisted.lock().expect("persisted lock").is_empty());
     }
 }

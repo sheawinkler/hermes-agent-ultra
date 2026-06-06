@@ -41,8 +41,9 @@ pub use voice::{
     TtsPiperConfig, TtsProviderEntry, TtsXaiConfig,
 };
 pub use loader::{
-    apply_user_config_patch, load_config, load_user_config_file, save_config_yaml,
-    user_config_field_display, validate_config, ConfigError,
+    apply_user_config_patch, atomic_json_write, atomic_json_write_pretty, atomic_write_bytes,
+    atomic_yaml_write, load_config, load_user_config_file, save_config_yaml, set_user_config_value,
+    user_config_field_display, validate_config, ConfigError, ConfigSetResult,
 };
 pub use managed_gateway::{
     build_vendor_gateway_url, coerce_modal_mode, env_var_enabled, get_tool_gateway_scheme,

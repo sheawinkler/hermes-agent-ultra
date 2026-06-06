@@ -285,6 +285,8 @@ describe('createSlashHandler', () => {
       expect(ctx.transcript.sys).toHaveBeenCalledWith('Voice TTS enabled.')
     })
     expect(ctx.voice.setVoiceRecordKey).not.toHaveBeenCalled()
+    expect(ctx.voice.setVoiceTts).toHaveBeenCalledWith(true)
+    expect(ctx.voice.setVoiceEnabled).toHaveBeenCalledWith(true)
   })
 
   it('cycles details mode and persists it', async () => {
@@ -764,7 +766,8 @@ const buildTranscript = () => ({
 
 const buildVoice = () => ({
   setVoiceEnabled: vi.fn(),
-  setVoiceRecordKey: vi.fn()
+  setVoiceRecordKey: vi.fn(),
+  setVoiceTts: vi.fn()
 })
 
 interface Ctx {

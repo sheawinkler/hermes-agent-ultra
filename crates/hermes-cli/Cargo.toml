@@ -47,6 +47,7 @@ hermes-gateway = { workspace = true, features = [
     "email",
     "sms",
     "homeassistant",
+    "ntfy",
     "api-server",
     "webhook",
 ] }

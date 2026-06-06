@@ -135,6 +135,35 @@ pub trait PlatformAdapter: Send + Sync {
             .await
     }
 
+    /// Send a text message with an optional platform-native thread id.
+    ///
+    /// Adapters without threaded replies inherit the plain send behavior.
+    async fn send_message_threaded(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        thread_id: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let _ = thread_id;
+        self.send_message(chat_id, text, parse_mode).await
+    }
+
+    /// Send or update a status message keyed by stable status type.
+    ///
+    /// Platforms that can edit messages should override this to keep noisy
+    /// status updates in one bubble. The default preserves append-only
+    /// behavior for adapters without editable message IDs.
+    async fn send_or_update_status(
+        &self,
+        chat_id: &str,
+        _status_key: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
+        self.send_message(chat_id, text, parse_mode).await
+    }
+
     /// Edit an existing message.
     async fn edit_message(
         &self,
@@ -142,18 +171,6 @@ pub trait PlatformAdapter: Send + Sync {
         message_id: &str,
         text: &str,
     ) -> Result<(), GatewayError>;
-
-    /// Delete an existing message when the platform supports it.
-    async fn delete_message(
-        &self,
-        chat_id: &str,
-        message_id: &str,
-    ) -> Result<(), GatewayError> {
-        let _ = (chat_id, message_id);
-        Err(GatewayError::Platform(
-            "message delete not supported on this platform".into(),
-        ))
-    }
 
     /// Send a file to a chat with an optional caption.
     async fn send_file(
@@ -180,6 +197,15 @@ pub trait PlatformAdapter: Send + Sync {
         };
         self.send_message(chat_id, &content, Some(ParseMode::Plain))
             .await
+    }
+
+    /// Delete a previously sent message when the platform supports it.
+    async fn delete_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+    ) -> Result<bool, GatewayError> {
+        Ok(false)
     }
 
     /// Add a reaction emoji to a message if the platform supports it.

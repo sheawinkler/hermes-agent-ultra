@@ -161,6 +161,30 @@ pub fn read_nous_access_token(reader: Option<&dyn TokenReader>) -> Option<String
     cached
 }
 
+/// Read the currently cached Nous OAuth subscriber access token without
+/// expiry checks or refresh callbacks.
+///
+/// Availability probes use this lighter path so slow/interactive refresh
+/// mechanisms never run while merely deciding whether a managed gateway is
+/// present. Actual request paths should continue to call
+/// [`read_nous_access_token`] so they can use fresh credentials when a
+/// caller wires in a refresh-capable [`TokenReader`].
+pub fn peek_nous_access_token() -> Option<String> {
+    if let Ok(explicit) = std::env::var(TOKEN_OVERRIDE_ENV) {
+        let trimmed = explicit.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    read_nous_provider_state()
+        .access_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -291,6 +315,20 @@ mod tests {
     }
 
     #[test]
+    fn peek_returns_cached_token_without_expiry_validation() {
+        let payload = json!({
+            "providers": {
+                "nous": {
+                    "access_token": "stale-tok",
+                    "expires_at": iso_seconds_from_now(-3600),
+                }
+            }
+        });
+        let _g = AuthGuard::new(Some(&payload));
+        assert_eq!(peek_nous_access_token(), Some("stale-tok".to_string()));
+    }
+
+    #[test]
     fn explicit_env_override_wins() {
         let payload = json!({
             "providers": {"nous": {"access_token": "from-disk"}}
@@ -301,6 +339,16 @@ mod tests {
             read_nous_access_token(None),
             Some("override-token".to_string())
         );
+    }
+
+    #[test]
+    fn peek_env_override_wins_over_disk() {
+        let payload = json!({
+            "providers": {"nous": {"access_token": "from-disk"}}
+        });
+        let _g = AuthGuard::new(Some(&payload));
+        std::env::set_var(TOKEN_OVERRIDE_ENV, "  override-token  ");
+        assert_eq!(peek_nous_access_token(), Some("override-token".to_string()));
     }
 
     #[test]

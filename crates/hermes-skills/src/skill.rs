@@ -12,6 +12,8 @@ use crate::guard::SkillGuard;
 use crate::hub::SkillsHubClient;
 use crate::store::SkillStore;
 
+pub const MAX_SKILL_CONTENT_CHARS: usize = 100_000;
+
 // ---------------------------------------------------------------------------
 // SkillError
 // ---------------------------------------------------------------------------
@@ -116,6 +118,16 @@ impl SkillManager {
         self
     }
 
+    fn validate_content_size(content: &str, label: &str) -> Result<(), SkillError> {
+        let chars = content.chars().count();
+        if chars > MAX_SKILL_CONTENT_CHARS {
+            return Err(SkillError::GuardViolation(format!(
+                "{label} exceeds {MAX_SKILL_CONTENT_CHARS} characters ({chars} supplied)"
+            )));
+        }
+        Ok(())
+    }
+
     /// Auto-create a skill from task summary and execution notes.
     pub async fn auto_create_from_task(
         &self,
@@ -205,6 +217,19 @@ impl SkillProvider for SkillManager {
         category: Option<&str>,
     ) -> Result<Skill, AgentError> {
         info!("Creating skill: {}", name);
+        Self::validate_content_size(content, "Skill content")?;
+
+        if self
+            .store
+            .load(name)
+            .await
+            .map_err(AgentError::from)?
+            .is_some()
+        {
+            return Err(AgentError::from(SkillError::GuardViolation(format!(
+                "Skill already exists: {name}"
+            ))));
+        }
 
         // Validate the skill content through the guard.
         let skill = Skill {
@@ -247,6 +272,7 @@ impl SkillProvider for SkillManager {
     #[instrument(skip(self, content), fields(name = %name))]
     async fn update_skill(&self, name: &str, content: &str) -> Result<Skill, AgentError> {
         info!("Updating skill: {}", name);
+        Self::validate_content_size(content, "Skill content")?;
 
         // Load existing skill to preserve category / description.
         let mut skill = self
@@ -337,6 +363,34 @@ mod tests {
 
         let list = mgr.list_skills().await.unwrap();
         assert_eq!(list.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_create_rejects_duplicate_skill() {
+        let dir = tempdir().unwrap();
+        let mgr = make_manager(&dir.path().to_path_buf());
+
+        mgr.create_skill("dup-skill", "# Skill\n1. First", None)
+            .await
+            .unwrap();
+        let err = mgr
+            .create_skill("dup-skill", "# Skill\n1. Second", None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("already exists"));
+    }
+
+    #[tokio::test]
+    async fn test_create_rejects_oversized_content() {
+        let dir = tempdir().unwrap();
+        let mgr = make_manager(&dir.path().to_path_buf());
+        let oversized = format!("# Huge\n{}", "x".repeat(MAX_SKILL_CONTENT_CHARS + 1));
+
+        let err = mgr
+            .create_skill("huge-skill", &oversized, None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("100000") || err.to_string().contains("100,000"));
     }
 
     #[tokio::test]

@@ -2801,6 +2801,40 @@ class TestGoogleChatStandaloneSend:
         assert kwargs["json"] == {"text": "hello cron"}
 
     @pytest.mark.asyncio
+    async def test_standalone_send_rejects_media_files_before_credentials(self, monkeypatch):
+        monkeypatch.delenv("GOOGLE_CHAT_SERVICE_ACCOUNT_JSON", raising=False)
+        session = _FakeAiohttpSession([])
+        _install_fake_aiohttp(monkeypatch, session)
+
+        result = await _gc_mod._standalone_send(
+            PlatformConfig(enabled=True, extra={}),
+            "spaces/AAAA-BBBB",
+            "hi",
+            media_files=["/tmp/report.pdf"],
+        )
+
+        assert "error" in result
+        assert "text only" in result["error"]
+        assert len(session.calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_standalone_send_rejects_force_document_before_credentials(self, monkeypatch):
+        monkeypatch.delenv("GOOGLE_CHAT_SERVICE_ACCOUNT_JSON", raising=False)
+        session = _FakeAiohttpSession([])
+        _install_fake_aiohttp(monkeypatch, session)
+
+        result = await _gc_mod._standalone_send(
+            PlatformConfig(enabled=True, extra={}),
+            "spaces/AAAA-BBBB",
+            "hi",
+            force_document=True,
+        )
+
+        assert "error" in result
+        assert "force_document" in result["error"]
+        assert len(session.calls) == 0
+
+    @pytest.mark.asyncio
     async def test_standalone_send_returns_error_on_invalid_chat_id(self, monkeypatch):
         monkeypatch.delenv("GOOGLE_CHAT_SERVICE_ACCOUNT_JSON", raising=False)
         result = await _gc_mod._standalone_send(

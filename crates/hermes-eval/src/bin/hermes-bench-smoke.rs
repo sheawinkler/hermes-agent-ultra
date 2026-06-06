@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use hermes_eval::runner::{Runner, RunnerConfig};
-use hermes_eval::{NoopRollout, TbliteSmokeAdapter};
+use hermes_eval::{SmokeRollout, TbliteSmokeAdapter};
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
@@ -30,7 +30,7 @@ async fn main() -> std::process::ExitCode {
     match runner
         .run(
             Arc::new(TbliteSmokeAdapter::default()),
-            Arc::new(NoopRollout),
+            Arc::new(SmokeRollout),
         )
         .await
     {

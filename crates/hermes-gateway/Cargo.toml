@@ -33,6 +33,7 @@ bluebubbles = []
 email = []
 sms = []
 homeassistant = []
+ntfy = []
 api-server = []
 webhook = []
 
@@ -42,6 +43,7 @@ hermes-agent = { workspace = true }
 hermes-config = { workspace = true }
 hermes-skills = { workspace = true, optional = true }
 hermes-tools = { workspace = true }
+hermes-cron = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

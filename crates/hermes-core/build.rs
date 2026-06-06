@@ -1,34 +1,70 @@
+use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=HERMES_GIT_COMMIT");
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-changed=../../.git/refs/heads");
-    println!("cargo:rerun-if-changed=../../.git/packed-refs");
+    println!("cargo:rerun-if-env-changed=HERMES_BUILD_GIT_SHA");
+    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
 
-    let commit = std::env::var("HERMES_GIT_COMMIT")
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default());
+    let repo_root = manifest_dir.join("../..");
+    emit_git_rerun_triggers(&repo_root);
+
+    if let Some(sha) = env_sha("HERMES_GIT_COMMIT")
+        .or_else(|| env_sha("HERMES_BUILD_GIT_SHA"))
+        .or_else(|| env_sha("GITHUB_SHA"))
+        .or_else(|| git_sha(&repo_root))
+    {
+        println!("cargo:rustc-env=HERMES_BUILD_GIT_SHA={sha}");
+        println!("cargo:rustc-env=HERMES_GIT_COMMIT={sha}");
+    }
+}
+
+fn env_sha(var: &str) -> Option<String> {
+    std::env::var(var)
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
-        .or_else(resolve_git_commit)
-        .unwrap_or_else(|| "unknown".to_string());
-
-    println!("cargo:rustc-env=HERMES_GIT_COMMIT={commit}");
+        .map(|v| short_sha(&v))
 }
 
-fn resolve_git_commit() -> Option<String> {
+fn git_sha(repo_root: &std::path::Path) -> Option<String> {
     let output = Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])
+        .current_dir(repo_root)
         .output()
         .ok()?;
     if !output.status.success() {
         return None;
     }
-    let commit = String::from_utf8(output.stdout).ok()?;
-    let commit = commit.trim();
-    if commit.is_empty() {
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
         None
     } else {
-        Some(commit.to_string())
+        Some(sha)
+    }
+}
+
+fn short_sha(raw: &str) -> String {
+    raw.chars().take(12).collect()
+}
+
+fn emit_git_rerun_triggers(repo_root: &std::path::Path) {
+    let git_dir = repo_root.join(".git");
+    println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        git_dir.join("packed-refs").display()
+    );
+
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).unwrap_or_default();
+    let Some(ref_path) = head.trim().strip_prefix("ref: ") else {
+        return;
+    };
+    if !ref_path.contains("..") {
+        println!(
+            "cargo:rerun-if-changed={}",
+            git_dir.join(ref_path).display()
+        );
     }
 }

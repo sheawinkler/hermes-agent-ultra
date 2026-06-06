@@ -4,6 +4,10 @@
 //! OpenAI, Anthropic, and OpenRouter APIs.
 
 use async_trait::async_trait;
+use base64::{
+    engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
+    Engine as _,
+};
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use reqwest::Client;
@@ -13,55 +17,135 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use hermes_intelligence::anthropic_adapter::get_anthropic_max_output;
+use hermes_intelligence::anthropic_adapter::{
+    default_anthropic_beta_header_value, forbids_sampling_params, get_anthropic_max_output,
+    is_azure_anthropic_endpoint, is_oauth_token, is_third_party_endpoint, requires_bearer_auth,
+    supports_fast_mode,
+};
+use hermes_intelligence::supports_vision;
 
 use hermes_core::{
     AgentError, FunctionCall, FunctionCallDelta, LlmProvider, LlmResponse, Message, MessageRole,
-    StreamChunk, StreamDelta, ToolCall, ToolCallDelta, ToolSchema,
+    StreamChunk, StreamDelta, ToolCall, ToolCallDelta, ToolSchema, UsageStats,
 };
 
 use crate::credential_pool::CredentialPool;
-use crate::provider_serialize_cache::ProviderSerializeCache;
+use crate::provider_profiles;
 use crate::rate_limit::RateLimitTracker;
-use crate::usage_parse::usage_stats_from_raw;
+use crate::tool_call_args::arguments_value_to_string;
+
+struct ChatRequestParams<'a> {
+    messages: &'a [Message],
+    tools: &'a [ToolSchema],
+    max_tokens: Option<u32>,
+    temperature: Option<f64>,
+    effective_model: &'a str,
+    extra_body: Option<&'a Value>,
+    stream: bool,
+}
 
 const ACP_MULTIMODAL_PREFIX: &str = "__hermes_acp_parts_json__:";
+pub const OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+const CODEX_CLOUDFLARE_ORIGINATOR: &str = "codex_cli_rs";
 
-fn rate_limit_headers_json(headers: &reqwest::header::HeaderMap) -> Option<String> {
-    let mut map = HashMap::new();
-    for (k, v) in headers.iter() {
-        let kl = k.as_str().to_ascii_lowercase();
-        if kl.starts_with("x-ratelimit-") || kl == "retry-after" {
-            if let Ok(s) = v.to_str() {
-                map.insert(kl, s.to_string());
-            }
+fn request_timeout_duration(seconds: Option<f64>) -> Option<Duration> {
+    seconds.and_then(|value| {
+        if value.is_finite() && value > 0.0 {
+            Duration::try_from_secs_f64(value).ok()
+        } else {
+            None
         }
-    }
-    if map.is_empty() {
-        None
-    } else {
-        serde_json::to_string(&map).ok()
-    }
+    })
 }
 
-fn llm_api_error(
-    status: reqwest::StatusCode,
-    body: &str,
-    headers: &reqwest::header::HeaderMap,
-) -> AgentError {
-    match rate_limit_headers_json(headers) {
-        Some(h) => AgentError::LlmApi(format!(
-            "API error {status}: {body}\n__HERMES_RL_HEADERS__:{h}"
-        )),
-        None => AgentError::LlmApi(format!("API error {status}: {body}")),
+fn build_provider_http_client(request_timeout: Option<Duration>) -> Client {
+    let mut builder = Client::builder();
+    if let Some(timeout) = request_timeout {
+        builder = builder.timeout(timeout);
     }
+    builder.build().unwrap_or_else(|err| {
+        tracing::warn!("failed to build provider HTTP client: {}", err);
+        Client::new()
+    })
 }
 
-fn extract_rate_limit_headers(
-    headers: &reqwest::header::HeaderMap,
-) -> Option<HashMap<String, String>> {
-    let json = rate_limit_headers_json(headers)?;
-    serde_json::from_str(&json).ok()
+pub fn codex_cloudflare_headers(access_token: Option<&str>) -> Vec<(String, String)> {
+    let mut headers = vec![
+        (
+            "originator".to_string(),
+            CODEX_CLOUDFLARE_ORIGINATOR.to_string(),
+        ),
+        (
+            "User-Agent".to_string(),
+            format!(
+                "{CODEX_CLOUDFLARE_ORIGINATOR}/{}",
+                env!("CARGO_PKG_VERSION")
+            ),
+        ),
+    ];
+
+    if let Some(account_id) = access_token.and_then(codex_chatgpt_account_id) {
+        headers.push(("ChatGPT-Account-ID".to_string(), account_id));
+    }
+
+    headers
+}
+
+pub fn openai_codex_provider(
+    api_key: impl Into<String>,
+    model: impl Into<String>,
+    base_url: Option<&str>,
+) -> OpenAiProvider {
+    openai_codex_provider_with_timeout(api_key, model, base_url, None)
+}
+
+pub fn openai_codex_provider_with_timeout(
+    api_key: impl Into<String>,
+    model: impl Into<String>,
+    base_url: Option<&str>,
+    request_timeout_seconds: Option<f64>,
+) -> OpenAiProvider {
+    let api_key = api_key.into();
+    let base_url = base_url
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(OPENAI_CODEX_BASE_URL)
+        .to_string();
+    let mut provider = OpenAiProvider::new(api_key.as_str())
+        .with_model(model)
+        .with_base_url(base_url.as_str())
+        .with_optional_request_timeout_seconds(request_timeout_seconds);
+    if is_codex_cloudflare_base_url(base_url.as_str()) {
+        provider = provider.with_headers(codex_cloudflare_headers(Some(api_key.as_str())));
+    }
+    provider
+}
+
+fn is_codex_cloudflare_base_url(base_url: &str) -> bool {
+    base_url
+        .trim()
+        .to_ascii_lowercase()
+        .contains("chatgpt.com/backend-api/codex")
+}
+
+fn codex_chatgpt_account_id(token: &str) -> Option<String> {
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    let payload = token.split('.').nth(1)?;
+    let decoded = URL_SAFE_NO_PAD
+        .decode(payload.as_bytes())
+        .or_else(|_| URL_SAFE.decode(payload.as_bytes()))
+        .ok()?;
+    let claims: Value = serde_json::from_slice(&decoded).ok()?;
+    claims
+        .get("https://api.openai.com/auth")
+        .and_then(|auth| auth.get("chatgpt_account_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 fn parse_acp_multimodal_parts(content: &str) -> Option<Vec<Value>> {
@@ -184,6 +268,8 @@ pub struct GenericProvider {
     pub model: String,
     /// HTTP client.
     client: Arc<Mutex<Client>>,
+    /// Optional total request timeout applied to newly-built clients.
+    request_timeout: Option<Duration>,
     /// Last time we rebuilt the client transport.
     client_refreshed_at: Arc<Mutex<Instant>>,
     /// Optional custom headers to send with every request.
@@ -192,7 +278,8 @@ pub struct GenericProvider {
     pub rate_limiter: Option<Arc<RateLimitTracker>>,
     /// Optional credential pool for key rotation.
     pub credential_pool: Option<Arc<CredentialPool>>,
-    serialize_cache: Option<Arc<ProviderSerializeCache>>,
+    /// Optional OpenAI-compatible provider profile used for request shaping.
+    pub provider_profile: Option<String>,
 }
 
 impl GenericProvider {
@@ -202,16 +289,18 @@ impl GenericProvider {
         api_key: impl Into<String>,
         model: impl Into<String>,
     ) -> Self {
+        let request_timeout = None;
         Self {
             base_url: base_url.into(),
             api_key: api_key.into(),
             model: model.into(),
-            client: Arc::new(Mutex::new(Client::new())),
+            client: Arc::new(Mutex::new(build_provider_http_client(request_timeout))),
+            request_timeout,
             client_refreshed_at: Arc::new(Mutex::new(Instant::now())),
             extra_headers: Vec::new(),
             rate_limiter: None,
             credential_pool: None,
-            serialize_cache: None,
+            provider_profile: None,
         }
     }
 
@@ -233,6 +322,32 @@ impl GenericProvider {
         self
     }
 
+    /// Set an optional total request timeout used by this provider and rebuilds.
+    pub fn with_optional_request_timeout_seconds(mut self, seconds: Option<f64>) -> Self {
+        self.request_timeout = request_timeout_duration(seconds);
+        if let Ok(mut client) = self.client.lock() {
+            *client = build_provider_http_client(self.request_timeout);
+        }
+        self
+    }
+
+    /// Set a total request timeout in seconds.
+    pub fn with_request_timeout_seconds(self, seconds: f64) -> Self {
+        self.with_optional_request_timeout_seconds(Some(seconds))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn configured_request_timeout(&self) -> Option<Duration> {
+        self.request_timeout
+    }
+
+    /// Attach a Rust-native provider profile for request shaping.
+    pub fn with_provider_profile(mut self, profile: impl Into<String>) -> Self {
+        self.provider_profile =
+            provider_profiles::canonical_provider_profile_id(&profile.into()).map(str::to_string);
+        self
+    }
+
     /// Attach a rate limit tracker.
     pub fn with_rate_limiter(mut self, tracker: Arc<RateLimitTracker>) -> Self {
         self.rate_limiter = Some(tracker);
@@ -243,28 +358,6 @@ impl GenericProvider {
     pub fn with_credential_pool(mut self, pool: Arc<CredentialPool>) -> Self {
         self.credential_pool = Some(pool);
         self
-    }
-
-    /// Share per-turn sanitize/tools JSON cache (LLM retry fast path).
-    pub fn with_serialize_cache(mut self, cache: Arc<ProviderSerializeCache>) -> Self {
-        self.serialize_cache = Some(cache);
-        self
-    }
-
-    fn sanitized_messages_for_request(&self, messages: &[Message], strict: bool) -> Value {
-        if let Some(cache) = &self.serialize_cache {
-            cache.sanitized_openai_messages(messages, strict)
-        } else {
-            Self::sanitize_messages_for_strict_api(messages, strict)
-        }
-    }
-
-    fn formatted_tools_for_request(&self, tools: &[ToolSchema]) -> Value {
-        if let Some(cache) = &self.serialize_cache {
-            cache.formatted_openai_tools(tools)
-        } else {
-            Self::format_tools_for_openai_api(tools)
-        }
     }
 
     /// Get the effective API key, using the credential pool if available.
@@ -296,11 +389,12 @@ impl GenericProvider {
         }
     }
 
-    /// Inject optional runtime hints: reasoning effort and service tier.
+    /// Inject optional runtime hints: reasoning effort, vision preprocessing,
+    /// and service tier.
     fn apply_runtime_hints(
         &self,
         body: &mut Value,
-        _messages: &[Message],
+        messages: &[Message],
         extra_body: Option<&Value>,
     ) {
         // Reasoning effort passthrough (`low|medium|high`) using extra_body.reasoning_effort.
@@ -318,6 +412,82 @@ impl GenericProvider {
         {
             body["service_tier"] = serde_json::json!(st);
         }
+
+        // Vision preprocessing: if user content contains local file-like paths,
+        // add a hint field used by downstream adapters.
+        let needs_vision_preprocess = messages.iter().any(|m| {
+            m.content.as_ref().is_some_and(|c| {
+                c.contains(".png") || c.contains(".jpg") || c.contains("data:image/")
+            })
+        });
+        if needs_vision_preprocess {
+            body["vision_preprocessed"] = serde_json::json!(true);
+        }
+    }
+
+    fn apply_opencode_go_reasoning_controls(&self, body: &mut Value, effective_model: &str) {
+        if !self
+            .base_url
+            .to_ascii_lowercase()
+            .contains("opencode.ai/zen/go")
+        {
+            return;
+        }
+
+        let model = flat_model_name(effective_model);
+        let is_kimi_k2 = model.starts_with("kimi-k2");
+        let is_deepseek_thinking = (model.starts_with("deepseek-v")
+            && !model.starts_with("deepseek-v3"))
+            || model == "deepseek-reasoner";
+
+        let reasoning = body.get("reasoning").cloned();
+        let mut enabled = true;
+        let mut effort = body
+            .get("reasoning_effort")
+            .and_then(|value| value.as_str())
+            .map(|value| value.trim().to_ascii_lowercase());
+
+        if let Some(reasoning_obj) = reasoning.as_ref().and_then(|value| value.as_object()) {
+            enabled = reasoning_obj
+                .get("enabled")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true);
+            if effort.is_none() {
+                effort = reasoning_obj
+                    .get("effort")
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.trim().to_ascii_lowercase());
+            }
+        }
+
+        if let Some(map) = body.as_object_mut() {
+            map.remove("reasoning");
+            map.remove("reasoning_effort");
+        }
+
+        if is_kimi_k2 {
+            if reasoning.is_none() && effort.is_none() {
+                return;
+            }
+            body["thinking"] =
+                serde_json::json!({ "type": if enabled { "enabled" } else { "disabled" } });
+            if enabled {
+                if let Some(mapped) = opencode_go_kimi_reasoning_effort(effort.as_deref()) {
+                    body["reasoning_effort"] = serde_json::json!(mapped);
+                }
+            }
+            return;
+        }
+
+        if is_deepseek_thinking {
+            body["thinking"] =
+                serde_json::json!({ "type": if enabled { "enabled" } else { "disabled" } });
+            if enabled {
+                if let Some(mapped) = opencode_go_deepseek_reasoning_effort(effort.as_deref()) {
+                    body["reasoning_effort"] = serde_json::json!(mapped);
+                }
+            }
+        }
     }
 
     /// Force-close helper for future explicit TCP cleanup hooks.
@@ -330,22 +500,17 @@ impl GenericProvider {
         self.client
             .lock()
             .map(|c| c.clone())
-            .unwrap_or_else(|_| Client::new())
+            .unwrap_or_else(|_| build_provider_http_client(self.request_timeout))
     }
 
     fn refresh_client(&self, reason: &str) {
         tracing::warn!("rebuilding primary HTTP client: {}", reason);
         if let Ok(mut c) = self.client.lock() {
-            *c = Client::new();
+            *c = build_provider_http_client(self.request_timeout);
         }
         if let Ok(mut t) = self.client_refreshed_at.lock() {
             *t = Instant::now();
         }
-    }
-
-    pub async fn turn_start_hygiene(&self, probe_url: &str) {
-        self.force_close_tcp_sockets();
-        self.maybe_refresh_stale_client(probe_url).await;
     }
 
     async fn maybe_refresh_stale_client(&self, probe_url: &str) {
@@ -406,6 +571,7 @@ impl GenericProvider {
 
     fn is_local_request_control_key(key: &str) -> bool {
         matches!(key, "strict_tool_calls" | "strict_api" | "provider_strict")
+            || provider_profiles::local_control_key_for_profile(None, key)
     }
 
     fn merge_extra_body_fields(body: &mut Value, extra_body: Option<&Value>) {
@@ -420,7 +586,32 @@ impl GenericProvider {
         }
     }
 
-    pub(crate) fn sanitize_messages_for_strict_api(messages: &[Message], enabled: bool) -> Value {
+    fn profile_for_extra_body<'a>(&'a self, extra_body: Option<&'a Value>) -> Option<&'a str> {
+        extra_body
+            .and_then(|value| value.get("provider_profile"))
+            .and_then(Value::as_str)
+            .and_then(provider_profiles::canonical_provider_profile_id)
+            .or(self.provider_profile.as_deref())
+    }
+
+    fn merge_extra_body_fields_for_profile(
+        body: &mut Value,
+        profile: Option<&str>,
+        extra_body: Option<&Value>,
+    ) {
+        let cleaned = provider_profiles::clean_extra_body_for_profile(profile, extra_body);
+        Self::merge_extra_body_fields(body, cleaned.as_ref());
+    }
+
+    fn sanitize_messages_for_api(
+        messages: &[Message],
+        enabled: bool,
+        effective_model: &str,
+        profile: Option<&str>,
+        extra_body: Option<&Value>,
+    ) -> Value {
+        let model_supports_vision =
+            Self::supports_multimodal_tool_results(profile, effective_model, extra_body);
         let mut out = Vec::with_capacity(messages.len());
         for msg in messages {
             let mut api_msg = serde_json::to_value(msg).unwrap_or_else(|_| serde_json::json!({}));
@@ -429,7 +620,11 @@ impl GenericProvider {
                 .and_then(|v| v.as_str())
                 .and_then(parse_acp_multimodal_parts)
             {
-                api_msg["content"] = Value::Array(parts);
+                api_msg["content"] = if model_supports_vision {
+                    Value::Array(parts)
+                } else {
+                    Value::String(flatten_multimodal_parts_text(&parts))
+                };
             }
             if !enabled {
                 out.push(api_msg);
@@ -445,11 +640,7 @@ impl GenericProvider {
                                 .get("arguments")
                                 .cloned()
                                 .unwrap_or_else(|| Value::String("{}".to_string()));
-                            let args =
-                                args_raw.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
-                                    serde_json::to_string(&args_raw)
-                                        .unwrap_or_else(|_| "{}".to_string())
-                                });
+                            let (args, _) = arguments_value_to_string(Some(&args_raw));
                             Some(serde_json::json!({
                                 "name": name,
                                 "arguments": args,
@@ -477,8 +668,22 @@ impl GenericProvider {
         Value::Array(out)
     }
 
-    pub(crate) fn format_tools_for_openai_api(tools: &[ToolSchema]) -> Value {
-        Value::Array(
+    fn supports_multimodal_tool_results(
+        profile: Option<&str>,
+        effective_model: &str,
+        extra_body: Option<&Value>,
+    ) -> bool {
+        if let Some(value) = extra_body
+            .and_then(|body| body.get("supports_vision"))
+            .and_then(Value::as_bool)
+        {
+            return value;
+        }
+        profile.is_some_and(provider_profiles::supports_vision) || supports_vision(effective_model)
+    }
+
+    fn format_tools_for_openai_api(tools: &[ToolSchema]) -> Value {
+        let formatted = Value::Array(
             tools
                 .iter()
                 .map(|tool| {
@@ -492,24 +697,57 @@ impl GenericProvider {
                     })
                 })
                 .collect(),
-        )
+        );
+        hermes_core::sanitize_tool_schemas(Some(&formatted)).unwrap_or(formatted)
     }
 
-    /// Golden harness: OpenAI-style chat/completions body (messages + tools) for API oracle tests.
-    #[doc(hidden)]
-    pub fn oracle_chat_completions_body(
-        messages: &[Message],
-        tools: &[ToolSchema],
-        model: &str,
-    ) -> Value {
-        let api_messages = Self::sanitize_messages_for_strict_api(messages, false);
+    fn chat_request_body(&self, request: ChatRequestParams<'_>) -> Value {
+        let ChatRequestParams {
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            effective_model,
+            extra_body,
+            stream,
+        } = request;
+        let profile = self.profile_for_extra_body(extra_body);
+        let strict_tool_sanitize = Self::should_sanitize_tool_calls(extra_body);
+        let mut api_messages = Self::sanitize_messages_for_api(
+            messages,
+            strict_tool_sanitize,
+            effective_model,
+            profile,
+            extra_body,
+        );
+        provider_profiles::normalize_messages_for_profile(profile, &mut api_messages);
+
         let mut body = serde_json::json!({
-            "model": model,
+            "model": effective_model,
             "messages": api_messages,
         });
-        if !tools.is_empty() {
-            body["tools"] = Self::format_tools_for_openai_api(tools);
+        if stream {
+            body["stream"] = Value::Bool(true);
         }
+
+        if let Some(mt) =
+            max_tokens.or_else(|| profile.and_then(provider_profiles::default_max_tokens))
+        {
+            body["max_tokens"] = serde_json::json!(mt);
+        }
+        if !profile.is_some_and(provider_profiles::omit_temperature) {
+            if let Some(temp) = temperature {
+                body["temperature"] = serde_json::json!(temp);
+            }
+        }
+        if !tools.is_empty() {
+            body["tools"] =
+                format_tools_for_openai_api_with_model(tools, effective_model, &self.base_url);
+        }
+        Self::merge_extra_body_fields_for_profile(&mut body, profile, extra_body);
+        self.apply_runtime_hints(&mut body, messages, extra_body);
+        provider_profiles::apply_profile_to_body(profile, &mut body, effective_model, extra_body);
+        self.apply_opencode_go_reasoning_controls(&mut body, effective_model);
         body
     }
 
@@ -560,12 +798,225 @@ impl GenericProvider {
     }
 }
 
-#[async_trait]
-impl LlmProvider for GenericProvider {
-    async fn turn_start_connection_hygiene(&self, probe_url: &str) {
-        self.turn_start_hygiene(probe_url).await;
+fn flat_model_name(model: &str) -> String {
+    let normalized = model.trim().to_ascii_lowercase();
+    let parts = normalized
+        .split(['/', ':'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+
+    for part in parts.iter().rev() {
+        if part.starts_with("kimi-k2")
+            || part.starts_with("deepseek-v")
+            || *part == "deepseek-reasoner"
+        {
+            return (*part).to_string();
+        }
     }
 
+    parts
+        .last()
+        .copied()
+        .unwrap_or(normalized.as_str())
+        .to_string()
+}
+
+fn opencode_go_kimi_reasoning_effort(effort: Option<&str>) -> Option<&'static str> {
+    match effort.unwrap_or("").trim().to_ascii_lowercase().as_str() {
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" => Some("high"),
+        "xhigh" | "max" => Some("high"),
+        _ => None,
+    }
+}
+
+fn opencode_go_deepseek_reasoning_effort(effort: Option<&str>) -> Option<&'static str> {
+    match effort.unwrap_or("").trim().to_ascii_lowercase().as_str() {
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" => Some("high"),
+        "xhigh" | "max" => Some("max"),
+        _ => None,
+    }
+}
+
+fn is_moonshot_model(model: &str) -> bool {
+    let lower = model.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+    flat_model_name(&lower).starts_with("kimi-k2") || lower.contains("moonshotai/")
+}
+
+fn format_tools_for_openai_api_with_model(
+    tools: &[ToolSchema],
+    effective_model: &str,
+    base_url: &str,
+) -> Value {
+    let mut formatted = GenericProvider::format_tools_for_openai_api(tools);
+    if is_moonshot_model(effective_model)
+        || AnthropicProvider::is_kimi_coding_endpoint(Some(base_url))
+    {
+        sanitize_moonshot_tools_value(&mut formatted);
+    }
+    formatted
+}
+
+fn sanitize_moonshot_tools_value(tools: &mut Value) {
+    let Some(items) = tools.as_array_mut() else {
+        return;
+    };
+    for tool in items {
+        let Some(function) = tool.get_mut("function").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        let params = function
+            .remove("parameters")
+            .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}}));
+        function.insert(
+            "parameters".to_string(),
+            sanitize_moonshot_tool_parameters(&params),
+        );
+    }
+}
+
+fn sanitize_moonshot_tool_parameters(params: &Value) -> Value {
+    let mut root = match params.as_object() {
+        Some(obj) => Value::Object(obj.clone()),
+        None => serde_json::json!({"type": "object", "properties": {}}),
+    };
+    sanitize_moonshot_schema_node(&mut root, true);
+    root
+}
+
+fn sanitize_moonshot_schema_node(node: &mut Value, top_level: bool) {
+    let Some(obj) = node.as_object_mut() else {
+        if top_level {
+            *node = serde_json::json!({"type": "object", "properties": {}});
+        }
+        return;
+    };
+
+    let has_ref = obj.contains_key("$ref");
+
+    if let Some(any_of) = obj.get_mut("anyOf").and_then(Value::as_array_mut) {
+        for branch in any_of.iter_mut() {
+            sanitize_moonshot_schema_node(branch, false);
+        }
+        any_of.retain(|branch| {
+            branch
+                .get("type")
+                .and_then(Value::as_str)
+                .is_none_or(|kind| kind != "null")
+        });
+    }
+
+    if obj.contains_key("anyOf") {
+        let non_null = obj
+            .get("anyOf")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if non_null.len() == 1 {
+            obj.remove("anyOf");
+            if let Some(branch_obj) = non_null
+                .into_iter()
+                .next()
+                .and_then(|v| v.as_object().cloned())
+            {
+                for (key, value) in branch_obj {
+                    obj.insert(key, value);
+                }
+            }
+        } else {
+            obj.remove("type");
+        }
+    }
+
+    obj.remove("nullable");
+
+    if let Some(props) = obj.get_mut("properties").and_then(Value::as_object_mut) {
+        for value in props.values_mut() {
+            sanitize_moonshot_schema_node(value, false);
+        }
+    }
+
+    if let Some(items) = obj.get_mut("items") {
+        sanitize_moonshot_schema_node(items, false);
+    }
+
+    if let Some(any_of) = obj.get_mut("anyOf").and_then(Value::as_array_mut) {
+        for branch in any_of {
+            sanitize_moonshot_schema_node(branch, false);
+        }
+    }
+
+    clean_moonshot_enum(obj);
+
+    if top_level {
+        obj.insert("type".to_string(), Value::String("object".to_string()));
+        if !obj.get("properties").is_some_and(Value::is_object) {
+            obj.insert(
+                "properties".to_string(),
+                Value::Object(serde_json::Map::new()),
+            );
+        }
+        return;
+    }
+
+    if !has_ref && !obj.contains_key("type") && !obj.contains_key("anyOf") {
+        let inferred = infer_moonshot_schema_type(obj);
+        obj.insert("type".to_string(), Value::String(inferred.to_string()));
+        clean_moonshot_enum(obj);
+    }
+}
+
+fn clean_moonshot_enum(obj: &mut serde_json::Map<String, Value>) {
+    let scalar = matches!(
+        obj.get("type").and_then(Value::as_str),
+        Some("string" | "integer" | "number" | "boolean")
+    );
+    if !scalar {
+        return;
+    }
+    let Some(values) = obj.get_mut("enum").and_then(Value::as_array_mut) else {
+        return;
+    };
+    values.retain(|value| !value.is_null() && !matches!(value.as_str(), Some("")));
+    if values.is_empty() {
+        obj.remove("enum");
+    }
+}
+
+fn infer_moonshot_schema_type(obj: &serde_json::Map<String, Value>) -> &'static str {
+    if obj.get("properties").is_some_and(Value::is_object) {
+        return "object";
+    }
+    if obj.contains_key("items") {
+        return "array";
+    }
+    if let Some(values) = obj.get("enum").and_then(Value::as_array) {
+        if let Some(first) = values
+            .iter()
+            .find(|value| !value.is_null() && !matches!(value.as_str(), Some("")))
+        {
+            if first.is_boolean() {
+                return "boolean";
+            }
+            if first.is_i64() || first.is_u64() {
+                return "integer";
+            }
+            if first.is_number() {
+                return "number";
+            }
+        }
+    }
+    "string"
+}
+
+#[async_trait]
+impl LlmProvider for GenericProvider {
     async fn chat_completion(
         &self,
         messages: &[Message],
@@ -579,25 +1030,15 @@ impl LlmProvider for GenericProvider {
 
         let effective_model = model.unwrap_or(&self.model);
         let api_key = self.effective_api_key();
-        let strict_tool_sanitize = Self::should_sanitize_tool_calls(extra_body);
-        let api_messages = self.sanitized_messages_for_request(messages, strict_tool_sanitize);
-
-        let mut body = serde_json::json!({
-            "model": effective_model,
-            "messages": api_messages,
+        let body = self.chat_request_body(ChatRequestParams {
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            effective_model,
+            extra_body,
+            stream: false,
         });
-
-        if let Some(mt) = max_tokens {
-            body["max_tokens"] = serde_json::json!(mt);
-        }
-        if let Some(temp) = temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if !tools.is_empty() {
-            body["tools"] = self.formatted_tools_for_request(tools);
-        }
-        Self::merge_extra_body_fields(&mut body, extra_body);
-        self.apply_runtime_hints(&mut body, messages, extra_body);
 
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
@@ -609,23 +1050,21 @@ impl LlmProvider for GenericProvider {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let hdrs = resp.headers().clone();
             let body_text = resp
                 .text()
                 .await
                 .unwrap_or_else(|_| "<no body>".to_string());
-            return Err(llm_api_error(status, &body_text, &hdrs));
+            return Err(AgentError::LlmApi(format!(
+                "API error {status}: {body_text}"
+            )));
         }
 
-        let rate_headers = extract_rate_limit_headers(resp.headers());
         let resp_json: Value = resp
             .json()
             .await
             .map_err(|e| AgentError::LlmApi(format!("Failed to parse response: {e}")))?;
 
-        let mut out = parse_openai_response(&resp_json)?;
-        out.rate_limit_headers = rate_headers;
-        Ok(out)
+        parse_openai_response(&resp_json)
     }
 
     fn chat_completion_stream(
@@ -648,28 +1087,15 @@ impl LlmProvider for GenericProvider {
 
             let effective_model = model.as_deref().unwrap_or(&provider.model);
             let api_key = provider.effective_api_key();
-            let strict_tool_sanitize =
-                GenericProvider::should_sanitize_tool_calls(extra_body.as_ref());
-            let api_messages =
-                provider.sanitized_messages_for_request(&messages, strict_tool_sanitize);
-
-            let mut body = serde_json::json!({
-                "model": effective_model,
-                "messages": api_messages,
-                "stream": true,
+            let mut body = provider.chat_request_body(ChatRequestParams {
+                messages: &messages,
+                tools: &tools,
+                max_tokens,
+                temperature,
+                effective_model,
+                extra_body: extra_body.as_ref(),
+                stream: true,
             });
-
-            if let Some(mt) = max_tokens {
-                body["max_tokens"] = serde_json::json!(mt);
-            }
-            if let Some(temp) = temperature {
-                body["temperature"] = serde_json::json!(temp);
-            }
-            if !tools.is_empty() {
-                body["tools"] = provider.formatted_tools_for_request(&tools);
-            }
-            GenericProvider::merge_extra_body_fields(&mut body, extra_body.as_ref());
-            provider.apply_runtime_hints(&mut body, &messages, extra_body.as_ref());
             // Request usage in the final streaming chunk
             body["stream_options"] = serde_json::json!({"include_usage": true});
 
@@ -795,26 +1221,43 @@ impl OpenAiProvider {
         }
     }
 
+    /// Set an optional total request timeout used by this provider and rebuilds.
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
+        Self {
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
+        }
+    }
+
+    /// Add a custom header to every OpenAI-compatible request.
+    pub fn with_header(self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            inner: self.inner.with_header(key, value),
+        }
+    }
+
+    /// Add several custom headers to every OpenAI-compatible request.
+    pub fn with_headers<I, K, V>(mut self, headers: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        for (key, value) in headers {
+            self = self.with_header(key, value);
+        }
+        self
+    }
+
     /// Attach a credential pool for API key rotation.
     pub fn with_credential_pool(self, pool: Arc<CredentialPool>) -> Self {
         Self {
             inner: self.inner.with_credential_pool(pool),
         }
     }
-
-    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
-        Self {
-            inner: self.inner.with_serialize_cache(cache),
-        }
-    }
 }
 
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
-    async fn turn_start_connection_hygiene(&self, probe_url: &str) {
-        self.inner.turn_start_hygiene(probe_url).await;
-    }
-
     async fn chat_completion(
         &self,
         messages: &[Message],
@@ -870,6 +1313,8 @@ pub struct AnthropicProvider {
     pub model: String,
     /// HTTP client.
     client: Arc<Mutex<Client>>,
+    /// Optional total request timeout applied to newly-built clients.
+    request_timeout: Option<Duration>,
     /// Last time we rebuilt the client transport.
     client_refreshed_at: Arc<Mutex<Instant>>,
     /// Anthropic API version header.
@@ -878,46 +1323,22 @@ pub struct AnthropicProvider {
     pub rate_limiter: Option<Arc<RateLimitTracker>>,
     /// Optional credential pool.
     pub credential_pool: Option<Arc<CredentialPool>>,
-    serialize_cache: Option<Arc<ProviderSerializeCache>>,
 }
 
 impl AnthropicProvider {
     /// Create a new Anthropic provider with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
+        let request_timeout = None;
         Self {
             base_url: "https://api.anthropic.com".to_string(),
             api_key: api_key.into(),
             model: "claude-3-5-sonnet-20241022".to_string(),
-            client: Arc::new(Mutex::new(Client::new())),
+            client: Arc::new(Mutex::new(build_provider_http_client(request_timeout))),
+            request_timeout,
             client_refreshed_at: Arc::new(Mutex::new(Instant::now())),
             api_version: "2023-06-01".to_string(),
             rate_limiter: None,
             credential_pool: None,
-            serialize_cache: None,
-        }
-    }
-
-    pub fn with_serialize_cache(mut self, cache: Arc<ProviderSerializeCache>) -> Self {
-        self.serialize_cache = Some(cache);
-        self
-    }
-
-    fn converted_messages_for_request(&self, messages: &[Message]) -> (Option<Value>, Vec<Value>) {
-        if let Some(cache) = &self.serialize_cache {
-            cache.converted_anthropic_messages(messages, &self.base_url)
-        } else {
-            Self::convert_messages(messages, Some(self.base_url.as_str()))
-        }
-    }
-
-    fn formatted_tools_for_request(&self, tools: &[ToolSchema]) -> Value {
-        if tools.is_empty() {
-            return Value::Array(vec![]);
-        }
-        if let Some(cache) = &self.serialize_cache {
-            cache.formatted_anthropic_tools(tools)
-        } else {
-            Value::Array(Self::convert_tools(tools))
         }
     }
 
@@ -931,6 +1352,25 @@ impl AnthropicProvider {
     pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
         self
+    }
+
+    /// Set an optional total request timeout used by this provider and rebuilds.
+    pub fn with_optional_request_timeout_seconds(mut self, seconds: Option<f64>) -> Self {
+        self.request_timeout = request_timeout_duration(seconds);
+        if let Ok(mut client) = self.client.lock() {
+            *client = build_provider_http_client(self.request_timeout);
+        }
+        self
+    }
+
+    /// Set a total request timeout in seconds.
+    pub fn with_request_timeout_seconds(self, seconds: f64) -> Self {
+        self.with_optional_request_timeout_seconds(Some(seconds))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn configured_request_timeout(&self) -> Option<Duration> {
+        self.request_timeout
     }
 
     /// Attach a rate limit tracker.
@@ -972,13 +1412,13 @@ impl AnthropicProvider {
         self.client
             .lock()
             .map(|c| c.clone())
-            .unwrap_or_else(|_| Client::new())
+            .unwrap_or_else(|_| build_provider_http_client(self.request_timeout))
     }
 
     fn refresh_client(&self, reason: &str) {
         tracing::warn!("rebuilding anthropic HTTP client: {}", reason);
         if let Ok(mut c) = self.client.lock() {
-            *c = Client::new();
+            *c = build_provider_http_client(self.request_timeout);
         }
         if let Ok(mut t) = self.client_refreshed_at.lock() {
             *t = Instant::now();
@@ -1025,12 +1465,79 @@ impl AnthropicProvider {
         api_key: &str,
         body: &Value,
     ) -> reqwest::RequestBuilder {
-        client
+        let base_url = self.base_url.as_str();
+        let native_oauth = !is_third_party_endpoint(Some(base_url)) && is_oauth_token(api_key);
+        let bearer_auth = native_oauth || requires_bearer_auth(Some(base_url));
+        let beta_header = default_anthropic_beta_header_value(Some(base_url), native_oauth);
+
+        let mut request = client
             .post(url)
-            .header("x-api-key", api_key)
             .header("anthropic-version", &self.api_version)
             .header("Content-Type", "application/json")
-            .json(body)
+            .header("anthropic-beta", beta_header)
+            .json(body);
+
+        if bearer_auth {
+            request = request.header("Authorization", format!("Bearer {api_key}"));
+        } else {
+            request = request.header("x-api-key", api_key);
+        }
+        if native_oauth {
+            request = request
+                .header("user-agent", "claude-cli/2.1.74 (external, cli)")
+                .header("x-app", "cli");
+        }
+        request
+    }
+
+    fn messages_url(&self) -> String {
+        Self::messages_url_for_base_url(&self.base_url)
+    }
+
+    fn messages_url_for_base_url(base_url: &str) -> String {
+        let trimmed = base_url.trim().trim_end_matches('/');
+        if let Ok(mut url) = reqwest::Url::parse(trimmed) {
+            let mut path = url.path().trim_end_matches('/').to_string();
+            if path.is_empty() {
+                path.push_str("/v1/messages");
+            } else if path.ends_with("/v1") {
+                path.push_str("/messages");
+            } else {
+                path.push_str("/v1/messages");
+            }
+            url.set_path(&path);
+            if is_azure_anthropic_endpoint(Some(trimmed))
+                && !url
+                    .query_pairs()
+                    .any(|(key, _)| key.eq_ignore_ascii_case("api-version"))
+            {
+                url.query_pairs_mut()
+                    .append_pair("api-version", "2025-04-15");
+            }
+            return url.to_string();
+        }
+
+        let mut url = format!("{trimmed}/v1/messages");
+        if is_azure_anthropic_endpoint(Some(trimmed)) && !url.contains("api-version=") {
+            let sep = if url.contains('?') { '&' } else { '?' };
+            url.push(sep);
+            url.push_str("api-version=2025-04-15");
+        }
+        url
+    }
+
+    fn strip_unsupported_anthropic_controls(body: &mut Value, model: &str) {
+        let Some(obj) = body.as_object_mut() else {
+            return;
+        };
+        if forbids_sampling_params(model) {
+            obj.remove("temperature");
+            obj.remove("top_p");
+            obj.remove("top_k");
+        }
+        if obj.get("speed").and_then(Value::as_str) == Some("fast") && !supports_fast_mode(model) {
+            obj.remove("speed");
+        }
     }
 
     async fn send_with_dead_connection_recovery(
@@ -1082,45 +1589,24 @@ impl AnthropicProvider {
         get_anthropic_max_output(model).max(1)
     }
 
-    fn is_native_anthropic_endpoint(base_url: Option<&str>) -> bool {
-        let host = base_url
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .and_then(|url| {
-                let without_scheme = url.split("://").nth(1).unwrap_or(url);
-                without_scheme
-                    .split('/')
-                    .next()
-                    .map(|h| h.split(':').next().unwrap_or(h).to_ascii_lowercase())
-            });
-        host.as_deref() == Some("api.anthropic.com")
-    }
-
-    fn attach_cache_control(block: &mut Value, cc: &hermes_core::types::CacheControl) {
-        if let Value::Object(map) = block {
-            map.insert("cache_control".to_string(), cc.to_api_json());
-        }
-    }
-
     /// Convert internal messages to Anthropic format, extracting system message.
-    pub(crate) fn convert_messages(
+    fn convert_messages(
         messages: &[Message],
         base_url: Option<&str>,
-    ) -> (Option<Value>, Vec<Value>) {
-        let mut system_blocks: Vec<Value> = Vec::new();
+    ) -> (Option<String>, Vec<Value>) {
+        let mut system_text: Option<String> = None;
         let mut anthropic_messages: Vec<Value> = Vec::new();
         let is_kimi_endpoint = Self::is_kimi_coding_endpoint(base_url);
-        let native_anthropic = Self::is_native_anthropic_endpoint(base_url);
 
         for msg in messages {
             match msg.role {
                 MessageRole::System => {
+                    // Anthropic: system goes in a separate `system` parameter
                     let content = msg.content.as_deref().unwrap_or("");
-                    let mut block = serde_json::json!({"type": "text", "text": content});
-                    if let Some(ref cc) = msg.cache_control {
-                        Self::attach_cache_control(&mut block, cc);
-                    }
-                    system_blocks.push(block);
+                    system_text = Some(match system_text {
+                        Some(existing) => format!("{existing}\n\n{content}"),
+                        None => content.to_string(),
+                    });
                 }
                 MessageRole::User => {
                     let mut content_blocks = Vec::new();
@@ -1138,23 +1624,15 @@ impl AnthropicProvider {
                         } else {
                             let mut block = serde_json::json!({"type": "text", "text": text});
                             if let Some(ref cc) = msg.cache_control {
-                                Self::attach_cache_control(&mut block, cc);
+                                block["cache_control"] = serde_json::json!({"type": format!("{:?}", cc.cache_type).to_lowercase()});
                             }
                             content_blocks.push(block);
                         }
-                    } else if msg.cache_control.is_some() {
-                        let mut block = serde_json::json!({"type": "text", "text": ""});
-                        if let Some(ref cc) = msg.cache_control {
-                            Self::attach_cache_control(&mut block, cc);
-                        }
-                        content_blocks.push(block);
                     }
-                    if !content_blocks.is_empty() {
-                        anthropic_messages.push(serde_json::json!({
-                            "role": "user",
-                            "content": content_blocks,
-                        }));
-                    }
+                    anthropic_messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": content_blocks,
+                    }));
                 }
                 MessageRole::Assistant => {
                     let mut content_blocks = Vec::new();
@@ -1166,6 +1644,9 @@ impl AnthropicProvider {
                         && msg.reasoning_content.is_some()
                     {
                         let thinking = msg.reasoning_content.as_deref().unwrap_or("");
+                        // Kimi /coding expects assistant tool-call replay messages
+                        // to include reasoning_content semantics; preserve it as
+                        // a thinking block before any text/tool_use blocks.
                         content_blocks
                             .push(serde_json::json!({"type": "thinking", "thinking": thinking}));
                     }
@@ -1174,6 +1655,7 @@ impl AnthropicProvider {
                             content_blocks.push(serde_json::json!({"type": "text", "text": text}));
                         }
                     }
+                    // Convert tool_calls to Anthropic tool_use blocks
                     if let Some(ref tool_calls) = msg.tool_calls {
                         for tc in tool_calls {
                             let input: Value = serde_json::from_str(&tc.function.arguments)
@@ -1187,11 +1669,6 @@ impl AnthropicProvider {
                         }
                     }
                     if !content_blocks.is_empty() {
-                        if let Some(ref cc) = msg.cache_control {
-                            if let Some(last) = content_blocks.last_mut() {
-                                Self::attach_cache_control(last, cc);
-                            }
-                        }
                         anthropic_messages.push(serde_json::json!({
                             "role": "assistant",
                             "content": content_blocks,
@@ -1199,42 +1676,25 @@ impl AnthropicProvider {
                     }
                 }
                 MessageRole::Tool => {
-                    let mut block = serde_json::json!({
+                    // Anthropic: tool results go as user messages with tool_result content blocks
+                    let content_blocks = vec![serde_json::json!({
                         "type": "tool_result",
                         "tool_use_id": msg.tool_call_id.as_deref().unwrap_or(""),
                         "content": msg.content.as_deref().unwrap_or(""),
-                    });
-                    if native_anthropic {
-                        if let Some(ref cc) = msg.cache_control {
-                            Self::attach_cache_control(&mut block, cc);
-                        }
-                    }
+                    })];
                     anthropic_messages.push(serde_json::json!({
                         "role": "user",
-                        "content": vec![block],
+                        "content": content_blocks,
                     }));
                 }
             }
         }
 
-        let system = if system_blocks.is_empty() {
-            None
-        } else if system_blocks.iter().any(|b| b.get("cache_control").is_some()) {
-            Some(Value::Array(system_blocks))
-        } else {
-            let merged = system_blocks
-                .iter()
-                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                .collect::<Vec<_>>()
-                .join("\n\n");
-            Some(Value::String(merged))
-        };
-
-        (system, anthropic_messages)
+        (system_text, anthropic_messages)
     }
 
     /// Convert tool schemas to Anthropic tool format.
-    pub(crate) fn convert_tools(tools: &[ToolSchema]) -> Vec<Value> {
+    fn convert_tools(tools: &[ToolSchema]) -> Vec<Value> {
         tools
             .iter()
             .map(|t| {
@@ -1299,8 +1759,15 @@ impl AnthropicProvider {
         }
 
         let usage = json.get("usage").and_then(|u| {
-            crate::prompt_caching::record_prompt_cache_telemetry(u);
-            usage_stats_from_raw(u, Some("anthropic"), Some("anthropic_messages"))
+            let input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+            let output = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(UsageStats {
+                prompt_tokens: input,
+                completion_tokens: output,
+                total_tokens: input + output,
+        estimated_cost: None,
+        ..Default::default()
+    })
         });
 
         let stop_reason = json
@@ -1361,7 +1828,8 @@ impl LlmProvider for AnthropicProvider {
 
         let effective_model = model.unwrap_or(&self.model);
         let api_key = self.effective_api_key();
-        let (system, anthropic_messages) = self.converted_messages_for_request(messages);
+        let (system_text, anthropic_messages) =
+            Self::convert_messages(messages, Some(self.base_url.as_str()));
         let resolved_max_tokens = Self::resolve_messages_max_tokens(max_tokens, effective_model);
 
         let mut body = serde_json::json!({
@@ -1370,18 +1838,19 @@ impl LlmProvider for AnthropicProvider {
             "max_tokens": resolved_max_tokens,
         });
 
-        if let Some(sys) = system {
-            body["system"] = sys;
+        if let Some(ref sys) = system_text {
+            body["system"] = serde_json::json!(sys);
         }
         if let Some(temp) = temperature {
             body["temperature"] = serde_json::json!(temp);
         }
         if !tools.is_empty() {
-            body["tools"] = self.formatted_tools_for_request(tools);
+            body["tools"] = serde_json::json!(Self::convert_tools(tools));
         }
         GenericProvider::merge_extra_body_fields(&mut body, extra_body);
+        Self::strip_unsupported_anthropic_controls(&mut body, effective_model);
 
-        let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
+        let url = self.messages_url();
         let resp = self
             .send_with_dead_connection_recovery(&url, &api_key, &body)
             .await?;
@@ -1427,7 +1896,10 @@ impl LlmProvider for AnthropicProvider {
 
             let effective_model = model.as_deref().unwrap_or(&provider.model);
             let api_key = provider.effective_api_key();
-            let (system, anthropic_messages) = provider.converted_messages_for_request(&messages);
+            let (system_text, anthropic_messages) = AnthropicProvider::convert_messages(
+                &messages,
+                Some(provider.base_url.as_str()),
+            );
             let resolved_max_tokens =
                 AnthropicProvider::resolve_messages_max_tokens(max_tokens, effective_model);
 
@@ -1438,18 +1910,19 @@ impl LlmProvider for AnthropicProvider {
                 "stream": true,
             });
 
-            if let Some(sys) = system {
-                body["system"] = sys;
+            if let Some(ref sys) = system_text {
+                body["system"] = serde_json::json!(sys);
             }
             if let Some(temp) = temperature {
                 body["temperature"] = serde_json::json!(temp);
             }
             if !tools.is_empty() {
-                body["tools"] = provider.formatted_tools_for_request(&tools);
+                body["tools"] = serde_json::json!(AnthropicProvider::convert_tools(&tools));
             }
             GenericProvider::merge_extra_body_fields(&mut body, extra_body.as_ref());
+            AnthropicProvider::strip_unsupported_anthropic_controls(&mut body, effective_model);
 
-            let url = format!("{}/v1/messages", provider.base_url.trim_end_matches('/'));
+            let url = provider.messages_url();
 
             let resp = match provider.send_with_dead_connection_recovery(&url, &api_key, &body).await {
                 Ok(r) => r,
@@ -1602,8 +2075,14 @@ impl LlmProvider for AnthropicProvider {
                                     other => other.to_string(),
                                 });
                             let usage = json.get("usage").and_then(|u| {
-                                crate::prompt_caching::record_prompt_cache_telemetry(u);
-                                usage_stats_from_raw(u, Some("anthropic"), Some("anthropic_messages"))
+                                let output = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                Some(UsageStats {
+                                    prompt_tokens: 0,
+                                    completion_tokens: output,
+                                    total_tokens: output,
+        estimated_cost: None,
+        ..Default::default()
+    })
                             });
                             yield Ok(StreamChunk {
                                 delta: None,
@@ -1614,8 +2093,14 @@ impl LlmProvider for AnthropicProvider {
                         "message_start" => {
                             // Extract usage from the initial message
                             let usage = json.get("message").and_then(|m| m.get("usage")).and_then(|u| {
-                                crate::prompt_caching::record_prompt_cache_telemetry(u);
-                                usage_stats_from_raw(u, Some("anthropic"), Some("anthropic_messages"))
+                                let input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                                Some(UsageStats {
+                                    prompt_tokens: input,
+                                    completion_tokens: 0,
+                                    total_tokens: input,
+        estimated_cost: None,
+        ..Default::default()
+    })
                             });
                             if let Some(u) = usage {
                                 yield Ok(StreamChunk {
@@ -1682,7 +2167,8 @@ impl OpenRouterProvider {
     /// Create a new OpenRouter provider with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            inner: GenericProvider::new("https://openrouter.ai/api/v1", api_key, "openai/gpt-4o"),
+            inner: GenericProvider::new("https://openrouter.ai/api/v1", api_key, "openai/gpt-4o")
+                .with_provider_profile("openrouter"),
             http_referer: None,
             x_title: None,
         }
@@ -1696,10 +2182,17 @@ impl OpenRouterProvider {
         }
     }
 
-    /// Set a custom base URL (OpenAI-compatible OpenRouter proxy).
     pub fn with_base_url(self, base_url: impl Into<String>) -> Self {
         Self {
             inner: self.inner.with_base_url(base_url),
+            ..self
+        }
+    }
+
+    /// Set an optional total request timeout used by this provider and rebuilds.
+    pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
+        Self {
+            inner: self.inner.with_optional_request_timeout_seconds(seconds),
             ..self
         }
     }
@@ -1720,13 +2213,6 @@ impl OpenRouterProvider {
     pub fn with_credential_pool(self, pool: Arc<CredentialPool>) -> Self {
         Self {
             inner: self.inner.with_credential_pool(pool),
-            ..self
-        }
-    }
-
-    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
-        Self {
-            inner: self.inner.with_serialize_cache(cache),
             ..self
         }
     }
@@ -1849,7 +2335,7 @@ impl OpenRouterProvider {
         hasher.update(model.as_bytes());
         hasher.update(b"\n");
         hasher.update(encoded);
-        Some(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+        Some(format!("{:x}", hasher.finalize()))
     }
 
     fn response_cache_get(key: &str) -> Option<LlmResponse> {
@@ -1905,10 +2391,6 @@ impl OpenRouterProvider {
 
 #[async_trait]
 impl LlmProvider for OpenRouterProvider {
-    async fn turn_start_connection_hygiene(&self, probe_url: &str) {
-        self.inner.turn_start_hygiene(probe_url).await;
-    }
-
     async fn chat_completion(
         &self,
         messages: &[Message],
@@ -1921,6 +2403,14 @@ impl LlmProvider for OpenRouterProvider {
         // Build a provider clone with OpenRouter headers
         let mut provider = self.inner.clone();
         provider.extra_headers = self.build_headers();
+        let effective_model = model.unwrap_or(&self.inner.model);
+        provider
+            .extra_headers
+            .extend(provider_profiles::extra_headers_for_profile(
+                Some("openrouter"),
+                effective_model,
+                extra_body,
+            ));
         let cache_control = Self::parse_response_cache_control(extra_body);
         if cache_control.enabled {
             provider
@@ -1936,29 +2426,18 @@ impl LlmProvider for OpenRouterProvider {
         let merged_extra = Self::merge_extra_body(extra_body);
 
         // Use GenericProvider for the actual request
-        let effective_model = model.unwrap_or(&self.inner.model);
         provider.check_rate_limit().await;
 
         let api_key = provider.effective_api_key();
-        let strict_tool_sanitize =
-            GenericProvider::should_sanitize_tool_calls(merged_extra.as_ref());
-        let api_messages = provider.sanitized_messages_for_request(messages, strict_tool_sanitize);
-
-        let mut body = serde_json::json!({
-            "model": effective_model,
-            "messages": api_messages,
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            effective_model,
+            extra_body: merged_extra.as_ref(),
+            stream: false,
         });
-
-        if let Some(mt) = max_tokens {
-            body["max_tokens"] = serde_json::json!(mt);
-        }
-        if let Some(temp) = temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if !tools.is_empty() {
-            body["tools"] = provider.formatted_tools_for_request(tools);
-        }
-        GenericProvider::merge_extra_body_fields(&mut body, merged_extra.as_ref());
 
         let cache_key = if cache_control.enabled && !cache_control.clear {
             Self::response_cache_key(effective_model, &body)
@@ -2016,6 +2495,14 @@ impl LlmProvider for OpenRouterProvider {
         // Use GenericProvider's streaming with OpenRouter headers
         let mut provider = self.inner.clone();
         provider.extra_headers = self.build_headers();
+        let effective_model = model.unwrap_or(&self.inner.model);
+        provider
+            .extra_headers
+            .extend(provider_profiles::extra_headers_for_profile(
+                Some("openrouter"),
+                effective_model,
+                extra_body,
+            ));
         let merged_extra = Self::merge_extra_body(extra_body);
 
         provider.chat_completion_stream(
@@ -2032,32 +2519,6 @@ impl LlmProvider for OpenRouterProvider {
 // ---------------------------------------------------------------------------
 // SSE chunk parsing helpers
 // ---------------------------------------------------------------------------
-
-/// Map OpenAI-compatible stream delta reasoning fields to `StreamDelta::extra.thinking`.
-///
-/// DeepSeek and other OpenAI-compat providers emit chain-of-thought in
-/// `delta.reasoning_content` / `delta.reasoning` rather than `content`. The agent
-/// loop accumulates `extra.thinking` into `Message::reasoning_content` and surfaces
-/// it via `on_thinking`.
-fn reasoning_extra_from_stream_delta(delta_obj: &Value) -> Option<Value> {
-    if let Some(s) = delta_obj.get("reasoning_content").and_then(|v| v.as_str()) {
-        if !s.is_empty() {
-            return Some(serde_json::json!({"thinking": s}));
-        }
-    }
-    if let Some(s) = delta_obj.get("reasoning").and_then(|v| v.as_str()) {
-        if !s.is_empty() {
-            return Some(serde_json::json!({"thinking": s}));
-        }
-    }
-    if let Some(details) = delta_obj.get("reasoning_details").and_then(|v| v.as_array()) {
-        let text = crate::reasoning::extract_reasoning_details(details);
-        if !text.is_empty() {
-            return Some(serde_json::json!({"thinking": text}));
-        }
-    }
-    None
-}
 
 /// Parse a single SSE data JSON object into a StreamChunk (OpenAI format).
 fn parse_sse_chunk(json: &Value) -> Option<StreamChunk> {
@@ -2098,13 +2559,11 @@ fn parse_sse_chunk(json: &Value) -> Option<StreamChunk> {
                 .collect::<Vec<_>>()
         });
 
-    let extra = reasoning_extra_from_stream_delta(delta_obj);
-
-    let delta = if content.is_some() || tool_calls.is_some() || extra.is_some() {
+    let delta = if content.is_some() || tool_calls.is_some() {
         Some(StreamDelta {
             content,
             tool_calls,
-            extra,
+            extra: None,
         })
     } else {
         None
@@ -2117,8 +2576,16 @@ fn parse_sse_chunk(json: &Value) -> Option<StreamChunk> {
 
     // Usage may appear in the final chunk
     let usage = json.get("usage").and_then(|u| {
-        crate::prompt_caching::record_prompt_cache_telemetry(u);
-        usage_stats_from_raw(u, None, Some("chat_completions"))
+        Some(UsageStats {
+            prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            completion_tokens: u
+                .get("completion_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            total_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+        estimated_cost: None,
+        ..Default::default()
+    })
     });
 
     Some(StreamChunk {
@@ -2172,11 +2639,7 @@ fn parse_openai_response(json: &Value) -> Result<LlmResponse, AgentError> {
                     let id = tc.get("id")?.as_str()?.to_string();
                     let function = tc.get("function")?;
                     let name = function.get("name")?.as_str()?.to_string();
-                    let arguments = function
-                        .get("arguments")
-                        .and_then(|a| a.as_str())
-                        .unwrap_or("{}")
-                        .to_string();
+                    let (arguments, _) = arguments_value_to_string(function.get("arguments"));
                     let extra_content = tc.get("extra_content").filter(|v| !v.is_null()).cloned();
 
                     Some(hermes_core::ToolCall {
@@ -2190,8 +2653,13 @@ fn parse_openai_response(json: &Value) -> Result<LlmResponse, AgentError> {
 
     // Parse usage
     let usage = json.get("usage").and_then(|u| {
-        crate::prompt_caching::record_prompt_cache_telemetry(u);
-        usage_stats_from_raw(u, None, Some("chat_completions"))
+        Some(UsageStats {
+            prompt_tokens: u.get("prompt_tokens")?.as_u64()? as u64,
+            completion_tokens: u.get("completion_tokens")?.as_u64()? as u64,
+            total_tokens: u.get("total_tokens")?.as_u64()? as u64,
+        estimated_cost: None,
+        ..Default::default()
+    })
     });
 
     let role = message_obj
@@ -2199,8 +2667,11 @@ fn parse_openai_response(json: &Value) -> Result<LlmResponse, AgentError> {
         .and_then(|r| r.as_str())
         .unwrap_or("assistant");
 
-    // Extract reasoning content (DeepSeek `reasoning_content`, R1 `reasoning`, OpenRouter details)
-    let reasoning_content = crate::reasoning::parse_reasoning(message_obj);
+    // Extract reasoning content
+    let reasoning_content = message_obj
+        .get("reasoning_content")
+        .and_then(|r| r.as_str())
+        .map(|s| s.to_string());
 
     let message = Message {
         role: match role {
@@ -2279,6 +2750,158 @@ fn summarize_openai_response_shape(json: &Value) -> String {
 mod tests {
     use super::*;
 
+    fn codex_jwt_with_account(account_id: Option<&str>) -> String {
+        let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","typ":"JWT"}"#);
+        let claims = match account_id {
+            Some(account_id) => serde_json::json!({
+                "sub": "user-xyz",
+                "exp": 9_999_999_999_i64,
+                "https://api.openai.com/auth": {
+                    "chatgpt_account_id": account_id,
+                    "chatgpt_plan_type": "plus"
+                }
+            }),
+            None => serde_json::json!({
+                "sub": "user-xyz",
+                "exp": 9_999_999_999_i64
+            }),
+        };
+        let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap());
+        format!("{header}.{payload}.sig")
+    }
+
+    fn header_value<'a>(headers: &'a [(String, String)], key: &str) -> Option<&'a str> {
+        headers
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+    }
+
+    #[test]
+    fn codex_cloudflare_headers_match_codex_cli_rs_contract() {
+        let token = codex_jwt_with_account(Some("acct-abc-999"));
+        let headers = codex_cloudflare_headers(Some(token.as_str()));
+
+        assert_eq!(header_value(&headers, "originator"), Some("codex_cli_rs"));
+        assert!(header_value(&headers, "User-Agent")
+            .expect("user agent")
+            .starts_with("codex_cli_rs/"));
+        assert_eq!(
+            header_value(&headers, "ChatGPT-Account-ID"),
+            Some("acct-abc-999")
+        );
+        assert!(header_value(&headers, "chatgpt-account-id").is_none());
+        assert!(header_value(&headers, "ChatGPT-Account-Id").is_none());
+    }
+
+    #[test]
+    fn codex_cloudflare_headers_ignore_malformed_or_missing_account_tokens() {
+        for token in ["not-a-jwt", "", "only.one", "  ", "...."] {
+            let headers = codex_cloudflare_headers(Some(token));
+            assert_eq!(header_value(&headers, "originator"), Some("codex_cli_rs"));
+            assert!(header_value(&headers, "ChatGPT-Account-ID").is_none());
+        }
+
+        let token = codex_jwt_with_account(None);
+        let headers = codex_cloudflare_headers(Some(token.as_str()));
+        assert_eq!(header_value(&headers, "originator"), Some("codex_cli_rs"));
+        assert!(header_value(&headers, "ChatGPT-Account-ID").is_none());
+    }
+
+    #[test]
+    fn openai_codex_provider_attaches_cloudflare_headers_to_requests() {
+        let token = codex_jwt_with_account(Some("acct-request"));
+        let provider = openai_codex_provider(token.as_str(), "gpt-5.4", None);
+        assert_eq!(provider.inner.base_url, OPENAI_CODEX_BASE_URL);
+
+        let request = provider
+            .inner
+            .build_request(
+                &Client::new(),
+                &format!("{}/chat/completions", OPENAI_CODEX_BASE_URL),
+                token.as_str(),
+                &serde_json::json!({"model": "gpt-5.4", "messages": []}),
+            )
+            .build()
+            .expect("request");
+        let headers = request.headers();
+
+        assert_eq!(headers.get("originator").unwrap(), "codex_cli_rs");
+        assert!(headers
+            .get("User-Agent")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("codex_cli_rs/"));
+        assert_eq!(headers.get("ChatGPT-Account-ID").unwrap(), "acct-request");
+    }
+
+    #[test]
+    fn openai_codex_provider_skips_cloudflare_headers_for_non_chatgpt_override() {
+        let token = codex_jwt_with_account(Some("acct-request"));
+        let provider = openai_codex_provider(
+            token.as_str(),
+            "gpt-5.4",
+            Some("https://openrouter.ai/api/v1"),
+        );
+
+        let request = provider
+            .inner
+            .build_request(
+                &Client::new(),
+                "https://openrouter.ai/api/v1/chat/completions",
+                token.as_str(),
+                &serde_json::json!({"model": "gpt-5.4", "messages": []}),
+            )
+            .build()
+            .expect("request");
+
+        assert!(request.headers().get("originator").is_none());
+        assert!(request.headers().get("ChatGPT-Account-ID").is_none());
+    }
+
+    #[test]
+    fn generic_provider_request_timeout_survives_client_rebuilds() {
+        let provider = GenericProvider::new("https://api.example.com/v1", "sk-test", "model")
+            .with_optional_request_timeout_seconds(Some(45.5));
+
+        assert_eq!(
+            provider.configured_request_timeout(),
+            Some(Duration::from_secs_f64(45.5))
+        );
+
+        provider.refresh_client("unit test");
+        assert_eq!(
+            provider.configured_request_timeout(),
+            Some(Duration::from_secs_f64(45.5))
+        );
+    }
+
+    #[test]
+    fn generic_provider_ignores_invalid_request_timeout_seconds() {
+        for value in [
+            None,
+            Some(0.0),
+            Some(-1.0),
+            Some(f64::INFINITY),
+            Some(f64::NAN),
+        ] {
+            let provider = GenericProvider::new("https://api.example.com/v1", "sk-test", "model")
+                .with_optional_request_timeout_seconds(value);
+            assert_eq!(provider.configured_request_timeout(), None);
+        }
+    }
+
+    #[test]
+    fn openai_codex_provider_applies_request_timeout_seconds() {
+        let provider = openai_codex_provider_with_timeout("sk-test", "gpt-5.4", None, Some(60.0));
+
+        assert_eq!(
+            provider.inner.configured_request_timeout(),
+            Some(Duration::from_secs(60))
+        );
+    }
+
     #[test]
     fn test_format_tools_for_openai_api_shape() {
         let tools = vec![ToolSchema::new(
@@ -2296,11 +2919,83 @@ mod tests {
     }
 
     #[test]
+    fn test_moonshot_tool_schema_sanitizer_repairs_mcp_shapes() {
+        let params = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"description": "search text"},
+                "filter": {
+                    "type": "string",
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "null"}
+                    ]
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"description": "tag"}
+                },
+                "db_type": {
+                    "anyOf": [
+                        {"enum": ["mysql", "postgresql", "", null]},
+                        {"type": "null"}
+                    ],
+                    "nullable": true
+                },
+                "payload": {"$ref": "#/$defs/Payload"}
+            },
+            "$defs": {"Payload": {"type": "object", "properties": {}}}
+        });
+
+        let out = sanitize_moonshot_tool_parameters(&params);
+        assert_eq!(out["type"], "object");
+        assert_eq!(out["properties"]["query"]["type"], "string");
+        assert_eq!(out["properties"]["filter"]["type"], "string");
+        assert!(out["properties"]["filter"].get("anyOf").is_none());
+        assert_eq!(out["properties"]["tags"]["items"]["type"], "string");
+        assert_eq!(out["properties"]["db_type"]["type"], "string");
+        assert_eq!(
+            out["properties"]["db_type"]["enum"],
+            serde_json::json!(["mysql", "postgresql"])
+        );
+        assert!(out["properties"]["db_type"].get("nullable").is_none());
+        assert!(out["properties"]["payload"].get("type").is_none());
+        assert_eq!(out["properties"]["payload"]["$ref"], "#/$defs/Payload");
+    }
+
+    #[test]
+    fn test_moonshot_model_tool_formatter_applies_sanitizer() {
+        let mut params = hermes_core::JsonSchema::new("object");
+        params.properties = Some(Default::default());
+        params
+            .properties
+            .as_mut()
+            .expect("properties")
+            .insert("q".to_string(), serde_json::json!({"description": "query"}));
+        let tools = vec![ToolSchema::new("search", "Search", params)];
+
+        let formatted = format_tools_for_openai_api_with_model(
+            &tools,
+            "openrouter/moonshotai/kimi-k2.6",
+            "https://openrouter.ai/api/v1",
+        );
+        assert_eq!(
+            formatted[0]["function"]["parameters"]["properties"]["q"]["type"],
+            "string"
+        );
+        assert!(is_moonshot_model("nous/moonshotai/kimi-k2-thinking"));
+        assert!(!is_moonshot_model("anthropic/claude-sonnet-4.6"));
+    }
+
+    #[test]
     fn test_merge_extra_body_fields_strips_local_request_controls() {
         let extra = serde_json::json!({
             "strict_api": true,
             "strict_tool_calls": true,
             "provider_strict": true,
+            "provider_profile": "openrouter",
+            "provider_preferences": {"allow": ["anthropic"]},
+            "supports_vision": true,
             "temperature": 0.2
         });
         let mut body = serde_json::json!({"model": "m", "messages": []});
@@ -2308,7 +3003,224 @@ mod tests {
         assert!(body.get("strict_api").is_none());
         assert!(body.get("strict_tool_calls").is_none());
         assert!(body.get("provider_strict").is_none());
+        assert!(body.get("provider_profile").is_none());
+        assert!(body.get("provider_preferences").is_none());
+        assert!(body.get("supports_vision").is_none());
         assert_eq!(body["temperature"], 0.2);
+    }
+
+    #[test]
+    fn test_provider_profile_request_body_defaults_and_qwen_messages() {
+        let provider = GenericProvider::new("https://dashscope.example/v1", "key", "qwen3.5")
+            .with_provider_profile("qwen-oauth");
+        let messages = vec![Message::system("Be helpful"), Message::user("hello")];
+        let extra = serde_json::json!({
+            "qwen_session_metadata": {"sessionId": "s123", "promptId": "p456"},
+            "provider_profile": "qwen-oauth"
+        });
+
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: Some(0.4),
+            effective_model: "qwen3.5",
+            extra_body: Some(&extra),
+            stream: false,
+        });
+
+        assert_eq!(body["max_tokens"], 65_536);
+        assert_eq!(body["temperature"], 0.4);
+        assert_eq!(body["vl_high_resolution_images"], true);
+        assert_eq!(
+            body["metadata"],
+            serde_json::json!({"sessionId": "s123", "promptId": "p456"})
+        );
+        assert!(body.get("qwen_session_metadata").is_none());
+        assert!(body.get("provider_profile").is_none());
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"],
+            serde_json::json!({"type": "ephemeral"})
+        );
+        assert_eq!(
+            body["messages"][1]["content"][0],
+            serde_json::json!({"type": "text", "text": "hello"})
+        );
+    }
+
+    #[test]
+    fn test_provider_profile_request_body_kimi_reasoning_contract() {
+        let provider = GenericProvider::new("https://api.moonshot.ai/v1", "key", "kimi-k2")
+            .with_provider_profile("kimi");
+        let messages = vec![Message::user("hello")];
+
+        let enabled = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: Some(0.7),
+            effective_model: "kimi-k2",
+            extra_body: Some(
+                &serde_json::json!({"reasoning": {"enabled": true, "effort": "high"}}),
+            ),
+            stream: false,
+        });
+        assert_eq!(enabled["max_tokens"], 32_000);
+        assert!(enabled.get("temperature").is_none());
+        assert_eq!(enabled["thinking"], serde_json::json!({"type": "enabled"}));
+        assert_eq!(enabled["reasoning_effort"], "high");
+        assert!(enabled.get("reasoning").is_none());
+
+        let disabled = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: Some(0.7),
+            effective_model: "kimi-k2",
+            extra_body: Some(&serde_json::json!({"reasoning_config": {"enabled": false}})),
+            stream: false,
+        });
+        assert_eq!(
+            disabled["thinking"],
+            serde_json::json!({"type": "disabled"})
+        );
+        assert!(disabled.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn test_provider_profile_request_body_openrouter_nous_and_custom_contracts() {
+        let messages = vec![Message::user("hello")];
+
+        let openrouter = GenericProvider::new(
+            "https://openrouter.ai/api/v1",
+            "key",
+            "openrouter/pareto-code",
+        )
+        .with_provider_profile("openrouter");
+        let or_body = openrouter.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "openrouter/pareto-code",
+            extra_body: Some(&serde_json::json!({
+                "provider_preferences": {"allow": ["anthropic"], "sort": "price"},
+                "openrouter_min_coding_score": 0.65,
+                "supports_reasoning": true,
+                "session_id": "sess-123"
+            })),
+            stream: false,
+        });
+        assert_eq!(
+            or_body["provider"],
+            serde_json::json!({"allow": ["anthropic"], "sort": "price"})
+        );
+        assert_eq!(or_body["session_id"], "sess-123");
+        assert_eq!(
+            or_body["plugins"],
+            serde_json::json!([{"id": "pareto-router", "min_coding_score": 0.65}])
+        );
+        assert_eq!(
+            or_body["reasoning"],
+            serde_json::json!({"enabled": true, "effort": "medium"})
+        );
+        assert!(or_body.get("provider_preferences").is_none());
+
+        let nous = GenericProvider::new(
+            "https://inference-api.nousresearch.com/v1",
+            "key",
+            "hermes-3",
+        )
+        .with_provider_profile("nous");
+        let nous_body = nous.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "hermes-3",
+            extra_body: Some(&serde_json::json!({
+                "supports_reasoning": true,
+                "reasoning": {"enabled": false}
+            })),
+            stream: false,
+        });
+        assert_eq!(
+            nous_body["tags"],
+            serde_json::json!(["product=hermes-agent"])
+        );
+        assert!(nous_body.get("reasoning").is_none());
+
+        let custom = GenericProvider::new("http://127.0.0.1:11434/v1", "key", "qwen3:72b")
+            .with_provider_profile("ollama-local");
+        let custom_body = custom.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "qwen3:72b",
+            extra_body: Some(&serde_json::json!({"ollama_num_ctx": 131072})),
+            stream: false,
+        });
+        assert_eq!(custom_body["options"]["num_ctx"], 131_072);
+        assert!(custom_body.get("ollama_num_ctx").is_none());
+    }
+
+    #[test]
+    fn test_opencode_go_kimi_reasoning_uses_moonshot_shape() {
+        let provider =
+            GenericProvider::new("https://opencode.ai/zen/go/v1", "test-key", "kimi-k2.6");
+        let extra = serde_json::json!({"reasoning": {"effort": "xhigh"}});
+        let mut body = serde_json::json!({"model": "kimi-k2.6", "messages": []});
+
+        GenericProvider::merge_extra_body_fields(&mut body, Some(&extra));
+        provider.apply_opencode_go_reasoning_controls(&mut body, "moonshotai/kimi-k2.6");
+
+        assert_eq!(body["thinking"], serde_json::json!({"type": "enabled"}));
+        assert_eq!(body["reasoning_effort"], "high");
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn test_opencode_go_deepseek_reasoning_uses_thinking_shape() {
+        let provider = GenericProvider::new(
+            "https://opencode.ai/zen/go/v1",
+            "test-key",
+            "deepseek-v4-pro",
+        );
+        let extra = serde_json::json!({"reasoning": {"effort": "max"}});
+        let mut body = serde_json::json!({"model": "deepseek-v4-pro", "messages": []});
+
+        GenericProvider::merge_extra_body_fields(&mut body, Some(&extra));
+        provider.apply_opencode_go_reasoning_controls(&mut body, "deepseek/deepseek-v4-pro");
+
+        assert_eq!(body["thinking"], serde_json::json!({"type": "enabled"}));
+        assert_eq!(body["reasoning_effort"], "max");
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn test_opencode_go_non_target_model_drops_reasoning_controls() {
+        let provider = GenericProvider::new("https://opencode.ai/zen/go/v1", "test-key", "glm-5.1");
+        let extra = serde_json::json!({"reasoning": {"effort": "high"}});
+        let mut body = serde_json::json!({"model": "glm-5.1", "messages": []});
+
+        GenericProvider::merge_extra_body_fields(&mut body, Some(&extra));
+        provider.apply_opencode_go_reasoning_controls(&mut body, "glm-5.1");
+
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("reasoning").is_none());
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn test_opencode_go_model_detection_handles_prefixes_and_variants() {
+        assert_eq!(flat_model_name("opencode-go:kimi-k2.6"), "kimi-k2.6");
+        assert_eq!(flat_model_name("opencode-go:kimi-k2.6:fast"), "kimi-k2.6");
+        assert_eq!(flat_model_name("moonshotai/kimi-k2.6:fast"), "kimi-k2.6");
+        assert_eq!(
+            flat_model_name("openrouter:deepseek/deepseek-reasoner:max"),
+            "deepseek-reasoner"
+        );
     }
 
     #[test]
@@ -2325,7 +3237,8 @@ mod tests {
             }],
         )];
 
-        let sanitized = GenericProvider::sanitize_messages_for_strict_api(&messages, true);
+        let sanitized =
+            GenericProvider::sanitize_messages_for_api(&messages, true, "gpt-4o", None, None);
         let tc = &sanitized[0]["tool_calls"][0];
         assert_eq!(tc["id"], "call_123");
         assert_eq!(tc["type"], "function");
@@ -2348,7 +3261,8 @@ mod tests {
                 extra_content: None,
             }],
         )];
-        let sanitized = GenericProvider::sanitize_messages_for_strict_api(&messages, false);
+        let sanitized =
+            GenericProvider::sanitize_messages_for_api(&messages, false, "gpt-4o", None, None);
         let tc = &sanitized[0]["tool_calls"][0];
         assert_eq!(tc["name"], "read_file");
         assert_eq!(tc["arguments"], "{\"path\":\"a.txt\"}");
@@ -2356,16 +3270,88 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_messages_for_strict_api_decodes_acp_multimodal_user_parts() {
+    fn test_sanitize_messages_for_api_decodes_acp_multimodal_user_parts_for_vision_models() {
         let parts = serde_json::json!([
             {"type": "text", "text": "inspect"},
             {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
         ]);
         let marker = format!("{}{}", ACP_MULTIMODAL_PREFIX, parts);
         let messages = vec![Message::user(marker)];
-        let sanitized = GenericProvider::sanitize_messages_for_strict_api(&messages, false);
+        let sanitized =
+            GenericProvider::sanitize_messages_for_api(&messages, false, "gpt-4o", None, None);
         assert!(sanitized[0]["content"].is_array());
         assert_eq!(sanitized[0]["content"][1]["type"], "image_url");
+    }
+
+    #[test]
+    fn test_sanitize_messages_for_api_collapses_images_for_non_vision_models() {
+        let parts = serde_json::json!([
+            {"type": "text", "text": "inspect"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
+        ]);
+        let marker = format!("{}{}", ACP_MULTIMODAL_PREFIX, parts);
+        let messages = vec![Message::user(marker)];
+        let sanitized = GenericProvider::sanitize_messages_for_api(
+            &messages,
+            false,
+            "deepseek-chat",
+            None,
+            None,
+        );
+        let content = sanitized[0]["content"].as_str().expect("collapsed text");
+        assert!(content.contains("inspect"));
+        assert!(content.contains("[Attached image]"));
+        assert!(!content.contains("image_url"));
+    }
+
+    #[test]
+    fn test_provider_profile_vision_preserves_acp_multimodal_parts() {
+        let parts = serde_json::json!([
+            {"type": "text", "text": "inspect"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
+        ]);
+        let messages = vec![Message::user(format!("{ACP_MULTIMODAL_PREFIX}{parts}"))];
+        let provider = GenericProvider::new("https://api.xiaomimimo.com/v1", "key", "mimo-v2-omni")
+            .with_provider_profile("mimo");
+
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "mimo-v2-omni",
+            extra_body: None,
+            stream: false,
+        });
+
+        assert_eq!(body["messages"][0]["content"][1]["type"], "image_url");
+    }
+
+    #[test]
+    fn test_supports_vision_override_can_disable_multimodal_parts() {
+        let parts = serde_json::json!([
+            {"type": "text", "text": "inspect"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
+        ]);
+        let messages = vec![Message::user(format!("{ACP_MULTIMODAL_PREFIX}{parts}"))];
+        let provider = GenericProvider::new("https://api.openai.com/v1", "key", "gpt-4o");
+        let extra = serde_json::json!({"supports_vision": false});
+
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "gpt-4o",
+            extra_body: Some(&extra),
+            stream: false,
+        });
+
+        let content = body["messages"][0]["content"]
+            .as_str()
+            .expect("collapsed text");
+        assert!(content.contains("[Attached image]"));
+        assert!(body.get("supports_vision").is_none());
     }
 
     #[test]
@@ -2389,6 +3375,34 @@ mod tests {
         assert_eq!(resp.message.content.as_deref(), Some("Hello!"));
         assert_eq!(resp.finish_reason.as_deref(), Some("stop"));
         assert_eq!(resp.usage.as_ref().unwrap().total_tokens, 15);
+    }
+
+    #[test]
+    fn test_parse_openai_response_null_content_is_safe() {
+        let json = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_null_content",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\"path\":\"Cargo.toml\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "model": "reasoning-tool-only"
+        });
+
+        let resp = parse_openai_response(&json).expect("null content response should parse");
+
+        assert_eq!(resp.message.content.as_deref(), Some(""));
+        let calls = resp.message.tool_calls.as_ref().expect("tool calls");
+        assert_eq!(calls[0].id, "call_null_content");
+        assert_eq!(calls[0].function.name, "read_file");
     }
 
     #[test]
@@ -2438,6 +3452,33 @@ mod tests {
         let tc = resp.message.tool_calls.as_ref().unwrap();
         assert_eq!(tc.len(), 1);
         assert_eq!(tc[0].function.name, "read_file");
+    }
+
+    #[test]
+    fn test_parse_openai_response_accepts_object_valued_tool_arguments() {
+        let json = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_dict_args",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": {"path": "README.md"}
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "model": "local-openai-compatible"
+        });
+
+        let resp = parse_openai_response(&json).expect("object arguments should parse");
+        let tc = resp.message.tool_calls.as_ref().unwrap();
+        let args: Value = serde_json::from_str(&tc[0].function.arguments).unwrap();
+        assert_eq!(args["path"], "README.md");
     }
 
     #[test]
@@ -2539,43 +3580,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_sse_chunk_reasoning_content_delta() {
-        let json = serde_json::json!({
-            "choices": [{
-                "delta": {
-                    "reasoning_content": "Let me think step by step."
-                },
-                "finish_reason": null
-            }]
-        });
-        let chunk = parse_sse_chunk(&json).unwrap();
-        let delta = chunk.delta.as_ref().unwrap();
-        assert!(delta.content.is_none());
-        assert_eq!(
-            delta.extra.as_ref().and_then(|e| e.get("thinking")).and_then(|v| v.as_str()),
-            Some("Let me think step by step.")
-        );
-    }
-
-    #[test]
-    fn test_parse_sse_chunk_reasoning_delta_without_content() {
-        let json = serde_json::json!({
-            "choices": [{
-                "delta": {
-                    "reasoning": "DeepSeek-R1 style reasoning"
-                },
-                "finish_reason": null
-            }]
-        });
-        let chunk = parse_sse_chunk(&json).unwrap();
-        let delta = chunk.delta.as_ref().unwrap();
-        assert_eq!(
-            delta.extra.as_ref().and_then(|e| e.get("thinking")).and_then(|v| v.as_str()),
-            Some("DeepSeek-R1 style reasoning")
-        );
-    }
-
-    #[test]
     fn test_anthropic_convert_messages() {
         let messages = vec![
             Message::system("You are helpful"),
@@ -2583,10 +3587,7 @@ mod tests {
             Message::assistant("Hi there!"),
         ];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages, None);
-        assert_eq!(
-            system.as_ref().and_then(|v| v.as_str()),
-            Some("You are helpful")
-        );
+        assert_eq!(system.as_deref(), Some("You are helpful"));
         assert_eq!(msgs.len(), 2); // user + assistant, system extracted
         assert_eq!(msgs[0]["role"], "user");
         assert_eq!(msgs[1]["role"], "assistant");
@@ -2629,7 +3630,7 @@ mod tests {
             Message::tool_result("tc_1", "file contents here"),
         ];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages, None);
-        assert_eq!(system.as_ref().and_then(|v| v.as_str()), Some("System"));
+        assert_eq!(system.as_deref(), Some("System"));
         assert_eq!(msgs.len(), 3); // user, assistant with tool_use, user with tool_result
                                    // Assistant message should have tool_use block
         let assistant_content = msgs[1]["content"].as_array().unwrap();
@@ -2717,19 +3718,147 @@ mod tests {
     }
 
     #[test]
-    fn test_anthropic_convert_messages_system_cache_control_array() {
-        use crate::prompt_caching::build_cache_marker;
-        let mut sys = Message::system("cached sys");
-        sys.cache_control = Some(build_cache_marker("1h"));
-        let messages = vec![sys, Message::user("hi")];
-        let (system, _) = AnthropicProvider::convert_messages(
-            &messages,
-            Some("https://api.anthropic.com"),
+    fn test_anthropic_messages_url_adds_azure_api_version_query() {
+        let url = AnthropicProvider::messages_url_for_base_url(
+            "https://my-resource.openai.azure.com/anthropic",
         );
-        let binding = system.expect("system");
-        let arr = binding.as_array().expect("system blocks");
-        assert_eq!(arr[0]["cache_control"]["type"], "ephemeral");
-        assert_eq!(arr[0]["cache_control"]["ttl"], "1h");
+        assert_eq!(
+            url,
+            "https://my-resource.openai.azure.com/anthropic/v1/messages?api-version=2025-04-15"
+        );
+
+        let existing = AnthropicProvider::messages_url_for_base_url(
+            "https://my-resource.openai.azure.com/anthropic?api-version=2024-01-01",
+        );
+        assert_eq!(
+            existing,
+            "https://my-resource.openai.azure.com/anthropic/v1/messages?api-version=2024-01-01"
+        );
+    }
+
+    #[test]
+    fn test_anthropic_request_uses_bearer_auth_and_azure_betas_for_foundry() {
+        let provider = AnthropicProvider::new("azure-foundry-secret")
+            .with_base_url("https://my-resource.openai.azure.com/anthropic");
+        let url = provider.messages_url();
+        let request = provider
+            .build_request(
+                &Client::new(),
+                &url,
+                "azure-foundry-secret",
+                &serde_json::json!({}),
+            )
+            .build()
+            .expect("request");
+        let headers = request.headers();
+        assert_eq!(
+            headers.get("Authorization").and_then(|h| h.to_str().ok()),
+            Some("Bearer azure-foundry-secret")
+        );
+        assert!(headers.get("x-api-key").is_none());
+        let betas = headers
+            .get("anthropic-beta")
+            .and_then(|h| h.to_str().ok())
+            .expect("anthropic-beta");
+        assert!(betas.contains("context-1m-2025-08-07"));
+        assert!(betas.contains("fine-grained-tool-streaming-2025-05-14"));
+    }
+
+    #[test]
+    fn test_anthropic_request_uses_api_key_for_native_api_key() {
+        let provider = AnthropicProvider::new("sk-ant-api03-secret");
+        let request = provider
+            .build_request(
+                &Client::new(),
+                "https://api.anthropic.com/v1/messages",
+                "sk-ant-api03-secret",
+                &serde_json::json!({}),
+            )
+            .build()
+            .expect("request");
+        let headers = request.headers();
+        assert_eq!(
+            headers.get("x-api-key").and_then(|h| h.to_str().ok()),
+            Some("sk-ant-api03-secret")
+        );
+        assert!(headers.get("Authorization").is_none());
+        let betas = headers
+            .get("anthropic-beta")
+            .and_then(|h| h.to_str().ok())
+            .expect("anthropic-beta");
+        assert!(betas.contains("interleaved-thinking-2025-05-14"));
+        assert!(!betas.contains("oauth-2025-04-20"));
+        assert!(!betas.contains("context-1m-2025-08-07"));
+    }
+
+    #[test]
+    fn test_anthropic_request_uses_bearer_and_oauth_betas_for_native_oauth() {
+        let provider = AnthropicProvider::new("sk-ant-oat01-secret");
+        let request = provider
+            .build_request(
+                &Client::new(),
+                "https://api.anthropic.com/v1/messages",
+                "sk-ant-oat01-secret",
+                &serde_json::json!({}),
+            )
+            .build()
+            .expect("request");
+        let headers = request.headers();
+        assert_eq!(
+            headers.get("Authorization").and_then(|h| h.to_str().ok()),
+            Some("Bearer sk-ant-oat01-secret")
+        );
+        assert!(headers.get("x-api-key").is_none());
+        let betas = headers
+            .get("anthropic-beta")
+            .and_then(|h| h.to_str().ok())
+            .expect("anthropic-beta");
+        assert!(betas.contains("oauth-2025-04-20"));
+        assert!(betas.contains("claude-code-20250219"));
+    }
+
+    #[test]
+    fn anthropic_provider_request_timeout_survives_client_rebuilds() {
+        let provider =
+            AnthropicProvider::new("sk-ant-api03-secret").with_request_timeout_seconds(90.0);
+
+        assert_eq!(
+            provider.configured_request_timeout(),
+            Some(Duration::from_secs(90))
+        );
+
+        provider.refresh_client("unit test");
+        assert_eq!(
+            provider.configured_request_timeout(),
+            Some(Duration::from_secs(90))
+        );
+    }
+
+    #[test]
+    fn test_anthropic_strips_sampling_and_unsupported_fast_controls() {
+        let mut body = serde_json::json!({
+            "model": "claude-opus-4-8-fast",
+            "messages": [],
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "top_k": 20,
+            "speed": "fast"
+        });
+        AnthropicProvider::strip_unsupported_anthropic_controls(&mut body, "claude-opus-4-8-fast");
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("top_p").is_none());
+        assert!(body.get("top_k").is_none());
+        assert!(body.get("speed").is_none());
+
+        let mut supported = serde_json::json!({
+            "model": "claude-opus-4-6",
+            "messages": [],
+            "temperature": 0.7,
+            "speed": "fast"
+        });
+        AnthropicProvider::strip_unsupported_anthropic_controls(&mut supported, "claude-opus-4-6");
+        assert_eq!(supported["temperature"], serde_json::json!(0.7));
+        assert_eq!(supported["speed"], serde_json::json!("fast"));
     }
 
     #[test]
@@ -2844,6 +3973,30 @@ mod tests {
         let reasoning = resp.message.reasoning_content.as_deref().unwrap();
         assert!(reasoning.contains("Step 1"));
         assert!(reasoning.contains("Step 2"));
+    }
+
+    #[test]
+    fn test_openrouter_parse_response_null_content_preserves_reasoning() {
+        let json = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "reasoning_content": "Tool-only reasoning path"
+                },
+                "finish_reason": "stop"
+            }],
+            "model": "deepseek/deepseek-r1"
+        });
+
+        let resp = OpenRouterProvider::parse_openrouter_response(&json)
+            .expect("reasoning-only OpenRouter response should parse");
+
+        assert_eq!(resp.message.content.as_deref(), Some(""));
+        assert_eq!(
+            resp.message.reasoning_content.as_deref(),
+            Some("Tool-only reasoning path")
+        );
     }
 
     #[test]

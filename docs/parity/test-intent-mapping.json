@@ -1,9 +1,9 @@
 {
-  "generated_at_utc": "2026-05-01T05:10:51.134609+00:00",
+  "generated_at_utc": "2026-05-29T20:36:27.637841+00:00",
   "intent_unit": "domain_intent",
   "intents": [
     {
-      "evidence_count": 23,
+      "evidence_count": 24,
       "evidence_sample": [
         "crates/hermes-cli/tests/e2e_gateway_cron_webhook.rs",
         "crates/hermes-cli/tests/e2e_gateway_process.rs",
@@ -18,6 +18,7 @@
         "crates/hermes-gateway/src/platforms/matrix.rs",
         "crates/hermes-gateway/src/platforms/mattermost.rs",
         "crates/hermes-gateway/src/platforms/mod.rs",
+        "crates/hermes-gateway/src/platforms/ntfy.rs",
         "crates/hermes-gateway/src/platforms/qqbot.rs",
         "crates/hermes-gateway/src/platforms/signal.rs",
         "crates/hermes-gateway/src/platforms/slack.rs",
@@ -37,7 +38,7 @@
       ]
     },
     {
-      "evidence_count": 71,
+      "evidence_count": 73,
       "evidence_sample": [
         "crates/hermes-tools/src/approval.rs",
         "crates/hermes-tools/src/backends/browser.rs",
@@ -54,6 +55,7 @@
         "crates/hermes-tools/src/backends/session_search.rs",
         "crates/hermes-tools/src/backends/todo.rs",
         "crates/hermes-tools/src/backends/tts.rs",
+        "crates/hermes-tools/src/backends/video.rs",
         "crates/hermes-tools/src/backends/vision.rs",
         "crates/hermes-tools/src/backends/web.rs",
         "crates/hermes-tools/src/credential_guard.rs",
@@ -62,8 +64,7 @@
         "crates/hermes-tools/src/register_builtins.rs",
         "crates/hermes-tools/src/registry.rs",
         "crates/hermes-tools/src/rtk_filter.rs",
-        "crates/hermes-tools/src/tool_policy.rs",
-        "crates/hermes-tools/src/tools/browser.rs"
+        "crates/hermes-tools/src/tool_policy.rs"
       ],
       "id": "tool-runtime-behavior",
       "mapped": true,
@@ -73,8 +74,9 @@
       ]
     },
     {
-      "evidence_count": 35,
+      "evidence_count": 39,
       "evidence_sample": [
+        "crates/hermes-cli/src/alpha_runtime.rs",
         "crates/hermes-cli/src/app.rs",
         "crates/hermes-cli/src/auth.rs",
         "crates/hermes-cli/src/banner.rs",
@@ -89,6 +91,7 @@
         "crates/hermes-cli/src/doctor.rs",
         "crates/hermes-cli/src/env_loader.rs",
         "crates/hermes-cli/src/gateway_cmd.rs",
+        "crates/hermes-cli/src/kanban.rs",
         "crates/hermes-cli/src/lib.rs",
         "crates/hermes-cli/src/lumio.rs",
         "crates/hermes-cli/src/main.rs",
@@ -97,9 +100,7 @@
         "crates/hermes-cli/src/pairing_store.rs",
         "crates/hermes-cli/src/platform_toolsets.rs",
         "crates/hermes-cli/src/profiles.rs",
-        "crates/hermes-cli/src/providers.rs",
-        "crates/hermes-cli/src/runtime_tool_wiring.rs",
-        "crates/hermes-cli/src/setup.rs"
+        "crates/hermes-cli/src/providers.rs"
       ],
       "id": "cli-command-surface",
       "mapped": true,

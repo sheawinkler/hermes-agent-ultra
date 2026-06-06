@@ -2,30 +2,21 @@
   "ci_gate": {
     "checks": [
       {
-        "actual": 1896.0,
+        "actual": 4494.0,
         "limit": 5500,
         "metric": "max_commits_behind",
         "status": "pass"
       },
       {
-        "actual": 1827.0,
+        "actual": 4374.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
         "status": "pass"
       },
       {
-        "actual": 3020.0,
+        "actual": 1493.0,
         "limit": 2600,
-        "max_overshoot": 500.0,
         "metric": "max_files_only_upstream",
-        "overshoot": 420.0,
-        "special_rule": "allow_files_only_upstream_overshoot_when_functional_clean",
-        "status": "warn"
-      },
-      {
-        "actual": 12.0,
-        "limit": 15,
-        "metric": "max_shared_different",
         "status": "pass"
       },
       {
@@ -54,20 +45,9 @@
       }
     ],
     "mode": "tree-drift",
-    "pass": true,
-    "special_rules_applied": [
-      {
-        "actual": 3020.0,
-        "limit": 2600.0,
-        "max_overshoot": 500.0,
-        "metric": "max_files_only_upstream",
-        "overshoot": 420.0,
-        "reason": "functional parity clean; upstream-only file growth treated as drift warning",
-        "rule": "allow_files_only_upstream_overshoot_when_functional_clean"
-      }
-    ]
+    "pass": true
   },
-  "generated_at_utc": "2026-05-12T08:43:39.337343+00:00",
+  "generated_at_utc": "2026-06-05T19:35:15.967398+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -80,13 +60,12 @@
     "GPAR-09": true
   },
   "metrics": {
-    "max_commits_behind": 1896.0,
+    "max_commits_behind": 4494.0,
     "max_divergence_review_overdue": 0.0,
-    "max_files_only_upstream": 3020.0,
+    "max_files_only_upstream": 1493.0,
     "max_queue_pending_commits": 0.0,
-    "max_shared_different": 12.0,
     "max_unowned_divergences": 0.0,
-    "max_upstream_patch_missing": 1827.0,
+    "max_upstream_patch_missing": 4374.0,
     "min_test_intent_mapping_ratio": 1.0
   },
   "program": {
@@ -97,22 +76,22 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "mirrored": 64,
-      "ported": 65,
-      "superseded": 2409
+      "mirrored": 75,
+      "ported": 22,
+      "superseded": 4186
     },
     "by_target_ticket": {
-      "20": 1018,
-      "21": 82,
-      "22": 486,
-      "23": 207,
-      "24": 11,
-      "25": 37,
-      "26": 697
+      "20": 1790,
+      "21": 109,
+      "22": 716,
+      "23": 333,
+      "24": 18,
+      "25": 89,
+      "26": 1228
     },
     "overrides_path": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/queue-overrides.json",
-    "patch_equivalent_count": 5,
-    "total_commits": 2538
+    "patch_equivalent_count": 2,
+    "total_commits": 4283
   },
   "release_gate": {
     "checks": [

@@ -9,6 +9,41 @@
       "input": { "abs_path": "/workspace/demo" },
       "expected": "4de1d2f8b60db00a",
       "skip": false
+    },
+    {
+      "id": "reject_short_commit_hash",
+      "op": "checkpoint_validate_commit_hash",
+      "input": { "commit_hash": "abc" },
+      "expected": "Invalid commit hash (expected 4-64 hex characters): 'abc'",
+      "skip": false
+    },
+    {
+      "id": "reject_flag_like_commit_hash",
+      "op": "checkpoint_validate_commit_hash",
+      "input": { "commit_hash": "-abc123" },
+      "expected": "Invalid commit hash (must not start with '-'): '-abc123'",
+      "skip": false
+    },
+    {
+      "id": "accept_uppercase_commit_hash",
+      "op": "checkpoint_validate_commit_hash",
+      "input": { "commit_hash": "ABCDEF1234" },
+      "expected": null,
+      "skip": false
+    },
+    {
+      "id": "parse_full_shortstat",
+      "op": "checkpoint_parse_shortstat",
+      "input": { "stat_line": "1 file changed, 2 insertions(+), 3 deletions(-)" },
+      "expected": { "files_changed": 1, "insertions": 2, "deletions": 3 },
+      "skip": false
+    },
+    {
+      "id": "parse_insertions_only_shortstat",
+      "op": "checkpoint_parse_shortstat",
+      "input": { "stat_line": "2 files changed, 10 insertions(+)" },
+      "expected": { "files_changed": 2, "insertions": 10, "deletions": 0 },
+      "skip": false
     }
   ]
 }

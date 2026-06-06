@@ -65,6 +65,51 @@
       ]
     },
     {
+      "id": "rust-gateway-platform-plugin-parity",
+      "status": "approved",
+      "workstream": "WS3",
+      "summary": "Keep platform adapter parity in the Rust gateway instead of vendoring upstream Python platform-plugin trees.",
+      "owner": "sheawinkler",
+      "ticket": 7,
+      "last_reviewed": "2026-05-26",
+      "review_date": "2026-08-26",
+      "rationale": "Mattermost and ntfy platform behavior are represented by Rust-native gateway adapters and adapter contracts; upstream Python plugin files are not vendored into the Rust runtime path.",
+      "path_prefixes": [
+        "plugins/platforms/mattermost/",
+        "plugins/platforms/ntfy/"
+      ]
+    },
+    {
+      "id": "upstream-python-plugin-backend-drift-20260527",
+      "status": "temporary",
+      "workstream": "WS3",
+      "summary": "Track newly added upstream Python plugin/backend trees separately from surgical Rust issue-triage fixes.",
+      "owner": "sheawinkler",
+      "ticket": 319,
+      "last_reviewed": "2026-05-27",
+      "review_date": "2026-06-10",
+      "rationale": "dashboard_auth/nous, image_gen/krea, and security-guidance were added upstream after this PR branch started. Importing or porting those Python plugin trees is unrelated to the focused #292/#293/#317 fixes and should be handled in a dedicated plugin parity slice.",
+      "path_prefixes": [
+        "plugins/dashboard_auth/nous/",
+        "plugins/image_gen/krea/",
+        "plugins/security-guidance/"
+      ]
+    },
+    {
+      "id": "upstream-s6-plan-doc-archive",
+      "status": "approved",
+      "workstream": "WS7",
+      "summary": "Do not import upstream implementation-plan archive documents unless they change local runtime or release behavior.",
+      "owner": "sheawinkler",
+      "ticket": 26,
+      "last_reviewed": "2026-05-26",
+      "review_date": "2026-08-26",
+      "rationale": "The upstream s6-overlay plan is a post-implementation reference document for upstream Docker/Python service-management history; Hermes Ultra tracks relevant runtime parity through local Docker, gateway, and release gates.",
+      "path_prefixes": [
+        "docs/plans/2026-05-07-s6-overlay-dynamic-subagent-gateways.md"
+      ]
+    },
+    {
       "id": "rust-cli-tui-primary-ux-surface",
       "status": "approved",
       "workstream": "WS5",

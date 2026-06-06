@@ -251,7 +251,7 @@ impl DiscordInner {
         &self,
         channel_id: &str,
         message_id: &str,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<bool, GatewayError> {
         let url = format!(
             "{}/channels/{channel_id}/messages/{message_id}",
             self.rest_api()
@@ -269,7 +269,7 @@ impl DiscordInner {
                 "Discord delete API error: {text}"
             )));
         }
-        Ok(())
+        Ok(true)
     }
 
     pub async fn send_embed(

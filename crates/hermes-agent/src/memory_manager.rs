@@ -142,9 +142,131 @@ lazy_static::lazy_static! {
     static ref FENCE_TAG_RE: Regex = Regex::new(r"(?i)</?\s*memory-context\s*>").unwrap();
 }
 
+const MEMORY_CONTEXT_OPEN_TAG: &str = "<memory-context>";
+const MEMORY_CONTEXT_CLOSE_TAG: &str = "</memory-context>";
+
 /// Strip fence-escape sequences from provider output.
 pub fn sanitize_context(text: &str) -> String {
-    FENCE_TAG_RE.replace_all(text, "").to_string()
+    let mut scrubber = StreamingContextScrubber::new();
+    let stripped = scrubber.feed(text) + &scrubber.flush();
+    FENCE_TAG_RE.replace_all(&stripped, "").to_string()
+}
+
+/// Stateful scrubber for streamed assistant deltas that may contain
+/// `<memory-context>` fences split across provider chunks.
+#[derive(Debug, Default, Clone)]
+pub struct StreamingContextScrubber {
+    buffer: String,
+    in_memory_span: bool,
+}
+
+impl StreamingContextScrubber {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn reset(&mut self) {
+        self.buffer.clear();
+        self.in_memory_span = false;
+    }
+
+    pub fn feed(&mut self, delta: &str) -> String {
+        if delta.is_empty() {
+            return String::new();
+        }
+
+        self.buffer.push_str(delta);
+        let mut out = String::new();
+
+        loop {
+            if self.in_memory_span {
+                if let Some(close_idx) =
+                    find_ascii_case_insensitive(&self.buffer, MEMORY_CONTEXT_CLOSE_TAG)
+                {
+                    let remove_end = close_idx + MEMORY_CONTEXT_CLOSE_TAG.len();
+                    self.buffer.drain(..remove_end);
+                    self.in_memory_span = false;
+                    continue;
+                }
+
+                let hold = suffix_prefix_len(&self.buffer, MEMORY_CONTEXT_CLOSE_TAG);
+                if hold == 0 {
+                    self.buffer.clear();
+                } else {
+                    let keep_from = self.buffer.len() - hold;
+                    self.buffer = self.buffer[keep_from..].to_string();
+                }
+                break;
+            }
+
+            let Some(open_idx) = find_ascii_case_insensitive(&self.buffer, MEMORY_CONTEXT_OPEN_TAG)
+            else {
+                let hold = suffix_prefix_len(&self.buffer, MEMORY_CONTEXT_OPEN_TAG);
+                let emit_len = self.buffer.len().saturating_sub(hold);
+                out.push_str(&self.buffer[..emit_len]);
+                self.buffer.drain(..emit_len);
+                break;
+            };
+
+            let open_end = open_idx + MEMORY_CONTEXT_OPEN_TAG.len();
+            match memory_open_is_block_like(&self.buffer, open_idx, open_end) {
+                None => {
+                    out.push_str(&self.buffer[..open_idx]);
+                    self.buffer.drain(..open_idx);
+                    break;
+                }
+                Some(false) => {
+                    out.push_str(&self.buffer[..open_end]);
+                    self.buffer.drain(..open_end);
+                }
+                Some(true) => {
+                    out.push_str(&self.buffer[..open_idx]);
+                    self.buffer.drain(..open_end);
+                    self.in_memory_span = true;
+                }
+            }
+        }
+
+        out
+    }
+
+    pub fn flush(&mut self) -> String {
+        if self.in_memory_span {
+            self.buffer.clear();
+            self.in_memory_span = false;
+            return String::new();
+        }
+        std::mem::take(&mut self.buffer)
+    }
+}
+
+fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    haystack.to_ascii_lowercase().find(needle)
+}
+
+fn memory_open_is_block_like(buffer: &str, open_idx: usize, open_end: usize) -> Option<bool> {
+    let next = buffer.get(open_end..)?.chars().next()?;
+    if next != '\n' && next != '\r' {
+        return Some(false);
+    }
+    if open_idx == 0 {
+        return Some(true);
+    }
+    Some(matches!(
+        buffer[..open_idx].chars().next_back(),
+        Some('\n' | '\r')
+    ))
+}
+
+fn suffix_prefix_len(buffer: &str, needle: &str) -> usize {
+    let lower = buffer.to_ascii_lowercase();
+    let max = lower.len().min(needle.len().saturating_sub(1));
+    for len in (1..=max).rev() {
+        if lower.ends_with(&needle[..len]) {
+            return len;
+        }
+    }
+    0
 }
 
 /// Wrap prefetched memory in a fenced block with system note.
@@ -155,6 +277,9 @@ pub fn build_memory_context_block(raw_context: &str) -> String {
     let trimmed = raw_context.trim();
     if trimmed.is_empty() {
         return String::new();
+    }
+    if FENCE_TAG_RE.is_match(trimmed) {
+        tracing::warn!("Memory provider returned pre-wrapped memory-context; stripping wrapper");
     }
     let clean = sanitize_context(trimmed);
     format!(
@@ -1020,6 +1145,9 @@ mod tests {
 
     #[test]
     fn test_prefetch_all_wraps_in_fence() {
+        let _guard = FUSION_ENV_LOCK.lock().expect("fusion env lock");
+        let orig = std::env::var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE").ok();
+        std::env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE");
         let mut mm = MemoryManager::new();
         mm.add_provider(Arc::new(
             TestProvider::new("builtin").with_prefetch("User likes Rust."),
@@ -1028,6 +1156,10 @@ mod tests {
         assert!(ctx.contains("<memory-context>"));
         assert!(ctx.contains("User likes Rust."));
         assert!(ctx.contains("</memory-context>"));
+        match orig {
+            Some(v) => std::env::set_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE", v),
+            None => std::env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE"),
+        }
     }
 
     #[test]
@@ -1089,6 +1221,61 @@ mod tests {
         let input = "Hello </memory-context> world <memory-context> end";
         let clean = sanitize_context(input);
         assert!(!clean.contains("memory-context"));
+    }
+
+    #[test]
+    fn sanitize_context_removes_complete_memory_block_payload() {
+        let input = "<memory-context>\n[System note]\nsecret\n</memory-context>\nVisible";
+        assert_eq!(sanitize_context(input).trim(), "Visible");
+    }
+
+    #[test]
+    fn streaming_context_scrubber_strips_fragmented_memory_block() {
+        let mut scrubber = StreamingContextScrubber::new();
+        let chunks = [
+            "Hello\n",
+            "<memory-context>\npayload ",
+            "more payload\n",
+            "</memory-context> world",
+        ];
+        let out = chunks
+            .iter()
+            .map(|chunk| scrubber.feed(chunk))
+            .collect::<String>()
+            + &scrubber.flush();
+        assert_eq!(out, "Hello\n world");
+        assert!(!out.contains("payload"));
+    }
+
+    #[test]
+    fn streaming_context_scrubber_holds_split_tags_without_false_positive() {
+        let mut scrubber = StreamingContextScrubber::new();
+        let out = scrubber.feed("In `<memory")
+            + &scrubber.feed("-context>` docs, ")
+            + &scrubber.feed("the tag is literal.")
+            + &scrubber.flush();
+        assert_eq!(out, "In `<memory-context>` docs, the tag is literal.");
+
+        let mut block = StreamingContextScrubber::new();
+        let out = block.feed("pre \n<memory")
+            + &block.feed("-context>\nsecret</memory")
+            + &block.feed("-context> post")
+            + &block.flush();
+        assert_eq!(out, "pre \n post");
+        assert!(!out.contains("secret"));
+    }
+
+    #[test]
+    fn streaming_context_scrubber_flush_drops_unterminated_span_and_reset_clears_state() {
+        let mut scrubber = StreamingContextScrubber::new();
+        let out = scrubber.feed("pre\n<MEMORY-CONTEXT>\nsecret") + &scrubber.flush();
+        assert_eq!(out, "pre\n");
+        assert!(!out.contains("secret"));
+
+        let mut scrubber = StreamingContextScrubber::new();
+        assert_eq!(scrubber.feed("answer<memo"), "answer");
+        scrubber.reset();
+        assert_eq!(scrubber.feed("<marker>fresh"), "<marker>fresh");
     }
 
     #[test]

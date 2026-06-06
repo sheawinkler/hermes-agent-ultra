@@ -48,6 +48,7 @@ HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 CANONICAL_BIN_NAME="${CANONICAL_BIN_NAME:-hermes-agent-ultra}"
 PRIMARY_BIN_NAME="${PRIMARY_BIN_NAME:-hermes-ultra}"
 LEGACY_BIN_NAME="${LEGACY_BIN_NAME:-hermes}"
+INSTALL_LEGACY_ALIAS="${INSTALL_LEGACY_ALIAS:-false}"
 RELEASE_BIN_BASENAME="${RELEASE_BIN_BASENAME:-hermes}"
 RUN_SETUP_MODE="${RUN_SETUP_MODE:-auto}" # auto|always|never
 ROOT_FHS_LAYOUT=false
@@ -83,9 +84,12 @@ Environment variables:
   HERMES_HOME            Hermes config dir for SOUL.md bootstrap (default: $HOME/.hermes)
   CANONICAL_BIN_NAME     Installed binary name (default: hermes-agent-ultra)
   PRIMARY_BIN_NAME       Primary user-facing command symlink (default: hermes-ultra)
-  LEGACY_BIN_NAME        Compatibility alias symlink name (default: hermes)
+  INSTALL_LEGACY_ALIAS   Also install the legacy hermes alias (default: false)
+  LEGACY_BIN_NAME        Compatibility alias symlink name when enabled (default: hermes)
   RELEASE_BIN_BASENAME   Tarball executable basename (default: hermes)
   RUN_SETUP_MODE         auto|always|never for setup flow (default: auto)
+  HERMES_INSTALL_PROBE_TIMEOUT_SECONDS
+                         Timeout for post-install doctor/auth/setup probes (default: 45; 0 disables)
 
 Defaults:
   - Linux root install:  /usr/local/bin (FHS-style command location)
@@ -235,6 +239,67 @@ prompt_yes_no() {
   esac
 }
 
+truthy_env() {
+  case "${1:-}" in
+    1|true|TRUE|True|yes|YES|Yes|on|ON|On) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+run_bounded_post_install_cmd() {
+  local label="$1"
+  shift
+  local seconds="${HERMES_INSTALL_PROBE_TIMEOUT_SECONDS:-45}"
+  case "${seconds}" in
+    ''|*[!0-9]*) seconds=45 ;;
+  esac
+
+  if [[ "${seconds}" -eq 0 ]]; then
+    "$@"
+    return $?
+  fi
+
+  local safe_label="${label//[^A-Za-z0-9_]/_}"
+  local marker="${TMP_DIR:-/tmp}/hermes-install-timeout-${safe_label}-$$-${RANDOM}"
+  local done_marker="${TMP_DIR:-/tmp}/hermes-install-done-${safe_label}-$$-${RANDOM}"
+  rm -f "${marker}" "${done_marker}"
+
+  "$@" &
+  local cmd_pid=$!
+  (
+    local elapsed=0
+    while [[ "${elapsed}" -lt "${seconds}" ]]; do
+      sleep 1
+      if [[ -f "${done_marker}" ]]; then
+        exit 0
+      fi
+      elapsed=$((elapsed + 1))
+    done
+    if [[ ! -f "${done_marker}" ]] && kill -0 "${cmd_pid}" 2>/dev/null; then
+      : > "${marker}"
+      kill -TERM "${cmd_pid}" 2>/dev/null || true
+      sleep 2
+      kill -KILL "${cmd_pid}" 2>/dev/null || true
+    fi
+  ) &
+  local watcher_pid=$!
+
+  local status=0
+  wait "${cmd_pid}" || status=$?
+  : > "${done_marker}"
+  wait "${watcher_pid}" 2>/dev/null || true
+
+  if [[ -f "${marker}" ]]; then
+    rm -f "${marker}" "${done_marker}"
+    echo "${label} timed out after ${seconds}s; continuing. Run manually:"
+    echo "  $*"
+    return 124
+  fi
+
+  rm -f "${done_marker}"
+  return "${status}"
+}
+
 run_post_install_flow() {
   local bin_path="$1"
   local -a clean_python_env=(
@@ -251,16 +316,16 @@ run_post_install_flow() {
 
   echo
   echo "Running post-install verification..."
-  "${clean_python_env[@]}" "${bin_path}" doctor || true
+  run_bounded_post_install_cmd "doctor" "${clean_python_env[@]}" "${bin_path}" doctor || true
 
   echo
   echo "Current auth/platform status:"
-  "${clean_python_env[@]}" "${bin_path}" auth status || true
+  run_bounded_post_install_cmd "auth status" "${clean_python_env[@]}" "${bin_path}" auth status || true
 
   if [[ -t 0 ]]; then
     echo
     if prompt_yes_no "Run interactive setup now?" "yes"; then
-      "${clean_python_env[@]}" "${bin_path}" setup || true
+      run_bounded_post_install_cmd "setup" "${clean_python_env[@]}" "${bin_path}" setup || true
     else
       echo "Skipped setup. Run this anytime:"
       echo "  ${bin_path} setup"
@@ -345,8 +410,10 @@ install -m 0755 "${SOURCE_BIN}" "${INSTALL_DIR}/${CANONICAL_BIN_NAME}"
 if [[ "${PRIMARY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
   ln -sfn "${CANONICAL_BIN_NAME}" "${INSTALL_DIR}/${PRIMARY_BIN_NAME}"
 fi
-if [[ "${LEGACY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
+if truthy_env "${INSTALL_LEGACY_ALIAS}" && [[ -n "${LEGACY_BIN_NAME}" ]] && [[ "${LEGACY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
   ln -sfn "${CANONICAL_BIN_NAME}" "${INSTALL_DIR}/${LEGACY_BIN_NAME}"
+elif [[ -n "${LEGACY_BIN_NAME}" ]] && [[ "${LEGACY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
+  echo "Legacy ${LEGACY_BIN_NAME} alias not installed by default; existing upstream ${LEGACY_BIN_NAME} commands are left untouched."
 fi
 
 echo "Installed to ${INSTALL_DIR}/${CANONICAL_BIN_NAME}"
@@ -374,7 +441,7 @@ if command -v "${CANONICAL_BIN_NAME}" >/dev/null 2>&1; then
   if command -v "${PRIMARY_BIN_NAME}" >/dev/null 2>&1; then
     echo "Primary command available: $(command -v "${PRIMARY_BIN_NAME}")"
   fi
-  if command -v "${LEGACY_BIN_NAME}" >/dev/null 2>&1; then
+  if truthy_env "${INSTALL_LEGACY_ALIAS}" && [[ -n "${LEGACY_BIN_NAME}" ]] && command -v "${LEGACY_BIN_NAME}" >/dev/null 2>&1; then
     echo "Legacy alias available: $(command -v "${LEGACY_BIN_NAME}")"
   fi
 else
@@ -402,7 +469,11 @@ if [[ -x "${BIN_PATH}" ]]; then
       run_post_install_flow "${BIN_PATH}"
       ;;
     auto)
-      if prompt_yes_no "Run post-install setup flow (doctor + auth status + setup)?" "yes"; then
+      if [[ "${IS_INTERACTIVE}" != "true" ]]; then
+        echo "Post-install setup skipped (non-interactive install). Run later:"
+        echo "  ${BIN_PATH} setup"
+        echo "To run verification during install, pass --setup or set RUN_SETUP_MODE=always."
+      elif prompt_yes_no "Run post-install setup flow (doctor + auth status + setup)?" "yes"; then
         run_post_install_flow "${BIN_PATH}"
       else
         echo "Post-install setup skipped. Run later:"

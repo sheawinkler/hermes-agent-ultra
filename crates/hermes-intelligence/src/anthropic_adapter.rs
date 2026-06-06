@@ -21,6 +21,8 @@ const MCP_TOOL_PREFIX: &str = "mcp_";
 
 /// Max output token limits per Anthropic model.
 static ANTHROPIC_OUTPUT_LIMITS: &[(&str, u32)] = &[
+    ("claude-opus-4-8", 128_000),
+    ("claude-opus-4-7", 128_000),
     ("claude-opus-4-6", 128_000),
     ("claude-sonnet-4-6", 64_000),
     ("claude-opus-4-5", 64_000),
@@ -35,6 +37,7 @@ static ANTHROPIC_OUTPUT_LIMITS: &[(&str, u32)] = &[
     ("claude-3-sonnet", 4_096),
     ("claude-3-haiku", 4_096),
     ("minimax", 131_072),
+    ("qwen3", 65_536),
 ];
 
 const ANTHROPIC_DEFAULT_OUTPUT_LIMIT: u32 = 128_000;
@@ -45,8 +48,13 @@ const COMMON_BETAS: &[&str] = &[
     "fine-grained-tool-streaming-2025-05-14",
 ];
 const TOOL_STREAMING_BETA: &str = "fine-grained-tool-streaming-2025-05-14";
+const CONTEXT_1M_BETA: &str = "context-1m-2025-08-07";
 const FAST_MODE_BETA: &str = "fast-mode-2026-02-01";
 const OAUTH_ONLY_BETAS: &[&str] = &["claude-code-20250219", "oauth-2025-04-20"];
+const ADAPTIVE_THINKING_SUBSTRINGS: &[&str] = &["4-6", "4.6", "4-7", "4.7", "4-8", "4.8"];
+const XHIGH_EFFORT_SUBSTRINGS: &[&str] = &["4-7", "4.7", "4-8", "4.8"];
+const NO_SAMPLING_PARAMS_SUBSTRINGS: &[&str] = &["4-7", "4.7", "4-8", "4.8"];
+const FAST_MODE_SUPPORTED_SUBSTRINGS: &[&str] = &["opus-4-6", "opus-4.6"];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -155,17 +163,32 @@ pub struct ReasoningConfig {
 // Model name normalization
 // ---------------------------------------------------------------------------
 
+/// Return true for AWS Bedrock model IDs where dots are semantic delimiters.
+pub fn is_bedrock_model_id(model: &str) -> bool {
+    let lower = model.trim().to_ascii_lowercase();
+    [
+        "anthropic.",
+        "us.anthropic.",
+        "eu.anthropic.",
+        "ap.anthropic.",
+        "global.anthropic.",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix))
+}
+
 /// Normalize a model name for the Anthropic API.
 ///
 /// Strips `anthropic/` prefix and converts dots to hyphens unless
-/// `preserve_dots` is true.
+/// `preserve_dots` is true. AWS Bedrock model IDs keep dots because those
+/// dots are part of Bedrock's provider model identifier.
 pub fn normalize_model_name(model: &str, preserve_dots: bool) -> String {
     let mut result = model.to_string();
     let lower = result.to_lowercase();
     if lower.starts_with("anthropic/") {
         result = result[10..].to_string();
     }
-    if !preserve_dots {
+    if !preserve_dots && !is_bedrock_model_id(&result) {
         result = result.replace('.', "-");
     }
     result
@@ -188,7 +211,30 @@ pub fn get_anthropic_max_output(model: &str) -> u32 {
 
 /// Return true for Claude 4.6 models that support adaptive thinking.
 pub fn supports_adaptive_thinking(model: &str) -> bool {
-    model.contains("4-6") || model.contains("4.6")
+    ADAPTIVE_THINKING_SUBSTRINGS
+        .iter()
+        .any(|needle| model.contains(needle))
+}
+
+/// Return true for models that accept Anthropic's `xhigh` adaptive effort.
+pub fn supports_xhigh_effort(model: &str) -> bool {
+    XHIGH_EFFORT_SUBSTRINGS
+        .iter()
+        .any(|needle| model.contains(needle))
+}
+
+/// Return true for models that reject explicit sampling parameters.
+pub fn forbids_sampling_params(model: &str) -> bool {
+    NO_SAMPLING_PARAMS_SUBSTRINGS
+        .iter()
+        .any(|needle| model.contains(needle))
+}
+
+/// Return true for models that support the Anthropic `speed=fast` parameter.
+pub fn supports_fast_mode(model: &str) -> bool {
+    FAST_MODE_SUPPORTED_SUBSTRINGS
+        .iter()
+        .any(|needle| model.contains(needle))
 }
 
 // ---------------------------------------------------------------------------
@@ -732,6 +778,9 @@ pub fn is_oauth_token(key: &str) -> bool {
     if key.starts_with("eyJ") {
         return true;
     }
+    if key.starts_with("cc-") {
+        return true;
+    }
     false
 }
 
@@ -749,17 +798,55 @@ pub fn is_third_party_endpoint(base_url: Option<&str>) -> bool {
     }
 }
 
+/// Return true for MiniMax's Anthropic-compatible endpoints.
+pub fn is_minimax_anthropic_endpoint(base_url: Option<&str>) -> bool {
+    match base_url {
+        None => false,
+        Some(url) => {
+            let normalized = url.trim().trim_end_matches('/').to_lowercase();
+            normalized.starts_with("https://api.minimax.io/anthropic")
+                || normalized.starts_with("https://api.minimaxi.com/anthropic")
+        }
+    }
+}
+
+/// Return true for Azure-hosted Anthropic Messages endpoints.
+pub fn is_azure_anthropic_endpoint(base_url: Option<&str>) -> bool {
+    let Some(raw) = base_url.map(str::trim).filter(|url| !url.is_empty()) else {
+        return false;
+    };
+    let Ok(parsed) = reqwest::Url::parse(raw) else {
+        return false;
+    };
+    let host = parsed
+        .host_str()
+        .unwrap_or("")
+        .trim_end_matches('.')
+        .to_lowercase();
+    let path = parsed.path().to_lowercase();
+    let host_padded = format!(".{host}.");
+    let is_foundry_host = host_padded.contains(".services.ai.azure.");
+    let is_legacy_azoai_host = host_padded.contains(".openai.azure.");
+    (is_foundry_host || is_legacy_azoai_host) && path.contains("/anthropic")
+}
+
+/// Return true for endpoints that still gate 1M context behind a beta header.
+pub fn base_url_needs_context_1m_beta(base_url: Option<&str>) -> bool {
+    base_url
+        .map(|url| url.trim().to_lowercase().contains("azure.com"))
+        .unwrap_or(false)
+}
+
 /// Return beta headers safe for the configured endpoint.
 pub fn common_betas_for_base_url(base_url: Option<&str>) -> Vec<&'static str> {
-    if requires_bearer_auth(base_url) {
-        COMMON_BETAS
-            .iter()
-            .copied()
-            .filter(|b| *b != TOOL_STREAMING_BETA)
-            .collect()
-    } else {
-        COMMON_BETAS.to_vec()
+    let mut betas = COMMON_BETAS.to_vec();
+    if base_url_needs_context_1m_beta(base_url) {
+        betas.push(CONTEXT_1M_BETA);
     }
+    if is_minimax_anthropic_endpoint(base_url) {
+        betas.retain(|beta| *beta != TOOL_STREAMING_BETA && *beta != CONTEXT_1M_BETA);
+    }
+    betas
 }
 
 /// Beta list for `default_headers["anthropic-beta"]` when constructing an Anthropic client.
@@ -799,14 +886,14 @@ pub fn fast_mode_request_beta_list(
     Some(betas)
 }
 
-/// Check if a base URL requires Bearer auth (e.g. MiniMax).
+/// Check if a base URL requires Bearer auth (e.g. MiniMax or Azure Foundry).
 pub fn requires_bearer_auth(base_url: Option<&str>) -> bool {
     match base_url {
         None => false,
         Some(url) => {
             let normalized = url.trim().trim_end_matches('/').to_lowercase();
-            normalized.starts_with("https://api.minimax.io/anthropic")
-                || normalized.starts_with("https://api.minimaxi.com/anthropic")
+            is_minimax_anthropic_endpoint(Some(normalized.as_str()))
+                || normalized.contains("azure.com")
         }
     }
 }
@@ -853,11 +940,20 @@ mod tests {
             normalize_model_name("claude-sonnet-4", false),
             "claude-sonnet-4"
         );
+        assert_eq!(
+            normalize_model_name("global.anthropic.claude-opus-4-7", false),
+            "global.anthropic.claude-opus-4-7"
+        );
+        assert_eq!(
+            normalize_model_name("claude-opus-4.6", false),
+            "claude-opus-4-6"
+        );
     }
 
     #[test]
     fn test_get_anthropic_max_output() {
         assert_eq!(get_anthropic_max_output("claude-opus-4-6"), 128_000);
+        assert_eq!(get_anthropic_max_output("claude-opus-4-8-fast"), 128_000);
         assert_eq!(
             get_anthropic_max_output("claude-sonnet-4-6-20260101"),
             64_000
@@ -881,6 +977,7 @@ mod tests {
         assert!(!is_oauth_token("sk-ant-api03-xxx"));
         assert!(is_oauth_token("sk-ant-oat-xxx"));
         assert!(is_oauth_token("eyJhbGci..."));
+        assert!(is_oauth_token("cc-claude-code-oauth"));
         assert!(!is_oauth_token("sk-proj-xxx"));
         assert!(!is_oauth_token(""));
     }
@@ -889,7 +986,23 @@ mod tests {
     fn test_supports_adaptive_thinking() {
         assert!(supports_adaptive_thinking("claude-opus-4-6"));
         assert!(supports_adaptive_thinking("claude-sonnet-4.6"));
+        assert!(supports_adaptive_thinking("claude-opus-4-7"));
+        assert!(supports_adaptive_thinking("claude-opus-4.8"));
         assert!(!supports_adaptive_thinking("claude-sonnet-4"));
+    }
+
+    #[test]
+    fn test_sampling_and_fast_mode_predicates_cover_opus_4_8() {
+        assert!(supports_xhigh_effort("claude-opus-4-7"));
+        assert!(supports_xhigh_effort("claude-opus-4.8-fast"));
+        assert!(forbids_sampling_params("claude-opus-4-7"));
+        assert!(forbids_sampling_params("claude-opus-4-8-fast"));
+        assert!(!forbids_sampling_params("claude-opus-4-6"));
+        assert!(supports_fast_mode("claude-opus-4-6"));
+        assert!(supports_fast_mode("anthropic/claude-opus-4.6"));
+        assert!(!supports_fast_mode("claude-opus-4-7"));
+        assert!(!supports_fast_mode("claude-opus-4-8-fast"));
+        assert!(!supports_fast_mode("claude-sonnet-4-6"));
     }
 
     #[test]
@@ -947,6 +1060,41 @@ mod tests {
         let oauth = default_anthropic_beta_list(None, true);
         assert!(oauth.iter().any(|b| *b == "oauth-2025-04-20"));
         assert!(oauth.len() > api.len());
+    }
+
+    #[test]
+    fn test_azure_anthropic_endpoint_detection_is_host_and_path_scoped() {
+        assert!(is_azure_anthropic_endpoint(Some(
+            "https://example.services.ai.azure.com/models/anthropic"
+        )));
+        assert!(is_azure_anthropic_endpoint(Some(
+            "https://example.services.ai.azure.us/anthropic"
+        )));
+        assert!(!is_azure_anthropic_endpoint(Some(
+            "https://example.openai.azure.com/openai/v1"
+        )));
+        assert!(!is_azure_anthropic_endpoint(Some(
+            "https://management.azure.com/anthropic"
+        )));
+    }
+
+    #[test]
+    fn test_azure_endpoint_keeps_context_1m_and_tool_streaming_betas() {
+        let betas =
+            common_betas_for_base_url(Some("https://my-resource.openai.azure.com/anthropic"));
+        assert!(betas.iter().any(|b| *b == CONTEXT_1M_BETA));
+        assert!(betas.iter().any(|b| *b == TOOL_STREAMING_BETA));
+    }
+
+    #[test]
+    fn test_requires_bearer_auth_covers_minimax_and_azure() {
+        assert!(requires_bearer_auth(Some(
+            "https://api.minimax.io/anthropic"
+        )));
+        assert!(requires_bearer_auth(Some(
+            "https://my-resource.openai.azure.com/anthropic"
+        )));
+        assert!(!requires_bearer_auth(Some("https://api.anthropic.com")));
     }
 
     #[test]

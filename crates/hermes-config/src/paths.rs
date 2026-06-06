@@ -320,6 +320,7 @@ mod tests {
         // managed_gateway tests that also mutate HERMES_HOME.
         let _g = crate::managed_gateway::test_lock::lock();
 
+        let _guard = crate::managed_gateway::test_lock::lock();
         let original = std::env::var("HERMES_HOME").ok();
         let original_ultra = std::env::var("HERMES_AGENT_ULTRA_HOME").ok();
 

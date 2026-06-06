@@ -11,6 +11,7 @@ import subprocess
 from typing import Any
 
 
+DEFAULT_DIVERGENCE_FILE = "docs/parity/intentional-divergence.json"
 DEFAULT_PREFIXES = [
     "skills",
     "optional-skills",
@@ -67,6 +68,14 @@ def parse_args() -> argparse.Namespace:
         help="Optional explicit report output path",
     )
     parser.add_argument(
+        "--intentional-divergence",
+        default=DEFAULT_DIVERGENCE_FILE,
+        help=(
+            "Approved divergence registry used to classify non-applicable "
+            "missing upstream paths. Pass an empty string to disable."
+        ),
+    )
+    parser.add_argument(
         "--allow-python-test-surfaces",
         action="store_true",
         help=(
@@ -76,6 +85,60 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--json", action="store_true", help="Print JSON report")
     return parser.parse_args()
+
+
+def path_matches_prefix(path: str, prefix: str) -> bool:
+    norm_prefix = normalize_prefix(prefix).rstrip("/")
+    if not norm_prefix:
+        return False
+    return path == norm_prefix or path.startswith(norm_prefix + "/")
+
+
+def load_divergence_items(
+    repo_root: pathlib.Path, divergence_file: str
+) -> list[dict[str, Any]]:
+    if not divergence_file.strip():
+        return []
+    div_path = (repo_root / divergence_file).resolve()
+    if not div_path.exists():
+        return []
+    raw = json.loads(div_path.read_text(encoding="utf-8"))
+    items = raw.get("items", [])
+    if not isinstance(items, list):
+        raise RuntimeError(f"invalid intentional divergence payload: {div_path}")
+    active_items: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("status") not in {"approved", "temporary"}:
+            continue
+        prefixes = item.get("path_prefixes", [])
+        if not isinstance(prefixes, list):
+            continue
+        active_items.append(
+            {
+                "id": str(item.get("id", "")),
+                "status": str(item.get("status", "")),
+                "workstream": str(item.get("workstream", "")),
+                "path_prefixes": [str(prefix) for prefix in prefixes],
+            }
+        )
+    return active_items
+
+
+def find_divergence_owner(
+    path: str, divergence_items: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    for item in divergence_items:
+        for prefix in item.get("path_prefixes", []):
+            if path_matches_prefix(path, prefix):
+                return {
+                    "id": item["id"],
+                    "status": item["status"],
+                    "workstream": item["workstream"],
+                    "matched_prefix": normalize_prefix(prefix).rstrip("/"),
+                }
+    return None
 
 
 def default_report_path(repo_root: pathlib.Path) -> pathlib.Path:
@@ -127,31 +190,60 @@ def build_report(
     local_mode: str,
     upstream_ref: str,
     prefixes: list[str],
+    divergence_items: list[dict[str, Any]],
 ) -> dict[str, Any]:
     by_prefix: dict[str, dict[str, Any]] = {}
     missing_total: list[str] = []
+    raw_missing_total: list[str] = []
+    divergence_paths: list[dict[str, str]] = []
+    divergence_counts: dict[str, int] = {}
 
     for prefix in prefixes:
         upstream_files = list_files(repo_root, upstream_ref, prefix)
         if local_mode == "worktree":
-            missing = [path for path in upstream_files if not (repo_root / path).exists()]
+            raw_missing = [path for path in upstream_files if not (repo_root / path).exists()]
         else:
-            missing = [path for path in upstream_files if not ref_has_path(repo_root, local_ref, path)]
-        present = len(upstream_files) - len(missing)
+            raw_missing = [
+                path for path in upstream_files if not ref_has_path(repo_root, local_ref, path)
+            ]
+        actionable_missing: list[str] = []
+        diverged_missing: list[dict[str, str]] = []
+        for path in raw_missing:
+            owner = find_divergence_owner(path, divergence_items)
+            if owner is None:
+                actionable_missing.append(path)
+                continue
+            entry = {"path": path, **owner}
+            diverged_missing.append(entry)
+            divergence_counts[owner["id"]] = divergence_counts.get(owner["id"], 0) + 1
+
+        present = len(upstream_files) - len(raw_missing)
+        effective_present = len(upstream_files) - len(actionable_missing)
         coverage = 1.0 if not upstream_files else present / len(upstream_files)
+        effective_coverage = (
+            1.0 if not upstream_files else effective_present / len(upstream_files)
+        )
         by_prefix[prefix] = {
             "upstream_file_count": len(upstream_files),
             "present_locally": present,
-            "missing_count": len(missing),
+            "raw_missing_count": len(raw_missing),
+            "intentional_divergence_count": len(diverged_missing),
+            "missing_count": len(actionable_missing),
             "coverage_ratio": coverage,
-            "missing_sample": missing[:50],
+            "effective_coverage_ratio": effective_coverage,
+            "missing_sample": actionable_missing[:50],
+            "intentional_divergence_sample": diverged_missing[:50],
         }
-        missing_total.extend(missing)
+        raw_missing_total.extend(raw_missing)
+        missing_total.extend(actionable_missing)
+        divergence_paths.extend(diverged_missing)
 
     summary = {
         "prefixes_checked": prefixes,
         "upstream_file_count": sum(v["upstream_file_count"] for v in by_prefix.values()),
         "present_locally": sum(v["present_locally"] for v in by_prefix.values()),
+        "raw_missing_total": len(raw_missing_total),
+        "intentional_divergence_total": len(divergence_paths),
         "missing_total": len(missing_total),
     }
 
@@ -165,6 +257,10 @@ def build_report(
         "summary": summary,
         "by_prefix": by_prefix,
         "missing_paths": sorted(missing_total),
+        "intentional_divergence_paths": sorted(
+            divergence_paths, key=lambda entry: entry["path"]
+        ),
+        "intentional_divergence_by_id": dict(sorted(divergence_counts.items())),
     }
 
 
@@ -212,11 +308,21 @@ def main() -> int:
             )
             print(f"[upstream-surface-coverage] Report: {report_path}")
         return 1
-    report = build_report(repo_root, args.local_ref, args.local_mode, args.upstream_ref, prefixes)
+    divergence_items = load_divergence_items(repo_root, args.intentional_divergence)
+    report = build_report(
+        repo_root,
+        args.local_ref,
+        args.local_mode,
+        args.upstream_ref,
+        prefixes,
+        divergence_items,
+    )
     report["policy"] = {
         "rust_only": True,
         "allow_python_test_surfaces": bool(args.allow_python_test_surfaces),
         "blocked_prefixes": [],
+        "intentional_divergence": args.intentional_divergence,
+        "active_divergence_items": len(divergence_items),
     }
 
     report_path = (

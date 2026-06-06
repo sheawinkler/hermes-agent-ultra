@@ -46,7 +46,7 @@ By default this command fetches upstream directly from GitHub
 - `shared-different-classification.json`: functional-vs-policy classification for shared-different files
 - `upstream-missing-queue.md` / `upstream-missing-queue.json`: auditable upstream missing commit queue
 - `intentional-divergence.json`: tracked, approved ultra-only deltas used by the report
-- `.sync-reports/upstream-surface-coverage-gate-*.json`: required-surface coverage proof for upstream files under `skills`, `optional-skills`, `plugins`, `tests`, `website`, `ui-tui`, `docs`
+- `.sync-reports/upstream-surface-coverage-gate-*.json`: required-surface coverage proof for upstream files under `skills`, `optional-skills`, `plugins`, `tests`, `website`, `ui-tui`, `docs`; reports raw missing files, approved intentional-divergence coverage, and unclassified actionable misses
 
 ## Manual Planning Docs
 

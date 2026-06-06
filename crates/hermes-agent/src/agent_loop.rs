@@ -30,6 +30,7 @@ use hermes_core::{
 
 use crate::api_bridge::CodexProvider;
 use crate::auxiliary_builder::{AuxiliaryBuildParams, build_auxiliary_client};
+use crate::bedrock::{resolve_bedrock_region, BedrockProvider};
 use crate::code_index::CodeIndex;
 use crate::compression::{
     CompressorConfig, ContextCompressor, estimate_messages_tokens,
@@ -244,6 +245,9 @@ pub struct RuntimeProviderConfig {
     /// OAuth2 client_id for refresh flows (provider config centre).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_client_id: Option<String>,
+    /// Per-provider HTTP request timeout in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_timeout_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2306,8 +2310,6 @@ pub struct AgentLoop {
     /// Per-turn cache of assembled API messages (LLM retry fast path).
     turn_api_messages_cache:
         Mutex<Option<(crate::api_messages::ApiMessagesCacheKey, Arc<[Message]>)>>,
-    /// Per-turn cache for OpenAI-compat provider message/tool JSON serialization.
-    provider_serialize_cache: Arc<crate::provider_serialize_cache::ProviderSerializeCache>,
     /// Python `_disable_streaming` — set after "stream not supported" for the rest of the session.
     disable_streaming: Arc<AtomicBool>,
     /// Lazy `CodexAppServerSession` (Python `agent._codex_session`).
@@ -2897,9 +2899,6 @@ impl AgentLoop {
             context_compressor,
             shared_session_persistence: std::sync::OnceLock::new(),
             turn_api_messages_cache: Mutex::new(None),
-            provider_serialize_cache: Arc::new(
-                crate::provider_serialize_cache::ProviderSerializeCache::new(),
-            ),
             disable_streaming: Arc::new(AtomicBool::new(false)),
             codex_app_server_session: Arc::new(Mutex::new(None)),
             last_nous_rate_limit_headers: Arc::new(Mutex::new(None)),
@@ -2934,14 +2933,13 @@ impl AgentLoop {
         if let Ok(mut guard) = self.turn_api_messages_cache.lock() {
             *guard = None;
         }
-        self.provider_serialize_cache.invalidate();
     }
 
     fn runtime_generic_provider(
         &self,
         provider: crate::provider::GenericProvider,
     ) -> crate::provider::GenericProvider {
-        provider.with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
+        provider
     }
 
     fn api_messages_cache_key(
@@ -3213,9 +3211,6 @@ impl AgentLoop {
             context_compressor,
             shared_session_persistence: std::sync::OnceLock::new(),
             turn_api_messages_cache: Mutex::new(None),
-            provider_serialize_cache: Arc::new(
-                crate::provider_serialize_cache::ProviderSerializeCache::new(),
-            ),
             disable_streaming: Arc::new(AtomicBool::new(false)),
             codex_app_server_session: Arc::new(Mutex::new(None)),
             last_nous_rate_limit_headers: Arc::new(Mutex::new(None)),
@@ -5129,6 +5124,28 @@ impl AgentLoop {
         (command, args)
     }
 
+    fn resolve_runtime_request_timeout_seconds(&self, provider: &str) -> Option<f64> {
+        self.config()
+            .runtime_providers
+            .get(provider)
+            .and_then(|c| c.request_timeout_seconds)
+            .or_else(|| {
+                let alias = match provider {
+                    "codex" => "openai-codex",
+                    "openai-codex" => "codex",
+                    "qwen" => "qwen-oauth",
+                    "qwen-oauth" => "qwen",
+                    "kimi" => "moonshot",
+                    "moonshot" => "kimi",
+                    _ => return None,
+                };
+                self.config()
+                    .runtime_providers
+                    .get(alias)
+                    .and_then(|c| c.request_timeout_seconds)
+            })
+    }
+
     pub(crate) fn build_runtime_provider(
         &self,
         provider: &str,
@@ -5148,13 +5165,19 @@ impl AgentLoop {
                 ))
             })?;
         let base_url = self.resolve_runtime_base_url(provider, route_base_url);
+        let request_timeout_seconds = self.resolve_runtime_request_timeout_seconds(provider);
         let cfg_api_mode = self.config().api_mode.clone();
         let mode = api_mode.unwrap_or(&cfg_api_mode);
+        let normalized_model_name =
+            crate::model_normalize::normalize_model_for_provider(model_name, provider);
+        let model_name = normalized_model_name.as_str();
 
         let provider_obj: Arc<dyn LlmProvider> = match provider {
             "openai" | "codex" | "openai-codex" => {
                 if matches!(mode, ApiMode::CodexResponses) {
-                    let mut p = CodexProvider::new(&api_key).with_model(model_name);
+                    let mut p = CodexProvider::new(&api_key)
+                        .with_model(model_name)
+                        .with_optional_request_timeout_seconds(request_timeout_seconds);
                     if let Some(ref url) = base_url {
                         p = p.with_base_url(url.clone());
                     }
@@ -5165,7 +5188,7 @@ impl AgentLoop {
                 } else {
                     let mut p = OpenAiProvider::new(&api_key)
                         .with_model(model_name)
-                        .with_serialize_cache(Arc::clone(&self.provider_serialize_cache));
+                        .with_optional_request_timeout_seconds(request_timeout_seconds);
                     if let Some(url) = base_url {
                         p = p.with_base_url(url);
                     }
@@ -5178,7 +5201,7 @@ impl AgentLoop {
             "anthropic" => {
                 let mut p = AnthropicProvider::new(&api_key)
                     .with_model(model_name)
-                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache));
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
@@ -5190,7 +5213,7 @@ impl AgentLoop {
             "openrouter" => {
                 let mut p = OpenRouterProvider::new(&api_key)
                     .with_model(model_name)
-                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache));
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
@@ -5202,7 +5225,7 @@ impl AgentLoop {
             "qwen" | "qwen-oauth" => {
                 let mut p = QwenProvider::new(&api_key)
                     .with_model(model_name)
-                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache));
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
@@ -5211,7 +5234,7 @@ impl AgentLoop {
             "kimi" | "moonshot" => {
                 let mut p = KimiProvider::new(&api_key)
                     .with_model(model_name)
-                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache));
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
@@ -5220,7 +5243,7 @@ impl AgentLoop {
             "minimax" => {
                 let mut p = MiniMaxProvider::new(&api_key)
                     .with_model(model_name)
-                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache));
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
@@ -5229,14 +5252,16 @@ impl AgentLoop {
             "stepfun" => {
                 let url =
                     base_url.unwrap_or_else(|| "https://api.stepfun.ai/step_plan/v1".to_string());
-                Arc::new(
-                    self.runtime_generic_provider(GenericProvider::new(url, &api_key, model_name)),
-                )
+                Arc::new(self.runtime_generic_provider(
+                    GenericProvider::new(url, &api_key, model_name)
+                        .with_optional_request_timeout_seconds(request_timeout_seconds)
+                        .with_provider_profile(provider),
+                ))
             }
             "nous" => {
                 let mut p = NousProvider::new(&api_key)
                     .with_model(model_name)
-                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache));
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
@@ -5248,26 +5273,25 @@ impl AgentLoop {
                     &api_key,
                 )
                 .with_model(model_name)
-                .with_serialize_cache(Arc::clone(&self.provider_serialize_cache));
+                .with_optional_request_timeout_seconds(request_timeout_seconds);
                 Arc::new(p)
             }
-            "bedrock" | "aws-bedrock" => {
-                let region = std::env::var("AWS_REGION")
-                    .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
-                    .unwrap_or_else(|_| "us-east-1".into());
-                let url = base_url
-                    .unwrap_or_else(|| format!("https://bedrock-runtime.{region}.amazonaws.com"));
-                let mut g =
-                    self.runtime_generic_provider(GenericProvider::new(url, &api_key, model_name));
-                if let Some(pool) = credential_pool {
-                    g = g.with_credential_pool(pool.clone());
+            "bedrock" | "aws" | "aws-bedrock" | "amazon-bedrock" | "amazon" => {
+                let mut p = BedrockProvider::new()
+                    .with_region(resolve_bedrock_region())
+                    .with_model(model_name);
+                if let Some(url) = base_url {
+                    p = p.with_base_url(url);
                 }
-                Arc::new(g)
+                Arc::new(p)
             }
             _ => {
                 let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-                let mut g =
-                    self.runtime_generic_provider(GenericProvider::new(url, &api_key, model_name));
+                let mut g = self.runtime_generic_provider(
+                    GenericProvider::new(url, &api_key, model_name)
+                        .with_optional_request_timeout_seconds(request_timeout_seconds)
+                        .with_provider_profile(provider),
+                );
                 if let Some(pool) = credential_pool {
                     g = g.with_credential_pool(pool.clone());
                 }

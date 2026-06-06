@@ -26,6 +26,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("huggingface", "huggingface"),
     ("gemini", "google"),
     ("google", "google"),
+    ("xiaomi", "xiaomi"),
     ("xai", "xai"),
     ("nvidia", "nvidia"),
     ("groq", "groq"),
@@ -85,6 +86,7 @@ mod tests {
         assert_eq!(to_models_dev("anthropic"), Some("anthropic"));
         assert_eq!(to_models_dev("kimi-coding"), Some("kimi-for-coding"));
         assert_eq!(to_models_dev("gemini"), Some("google"));
+        assert_eq!(to_models_dev("xiaomi"), Some("xiaomi"));
         assert_eq!(to_models_dev("nonexistent"), None);
     }
 

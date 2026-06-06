@@ -566,7 +566,7 @@ Host                                    Container
   │   ├── state.db, sessions/, memories/   (runtime state)
   │   └── mcp-tokens/                      (OAuth tokens for MCP servers)
   ├── home/                                ──►  /home/hermes    (rw)
-  └── workspace/                           (MESSAGING_CWD)
+  └── workspace/                           (workingDirectory / terminal.cwd)
       ├── SOUL.md                          (from documents option)
       └── (agent-created files)
 
@@ -762,7 +762,7 @@ nix build .#checks.x86_64-linux.config-roundtrip    # merge script preserves use
 | `group` | `str` | `"hermes"` | System group |
 | `createUser` | `bool` | `true` | Auto-create user/group |
 | `stateDir` | `str` | `"/var/lib/hermes"` | State directory (`HERMES_HOME` parent) |
-| `workingDirectory` | `str` | `"${stateDir}/workspace"` | Agent working directory (`MESSAGING_CWD`) |
+| `workingDirectory` | `str` | `"${stateDir}/workspace"` | Agent working directory (`terminal.cwd`) |
 | `addToSystemPackages` | `bool` | `false` | Add `hermes` CLI to system PATH and set `HERMES_HOME` system-wide |
 
 ### Configuration
@@ -848,7 +848,7 @@ nix build .#checks.x86_64-linux.config-roundtrip    # merge script preserves use
 │   ├── cron/
 │   └── logs/
 ├── home/                            # Agent HOME
-└── workspace/                       # MESSAGING_CWD
+└── workspace/                       # terminal.cwd
     ├── SOUL.md                      # From documents option
     └── (agent-created files)
 ```

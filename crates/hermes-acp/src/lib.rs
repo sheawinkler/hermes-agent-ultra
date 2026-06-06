@@ -10,6 +10,7 @@
 //! - **Events**: thinking, tool progress, message streaming
 //! - **Permissions**: approval callback bridging
 
+pub mod auth;
 pub mod events;
 pub mod handler;
 pub mod permissions;
@@ -17,8 +18,12 @@ pub mod protocol;
 pub mod resource_resolver;
 pub mod server;
 pub mod session;
+pub mod tools;
 
-pub use events::{AcpEvent, AcpEventKind, EventSink, ToolCallIdTracker};
+pub use auth::{build_auth_methods, detect_provider, has_provider, TERMINAL_SETUP_AUTH_METHOD_ID};
+pub use events::{
+    plan_entries_from_todo_result, AcpEvent, AcpEventKind, EventSink, ToolCallIdTracker,
+};
 pub use handler::{
     AcpHandler, AcpPromptExecutor, DefaultAcpHandler, HermesAcpHandler, PromptExecutionOutput,
 };
@@ -29,10 +34,15 @@ pub use permissions::{
 pub use protocol::{
     AcpError, AcpMethod, AcpRequest, AcpResponse, AgentCapabilities, AuthMethod, AvailableCommand,
     ClientCapabilities, ContentBlock, Implementation, InitializeResponse, McpServerConfig,
-    PromptResponse, SessionCapabilities, SessionUpdate, StopReason, Usage,
+    PlanEntry, PromptCapabilities, PromptResponse, SessionCapabilities, SessionUpdate, StopReason,
+    Usage,
 };
 pub use server::AcpServer;
 pub use session::{SessionInfo, SessionManager, SessionPhase, SessionState};
+pub use tools::{
+    format_tool_result, make_tool_call_id, tool_completion_status, tool_kind, tool_start_metadata,
+    tool_title, ToolStartMetadata,
+};
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -74,7 +84,7 @@ impl Default for AcpConfig {
 
 /// Start the ACP server from CLI context.
 pub async fn start_acp_server(config: AcpConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let session_manager = Arc::new(SessionManager::new_with_default_persistence());
+    let session_manager = Arc::new(SessionManager::new());
     let event_sink = Arc::new(EventSink::default());
     let permission_store = Arc::new(PermissionStore::new());
 

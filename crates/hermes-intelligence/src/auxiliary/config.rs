@@ -270,6 +270,12 @@ mod tests {
     }
 
     #[test]
+    fn default_config_consults_env() {
+        assert!(AuxiliaryConfig::default().consult_env);
+        assert!(AuxiliaryConfig::new().consult_env);
+    }
+
+    #[test]
     fn env_override_promoted_when_enabled() {
         let key = "AUXILIARY_TITLE_PROVIDER";
         // SAFETY: test runs single-threaded; env restored before return.

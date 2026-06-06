@@ -44,6 +44,19 @@ impl AuxiliarySource {
             AuxiliarySource::DirectKey(name) => name.clone(),
         }
     }
+
+    /// OpenAI-compatible auxiliary endpoints choose their own output budget for
+    /// side tasks. Sending `max_tokens` trips reasoning-model gateways that
+    /// accept the same endpoint shape but reject that parameter.
+    pub fn omits_auxiliary_max_tokens(&self) -> bool {
+        matches!(
+            self,
+            AuxiliarySource::OpenRouter
+                | AuxiliarySource::Nous
+                | AuxiliarySource::Custom
+                | AuxiliarySource::DirectKey(_)
+        )
+    }
 }
 
 /// A fully-resolved provider entry the chain can call into.
@@ -169,6 +182,13 @@ impl ProviderChain {
     pub fn labels(&self) -> Vec<String> {
         self.candidates.iter().map(|c| c.label()).collect()
     }
+
+    pub fn entries(&self) -> Vec<(String, String, bool)> {
+        self.candidates
+            .iter()
+            .map(|c| (c.label(), c.default_model.clone(), c.supports_vision))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -239,5 +259,17 @@ mod tests {
             .push(cand(AuxiliarySource::DirectKey("kimi".into()), "k").with_supports_vision(false));
         let v = chain.vision_only();
         assert_eq!(v.labels(), vec!["openrouter"]);
+    }
+
+    #[test]
+    fn custom_and_direct_key_candidates_default_to_vision_capable() {
+        let custom = cand(AuxiliarySource::Custom, "custom-vision-model");
+        let xiaomi = cand(AuxiliarySource::DirectKey("xiaomi".into()), "mimo-v2.5-pro");
+        let kimi =
+            cand(AuxiliarySource::DirectKey("kimi".into()), "kimi-k2").with_supports_vision(false);
+
+        assert!(custom.supports_vision);
+        assert!(xiaomi.supports_vision);
+        assert!(!kimi.supports_vision);
     }
 }

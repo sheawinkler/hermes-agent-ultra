@@ -50,7 +50,8 @@ fork-specific history.
   - Emits gate artifact under `.sync-reports/differential-parity-gate-<timestamp>.json`
 - `scripts/run-upstream-surface-coverage-gate.py`
   - Verifies required upstream surfaces are present locally (`skills`, `optional-skills`, `plugins`, `tests`, `website`, `ui-tui`, `docs`)
-  - Fails on any missing upstream file under those prefixes
+  - Fails on unclassified missing upstream files under those prefixes
+  - Classifies approved Rust-first divergences from `docs/parity/intentional-divergence.json` separately from actionable missing paths
   - Supports `--local-mode worktree` for pre-commit validation while changes are still unstaged/uncommitted
   - Emits gate artifact under `.sync-reports/upstream-surface-coverage-gate-<timestamp>.json`
 - `scripts/run-upstream-slash-parity-gate.py`

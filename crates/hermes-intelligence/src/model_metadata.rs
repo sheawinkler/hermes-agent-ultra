@@ -13,10 +13,13 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Descending tiers for context length probing when the model is unknown.
-pub const CONTEXT_PROBE_TIERS: &[u64] = &[128_000, 64_000, 32_000, 16_000, 8_000];
+pub const CONTEXT_PROBE_TIERS: &[u64] = &[256_000, 128_000, 64_000, 32_000, 16_000, 8_000];
 
 /// Default context length when no detection method succeeds.
-pub const DEFAULT_FALLBACK_CONTEXT: u64 = 128_000;
+pub const DEFAULT_FALLBACK_CONTEXT: u64 = 256_000;
+
+/// Fixed rough budget charged for a single image block in multimodal content.
+pub const IMAGE_TOKEN_ESTIMATE: u64 = 1_500;
 
 /// Minimum context length for Hermes Agent tool-calling workflows.
 pub const MINIMUM_CONTEXT_LENGTH: u64 = 64_000;
@@ -54,6 +57,21 @@ static DEFAULT_CONTEXT_LENGTHS: &[(&str, u64)] = &[
     ("claude-sonnet-4-6", 1_000_000),
     ("claude-opus-4.6", 1_000_000),
     ("claude-sonnet-4.6", 1_000_000),
+    ("global.anthropic.claude-opus-4-7", 1_000_000),
+    ("anthropic.claude-sonnet-4-6", 1_000_000),
+    ("global.anthropic.claude-sonnet-4-6", 1_000_000),
+    ("us.anthropic.claude-sonnet-4-6", 1_000_000),
+    ("eu.anthropic.claude-sonnet-4-6", 1_000_000),
+    ("au.anthropic.claude-sonnet-4-6", 1_000_000),
+    ("jp.anthropic.claude-sonnet-4-6", 1_000_000),
+    ("anthropic.claude-haiku-4-5", 200_000),
+    ("global.anthropic.claude-haiku-4-5", 200_000),
+    ("us.anthropic.claude-haiku-4-5", 200_000),
+    ("eu.anthropic.claude-haiku-4-5", 200_000),
+    ("au.anthropic.claude-haiku-4-5", 200_000),
+    ("jp.anthropic.claude-haiku-4-5", 200_000),
+    ("anthropic.claude-3-5-sonnet", 200_000),
+    ("amazon.nova", 300_000),
     // Older Claude
     ("claude", 200_000),
     // OpenAI
@@ -93,6 +111,8 @@ static DEFAULT_CONTEXT_LENGTHS: &[(&str, u64)] = &[
     // Xiaomi MIMO
     ("mimo-v2.5-pro", 1_000_000),
     ("mimo-v2.5", 1_000_000),
+    // Tencent TokenHub
+    ("hy3-preview", 128_000),
 ];
 
 // ---------------------------------------------------------------------------
@@ -286,6 +306,30 @@ pub fn known_models() -> Vec<ModelInfo> {
             output_cost_per_million: Some(0.40),
         },
         ModelInfo {
+            name: "mimo-v2.5-pro".into(),
+            provider: "xiaomi".into(),
+            context_window: 1_000_000,
+            max_output_tokens: None,
+            supports_vision: true,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_reasoning: false,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
+        },
+        ModelInfo {
+            name: "mimo-v2.5".into(),
+            provider: "xiaomi".into(),
+            context_window: 1_000_000,
+            max_output_tokens: None,
+            supports_vision: true,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_reasoning: false,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
+        },
+        ModelInfo {
             name: "deepseek-chat".into(),
             provider: "deepseek".into(),
             context_window: 128_000,
@@ -392,13 +436,12 @@ pub fn estimate_tokens_rough(text: &str) -> u64 {
     if text.is_empty() {
         return 0;
     }
-    ((text.len() as u64) + 3) / 4
+    ((text.chars().count() as u64) + 3) / 4
 }
 
 /// Rough token estimate for a serialized message list.
 pub fn estimate_messages_tokens_rough(messages: &[serde_json::Value]) -> u64 {
-    let total_chars: usize = messages.iter().map(|m| m.to_string().len()).sum();
-    ((total_chars as u64) + 3) / 4
+    messages.iter().map(estimate_message_tokens_rough).sum()
 }
 
 /// Rough token estimate for a full request (messages + system + tools).
@@ -413,6 +456,58 @@ pub fn estimate_request_tokens_rough(
         total_chars += tools.iter().map(|t| t.to_string().len()).sum::<usize>();
     }
     ((total_chars as u64) + 3) / 4
+}
+
+fn estimate_message_tokens_rough(message: &serde_json::Value) -> u64 {
+    let Some(content) = message.get("content") else {
+        return estimate_tokens_rough(&message.to_string());
+    };
+    if !content.is_array() {
+        return estimate_tokens_rough(&message.to_string());
+    }
+
+    let mut envelope = message.clone();
+    if let Some(obj) = envelope.as_object_mut() {
+        obj.insert(
+            "content".to_string(),
+            serde_json::Value::String(String::new()),
+        );
+    }
+
+    estimate_tokens_rough(&envelope.to_string()) + estimate_content_tokens_rough(content)
+}
+
+fn estimate_content_tokens_rough(content: &serde_json::Value) -> u64 {
+    if let Some(text) = content.as_str() {
+        return estimate_tokens_rough(text);
+    }
+
+    let Some(parts) = content.as_array() else {
+        return estimate_tokens_rough(&content.to_string());
+    };
+
+    parts
+        .iter()
+        .map(|part| {
+            if is_image_content_block(part) {
+                return IMAGE_TOKEN_ESTIMATE;
+            }
+            if let Some(text) = part.as_str() {
+                return estimate_tokens_rough(text);
+            }
+            if let Some(text) = part.get("text").and_then(|value| value.as_str()) {
+                return estimate_tokens_rough(text);
+            }
+            estimate_tokens_rough(&part.to_string())
+        })
+        .sum()
+}
+
+fn is_image_content_block(part: &serde_json::Value) -> bool {
+    matches!(
+        part.get("type").and_then(|value| value.as_str()),
+        Some("image") | Some("image_url") | Some("input_image")
+    ) || part.get("image_url").is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -484,6 +579,7 @@ pub fn infer_provider_from_url(base_url: &str) -> Option<&'static str> {
         ("api.openai.com", "openai"),
         ("chatgpt.com", "openai"),
         ("api.anthropic.com", "anthropic"),
+        ("bedrock-runtime.", "bedrock"),
         ("api.z.ai", "zai"),
         ("open.bigmodel.cn", "zai"),
         ("api.moonshot.ai", "kimi-coding"),
@@ -494,6 +590,13 @@ pub fn infer_provider_from_url(base_url: &str) -> Option<&'static str> {
         ("api.deepseek.com", "deepseek"),
         ("api.githubcopilot.com", "copilot"),
         ("api.x.ai", "xai"),
+        ("api.gmi-serving.com", "gmi"),
+        ("api.arcee.ai", "arcee"),
+        ("api.xiaomimimo.com", "xiaomi"),
+        ("token-plan-ams.xiaomimimo.com", "xiaomi"),
+        ("token-plan-cn.xiaomimimo.com", "xiaomi"),
+        ("token-plan-sgp.xiaomimimo.com", "xiaomi"),
+        ("tokenhub.tencentmaas.com", "tencent-tokenhub"),
     ];
 
     for (pattern, provider) in mappings {
@@ -528,6 +631,10 @@ pub fn is_local_endpoint(base_url: &str) -> bool {
         || host_lower.ends_with(".docker.internal")
         || host_lower.ends_with(".containers.internal")
     {
+        return true;
+    }
+
+    if !host_lower.is_empty() && !host_lower.contains('.') {
         return true;
     }
 
@@ -573,12 +680,21 @@ mod tests {
     fn test_get_model_context_length() {
         assert_eq!(get_model_context_length("gpt-4o"), 128_000);
         assert_eq!(get_model_context_length("claude-opus-4-6"), 1_000_000);
+        assert_eq!(
+            get_model_context_length("us.anthropic.claude-sonnet-4-6"),
+            1_000_000
+        );
+        assert_eq!(
+            get_model_context_length("anthropic.claude-3-5-sonnet-20241022-v2:0"),
+            200_000
+        );
         assert_eq!(get_model_context_length("gemini-2.0-flash"), 1_048_576);
         assert_eq!(get_model_context_length("gemma4:31b-cloud"), 256_000);
         assert_eq!(get_model_context_length("xiaomi/mimo-v2.5-pro"), 1_000_000);
+        assert!(get_model_context_length("hy3-preview") >= 4096);
         assert_eq!(
             get_model_context_length("unknown-model"),
-            DEFAULT_FALLBACK_CONTEXT
+            CONTEXT_PROBE_TIERS[0]
         );
     }
 
@@ -587,6 +703,25 @@ mod tests {
         assert_eq!(estimate_tokens_rough(""), 0);
         assert_eq!(estimate_tokens_rough("hello world"), 3); // 11 chars -> 3
         assert_eq!(estimate_tokens_rough("hi"), 1); // 2 chars -> ceiling(5/4) = 1
+        assert_eq!(estimate_tokens_rough("你好世界"), 1); // 4 Unicode chars -> 1
+    }
+
+    #[test]
+    fn test_estimate_messages_tokens_counts_image_blocks_without_base64_payload() {
+        let huge = "A".repeat(1024 * 1024);
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "describe"},
+                {"type": "image_url", "image_url": {"url": format!("data:image/png;base64,{huge}")}}
+            ]
+        })];
+        let estimate = estimate_messages_tokens_rough(&messages);
+        assert!(estimate >= IMAGE_TOKEN_ESTIMATE);
+        assert!(
+            estimate < 5_000,
+            "image payload bytes should not dominate token estimate"
+        );
     }
 
     #[test]
@@ -594,17 +729,27 @@ mod tests {
         let info = get_model_info("gpt-4o").unwrap();
         assert_eq!(info.context_window, 128_000);
         assert!(info.supports_vision);
+        let mimo = get_model_info("xiaomi/mimo-v2.5-pro").unwrap();
+        assert_eq!(mimo.provider, "xiaomi");
+        assert_eq!(mimo.context_window, 1_000_000);
+        assert!(mimo.supports_vision);
     }
 
     #[test]
     fn test_supports_vision() {
         assert!(supports_vision("gpt-4o"));
         assert!(supports_vision("claude-opus-4-6"));
+        assert!(supports_vision("xiaomi/mimo-v2.5-pro"));
+        assert!(supports_vision("mimo-v2.5"));
         assert!(!supports_vision("deepseek-chat"));
     }
 
     #[test]
     fn test_get_next_probe_tier() {
+        assert_eq!(CONTEXT_PROBE_TIERS[0], 256_000);
+        assert_eq!(DEFAULT_FALLBACK_CONTEXT, 256_000);
+        assert_eq!(get_next_probe_tier(500_000), Some(256_000));
+        assert_eq!(get_next_probe_tier(256_000), Some(128_000));
         assert_eq!(get_next_probe_tier(128_000), Some(64_000));
         assert_eq!(get_next_probe_tier(64_000), Some(32_000));
         assert_eq!(get_next_probe_tier(8_000), None);
@@ -621,8 +766,32 @@ mod tests {
             Some("anthropic")
         );
         assert_eq!(
+            infer_provider_from_url("https://bedrock-runtime.us-east-1.amazonaws.com"),
+            Some("bedrock")
+        );
+        assert_eq!(
             infer_provider_from_url("https://open.bigmodel.cn/api/paas/v4"),
             Some("zai")
+        );
+        assert_eq!(
+            infer_provider_from_url("https://api.gmi-serving.com/v1"),
+            Some("gmi")
+        );
+        assert_eq!(
+            infer_provider_from_url("https://api.arcee.ai/api/v1"),
+            Some("arcee")
+        );
+        assert_eq!(
+            infer_provider_from_url("https://api.xiaomimimo.com/v1"),
+            Some("xiaomi")
+        );
+        assert_eq!(
+            infer_provider_from_url("https://token-plan-ams.xiaomimimo.com/v1"),
+            Some("xiaomi")
+        );
+        assert_eq!(
+            infer_provider_from_url("https://tokenhub.tencentmaas.com/v1"),
+            Some("tencent-tokenhub")
         );
         assert_eq!(infer_provider_from_url("http://localhost:8080"), None);
     }
@@ -631,6 +800,10 @@ mod tests {
     fn test_is_local_endpoint() {
         assert!(is_local_endpoint("http://localhost:8080"));
         assert!(is_local_endpoint("http://127.0.0.1:11434"));
+        assert!(is_local_endpoint("ollama"));
+        assert!(is_local_endpoint("ollama:11434"));
+        assert!(is_local_endpoint("hermes-litellm/v1"));
+        assert!(is_local_endpoint("http://gateway:4000/v1"));
         assert!(is_local_endpoint("http://100.64.0.0:11434"));
         assert!(is_local_endpoint("http://100.64.0.1:11434/v1"));
         assert!(is_local_endpoint("http://100.77.243.5:11434"));

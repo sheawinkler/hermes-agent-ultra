@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,34 @@ def ensure_remote(repo_root: Path, remote: str, url: str) -> None:
     if remote in remotes:
         return
     run_git(repo_root, ["remote", "add", remote, url])
+
+
+def branch_from_remote_ref(remote: str, upstream_ref: str) -> str:
+    prefix = f"{remote}/"
+    if upstream_ref.startswith(prefix) and len(upstream_ref) > len(prefix):
+        return upstream_ref[len(prefix) :]
+    return "main"
+
+
+def fetch_remote_branch(repo_root: Path, remote: str, branch: str) -> None:
+    remote_ref = f"{remote}/{branch}"
+    refspec = f"refs/heads/{branch}:refs/remotes/{remote}/{branch}"
+    proc = subprocess.run(
+        ["git", "fetch", "--no-tags", remote, refspec],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode == 0:
+        return
+    if run_git(repo_root, ["rev-parse", "--verify", remote_ref], check=False):
+        print(
+            f"warning: scoped fetch for {remote_ref} failed; using existing ref: "
+            f"{proc.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return
+    raise RuntimeError(f"git fetch {remote} {branch} failed: {proc.stderr.strip()}")
 
 
 def ls_tree_paths(repo_root: Path, ref: str) -> set[str]:
@@ -180,7 +209,11 @@ def main() -> int:
 
     ensure_remote(repo_root, args.upstream_remote, args.upstream_url)
     if not args.no_fetch:
-        run_git(repo_root, ["fetch", args.upstream_remote, "--prune"])
+        fetch_remote_branch(
+            repo_root,
+            args.upstream_remote,
+            branch_from_remote_ref(args.upstream_remote, args.upstream_ref),
+        )
 
     local_paths = ls_tree_paths(repo_root, "HEAD")
     upstream_paths = ls_tree_paths(repo_root, args.upstream_ref)

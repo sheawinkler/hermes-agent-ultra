@@ -3,14 +3,18 @@
 //! Foundation crate defining all shared types, traits, and error types
 //! used across the hermes-agent-rust workspace.
 
-pub mod errors;
+pub mod auth_gate;
 pub mod build_info;
+pub mod errors;
 pub mod inbound;
+pub mod providers;
+pub mod schema_sanitizer;
 pub mod time;
 pub mod tool_call_parser;
 pub mod tool_schema;
 pub mod traits;
 pub mod types;
+pub mod version;
 
 pub mod test_env;
 
@@ -40,6 +44,11 @@ pub use tool_schema::{tool_schema, JsonSchema, ToolSchema};
 
 pub use inbound::{
     transport_fallback_message, InboundEvent, InboundMessagePreparer, InboundPrepareContext,
+};
+
+// Re-export schema sanitizer helpers
+pub use schema_sanitizer::{
+    sanitize_tool_parameters, sanitize_tool_schemas, strip_pattern_and_format, strip_slash_enum,
 };
 
 // Re-export trait definitions

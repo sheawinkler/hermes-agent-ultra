@@ -1,15 +1,18 @@
 //! ACP event types for bridging agent progress to the ACP client.
 //!
-//! Mirrors the Python `acp_adapter/events.py` — provides callback factories
-//! that bridge AIAgent events (tool progress, thinking, step completion,
-//! message streaming) to ACP session update notifications.
+//! Provides callback factories that bridge agent events (tool progress,
+//! thinking, step completion, message streaming) to ACP session update
+//! notifications.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
+
+use crate::protocol::{AvailableCommand, PlanEntry};
+use crate::tools::{format_tool_result, tool_completion_status, tool_start_metadata};
 
 // ---------------------------------------------------------------------------
 // Event types
@@ -29,10 +32,24 @@ pub enum AcpEventKind {
     MessageDelta,
     /// Complete agent message.
     MessageComplete,
+    /// Replayed or externally supplied user message chunk.
+    UserMessageChunk,
+    /// Replayed or externally supplied assistant message chunk.
+    AgentMessageChunk,
+    /// Replayed or externally supplied assistant thought chunk.
+    AgentThoughtChunk,
     /// Step completed (one LLM turn with optional tool calls).
     StepComplete,
     /// Session-level progress update.
     Progress,
+    /// Available slash commands changed.
+    AvailableCommandsUpdate,
+    /// Session metadata changed.
+    SessionInfoUpdate,
+    /// Native plan/task list changed.
+    PlanUpdate,
+    /// Native context usage changed.
+    UsageUpdate,
     /// An error occurred.
     Error,
 }
@@ -48,15 +65,42 @@ pub struct AcpEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arguments: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<Value>,
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_call_count: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(
+        rename = "sessionUpdate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub session_update: Option<String>,
+    #[serde(
+        rename = "availableCommands",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub available_commands: Option<Vec<AvailableCommand>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entries: Option<Vec<PlanEntry>>,
+    #[serde(rename = "updatedAt", default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used: Option<u64>,
 }
 
 impl AcpEvent {
@@ -75,10 +119,20 @@ impl AcpEvent {
             text: Some(text.to_string()),
             tool_call_id: None,
             tool_name: None,
+            tool_kind: None,
+            title: None,
             arguments: None,
             result: None,
+            status: None,
+            content: None,
             api_call_count: None,
             error: None,
+            session_update: None,
+            available_commands: None,
+            entries: None,
+            updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -88,17 +142,28 @@ impl AcpEvent {
         tool_name: &str,
         arguments: Option<Value>,
     ) -> Self {
+        let metadata = tool_start_metadata(tool_name, arguments.as_ref());
         Self {
             kind: AcpEventKind::ToolCallStart,
             session_id: session_id.to_string(),
             timestamp: Self::now(),
             tool_call_id: Some(tool_call_id.to_string()),
             tool_name: Some(tool_name.to_string()),
+            tool_kind: Some(metadata.kind.to_string()),
+            title: Some(metadata.title),
             arguments,
             text: None,
             result: None,
+            status: None,
+            content: None,
             api_call_count: None,
             error: None,
+            session_update: None,
+            available_commands: None,
+            entries: None,
+            updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -108,17 +173,29 @@ impl AcpEvent {
         tool_name: &str,
         result: Option<String>,
     ) -> Self {
+        let status = tool_completion_status(tool_name, result.as_deref());
+        let result = format_tool_result(tool_name, result.as_deref());
         Self {
             kind: AcpEventKind::ToolCallComplete,
             session_id: session_id.to_string(),
             timestamp: Self::now(),
             tool_call_id: Some(tool_call_id.to_string()),
             tool_name: Some(tool_name.to_string()),
+            tool_kind: Some(crate::tools::tool_kind(tool_name).to_string()),
+            title: Some(tool_start_metadata(tool_name, None).title),
             result,
             text: None,
             arguments: None,
+            status: Some(status.to_string()),
+            content: None,
             api_call_count: None,
             error: None,
+            session_update: None,
+            available_commands: None,
+            entries: None,
+            updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -130,10 +207,20 @@ impl AcpEvent {
             text: Some(text.to_string()),
             tool_call_id: None,
             tool_name: None,
+            tool_kind: None,
+            title: None,
             arguments: None,
             result: None,
+            status: None,
+            content: None,
             api_call_count: None,
             error: None,
+            session_update: None,
+            available_commands: None,
+            entries: None,
+            updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -145,10 +232,127 @@ impl AcpEvent {
             text: Some(text.to_string()),
             tool_call_id: None,
             tool_name: None,
+            tool_kind: None,
+            title: None,
             arguments: None,
             result: None,
+            status: None,
+            content: None,
             api_call_count: None,
             error: None,
+            session_update: None,
+            available_commands: None,
+            entries: None,
+            updated_at: None,
+            size: None,
+            used: None,
+        }
+    }
+
+    pub fn user_message_chunk(session_id: &str, text: &str) -> Self {
+        Self::history_text_chunk(
+            AcpEventKind::UserMessageChunk,
+            "user_message_chunk",
+            session_id,
+            text,
+        )
+    }
+
+    pub fn agent_message_chunk(session_id: &str, text: &str) -> Self {
+        Self::history_text_chunk(
+            AcpEventKind::AgentMessageChunk,
+            "agent_message_chunk",
+            session_id,
+            text,
+        )
+    }
+
+    pub fn agent_thought_chunk(session_id: &str, text: &str) -> Self {
+        Self::history_text_chunk(
+            AcpEventKind::AgentThoughtChunk,
+            "agent_thought_chunk",
+            session_id,
+            text,
+        )
+    }
+
+    fn history_text_chunk(
+        kind: AcpEventKind,
+        session_update: &str,
+        session_id: &str,
+        text: &str,
+    ) -> Self {
+        Self {
+            kind,
+            session_id: session_id.to_string(),
+            timestamp: Self::now(),
+            session_update: Some(session_update.to_string()),
+            content: Some(json!({"type": "text", "text": text})),
+            text: Some(text.to_string()),
+            tool_call_id: None,
+            tool_name: None,
+            tool_kind: None,
+            title: None,
+            arguments: None,
+            result: None,
+            status: None,
+            api_call_count: None,
+            error: None,
+            available_commands: None,
+            entries: None,
+            updated_at: None,
+            size: None,
+            used: None,
+        }
+    }
+
+    pub fn plan_update(session_id: &str, entries: Vec<PlanEntry>) -> Self {
+        Self {
+            kind: AcpEventKind::PlanUpdate,
+            session_id: session_id.to_string(),
+            timestamp: Self::now(),
+            session_update: Some("plan".to_string()),
+            entries: Some(entries),
+            tool_call_id: None,
+            tool_name: None,
+            tool_kind: None,
+            title: None,
+            arguments: None,
+            result: None,
+            status: None,
+            content: None,
+            text: None,
+            api_call_count: None,
+            error: None,
+            available_commands: None,
+            updated_at: None,
+            size: None,
+            used: None,
+        }
+    }
+
+    pub fn usage_update(session_id: &str, size: u64, used: u64) -> Self {
+        Self {
+            kind: AcpEventKind::UsageUpdate,
+            session_id: session_id.to_string(),
+            timestamp: Self::now(),
+            session_update: Some("usage_update".to_string()),
+            size: Some(size),
+            used: Some(used),
+            tool_call_id: None,
+            tool_name: None,
+            tool_kind: None,
+            title: None,
+            arguments: None,
+            result: None,
+            status: None,
+            content: None,
+            text: None,
+            api_call_count: None,
+            error: None,
+            available_commands: None,
+            entries: None,
+            updated_at: None,
         }
     }
 
@@ -160,10 +364,20 @@ impl AcpEvent {
             api_call_count: Some(api_call_count),
             tool_call_id: None,
             tool_name: None,
+            tool_kind: None,
+            title: None,
             arguments: None,
             result: None,
+            status: None,
+            content: None,
             text: None,
             error: None,
+            session_update: None,
+            available_commands: None,
+            entries: None,
+            updated_at: None,
+            size: None,
+            used: None,
         }
     }
 
@@ -175,12 +389,129 @@ impl AcpEvent {
             error: Some(error.to_string()),
             tool_call_id: None,
             tool_name: None,
+            tool_kind: None,
+            title: None,
             arguments: None,
             result: None,
+            status: None,
+            content: None,
             text: None,
             api_call_count: None,
+            session_update: None,
+            available_commands: None,
+            entries: None,
+            updated_at: None,
+            size: None,
+            used: None,
         }
     }
+
+    pub fn available_commands_update(session_id: &str, commands: Vec<AvailableCommand>) -> Self {
+        Self {
+            kind: AcpEventKind::AvailableCommandsUpdate,
+            session_id: session_id.to_string(),
+            timestamp: Self::now(),
+            session_update: Some("available_commands_update".to_string()),
+            available_commands: Some(commands),
+            updated_at: None,
+            size: None,
+            used: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_kind: None,
+            title: None,
+            arguments: None,
+            result: None,
+            status: None,
+            content: None,
+            text: None,
+            api_call_count: None,
+            error: None,
+            entries: None,
+        }
+    }
+
+    pub fn session_info_update(
+        session_id: &str,
+        title: Option<String>,
+        updated_at: String,
+    ) -> Self {
+        Self {
+            kind: AcpEventKind::SessionInfoUpdate,
+            session_id: session_id.to_string(),
+            timestamp: Self::now(),
+            session_update: Some("session_info_update".to_string()),
+            title,
+            updated_at: Some(updated_at),
+            tool_call_id: None,
+            tool_name: None,
+            tool_kind: None,
+            arguments: None,
+            result: None,
+            status: None,
+            content: None,
+            text: None,
+            api_call_count: None,
+            error: None,
+            entries: None,
+            available_commands: None,
+            size: None,
+            used: None,
+        }
+    }
+}
+
+fn json_loads_maybe_prefix(text: &str) -> Option<Value> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<Value>(text).ok().or_else(|| {
+        serde_json::Deserializer::from_str(text)
+            .into_iter::<Value>()
+            .next()
+            .and_then(Result::ok)
+    })
+}
+
+pub fn plan_entries_from_todo_result(result: Option<&str>) -> Option<Vec<PlanEntry>> {
+    let data = json_loads_maybe_prefix(result?)?;
+    let todos = data.get("todos")?.as_array()?;
+
+    let mut entries = Vec::new();
+    for item in todos.iter().filter_map(Value::as_object) {
+        let mut content = item
+            .get("content")
+            .or_else(|| item.get("id"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            continue;
+        }
+        let raw_status = item
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("pending")
+            .trim();
+        let status = match raw_status {
+            "completed" => "completed",
+            "in_progress" => "in_progress",
+            "cancelled" => {
+                content = format!("[cancelled] {content}");
+                "completed"
+            }
+            _ => "pending",
+        };
+        entries.push(PlanEntry {
+            content,
+            priority: "medium".to_string(),
+            status: status.to_string(),
+        });
+    }
+
+    Some(entries)
 }
 
 // ---------------------------------------------------------------------------
@@ -323,11 +654,99 @@ mod tests {
 
     #[test]
     fn test_acp_event_kinds() {
-        let e = AcpEvent::tool_call_start("s1", "tc1", "read_file", None);
+        let e = AcpEvent::tool_call_start(
+            "s1",
+            "tc1",
+            "read_file",
+            Some(serde_json::json!({"path": "/tmp/a.txt"})),
+        );
         assert_eq!(e.kind, AcpEventKind::ToolCallStart);
         assert_eq!(e.tool_name.as_deref(), Some("read_file"));
+        assert_eq!(e.tool_kind.as_deref(), Some("read"));
+        assert_eq!(e.title.as_deref(), Some("read: /tmp/a.txt"));
 
-        let e2 = AcpEvent::tool_call_complete("s1", "tc1", "read_file", Some("ok".into()));
-        assert_eq!(e2.result.as_deref(), Some("ok"));
+        let e2 = AcpEvent::tool_call_complete(
+            "s1",
+            "tc1",
+            "read_file",
+            Some(r#"{"error":"missing"}"#.into()),
+        );
+        assert_eq!(e2.result.as_deref(), Some("Read failed: missing"));
+        assert_eq!(e2.tool_kind.as_deref(), Some("read"));
+        assert_eq!(e2.status.as_deref(), Some("failed"));
+
+        let e3 = AcpEvent::tool_call_complete(
+            "s1",
+            "tc2",
+            "terminal",
+            Some("Error: pytest collected 0 items".into()),
+        );
+        assert_eq!(
+            e3.result.as_deref(),
+            Some("Error: pytest collected 0 items")
+        );
+        assert_eq!(e3.status.as_deref(), Some("completed"));
+
+        let usage = AcpEvent::usage_update("s1", 100_000, 25_000);
+        assert_eq!(usage.kind, AcpEventKind::UsageUpdate);
+        assert_eq!(usage.session_update.as_deref(), Some("usage_update"));
+        assert_eq!(usage.size, Some(100_000));
+        assert_eq!(usage.used, Some(25_000));
+        let wire = serde_json::to_value(&usage).expect("usage event json");
+        assert_eq!(wire["sessionUpdate"], "usage_update");
+        assert_eq!(wire["size"], 100_000);
+        assert_eq!(wire["used"], 25_000);
+    }
+
+    #[test]
+    fn todo_plan_update_parses_statuses_and_serializes_native_entries() {
+        let entries = plan_entries_from_todo_result(Some(
+            r#"{"todos":[{"id":"inspect","content":"Inspect ACP","status":"completed"},{"id":"patch","content":"Patch renderer","status":"in_progress"},{"id":"old","content":"Drop stale task","status":"cancelled"}]}"#,
+        ))
+        .expect("todo entries");
+
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.content.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "Inspect ACP",
+                "Patch renderer",
+                "[cancelled] Drop stale task"
+            ]
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.status.as_str())
+                .collect::<Vec<_>>(),
+            vec!["completed", "in_progress", "completed"]
+        );
+
+        let event = AcpEvent::plan_update("s1", entries);
+        let value = serde_json::to_value(event).unwrap();
+        assert_eq!(value["sessionUpdate"], "plan");
+        assert_eq!(value["entries"][0]["priority"], "medium");
+        assert_eq!(
+            value["entries"][2]["content"],
+            "[cancelled] Drop stale task"
+        );
+    }
+
+    #[test]
+    fn todo_plan_update_parses_trailing_hint_and_empty_todos() {
+        let entries = plan_entries_from_todo_result(Some(
+            r#"{"todos":[{"id":"ship","content":"Ship ACP plan","status":"pending"}]}
+
+[Hint: persisted]"#,
+        ))
+        .expect("todo entries with suffix");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content, "Ship ACP plan");
+        assert_eq!(entries[0].status, "pending");
+
+        let empty = plan_entries_from_todo_result(Some(r#"{"todos":[]}"#)).expect("empty plan");
+        assert!(empty.is_empty());
     }
 }

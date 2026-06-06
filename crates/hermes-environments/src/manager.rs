@@ -49,18 +49,23 @@ impl BackendManager {
     fn create_backend(config: &TerminalConfig) -> (Arc<dyn TerminalBackend>, TerminalBackendType) {
         match config.backend {
             TerminalBackendType::Local => (
-                Arc::new(LocalBackend::new_with_shell(
-                    config.timeout,
-                    config.max_output_size,
-                    config.shell.clone(),
-                )),
+                Arc::new(LocalBackend::from_terminal_config(config)),
                 TerminalBackendType::Local,
             ),
             #[cfg(feature = "docker")]
             TerminalBackendType::Docker => (
                 Arc::new(DockerBackend::new(
-                    None,
-                    None,
+                    config.docker_container_id.clone(),
+                    config.docker_image.clone(),
+                    config.docker_mount_cwd_to_workspace,
+                    config.docker_run_as_host_user,
+                    config.container_cpu,
+                    config.container_memory,
+                    config.container_disk,
+                    config.container_persistent,
+                    config.docker_env.clone(),
+                    config.docker_forward_env.clone(),
+                    config.docker_volumes.clone(),
                     config.timeout,
                     config.max_output_size,
                 )),
@@ -69,10 +74,13 @@ impl BackendManager {
             #[cfg(feature = "ssh")]
             TerminalBackendType::Ssh => (
                 Arc::new(SshBackend::new(
-                    "localhost".to_string(),
-                    22,
-                    None,
-                    None,
+                    config
+                        .ssh_host
+                        .clone()
+                        .unwrap_or_else(|| "localhost".to_string()),
+                    config.ssh_port.unwrap_or(22),
+                    config.ssh_user.clone(),
+                    config.ssh_key_path.clone(),
                     config.timeout,
                     config.max_output_size,
                 )),
@@ -116,11 +124,7 @@ impl BackendManager {
                     config.backend
                 );
                 (
-                    Arc::new(LocalBackend::new_with_shell(
-                        config.timeout,
-                        config.max_output_size,
-                        config.shell.clone(),
-                    )),
+                    Arc::new(LocalBackend::from_terminal_config(config)),
                     TerminalBackendType::Local,
                 )
             }

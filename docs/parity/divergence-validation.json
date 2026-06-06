@@ -1,6 +1,6 @@
 {
-  "divergence_file": "C:\\Users\\15059\\hermes-agent-ultra\\docs\\parity\\intentional-divergence.json",
-  "generated_at_utc": "2026-05-20T05:50:19.925646+00:00",
+  "divergence_file": "docs/parity/intentional-divergence.json",
+  "generated_at_utc": "2026-05-30T18:15:34.743249+00:00",
   "items": [
     {
       "errors": [],
@@ -58,12 +58,16 @@
       "errors": [],
       "id": "rust-skills-catalog-governance",
       "last_reviewed": "2026-04-21",
-      "matched_files": 869,
+      "matched_files": 888,
       "matched_sample": [
         "optional-skills/DESCRIPTION.md",
         "optional-skills/autonomous-ai-agents/DESCRIPTION.md",
+        "optional-skills/autonomous-ai-agents/antigravity-cli/SKILL.md",
+        "optional-skills/autonomous-ai-agents/antigravity-cli/references/cli-docs.md",
         "optional-skills/autonomous-ai-agents/blackbox/SKILL.md",
+        "optional-skills/autonomous-ai-agents/grok/SKILL.md",
         "optional-skills/autonomous-ai-agents/honcho/SKILL.md",
+        "optional-skills/autonomous-ai-agents/openhands/SKILL.md",
         "optional-skills/blockchain/base/SKILL.md",
         "optional-skills/blockchain/base/scripts/base_client.py",
         "optional-skills/blockchain/evm/SKILL.md",
@@ -75,11 +79,7 @@
         "optional-skills/communication/DESCRIPTION.md",
         "optional-skills/communication/one-three-one-rule/SKILL.md",
         "optional-skills/creative/DESCRIPTION.md",
-        "optional-skills/creative/blender-mcp/SKILL.md",
-        "optional-skills/creative/concept-diagrams/SKILL.md",
-        "optional-skills/creative/concept-diagrams/examples/apartment-floor-plan-conversion.md",
-        "optional-skills/creative/concept-diagrams/examples/automated-password-reset-flow.md",
-        "optional-skills/creative/concept-diagrams/examples/autonomous-llm-research-agent-flow.md"
+        "optional-skills/creative/blender-mcp/SKILL.md"
       ],
       "overdue": false,
       "owner": "sheawinkler",
@@ -90,9 +90,68 @@
     },
     {
       "errors": [],
+      "id": "rust-gateway-platform-plugin-parity",
+      "last_reviewed": "2026-05-26",
+      "matched_files": 6,
+      "matched_sample": [
+        "plugins/platforms/mattermost/__init__.py",
+        "plugins/platforms/mattermost/adapter.py",
+        "plugins/platforms/mattermost/plugin.yaml",
+        "plugins/platforms/ntfy/__init__.py",
+        "plugins/platforms/ntfy/adapter.py",
+        "plugins/platforms/ntfy/plugin.yaml"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-08-26",
+      "status": "approved",
+      "ticket": 7,
+      "warnings": []
+    },
+    {
+      "errors": [],
+      "id": "upstream-python-plugin-backend-drift-20260527",
+      "last_reviewed": "2026-05-27",
+      "matched_files": 10,
+      "matched_sample": [
+        "plugins/dashboard_auth/nous/__init__.py",
+        "plugins/dashboard_auth/nous/plugin.yaml",
+        "plugins/image_gen/krea/__init__.py",
+        "plugins/image_gen/krea/plugin.yaml",
+        "plugins/security-guidance/LICENSE",
+        "plugins/security-guidance/NOTICE",
+        "plugins/security-guidance/README.md",
+        "plugins/security-guidance/__init__.py",
+        "plugins/security-guidance/patterns.py",
+        "plugins/security-guidance/plugin.yaml"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-06-10",
+      "status": "temporary",
+      "ticket": 319,
+      "warnings": []
+    },
+    {
+      "errors": [],
+      "id": "upstream-s6-plan-doc-archive",
+      "last_reviewed": "2026-05-26",
+      "matched_files": 1,
+      "matched_sample": [
+        "docs/plans/2026-05-07-s6-overlay-dynamic-subagent-gateways.md"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-08-26",
+      "status": "approved",
+      "ticket": 26,
+      "warnings": []
+    },
+    {
+      "errors": [],
       "id": "rust-cli-tui-primary-ux-surface",
       "last_reviewed": "2026-04-21",
-      "matched_files": 833,
+      "matched_files": 1178,
       "matched_sample": [
         "ui-tui/.gitignore",
         "ui-tui/.prettierrc",
@@ -111,9 +170,9 @@
         "ui-tui/packages/hermes-ink/src/hooks/use-stderr.ts",
         "ui-tui/packages/hermes-ink/src/hooks/use-stdout.ts",
         "ui-tui/packages/hermes-ink/src/ink/Ansi.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/app-mouse.test.ts",
         "ui-tui/packages/hermes-ink/src/ink/bidi.ts",
-        "ui-tui/packages/hermes-ink/src/ink/cache-eviction.ts",
-        "ui-tui/packages/hermes-ink/src/ink/clearTerminal.ts"
+        "ui-tui/packages/hermes-ink/src/ink/cache-eviction.ts"
       ],
       "overdue": false,
       "owner": "sheawinkler",
@@ -234,11 +293,11 @@
   ],
   "summary": {
     "errors": 0,
-    "items": 12,
-    "local_paths": 3238,
+    "items": 15,
+    "local_paths": 3293,
     "review_overdue": 0,
     "unowned": 0,
-    "upstream_paths": 3588,
+    "upstream_paths": 4212,
     "warnings": 0
   }
 }

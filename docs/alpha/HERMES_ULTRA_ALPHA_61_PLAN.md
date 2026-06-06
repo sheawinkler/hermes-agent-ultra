@@ -2,6 +2,13 @@
 
 Source: `plans/alpha/hermes-ultra-alpha-61-elements.json`
 
+## Runtime Surfaces
+
+- CLI: `/objective ...` manages Objective OS contracts, policies, ledgers, DAGs, and eval trends.
+- CLI: `/mission ...` manages Mission Control loops, queue recovery/replay, and private trading/autoresearch boards.
+- Tools: `objective_snapshot` and `mission_snapshot` expose the persisted alpha runtime state as read-only structured JSON for agents.
+- Tests: `crates/hermes-cli/src/alpha_runtime.rs` covers alpha state mutation/rendering, and `crates/hermes-tools/src/tools/alpha_snapshot.rs` covers read-only agent snapshots.
+
 | ID | Area | Title | Priority | Trading-sensitive |
 | --- | --- | --- | --- | --- |
 | ALPHA-001 | Objective OS | Persistent objective contract engine | P0 | no |
