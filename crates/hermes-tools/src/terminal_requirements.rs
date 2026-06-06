@@ -315,8 +315,7 @@ fn command_success_with_timeout(executable: &Path, args: &[&str], timeout: Durat
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    use crate::approval::TEST_ENV_LOCK;
 
     struct EnvGuard {
         key: &'static str,
@@ -373,14 +372,14 @@ mod tests {
 
     #[test]
     fn local_terminal_requirements_pass_by_default() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
         let _guards = clear_terminal_env();
         assert!(check_terminal_requirements());
     }
 
     #[test]
     fn unknown_terminal_env_is_unavailable() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
         let _guards = clear_terminal_env();
         let _env = EnvGuard::set("TERMINAL_ENV", "unknown-backend");
         let report = terminal_requirements_report();
@@ -394,7 +393,7 @@ mod tests {
 
     #[test]
     fn ssh_requires_host_and_user() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
         let _guards = clear_terminal_env();
         let _env = EnvGuard::set("TERMINAL_ENV", "ssh");
         let report = terminal_requirements_report();
@@ -412,7 +411,7 @@ mod tests {
 
     #[test]
     fn modal_managed_mode_requires_managed_gateway() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
         let _guards = clear_terminal_env();
         let _env = EnvGuard::set("TERMINAL_ENV", "modal");
         let _mode = EnvGuard::set("TERMINAL_MODAL_MODE", "managed");
@@ -428,7 +427,7 @@ mod tests {
 
     #[test]
     fn modal_direct_mode_requires_direct_credentials() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
         let _guards = clear_terminal_env();
         let _env = EnvGuard::set("TERMINAL_ENV", "modal");
         let _mode = EnvGuard::set("TERMINAL_MODAL_MODE", "direct");
@@ -442,7 +441,7 @@ mod tests {
 
     #[test]
     fn vercel_sandbox_is_known_but_not_exposed_without_rust_backend() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
         let _guards = clear_terminal_env();
         let _env = EnvGuard::set("TERMINAL_ENV", "vercel_sandbox");
         let report = terminal_requirements_report();

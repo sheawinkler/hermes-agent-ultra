@@ -794,14 +794,13 @@ fn dirs_home() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    use crate::approval::TEST_ENV_LOCK;
     use async_trait::async_trait;
     use hermes_core::{AgentError, CommandOutput, Skill, SkillMeta};
     use serde_json::Value;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK
+        TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
