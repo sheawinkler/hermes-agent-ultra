@@ -843,6 +843,10 @@
     "9cf1140caaefa6f275667ed1b11a61aabb6199dd": {
       "disposition": "ported",
       "notes": "Rust ACP polished tool errors are treated as failed for core tool outputs while generic optional JSON error payloads remain completed; completion-status tests cover both sides of the conservative rule."
+    },
+    "0b9526b4761bbabc98ca48f5c0a3f2dfda765314": {
+      "disposition": "ported",
+      "notes": "Rust ACP session/set_model now has handler-level regression coverage proving model switches preserve existing provider/base_url/api_mode route metadata through the public SessionManager update_session_meta path instead of recreating or clearing provider state."
     }
   },
   "subject_patterns": [

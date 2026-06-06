@@ -1651,6 +1651,7 @@ impl AcpHandler for DefaultAcpHandler {
 mod tests {
     use super::*;
     use crate::events::AcpEventKind;
+    use crate::session::SessionMetaUpdate;
     use serde_json::json;
 
     struct EchoPromptExecutor;
@@ -2023,6 +2024,48 @@ mod tests {
                 .get("approval_mode")
                 .map(String::as_str),
             Some("auto")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_session_model_preserves_provider_route_metadata() {
+        let handler = make_handler();
+        let state = handler.session_manager.create_session("/workspace");
+        let session_id = state.session_id;
+        handler
+            .session_manager
+            .update_session_meta(
+                &session_id,
+                SessionMetaUpdate {
+                    model: Some("openrouter:anthropic/claude-sonnet-4".to_string()),
+                    provider: Some("openrouter".to_string()),
+                    api_mode: Some("responses".to_string()),
+                    base_url: Some("https://openrouter.ai/api/v1".to_string()),
+                    ..SessionMetaUpdate::default()
+                },
+            )
+            .expect("session exists");
+
+        let response = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/set_model".into(),
+                params: Some(json!({
+                    "sessionId": session_id,
+                    "modelId": "openai/gpt-4.1"
+                })),
+            })
+            .await;
+        assert!(response.error.is_none());
+
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.model.as_deref(), Some("openai/gpt-4.1"));
+        assert_eq!(state.provider.as_deref(), Some("openrouter"));
+        assert_eq!(state.api_mode.as_deref(), Some("responses"));
+        assert_eq!(
+            state.base_url.as_deref(),
+            Some("https://openrouter.ai/api/v1")
         );
     }
 
