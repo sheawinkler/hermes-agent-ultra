@@ -58,6 +58,7 @@ use crate::model_switch::{
     cached_provider_catalog_status, curated_provider_slugs, format_stale_auxiliary_warning,
     normalize_provider_model, provider_catalog_entries_for_config, provider_model_ids,
     provider_model_ids_for_config, provider_slug_from_provider_model, provider_slugs_for_config,
+    DEFAULT_VISIBLE_MODELS_PER_PROVIDER,
 };
 use crate::pairing_store::{PairingStatus, PairingStore};
 use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
@@ -13903,7 +13904,8 @@ async fn handle_provider_command(app: &mut App) -> Result<CommandResult, AgentEr
         emit_command_output(app, "No providers registered.");
         return Ok(CommandResult::Handled);
     }
-    let entries = provider_catalog_entries_for_config(&app.config, 4).await;
+    let entries =
+        provider_catalog_entries_for_config(&app.config, DEFAULT_VISIBLE_MODELS_PER_PROVIDER).await;
     if entries.is_empty() {
         emit_command_output(
             app,

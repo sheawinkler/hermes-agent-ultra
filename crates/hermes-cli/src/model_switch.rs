@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 use crate::providers::{canonical_provider_id, provider_capability_for};
 const NOUS_DEFAULT_INFERENCE_BASE_URL: &str = "https://inference-api.nousresearch.com/v1";
 const PROVIDER_CATALOG_CACHE_VERSION: u32 = 2;
+pub const DEFAULT_VISIBLE_MODELS_PER_PROVIDER: usize = 50;
 const OLLAMA_LOCAL_DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434/v1";
 const LLAMA_CPP_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 const VLLM_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8000/v1";
@@ -1321,7 +1322,7 @@ mod tests {
         provider_catalog_entries_for_config, provider_curated_models,
         provider_model_ids_for_config, provider_model_ids_with_client, provider_picker_description,
         provider_slug_from_provider_model, provider_slugs_for_config,
-        resolve_huggingface_catalog_endpoint_and_token,
+        resolve_huggingface_catalog_endpoint_and_token, DEFAULT_VISIBLE_MODELS_PER_PROVIDER,
     };
 
     fn env_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -1812,6 +1813,34 @@ mod tests {
             .expect("custom provider entry");
         assert_eq!(entry.models, vec!["kimi-k2.5"]);
         assert_eq!(entry.total_models, 2);
+    }
+
+    #[tokio::test]
+    async fn default_visible_models_per_provider_shows_first_fifty() {
+        let mut cfg = hermes_config::GatewayConfig::default();
+        let models = (0..60)
+            .map(|idx| format!("model-{idx:02}"))
+            .collect::<Vec<_>>();
+        cfg.llm_providers.insert(
+            "wide-provider".to_string(),
+            hermes_config::LlmProviderConfig {
+                models,
+                discover_models: false,
+                ..hermes_config::LlmProviderConfig::default()
+            },
+        );
+
+        let entries =
+            provider_catalog_entries_for_config(&cfg, DEFAULT_VISIBLE_MODELS_PER_PROVIDER).await;
+        let entry = entries
+            .iter()
+            .find(|entry| entry.provider == "wide-provider")
+            .expect("wide provider entry");
+
+        assert_eq!(entry.total_models, 60);
+        assert_eq!(entry.models.len(), 50);
+        assert_eq!(entry.models.first().map(String::as_str), Some("model-00"));
+        assert_eq!(entry.models.last().map(String::as_str), Some("model-49"));
     }
 
     #[tokio::test]

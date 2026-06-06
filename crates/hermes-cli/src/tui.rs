@@ -4488,7 +4488,11 @@ async fn disconnect_provider_credentials(provider: &str) -> Result<(bool, bool),
 
 async fn open_model_provider_modal(state: &mut TuiState, app: &App) {
     let providers = crate::model_switch::curated_provider_slugs();
-    let entries = crate::model_switch::provider_catalog_entries(&providers, 4).await;
+    let entries = crate::model_switch::provider_catalog_entries(
+        &providers,
+        crate::model_switch::DEFAULT_VISIBLE_MODELS_PER_PROVIDER,
+    )
+    .await;
     let token_store_providers = load_token_store_providers().await;
     let mut items: Vec<PickerItem> = Vec::new();
     for provider in providers {
