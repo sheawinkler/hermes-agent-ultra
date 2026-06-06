@@ -1152,7 +1152,7 @@ impl HermesAcpHandler {
                     None
                 }
             }
-            "version" => Some(format!("Hermes Agent v{}", self.version)),
+            "version" => Some(hermes_core::version::version_label()),
             "tools" => {
                 let tools = self.available_tools();
                 if tools.is_empty() {
@@ -2414,6 +2414,7 @@ mod tests {
             .as_ref()
             .expect("available commands");
         assert!(commands.iter().any(|command| command.name == "help"));
+        assert!(commands.iter().any(|command| command.name == "version"));
         let model = commands
             .iter()
             .find(|command| command.name == "model")
@@ -2743,6 +2744,18 @@ mod tests {
         assert!(response.contains("/ 128,000 tokens"));
         assert!(response.contains("Compression: ~"));
         assert!(response.contains("tokens until threshold (~102,400, 80%)."));
+    }
+
+    #[tokio::test]
+    async fn test_version_slash_command_uses_shared_version_label() {
+        let handler = make_handler();
+        let state = handler.session_manager.create_session("/workspace");
+
+        let response = handler
+            .handle_slash_command("/version", &state.session_id)
+            .expect("version response");
+
+        assert_eq!(response, hermes_core::version::version_label());
     }
 
     #[tokio::test]
