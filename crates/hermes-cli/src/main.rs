@@ -38,8 +38,9 @@ use hermes_cli::auth::{
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
 use hermes_cli::model_switch::{
-    cached_provider_catalog_status, curated_provider_slugs, normalize_provider_model,
-    provider_catalog_entries, provider_model_ids, provider_picker_description,
+    cached_provider_catalog_status, curated_provider_slugs, format_stale_auxiliary_warning,
+    normalize_provider_model, provider_catalog_entries, provider_model_ids,
+    provider_picker_description, provider_slug_from_provider_model,
 };
 use hermes_cli::platform_toolsets::{resolve_platform_tool_schemas, tool_definition_summary};
 use hermes_cli::providers::provider_capability_for;
@@ -1639,10 +1640,15 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
             let cfg_path = hermes_state_root(&cli).join("config.yaml");
             let mut disk =
                 load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
+            let main_provider = provider_slug_from_provider_model(&normalized).to_string();
+            let stale_aux = disk.stale_auxiliary_assignments_for_main_provider(&main_provider);
             disk.model = Some(normalized.clone());
             save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
             println!("Model switched to: {}", normalized);
             println!("Persisted default model in {}.", cfg_path.display());
+            if let Some(warning) = format_stale_auxiliary_warning(&main_provider, &stale_aux) {
+                println!("{warning}");
+            }
         }
         None => {
             let current = config.model.as_deref().unwrap_or("gpt-4o");

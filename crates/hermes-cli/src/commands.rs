@@ -55,8 +55,8 @@ use crate::kanban::{
     set_blocked, KanbanActionInput, KanbanBoard, KanbanLane, NewKanbanTaskInput,
 };
 use crate::model_switch::{
-    cached_provider_catalog_status, curated_provider_slugs, normalize_provider_model,
-    provider_model_ids,
+    cached_provider_catalog_status, curated_provider_slugs, format_stale_auxiliary_warning,
+    normalize_provider_model, provider_model_ids, provider_slug_from_provider_model,
 };
 use crate::pairing_store::{PairingStatus, PairingStore};
 use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
@@ -4329,13 +4329,22 @@ fn persist_current_model_selection(app: &App) -> Result<PathBuf, AgentError> {
 }
 
 fn format_model_persistence_note(app: &App) -> String {
-    match persist_current_model_selection(app) {
+    let mut note = match persist_current_model_selection(app) {
         Ok(path) => format!("Persisted default model in {}.", path.display()),
         Err(err) => format!(
             "Warning: switched for this session, but failed to persist default model: {}",
             err
         ),
+    };
+    let main_provider = provider_slug_from_provider_model(&app.current_model);
+    let stale_aux = app
+        .config
+        .stale_auxiliary_assignments_for_main_provider(main_provider);
+    if let Some(warning) = format_stale_auxiliary_warning(main_provider, &stale_aux) {
+        note.push('\n');
+        note.push_str(&warning);
     }
+    note
 }
 
 async fn pick_model_for_provider(

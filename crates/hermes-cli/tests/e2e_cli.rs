@@ -69,6 +69,47 @@ fn e2e_cli_config_set_dotted_llm_and_get_masks_key() {
 }
 
 #[test]
+fn e2e_cli_model_switch_warns_on_stale_auxiliary_provider() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+
+    let mut set_compression_provider = Command::cargo_bin("hermes").expect("binary exists");
+    set_compression_provider.env("HERMES_HOME", home);
+    set_compression_provider.args(["config", "set", "auxiliary.compression.provider", "nous"]);
+    set_compression_provider.assert().success();
+
+    let mut set_compression_model = Command::cargo_bin("hermes").expect("binary exists");
+    set_compression_model.env("HERMES_HOME", home);
+    set_compression_model.args(["config", "set", "auxiliary.compression.model", "hermes-4"]);
+    set_compression_model.assert().success();
+
+    let mut set_vision_auto = Command::cargo_bin("hermes").expect("binary exists");
+    set_vision_auto.env("HERMES_HOME", home);
+    set_vision_auto.args(["config", "set", "auxiliary.vision.provider", "auto"]);
+    set_vision_auto.assert().success();
+
+    let mut switch = Command::cargo_bin("hermes").expect("binary exists");
+    switch.env("HERMES_HOME", home);
+    switch.args(["model", "openrouter:anthropic/claude-opus-4.8"]);
+    let out = switch.assert().success().get_output().stdout.clone();
+    let text = std::str::from_utf8(&out).expect("utf8");
+    assert!(
+        text.contains("Model switched to: openrouter:anthropic/claude-opus-4.8"),
+        "expected model switch output, got: {text:?}"
+    );
+    assert!(
+        text.contains(
+            "Warning: 1 auxiliary task (compression=nous/hermes-4) still run on providers other than main 'openrouter'"
+        ),
+        "expected stale auxiliary warning, got: {text:?}"
+    );
+    assert!(
+        !text.contains("vision"),
+        "auto auxiliary provider should not be reported stale: {text:?}"
+    );
+}
+
+#[test]
 fn e2e_cli_profile_list_and_current_show_custom_alias() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path();

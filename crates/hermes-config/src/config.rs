@@ -466,6 +466,14 @@ fn default_auxiliary_provider() -> String {
     "auto".to_string()
 }
 
+/// Auxiliary slot pinned to a provider that differs from the selected main provider.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StaleAuxiliaryAssignment {
+    pub task: String,
+    pub provider: String,
+    pub model: String,
+}
+
 fn deserialize_string_or_empty<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
@@ -551,6 +559,38 @@ pub fn default_auxiliary_task_configs() -> BTreeMap<String, AuxiliaryTaskConfig>
 const BUILTIN_AUXILIARY_ENV_BRIDGE_TASKS: &[&str] = &["approval", "vision", "web_extract"];
 
 impl GatewayConfig {
+    /// Return auxiliary tasks pinned to a provider other than `main_provider`.
+    ///
+    /// Switching the main model does not clear auxiliary overrides. This helper
+    /// surfaces the silent mismatch so callers can warn and offer reset guidance
+    /// without destroying legitimate dedicated auxiliary model choices.
+    pub fn stale_auxiliary_assignments_for_main_provider(
+        &self,
+        main_provider: &str,
+    ) -> Vec<StaleAuxiliaryAssignment> {
+        let main_provider = main_provider.trim().to_ascii_lowercase();
+        if main_provider.is_empty() {
+            return Vec::new();
+        }
+        self.auxiliary
+            .iter()
+            .filter_map(|(task, cfg)| {
+                let provider = cfg.provider.trim();
+                if provider.is_empty()
+                    || provider.eq_ignore_ascii_case("auto")
+                    || provider.eq_ignore_ascii_case(&main_provider)
+                {
+                    return None;
+                }
+                Some(StaleAuxiliaryAssignment {
+                    task: task.clone(),
+                    provider: provider.to_string(),
+                    model: cfg.model.trim().to_string(),
+                })
+            })
+            .collect()
+    }
+
     /// Return config-derived environment overrides for the built-in auxiliary
     /// bridge set (`vision`, `web_extract`, `approval`).
     pub fn builtin_auxiliary_env_overrides(&self) -> Vec<(String, String)> {
@@ -1684,6 +1724,49 @@ llm_providers:
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn stale_auxiliary_assignments_report_provider_mismatches() {
+        let mut cfg = GatewayConfig::default();
+        cfg.auxiliary.insert(
+            "compression".to_string(),
+            AuxiliaryTaskConfig {
+                provider: "nous".to_string(),
+                model: "hermes-4".to_string(),
+                ..Default::default()
+            },
+        );
+        cfg.auxiliary.insert(
+            "vision".to_string(),
+            AuxiliaryTaskConfig {
+                provider: "auto".to_string(),
+                model: "ignored".to_string(),
+                ..Default::default()
+            },
+        );
+        cfg.auxiliary.insert(
+            "curator".to_string(),
+            AuxiliaryTaskConfig {
+                provider: "openrouter".to_string(),
+                model: "anthropic/claude-opus-4.7".to_string(),
+                ..Default::default()
+            },
+        );
+
+        let stale = cfg.stale_auxiliary_assignments_for_main_provider("openrouter");
+        assert_eq!(
+            stale,
+            vec![StaleAuxiliaryAssignment {
+                task: "compression".to_string(),
+                provider: "nous".to_string(),
+                model: "hermes-4".to_string(),
+            }]
+        );
+        assert!(cfg
+            .stale_auxiliary_assignments_for_main_provider("nous")
+            .iter()
+            .any(|entry| entry.task == "curator"));
     }
 
     #[test]

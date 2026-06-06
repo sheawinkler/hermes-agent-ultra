@@ -7,6 +7,7 @@ use hermes_agent::bedrock::{
     curated_bedrock_models_for_region, discover_bedrock_model_ids, has_aws_credentials,
     resolve_bedrock_region,
 };
+use hermes_config::StaleAuxiliaryAssignment;
 use hermes_core::AgentError;
 use hermes_intelligence::models_dev::{default_client, ModelsDevClient};
 use hmac::{Hmac, Mac};
@@ -513,6 +514,45 @@ pub fn normalize_provider_model(input: &str) -> Result<String, AgentError> {
     } else {
         Ok(format!("openai:{trimmed}"))
     }
+}
+
+pub fn provider_slug_from_provider_model(provider_model: &str) -> &str {
+    provider_model
+        .split_once(':')
+        .map(|(provider, _)| provider.trim())
+        .filter(|provider| !provider.is_empty())
+        .unwrap_or("openai")
+}
+
+pub fn format_stale_auxiliary_warning(
+    main_provider: &str,
+    stale: &[StaleAuxiliaryAssignment],
+) -> Option<String> {
+    if stale.is_empty() {
+        return None;
+    }
+
+    let slots = stale
+        .iter()
+        .map(|entry| {
+            let model = entry.model.trim();
+            if model.is_empty() {
+                format!("{}={}", entry.task, entry.provider)
+            } else {
+                format!("{}={}/{}", entry.task, entry.provider, model)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let plural = if stale.len() == 1 { "" } else { "s" };
+
+    Some(format!(
+        "Warning: {} auxiliary task{} ({}) still run on providers other than main '{}'. They will not follow this model switch. Reset with `hermes config set auxiliary.<task>.provider auto`.",
+        stale.len(),
+        plural,
+        slots,
+        main_provider
+    ))
 }
 
 pub fn curated_provider_slugs() -> Vec<&'static str> {
@@ -1134,7 +1174,7 @@ mod tests {
         load_provider_catalog_cache, merge_with_models_dev, normalize_provider_model,
         persist_provider_catalog_cache, provider_catalog_cache_path, provider_catalog_entries,
         provider_curated_models, provider_model_ids_with_client, provider_picker_description,
-        resolve_huggingface_catalog_endpoint_and_token,
+        provider_slug_from_provider_model, resolve_huggingface_catalog_endpoint_and_token,
     };
 
     fn env_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -1203,6 +1243,40 @@ mod tests {
             normalize_provider_model("gpt-4o").expect("bare OpenAI model"),
             "openai:gpt-4o"
         );
+    }
+
+    #[test]
+    fn provider_slug_from_provider_model_defaults_bare_to_openai() {
+        assert_eq!(
+            provider_slug_from_provider_model("openrouter:anthropic/claude-opus-4.8"),
+            "openrouter"
+        );
+        assert_eq!(provider_slug_from_provider_model("gpt-4o"), "openai");
+        assert_eq!(provider_slug_from_provider_model(":gpt-4o"), "openai");
+    }
+
+    #[test]
+    fn format_stale_auxiliary_warning_lists_pinned_slots() {
+        let stale = vec![
+            hermes_config::StaleAuxiliaryAssignment {
+                task: "compression".to_string(),
+                provider: "nous".to_string(),
+                model: "hermes-4".to_string(),
+            },
+            hermes_config::StaleAuxiliaryAssignment {
+                task: "curator".to_string(),
+                provider: "openai".to_string(),
+                model: String::new(),
+            },
+        ];
+        let warning =
+            super::format_stale_auxiliary_warning("openrouter", &stale).expect("stale warning");
+        assert!(warning.contains("Warning: 2 auxiliary tasks"));
+        assert!(warning.contains("compression=nous/hermes-4"));
+        assert!(warning.contains("curator=openai"));
+        assert!(warning.contains("main 'openrouter'"));
+        assert!(warning.contains("auxiliary.<task>.provider auto"));
+        assert!(super::format_stale_auxiliary_warning("openrouter", &[]).is_none());
     }
 
     #[test]
