@@ -3132,7 +3132,10 @@ mod tests {
         });
         assert_eq!(
             nous_body["tags"],
-            serde_json::json!(["product=hermes-agent"])
+            serde_json::json!([
+                provider_profiles::NOUS_PRODUCT_TAG,
+                provider_profiles::hermes_client_tag()
+            ])
         );
         assert!(nous_body.get("reasoning").is_none());
 

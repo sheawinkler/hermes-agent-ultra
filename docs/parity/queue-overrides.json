@@ -971,6 +971,10 @@
     "da4f407e5173": {
       "disposition": "ported",
       "notes": "Rust `hermes portal` now defaults to Nous Portal onboarding/setup, `portal info/status/check` report status, CLI help/README/auth recovery guidance use the human-readable portal alias, and focused CLI tests cover the dispatch without OAuth side effects."
+    },
+    "486b692ddd80": {
+      "disposition": "ported",
+      "notes": "Rust Nous provider request shaping now centralizes Portal attribution tags as product=hermes-agent plus client=hermes-client-v<workspace version>, and request-body tests prove the versioned tag is applied to actual Nous chat completion payloads."
     }
   },
   "subject_patterns": [
