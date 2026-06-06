@@ -2,6 +2,7 @@
 //!
 //! Handles voice message transcription (STT) and text-to-speech (TTS) responses.
 
+use hermes_config::managed_gateway::resolve_openai_audio_api_key;
 use hermes_core::AgentError;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -45,6 +46,8 @@ impl Default for VoiceConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SttProvider {
     Whisper,
+    GroqWhisper,
+    MistralVoxtral,
     DeepgramNova,
     Custom(String),
 }
@@ -54,6 +57,110 @@ pub enum TtsProvider {
     OpenAi,
     ElevenLabs,
     Custom(String),
+}
+
+const OPENAI_STT_MODELS: &[&str] = &["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe"];
+const GROQ_STT_MODELS: &[&str] = &[
+    "whisper-large-v3",
+    "whisper-large-v3-turbo",
+    "distil-whisper-large-v3-en",
+];
+const MISTRAL_STT_MODELS: &[&str] = &[
+    "voxtral-mini-latest",
+    "voxtral-mini-2507",
+    "voxtral-mini-2602",
+];
+
+fn env_trimmed(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn env_or_default(keys: &[&str], default: &str) -> String {
+    keys.iter()
+        .find_map(|key| env_trimmed(key))
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn endpoint_from_base(base: String) -> String {
+    let base = base.trim_end_matches('/');
+    if base.ends_with("/audio/transcriptions") {
+        base.to_string()
+    } else {
+        format!("{base}/audio/transcriptions")
+    }
+}
+
+fn known_model(model: &str, models: &[&str]) -> bool {
+    models.iter().any(|m| model.eq_ignore_ascii_case(m))
+}
+
+fn normalize_gateway_stt_model(provider: &str, requested: Option<&str>) -> String {
+    let requested = requested.map(str::trim).filter(|s| !s.is_empty());
+    match provider {
+        "groq" => {
+            let default = env_or_default(&["STT_GROQ_MODEL"], "whisper-large-v3-turbo");
+            match requested {
+                Some(model)
+                    if known_model(model, OPENAI_STT_MODELS)
+                        || known_model(model, MISTRAL_STT_MODELS) =>
+                {
+                    default
+                }
+                Some(model) => model.to_string(),
+                None => default,
+            }
+        }
+        "mistral" => {
+            let default = env_or_default(&["STT_MISTRAL_MODEL"], "voxtral-mini-latest");
+            match requested {
+                Some(model)
+                    if known_model(model, OPENAI_STT_MODELS)
+                        || known_model(model, GROQ_STT_MODELS) =>
+                {
+                    default
+                }
+                Some(model) => model.to_string(),
+                None => default,
+            }
+        }
+        _ => {
+            let default = env_or_default(&["STT_OPENAI_MODEL"], "whisper-1");
+            match requested {
+                Some(model)
+                    if known_model(model, GROQ_STT_MODELS)
+                        || known_model(model, MISTRAL_STT_MODELS) =>
+                {
+                    default
+                }
+                Some(model) => model.to_string(),
+                None => default,
+            }
+        }
+    }
+}
+
+fn configured_gateway_stt_model(provider: &str) -> String {
+    let provider_key = match provider {
+        "groq" => "STT_GROQ_MODEL",
+        "mistral" => "STT_MISTRAL_MODEL",
+        _ => "STT_OPENAI_MODEL",
+    };
+    let requested = env_trimmed(provider_key)
+        .or_else(|| env_trimmed("HERMES_STT_MODEL"))
+        .or_else(|| env_trimmed("STT_MODEL"));
+    normalize_gateway_stt_model(provider, requested.as_deref())
+}
+
+fn gateway_transcription_response_format(provider: &str, model: &str) -> &'static str {
+    match provider {
+        "groq" => "text",
+        "mistral" => "json",
+        _ if model.eq_ignore_ascii_case("whisper-1") => "text",
+        _ => "json",
+    }
 }
 
 /// Voice mode manager.
@@ -87,6 +194,8 @@ impl VoiceManager {
     pub async fn transcribe(&self, audio_data: &[u8], format: &str) -> Result<String, AgentError> {
         match &self.config.stt_provider {
             SttProvider::Whisper => self.transcribe_whisper(audio_data, format).await,
+            SttProvider::GroqWhisper => self.transcribe_groq(audio_data, format).await,
+            SttProvider::MistralVoxtral => self.transcribe_mistral(audio_data, format).await,
             SttProvider::DeepgramNova => self.transcribe_deepgram(audio_data, format).await,
             SttProvider::Custom(url) => self.transcribe_custom(url, audio_data, format).await,
         }
@@ -305,49 +414,135 @@ impl VoiceManager {
         audio_data: &[u8],
         format: &str,
     ) -> Result<String, AgentError> {
-        let api_key = std::env::var("HERMES_OPENAI_API_KEY")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .ok_or_else(|| {
-                AgentError::Config(
-                    "HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) not set for Whisper STT".into(),
-                )
-            })?;
+        let api_key = resolve_openai_audio_api_key();
+        if api_key.is_empty() {
+            return Err(AgentError::Config(
+                "VOICE_TOOLS_OPENAI_KEY / HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) not set for Whisper STT"
+                    .into(),
+            ));
+        }
+        let endpoint = endpoint_from_base(env_or_default(
+            &["STT_OPENAI_BASE_URL", "OPENAI_BASE_URL"],
+            "https://api.openai.com/v1",
+        ));
+        let model = configured_gateway_stt_model("openai");
+        let response_format = gateway_transcription_response_format("openai", &model);
+        self.transcribe_multipart_endpoint(
+            "OpenAI Whisper",
+            &endpoint,
+            &api_key,
+            audio_data,
+            format,
+            &model,
+            response_format,
+            true,
+        )
+        .await
+    }
 
+    async fn transcribe_groq(&self, audio_data: &[u8], format: &str) -> Result<String, AgentError> {
+        let api_key = env_trimmed("GROQ_API_KEY")
+            .ok_or_else(|| AgentError::Config("GROQ_API_KEY not set for Groq STT".into()))?;
+        let endpoint = endpoint_from_base(env_or_default(
+            &["STT_GROQ_BASE_URL", "GROQ_BASE_URL"],
+            "https://api.groq.com/openai/v1",
+        ));
+        let model = configured_gateway_stt_model("groq");
+        let response_format = gateway_transcription_response_format("groq", &model);
+        self.transcribe_multipart_endpoint(
+            "Groq Whisper",
+            &endpoint,
+            &api_key,
+            audio_data,
+            format,
+            &model,
+            response_format,
+            true,
+        )
+        .await
+    }
+
+    async fn transcribe_mistral(
+        &self,
+        audio_data: &[u8],
+        format: &str,
+    ) -> Result<String, AgentError> {
+        let api_key = env_trimmed("MISTRAL_API_KEY")
+            .ok_or_else(|| AgentError::Config("MISTRAL_API_KEY not set for Mistral STT".into()))?;
+        let endpoint = endpoint_from_base(env_or_default(
+            &["STT_MISTRAL_BASE_URL", "MISTRAL_BASE_URL"],
+            "https://api.mistral.ai/v1",
+        ));
+        let model = configured_gateway_stt_model("mistral");
+        let response_format = gateway_transcription_response_format("mistral", &model);
+        self.transcribe_multipart_endpoint(
+            "Mistral Voxtral",
+            &endpoint,
+            &api_key,
+            audio_data,
+            format,
+            &model,
+            response_format,
+            false,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn transcribe_multipart_endpoint(
+        &self,
+        provider_label: &str,
+        endpoint: &str,
+        api_key: &str,
+        audio_data: &[u8],
+        format: &str,
+        model: &str,
+        response_format: &str,
+        send_response_format: bool,
+    ) -> Result<String, AgentError> {
         let client = reqwest::Client::new();
         let part = reqwest::multipart::Part::bytes(audio_data.to_vec())
             .file_name(format!("audio.{}", format))
             .mime_str(&format!("audio/{}", format))
             .map_err(|e| AgentError::LlmApi(e.to_string()))?;
 
-        let form = reqwest::multipart::Form::new()
+        let mut form = reqwest::multipart::Form::new()
             .part("file", part)
-            .text("model", "whisper-1");
-
-        let form = if let Some(ref lang) = self.config.language {
-            form.text("language", lang.clone())
-        } else {
-            form
-        };
+            .text("model", model.to_string());
+        if send_response_format {
+            form = form.text("response_format", response_format.to_string());
+        }
+        if let Some(ref lang) = self.config.language {
+            form = form.text("language", lang.clone());
+        }
 
         let resp = client
-            .post("https://api.openai.com/v1/audio/transcriptions")
+            .post(endpoint)
             .header("Authorization", format!("Bearer {}", api_key))
             .multipart(form)
             .send()
             .await
-            .map_err(|e| AgentError::LlmApi(format!("Whisper API error: {e}")))?;
+            .map_err(|e| AgentError::LlmApi(format!("{provider_label} API error: {e}")))?;
 
         if !resp.status().is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(AgentError::LlmApi(format!("Whisper error: {body}")));
+            return Err(AgentError::LlmApi(format!(
+                "{provider_label} error: {body}"
+            )));
+        }
+
+        if response_format.eq_ignore_ascii_case("text") {
+            let text = resp
+                .text()
+                .await
+                .map_err(|e| AgentError::LlmApi(format!("{provider_label} read body: {e}")))?;
+            return Ok(text.trim().to_string());
         }
 
         let json: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| AgentError::LlmApi(format!("Parse error: {e}")))?;
+            .map_err(|e| AgentError::LlmApi(format!("{provider_label} parse error: {e}")))?;
         Ok(json
             .get("text")
             .and_then(|t| t.as_str())
@@ -472,15 +667,13 @@ impl VoiceManager {
     }
 
     async fn tts_openai(&self, text: &str) -> Result<Vec<u8>, AgentError> {
-        let api_key = std::env::var("HERMES_OPENAI_API_KEY")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .ok_or_else(|| {
-                AgentError::Config(
-                    "HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) not set for TTS".into(),
-                )
-            })?;
+        let api_key = resolve_openai_audio_api_key();
+        if api_key.is_empty() {
+            return Err(AgentError::Config(
+                "VOICE_TOOLS_OPENAI_KEY / HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) not set for TTS"
+                    .into(),
+            ));
+        }
 
         let client = reqwest::Client::new();
         let body = serde_json::json!({
@@ -595,11 +788,67 @@ impl VoiceManager {
 mod tests {
     use super::*;
     use std::f32::consts::PI;
+    use std::sync::{Mutex as StdMutex, MutexGuard, OnceLock};
+
+    static ENV_LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK
+            .get_or_init(|| StdMutex::new(()))
+            .lock()
+            .expect("env lock poisoned")
+    }
+
+    struct EnvGuard {
+        original: Vec<(&'static str, Option<String>)>,
+        _g: MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn new() -> Self {
+            let g = env_lock();
+            let keys = [
+                "VOICE_TOOLS_OPENAI_KEY",
+                "HERMES_OPENAI_API_KEY",
+                "OPENAI_API_KEY",
+                "GROQ_API_KEY",
+                "MISTRAL_API_KEY",
+                "STT_MODEL",
+                "HERMES_STT_MODEL",
+                "STT_OPENAI_MODEL",
+                "STT_GROQ_MODEL",
+                "STT_MISTRAL_MODEL",
+                "STT_OPENAI_BASE_URL",
+                "OPENAI_BASE_URL",
+                "STT_GROQ_BASE_URL",
+                "GROQ_BASE_URL",
+                "STT_MISTRAL_BASE_URL",
+                "MISTRAL_BASE_URL",
+            ];
+            let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+            for key in keys {
+                std::env::remove_var(key);
+            }
+            Self { original, _g: g }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in &self.original {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_voice_state_default() {
         let config = VoiceConfig::default();
         assert_eq!(config.state, VoiceState::Disabled);
+        assert_eq!(config.stt_provider, SttProvider::Whisper);
     }
 
     #[test]
@@ -664,5 +913,69 @@ mod tests {
             pcm.extend_from_slice(&sample.to_le_bytes());
         }
         assert!(mgr.detect_voice_activity(&pcm));
+    }
+
+    #[test]
+    fn gateway_stt_model_normalizes_provider_mismatches() {
+        let _g = EnvGuard::new();
+        assert_eq!(normalize_gateway_stt_model("openai", None), "whisper-1");
+        assert_eq!(
+            normalize_gateway_stt_model("groq", Some("whisper-1")),
+            "whisper-large-v3-turbo"
+        );
+        assert_eq!(
+            normalize_gateway_stt_model("mistral", Some("whisper-large-v3")),
+            "voxtral-mini-latest"
+        );
+        assert_eq!(
+            normalize_gateway_stt_model("openai", Some("gpt-4o-mini-transcribe")),
+            "gpt-4o-mini-transcribe"
+        );
+    }
+
+    #[test]
+    fn gateway_stt_endpoint_builds_from_provider_base_urls() {
+        let _g = EnvGuard::new();
+        assert_eq!(
+            endpoint_from_base("https://api.groq.com/openai/v1".into()),
+            "https://api.groq.com/openai/v1/audio/transcriptions"
+        );
+        assert_eq!(
+            endpoint_from_base("https://api.mistral.ai/v1/audio/transcriptions".into()),
+            "https://api.mistral.ai/v1/audio/transcriptions"
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_whisper_prefers_voice_tools_key_and_reports_missing_keys() {
+        let _g = EnvGuard::new();
+        let mgr = VoiceManager::new(VoiceConfig::default());
+        let err = mgr.transcribe(&[1, 2, 3, 4], "wav").await.unwrap_err();
+        assert!(err.to_string().contains("VOICE_TOOLS_OPENAI_KEY"));
+
+        std::env::set_var("VOICE_TOOLS_OPENAI_KEY", "voice-key");
+        std::env::set_var("HERMES_OPENAI_API_KEY", "hermes-key");
+        assert_eq!(resolve_openai_audio_api_key(), "voice-key");
+    }
+
+    #[tokio::test]
+    async fn gateway_groq_and_mistral_stt_report_provider_credentials() {
+        let _g = EnvGuard::new();
+
+        let mut cfg = VoiceConfig::default();
+        cfg.stt_provider = SttProvider::GroqWhisper;
+        let groq = VoiceManager::new(cfg)
+            .transcribe(&[1, 2, 3, 4], "wav")
+            .await
+            .unwrap_err();
+        assert!(groq.to_string().contains("GROQ_API_KEY"));
+
+        let mut cfg = VoiceConfig::default();
+        cfg.stt_provider = SttProvider::MistralVoxtral;
+        let mistral = VoiceManager::new(cfg)
+            .transcribe(&[1, 2, 3, 4], "wav")
+            .await
+            .unwrap_err();
+        assert!(mistral.to_string().contains("MISTRAL_API_KEY"));
     }
 }

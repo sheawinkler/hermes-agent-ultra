@@ -759,6 +759,34 @@
     "eb49936a60aa": {
       "disposition": "superseded",
       "notes": "upstream docs/install audio-format update is superseded by rust-native TTS providers, media_category/send_file adapter routing, and gateway MEDIA marker delivery tests; no Python install-script runtime remains to port"
+    },
+    "bdac541d1ee2": {
+      "disposition": "ported",
+      "notes": "Rust OpenAI audio key resolution already prefers HERMES_OPENAI_API_KEY over legacy OPENAI_API_KEY and this slice aligns gateway voice STT/TTS error paths with the shared resolver while preserving legacy fallback."
+    },
+    "0858ee2f2701": {
+      "disposition": "ported",
+      "notes": "Rust OpenAI audio key resolution now consistently uses VOICE_TOOLS_OPENAI_KEY first for transcription and gateway voice STT/TTS, then HERMES_OPENAI_API_KEY, then OPENAI_API_KEY; focused tests cover precedence and schema/error visibility."
+    },
+    "ec32e9a5406d": {
+      "disposition": "ported",
+      "notes": "Rust transcription now exposes provider-aware Groq STT with GROQ_API_KEY, Groq OpenAI-compatible endpoint/model defaults, model normalization, schema coverage, and gateway SttProvider::GroqWhisper credential/error handling tests."
+    },
+    "b8f8d3ef9e55": {
+      "disposition": "ported",
+      "notes": "Rust transcription now implements the valuable provider fallback portion of the three-provider STT surface: explicit/provider-env OpenAI, Groq, and Mistral/Voxtral with deterministic model normalization and tests. Python faster-whisper local runtime is intentionally not embedded in the Rust runtime."
+    },
+    "5f4b93c20f41": {
+      "disposition": "ported",
+      "notes": "Rust transcription now exposes Mistral/Voxtral STT with MISTRAL_API_KEY, /v1/audio/transcriptions endpoint construction, voxtral model defaults, no unsupported response_format multipart field, schema coverage, and gateway SttProvider::MistralVoxtral tests."
+    },
+    "0f597dd12796": {
+      "disposition": "ported",
+      "notes": "Rust STT provider/model normalization prevents OpenAI whisper-1 from being sent to Groq or Mistral/Voxtral and prevents Groq/Voxtral models from leaking to OpenAI; tool and gateway tests cover mismatch normalization."
+    },
+    "3260413cc7fa": {
+      "disposition": "ported",
+      "notes": "Rust STT override env vars are first-class runtime knobs: HERMES_STT_PROVIDER/STT_PROVIDER, STT_OPENAI_MODEL, STT_GROQ_MODEL, STT_MISTRAL_MODEL, and provider base-url overrides are resolved in the Rust transcription/gateway voice surfaces with tests."
     }
   },
   "subject_patterns": [
