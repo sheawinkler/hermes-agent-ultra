@@ -10427,7 +10427,7 @@ fn setup_provider_default_base_url(provider: &str) -> Option<&'static str> {
         "openai-codex" => Some("https://chatgpt.com/backend-api/codex"),
         "nous-api" => Some(DEFAULT_NOUS_INFERENCE_URL),
         "google-gemini-cli" => Some("cloudcode-pa://google"),
-        "gemini" => Some("https://generativelanguage.googleapis.com/v1beta"),
+        "gemini" => Some(provider_profiles::GEMINI_OPENAI_BASE_URL),
         "qwen" | "alibaba" => Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
         "alibaba-coding-plan" => Some("https://coding-intl.dashscope.aliyuncs.com/v1"),
         "deepseek" => Some("https://api.deepseek.com/v1"),
@@ -15867,6 +15867,10 @@ mod tests {
         assert_eq!(
             setup_provider_env_keys("google-gemini-cli"),
             &["HERMES_GEMINI_OAUTH_API_KEY"]
+        );
+        assert_eq!(
+            setup_provider_default_base_url("gemini"),
+            Some(provider_profiles::GEMINI_OPENAI_BASE_URL)
         );
         assert_eq!(
             setup_provider_env_keys("copilot"),

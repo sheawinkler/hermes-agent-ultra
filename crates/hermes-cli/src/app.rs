@@ -5706,6 +5706,20 @@ mod tests {
             provider_default_base_url("tencent"),
             Some(TENCENT_TOKENHUB_BASE_URL)
         );
+        assert_eq!(
+            provider_default_base_url("gemini"),
+            Some(provider_profiles::GEMINI_OPENAI_BASE_URL)
+        );
+        assert_eq!(
+            provider_default_base_url("google-ai-studio"),
+            Some(provider_profiles::GEMINI_OPENAI_BASE_URL)
+        );
+        assert_eq!(
+            provider_profiles::gemini_openai_compatible_base_url(
+                provider_profiles::GEMINI_NATIVE_BASE_URL
+            ),
+            provider_profiles::GEMINI_OPENAI_BASE_URL
+        );
     }
 
     #[test]
@@ -6577,7 +6591,7 @@ const STEPFUN_BASE_URL: &str = "https://api.stepfun.ai/step_plan/v1";
 const QWEN_BASE_URL: &str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
 const ALIBABA_CODING_PLAN_BASE_URL: &str = "https://coding-intl.dashscope.aliyuncs.com/v1";
 const GOOGLE_GEMINI_CLI_BASE_URL: &str = "cloudcode-pa://google";
-const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
+const GEMINI_BASE_URL: &str = provider_profiles::GEMINI_OPENAI_BASE_URL;
 const AI_GATEWAY_BASE_URL: &str = "https://ai-gateway.vercel.sh/v1";
 const KIMI_CODING_BASE_URL: &str = provider_profiles::KIMI_CODE_BASE_URL;
 const KIMI_LEGACY_BASE_URL: &str = provider_profiles::KIMI_LEGACY_BASE_URL;
@@ -7260,6 +7274,17 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
                 p = p.with_base_url(url);
             }
             Arc::new(p)
+        }
+        "gemini" => {
+            let url = base_url
+                .as_deref()
+                .map(provider_profiles::gemini_openai_compatible_base_url)
+                .unwrap_or_else(|| provider_profiles::GEMINI_OPENAI_BASE_URL.to_string());
+            Arc::new(
+                GenericProvider::new(url, &api_key, model_name.as_str())
+                    .with_optional_request_timeout_seconds(request_timeout_seconds)
+                    .with_provider_profile(runtime_provider.as_str()),
+            )
         }
         "stepfun" => {
             let url = base_url.unwrap_or_else(|| STEPFUN_BASE_URL.to_string());

@@ -594,15 +594,6 @@ impl GenericProvider {
             .or(self.provider_profile.as_deref())
     }
 
-    fn merge_extra_body_fields_for_profile(
-        body: &mut Value,
-        profile: Option<&str>,
-        extra_body: Option<&Value>,
-    ) {
-        let cleaned = provider_profiles::clean_extra_body_for_profile(profile, extra_body);
-        Self::merge_extra_body_fields(body, cleaned.as_ref());
-    }
-
     fn sanitize_messages_for_api(
         messages: &[Message],
         enabled: bool,
@@ -712,7 +703,13 @@ impl GenericProvider {
             stream,
         } = request;
         let profile = self.profile_for_extra_body(extra_body);
+        let native_gemini = provider_profiles::is_native_gemini_base_url(&self.base_url);
         let strict_tool_sanitize = Self::should_sanitize_tool_calls(extra_body);
+        let request_extra_body = if native_gemini {
+            provider_profiles::clean_extra_body_for_native_gemini(extra_body)
+        } else {
+            provider_profiles::clean_extra_body_for_profile(profile, extra_body)
+        };
         let mut api_messages = Self::sanitize_messages_for_api(
             messages,
             strict_tool_sanitize,
@@ -744,9 +741,16 @@ impl GenericProvider {
             body["tools"] =
                 format_tools_for_openai_api_with_model(tools, effective_model, &self.base_url);
         }
-        Self::merge_extra_body_fields_for_profile(&mut body, profile, extra_body);
-        self.apply_runtime_hints(&mut body, messages, extra_body);
-        provider_profiles::apply_profile_to_body(profile, &mut body, effective_model, extra_body);
+        Self::merge_extra_body_fields(&mut body, request_extra_body.as_ref());
+        self.apply_runtime_hints(&mut body, messages, request_extra_body.as_ref());
+        if !native_gemini {
+            provider_profiles::apply_profile_to_body(
+                profile,
+                &mut body,
+                effective_model,
+                extra_body,
+            );
+        }
         self.apply_opencode_go_reasoning_controls(&mut body, effective_model);
         body
     }
@@ -3094,6 +3098,51 @@ mod tests {
         assert!(body.get("provider_preferences").is_none());
         assert!(body.get("supports_vision").is_none());
         assert_eq!(body["temperature"], 0.2);
+    }
+
+    #[test]
+    fn test_native_gemini_request_body_strips_openai_extra_body_fields() {
+        let provider = GenericProvider::new(
+            provider_profiles::GEMINI_NATIVE_BASE_URL,
+            "key",
+            "gemini-2.5-pro",
+        )
+        .with_provider_profile("nous");
+        let messages = vec![Message::user("hello")];
+        let extra = serde_json::json!({
+            "provider_profile": "nous",
+            "tags": ["bad-openai-field"],
+            "reasoning_effort": "high",
+            "service_tier": "flex",
+            "supports_vision": true,
+            "thinking_config": {"thinking_budget": 1024},
+            "thinkingConfig": {"includeThoughts": true}
+        });
+
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "gemini-2.5-pro",
+            extra_body: Some(&extra),
+            stream: false,
+        });
+
+        assert_eq!(
+            body["thinking_config"],
+            serde_json::json!({"thinking_budget": 1024})
+        );
+        assert_eq!(
+            body["thinkingConfig"],
+            serde_json::json!({"includeThoughts": true})
+        );
+        assert!(body.get("tags").is_none());
+        assert!(body.get("reasoning").is_none());
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("service_tier").is_none());
+        assert!(body.get("provider_profile").is_none());
+        assert!(body.get("supports_vision").is_none());
     }
 
     #[test]

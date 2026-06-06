@@ -12,12 +12,27 @@ pub const KIMI_CODE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
 pub const KIMI_LEGACY_BASE_URL: &str = "https://api.moonshot.ai/v1";
 pub const KIMI_CN_BASE_URL: &str = "https://api.moonshot.cn/v1";
 pub const KIMI_CODE_USER_AGENT: &str = "KimiCLI/1.0";
+pub const GEMINI_NATIVE_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
+pub const GEMINI_OPENAI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
 
 pub fn is_kimi_code_base_url(base_url: &str) -> bool {
     base_url
         .trim()
         .to_ascii_lowercase()
         .contains("api.kimi.com")
+}
+
+pub fn is_native_gemini_base_url(base_url: &str) -> bool {
+    let normalized = base_url.trim().trim_end_matches('/').to_ascii_lowercase();
+    normalized.contains("generativelanguage.googleapis.com") && !normalized.contains("/openai")
+}
+
+pub fn gemini_openai_compatible_base_url(base_url: &str) -> String {
+    if is_native_gemini_base_url(base_url) {
+        format!("{}/openai", base_url.trim().trim_end_matches('/'))
+    } else {
+        base_url.trim().trim_end_matches('/').to_string()
+    }
 }
 
 pub fn kimi_base_url_for_api_key(api_key: &str, legacy_default: &str) -> &'static str {
@@ -149,6 +164,23 @@ pub fn clean_extra_body_for_profile(
         }
     }
     Some(Value::Object(cleaned))
+}
+
+pub fn clean_extra_body_for_native_gemini(extra_body: Option<&Value>) -> Option<Value> {
+    let Some(Value::Object(map)) = extra_body else {
+        return None;
+    };
+    let mut cleaned = Map::new();
+    for key in ["thinking_config", "thinkingConfig"] {
+        if let Some(value) = map.get(key) {
+            cleaned.insert(key.to_string(), value.clone());
+        }
+    }
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(Value::Object(cleaned))
+    }
 }
 
 pub fn normalize_messages_for_profile(profile: Option<&str>, messages: &mut Value) {
@@ -419,6 +451,16 @@ mod tests {
         assert!(supports_vision("xiaomi"));
         assert!(!supports_vision("kimi"));
         assert!(is_kimi_code_base_url(KIMI_CODE_BASE_URL));
+        assert_eq!(
+            gemini_openai_compatible_base_url(GEMINI_NATIVE_BASE_URL),
+            GEMINI_OPENAI_BASE_URL
+        );
+        assert_eq!(
+            gemini_openai_compatible_base_url(GEMINI_OPENAI_BASE_URL),
+            GEMINI_OPENAI_BASE_URL
+        );
+        assert!(is_native_gemini_base_url(GEMINI_NATIVE_BASE_URL));
+        assert!(!is_native_gemini_base_url(GEMINI_OPENAI_BASE_URL));
         assert_eq!(
             kimi_base_url_for_api_key("sk-kimi-test", KIMI_LEGACY_BASE_URL),
             KIMI_CODE_BASE_URL

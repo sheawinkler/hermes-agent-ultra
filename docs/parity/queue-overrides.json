@@ -1039,6 +1039,10 @@
     "ea266f43e9db": {
       "disposition": "superseded",
       "notes": "Rust LocalSearchBackend does not shell through rg/grep or parse merged stderr as matches; it compiles regexes with regex::Regex before traversal, skips unreadable/non-UTF8 files without diagnostic payload parsing, and now regression-tests invalid-regex errors plus partial read failures preserving content/files_only/count matches."
+    },
+    "ec46f5912e30": {
+      "disposition": "ported",
+      "notes": "Rust Gemini direct-provider setup and runtime defaults now use Google AI Studio's OpenAI-compatible /v1beta/openai endpoint, normalize manually supplied native Gemini base URLs to that endpoint, and defensively strip OpenAI-only extra_body/profile fields from native-Gemini request bodies while preserving thinking_config/thinkingConfig. The upstream native maxOutputTokens default is superseded by Rust's OpenAI-compatible max_tokens path."
     }
   },
   "subject_patterns": [
