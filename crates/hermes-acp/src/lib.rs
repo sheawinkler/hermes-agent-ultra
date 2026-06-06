@@ -36,8 +36,8 @@ pub use protocol::{
 pub use server::AcpServer;
 pub use session::{SessionInfo, SessionManager, SessionPhase, SessionState};
 pub use tools::{
-    make_tool_call_id, tool_completion_status, tool_kind, tool_start_metadata, tool_title,
-    ToolStartMetadata,
+    format_tool_result, make_tool_call_id, tool_completion_status, tool_kind, tool_start_metadata,
+    tool_title, ToolStartMetadata,
 };
 
 use serde::{Deserialize, Serialize};

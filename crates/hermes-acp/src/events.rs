@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::tools::{tool_completion_status, tool_start_metadata};
+use crate::tools::{format_tool_result, tool_completion_status, tool_start_metadata};
 
 // ---------------------------------------------------------------------------
 // Event types
@@ -124,6 +124,7 @@ impl AcpEvent {
         result: Option<String>,
     ) -> Self {
         let status = tool_completion_status(tool_name, result.as_deref());
+        let result = format_tool_result(tool_name, result.as_deref());
         Self {
             kind: AcpEventKind::ToolCallComplete,
             session_id: session_id.to_string(),
@@ -370,8 +371,20 @@ mod tests {
             "read_file",
             Some(r#"{"error":"missing"}"#.into()),
         );
-        assert_eq!(e2.result.as_deref(), Some(r#"{"error":"missing"}"#));
+        assert_eq!(e2.result.as_deref(), Some("Read failed: missing"));
         assert_eq!(e2.tool_kind.as_deref(), Some("read"));
         assert_eq!(e2.status.as_deref(), Some("failed"));
+
+        let e3 = AcpEvent::tool_call_complete(
+            "s1",
+            "tc2",
+            "terminal",
+            Some("Error: pytest collected 0 items".into()),
+        );
+        assert_eq!(
+            e3.result.as_deref(),
+            Some("Error: pytest collected 0 items")
+        );
+        assert_eq!(e3.status.as_deref(), Some("completed"));
     }
 }

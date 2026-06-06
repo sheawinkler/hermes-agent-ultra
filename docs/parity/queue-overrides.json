@@ -827,6 +827,22 @@
     "19db9cd0760e05dafcd1ae637db946cdd65322ce": {
       "disposition": "ported",
       "notes": "Rust ACP SessionManager now exposes a public lock-protected update_session_meta API with COALESCE-style optional model preservation, merges cwd/provider/api_mode/base_url/config options, routes existing update_cwd/update_model through it, and tests missing-session no-op plus single persist callback behavior."
+    },
+    "375c7f9cc379f940f3923ac967793675bdfd2b5c": {
+      "disposition": "ported",
+      "notes": "Rust ACP now renders structured JSON tool results into compact readable completion text, including todo summaries, read_file fenced content, search_files matches/files with JSON-prefix hint handling, skill summaries, browser/media/edit helpers, and generic nested JSON bullets without leaking raw blobs."
+    },
+    "b38d2d133bbb76fb9d91f08c3b1a838f5ce0a5b9": {
+      "disposition": "ported",
+      "notes": "Rust ACP tool completions compute failed status from structured success=false, ok=false, and nonzero exit_code/returncode while keeping status calculation separate from display formatting; focused tests cover the status path."
+    },
+    "eda1c97a1ef8c7d8505f40be1839929e130ad4c4": {
+      "disposition": "ported",
+      "notes": "Rust ACP marks canonical raised-exception outputs beginning with Error executing tool as failed while preserving plain Error: terminal/test output as completed; completion-status tests cover the positive and negative cases."
+    },
+    "9cf1140caaefa6f275667ed1b11a61aabb6199dd": {
+      "disposition": "ported",
+      "notes": "Rust ACP polished tool errors are treated as failed for core tool outputs while generic optional JSON error payloads remain completed; completion-status tests cover both sides of the conservative rule."
     }
   },
   "subject_patterns": [
