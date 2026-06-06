@@ -1103,6 +1103,17 @@ fn rand_u64_range(min: u64, max: u64) -> u64 {
     }
 }
 
+fn advertised_tool_name_index(tool_schemas: &[ToolSchema]) -> (HashSet<&str>, String) {
+    let mut names: Vec<&str> = tool_schemas
+        .iter()
+        .map(|schema| schema.name.as_str())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    let display = names.join(", ");
+    (names.into_iter().collect(), display)
+}
+
 /// Result of collecting one streaming completion (may end with user interrupt).
 enum StreamCollectOutcome {
     Complete(LlmResponse),
@@ -4622,6 +4633,8 @@ impl AgentLoop {
 
         // Determine which tools to expose
         let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
+        let (advertised_tool_names, advertised_tool_names_display) =
+            advertised_tool_name_index(&tool_schemas);
 
         // Build and inject system prompt (or reuse SQLite-cached prompt for session continuity)
         let (system_content, restored_system) =
@@ -5328,7 +5341,7 @@ impl AgentLoop {
             }
             let invalid_tool_calls: Vec<String> = tool_calls
                 .iter()
-                .filter(|tc| self.tool_registry.get(&tc.function.name).is_none())
+                .filter(|tc| !advertised_tool_names.contains(tc.function.name.as_str()))
                 .map(|tc| tc.function.name.clone())
                 .collect();
             if !invalid_tool_calls.is_empty() {
@@ -5340,7 +5353,6 @@ impl AgentLoop {
                         invalid_tool_retries, self.config.invalid_tool_call_max_retries
                     ),
                 );
-                let available = self.tool_registry.names().join(", ");
                 if invalid_tool_retries >= self.config.invalid_tool_call_max_retries {
                     self.emit_status(
                         "lifecycle",
@@ -5369,7 +5381,12 @@ impl AgentLoop {
                     let content = if self.tool_registry.get(&tc.function.name).is_none() {
                         format!(
                             "Tool '{}' does not exist. Available tools: {}",
-                            tc.function.name, available
+                            tc.function.name, advertised_tool_names_display
+                        )
+                    } else if !advertised_tool_names.contains(tc.function.name.as_str()) {
+                        format!(
+                            "Tool '{}' is not enabled in this session. Available tools: {}",
+                            tc.function.name, advertised_tool_names_display
                         )
                     } else {
                         "Skipped: another tool call in this turn used an invalid name. Please retry this tool call.".to_string()
@@ -5488,6 +5505,7 @@ impl AgentLoop {
                     &tool_calls,
                     total_turns,
                     tool_governor.tool_concurrency,
+                    &tool_schemas,
                     contextlattice_connect_intent,
                     self.config
                         .max_cost_usd
@@ -5806,6 +5824,8 @@ impl AgentLoop {
             .unwrap_or_default();
 
         let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
+        let (advertised_tool_names, advertised_tool_names_display) =
+            advertised_tool_name_index(&tool_schemas);
         let (system_content, restored_system) =
             self.resolve_initial_system_prompt(&task_hint, &tool_schemas);
         ctx.add_message(Message::system(&system_content));
@@ -6615,7 +6635,7 @@ impl AgentLoop {
 
             let invalid_tool_calls: Vec<String> = tool_calls
                 .iter()
-                .filter(|tc| self.tool_registry.get(&tc.function.name).is_none())
+                .filter(|tc| !advertised_tool_names.contains(tc.function.name.as_str()))
                 .map(|tc| tc.function.name.clone())
                 .collect();
             if !invalid_tool_calls.is_empty() {
@@ -6627,7 +6647,6 @@ impl AgentLoop {
                         invalid_tool_retries, self.config.invalid_tool_call_max_retries
                     ),
                 );
-                let available = self.tool_registry.names().join(", ");
                 if invalid_tool_retries >= self.config.invalid_tool_call_max_retries {
                     self.emit_status(
                         "lifecycle",
@@ -6656,7 +6675,12 @@ impl AgentLoop {
                     let content = if self.tool_registry.get(&tc.function.name).is_none() {
                         format!(
                             "Tool '{}' does not exist. Available tools: {}",
-                            tc.function.name, available
+                            tc.function.name, advertised_tool_names_display
+                        )
+                    } else if !advertised_tool_names.contains(tc.function.name.as_str()) {
+                        format!(
+                            "Tool '{}' is not enabled in this session. Available tools: {}",
+                            tc.function.name, advertised_tool_names_display
                         )
                     } else {
                         "Skipped: another tool call in this turn used an invalid name. Please retry this tool call.".to_string()
@@ -6770,6 +6794,7 @@ impl AgentLoop {
                     &tool_calls,
                     total_turns,
                     tool_concurrency,
+                    &tool_schemas,
                     contextlattice_connect_intent,
                     self.config
                         .max_cost_usd
@@ -7603,6 +7628,7 @@ impl AgentLoop {
         tool_calls: &[ToolCall],
         turn: u32,
         tool_concurrency: usize,
+        tool_schemas: &[ToolSchema],
         contextlattice_connect_intent: bool,
         parent_budget_remaining_usd: Option<f64>,
         tool_errors: &mut Vec<hermes_core::ToolErrorRecord>,
@@ -7660,16 +7686,24 @@ impl AgentLoop {
                     ));
                     continue;
                 }
+                let requested_toolset = parsed
+                    .get("toolset")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
                 let req = crate::sub_agent_orchestrator::SubAgentRequest {
                     task,
                     context: parsed
                         .get("context")
                         .and_then(|v| v.as_str())
                         .map(str::to_string),
-                    toolset: parsed
-                        .get("toolset")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
+                    inherited_tool_schemas: if requested_toolset.is_none() {
+                        tool_schemas.to_vec()
+                    } else {
+                        Vec::new()
+                    },
+                    toolset: requested_toolset,
                     model: parsed
                         .get("model")
                         .and_then(|v| v.as_str())
@@ -12456,6 +12490,111 @@ mod tests {
         // Python follows the same cadence because `_iters_since_skill += 1`
         // happens at each loop iteration before the tool/reset branch.
         assert_eq!(counters.iters_since_skill, 1);
+    }
+
+    #[test]
+    fn hidden_registered_tool_call_is_rejected_when_not_advertised() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        struct HiddenToolProvider {
+            calls: Arc<AtomicU32>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for HiddenToolProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                let message = if n == 0 {
+                    Message::assistant_with_tool_calls(
+                        None,
+                        vec![ToolCall {
+                            id: "tc_hidden".to_string(),
+                            function: hermes_core::FunctionCall {
+                                name: "web_search".to_string(),
+                                arguments: "{}".to_string(),
+                            },
+                            extra_content: None,
+                        }],
+                    )
+                } else {
+                    Message::assistant("done")
+                };
+                Ok(hermes_core::LlmResponse {
+                    message,
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let terminal_schema =
+            ToolSchema::new("terminal", "Terminal tool", JsonSchema::new("object"));
+        let hidden_executions = Arc::new(AtomicU32::new(0));
+        let hidden_executions_for_tool = hidden_executions.clone();
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "terminal",
+            terminal_schema.clone(),
+            Arc::new(|_args| Ok("terminal ran".to_string())),
+        );
+        registry.register(
+            "web_search",
+            ToolSchema::new("web_search", "Web search", JsonSchema::new("object")),
+            Arc::new(move |_args| {
+                hidden_executions_for_tool.fetch_add(1, Ordering::SeqCst);
+                Ok("web ran".to_string())
+            }),
+        );
+
+        let config = AgentConfig {
+            max_turns: 4,
+            invalid_tool_call_max_retries: 2,
+            ..AgentConfig::default()
+        };
+        let provider = Arc::new(HiddenToolProvider {
+            calls: Arc::new(AtomicU32::new(0)),
+        });
+        let agent = AgentLoop::new(config, Arc::new(registry), provider);
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let result = rt
+            .block_on(agent.run(
+                vec![Message::user("search the web")],
+                Some(vec![terminal_schema]),
+            ))
+            .expect("agent run should succeed");
+
+        assert!(result.finished_naturally);
+        assert_eq!(hidden_executions.load(Ordering::SeqCst), 0);
+        let transcript = result
+            .messages
+            .iter()
+            .filter_map(|msg| msg.content.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(transcript.contains("Tool 'web_search' is not enabled in this session"));
+        assert!(transcript.contains("Available tools: terminal"));
+        assert!(!transcript.contains("web ran"));
     }
 
     #[test]

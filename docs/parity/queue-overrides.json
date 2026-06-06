@@ -811,6 +811,10 @@
     "ef5eaf8d8757a5e75fa571042abc287430192f53": {
       "disposition": "ported",
       "notes": "Rust cron now honors the cron platform_toolsets config path, adds the hermes-cron default platform/toolset surface, hard-denies recursive and interactive cron tools, preserves direct custom-tool fallback, and covers default/configured cron filtering with targeted tests."
+    },
+    "f75b1d21b4c8cacc2b9b9fb87227ff315365cd90": {
+      "disposition": "ported",
+      "notes": "Rust agent loop now treats advertised tool schemas as the runtime allowlist, rejects registered-but-disabled fabricated tool calls in non-streaming and streaming loops, and makes delegate_task inherit the parent enabled tool surface when no explicit child toolset is requested; execute_code schema remains Rust-only and does not advertise disabled sandbox helper tools."
     }
   },
   "subject_patterns": [

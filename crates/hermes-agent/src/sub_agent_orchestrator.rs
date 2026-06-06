@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use hermes_core::{AgentError, LlmProvider, Message};
+use hermes_core::{AgentError, LlmProvider, Message, ToolSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::time::timeout;
@@ -99,6 +99,8 @@ pub struct SubAgentRequest {
     pub task: String,
     pub context: Option<String>,
     pub toolset: Option<String>,
+    /// Parent-advertised tools to inherit when no explicit child toolset is requested.
+    pub inherited_tool_schemas: Vec<ToolSchema>,
     pub model: Option<String>,
     /// Child depth injected by parent agent loop (parent_depth + 1).
     pub child_depth: u32,
@@ -284,6 +286,11 @@ impl SubAgentOrchestrator {
         let tool_registry = self.cfg.tool_registry.clone();
         let llm_provider = self.cfg.llm_provider.clone();
         let child_depth = req.child_depth;
+        let inherited_tools = if req.toolset.is_none() && !req.inherited_tool_schemas.is_empty() {
+            Some(req.inherited_tool_schemas.clone())
+        } else {
+            None
+        };
         let initial = initial_messages(&req.task, req.context.as_deref());
 
         // Run the child on its own tokio task so that its `impl Future` type is
@@ -300,7 +307,7 @@ impl SubAgentOrchestrator {
                 child_interrupt_for_spawn,
             )
             .with_delegate_depth(child_depth);
-            child_agent.run(initial, None).await
+            child_agent.run(initial, inherited_tools).await
         });
 
         let result = match timeout(self.cfg.timeout, join).await {
@@ -430,8 +437,8 @@ fn extract_final_assistant_text(messages: &[Message]) -> String {
 mod tests {
     use super::*;
     use futures::stream::{BoxStream, StreamExt};
-    use hermes_core::{LlmResponse, StreamChunk, ToolSchema};
-    use std::sync::Arc;
+    use hermes_core::{JsonSchema, LlmResponse, StreamChunk, ToolSchema};
+    use std::sync::{Arc, Mutex};
 
     // Minimal test provider that returns a deterministic assistant response
     // so the child loop finishes in a single turn. Behavioural tests live
@@ -466,6 +473,85 @@ mod tests {
         ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
             futures::stream::empty().boxed()
         }
+    }
+
+    #[tokio::test]
+    async fn omitted_toolset_inherits_parent_advertised_tools() {
+        struct RecordingProvider {
+            seen_tools: Arc<Mutex<Vec<Vec<String>>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for RecordingProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<LlmResponse, AgentError> {
+                self.seen_tools
+                    .lock()
+                    .expect("seen tools lock")
+                    .push(tools.iter().map(|tool| tool.name.clone()).collect());
+                Ok(LlmResponse {
+                    message: Message::assistant("done"),
+                    usage: None,
+                    model: "recording".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let seen_tools = Arc::new(Mutex::new(Vec::<Vec<String>>::new()));
+        let tmp = tempfile::tempdir().unwrap();
+        let orch = Arc::new(SubAgentOrchestrator::new(SubAgentOrchestratorConfig {
+            parent_config: AgentConfig {
+                max_turns: 2,
+                ..AgentConfig::default()
+            },
+            tool_registry: Arc::new(ToolRegistry::new()),
+            llm_provider: Arc::new(RecordingProvider {
+                seen_tools: seen_tools.clone(),
+            }),
+            parent_interrupt: InterruptController::new(),
+            hermes_home: tmp.path().to_path_buf(),
+            parent_session_id: Some("parent".into()),
+            timeout: Duration::from_secs(2),
+        }));
+
+        let out = orch
+            .execute(SubAgentRequest {
+                task: "child task".into(),
+                child_depth: 1,
+                max_depth: 4,
+                inherited_tool_schemas: vec![ToolSchema::new(
+                    "terminal",
+                    "Terminal tool",
+                    JsonSchema::new("object"),
+                )],
+                ..Default::default()
+            })
+            .await;
+
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["status"], "completed");
+        let seen = seen_tools.lock().expect("seen tools lock");
+        assert_eq!(seen.as_slice(), &[vec!["terminal".to_string()]]);
     }
 
     #[tokio::test]

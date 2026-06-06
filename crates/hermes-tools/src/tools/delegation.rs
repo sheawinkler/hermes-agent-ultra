@@ -99,7 +99,7 @@ impl ToolHandler for DelegateTaskHandler {
             "toolset".into(),
             json!({
                 "type": "string",
-                "description": "Toolset name to assign to the sub-agent (e.g. 'web', 'terminal')"
+                "description": "Optional toolset name for the sub-agent. Omit to inherit the currently enabled parent tools."
             }),
         );
         props.insert(
@@ -133,7 +133,7 @@ impl ToolHandler for DelegateTaskHandler {
 
         tool_schema(
             "delegate_task",
-            "Delegate a task to a sub-agent with an isolated context. The sub-agent will work independently and return results.",
+            "Delegate a task to a sub-agent with an isolated context. Omitted toolset inherits the current session's enabled tools.",
             JsonSchema::object(props, vec!["task".into()]),
         )
     }
@@ -164,6 +164,9 @@ mod tests {
     async fn test_delegate_task_schema() {
         let handler = DelegateTaskHandler::new(Arc::new(MockDelegationBackend));
         assert_eq!(handler.schema().name, "delegate_task");
+        let rendered = serde_json::to_string(&handler.schema()).expect("schema json");
+        assert!(rendered.contains("inherit"));
+        assert!(rendered.contains("currently enabled parent tools"));
     }
 
     #[tokio::test]

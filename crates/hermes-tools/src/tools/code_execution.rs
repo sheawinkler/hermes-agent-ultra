@@ -119,6 +119,9 @@ mod tests {
         assert_eq!(schema.name, "execute_code");
         let rendered = serde_json::to_string(&schema.parameters).expect("schema json");
         assert!(!rendered.contains("\"python\""));
+        assert!(!rendered.contains("web_search"));
+        assert!(!rendered.contains("web_extract"));
+        assert!(!rendered.contains("read_file"));
         assert!(rendered.contains("\"language\""));
     }
 
