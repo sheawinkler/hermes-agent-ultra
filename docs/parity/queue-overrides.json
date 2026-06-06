@@ -867,6 +867,18 @@
     "4764e06fdefa65cb75961da64da1ed63c99a0a2a": {
       "disposition": "ported",
       "notes": "Rust ACP exposes the editor session-management surface with load/resume/fork/list plus model/mode/config updates, now including the stable session/set_config_option method alias; handler tests cover camelCase routing and persisted session config."
+    },
+    "d2536a72bf27b3ca01d1b48957e58cb0202b6dfb": {
+      "disposition": "ported",
+      "notes": "Rust ACP replays persisted user and assistant session history on session/load and session/resume as session/update message chunks, skipping non-displayable system messages and preserving malformed-history tolerance."
+    },
+    "f3a4af9cf2a626cb3e055766cb1cff60168d295d": {
+      "disposition": "ported",
+      "notes": "Rust ACP replays assistant reasoning_content/reasoning as agent_thought_chunk before assistant message text and reconstructs persisted tool-call start/completion events during load/resume history replay."
+    },
+    "3034eee38ec516109566c00975be4d0276747c34": {
+      "disposition": "ported",
+      "notes": "Rust ACP server now flushes session/load and session/resume replay notifications before the JSON-RPC response, with run_on coverage proving clients receive transcript updates within the request lifetime."
     }
   },
   "subject_patterns": [

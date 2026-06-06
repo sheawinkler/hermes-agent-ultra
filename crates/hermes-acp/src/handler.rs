@@ -694,6 +694,92 @@ impl HermesAcpHandler {
         ));
     }
 
+    fn replay_session_history(&self, state: &SessionState) {
+        let mut active_tool_calls: HashMap<String, String> = HashMap::new();
+        for (index, message) in state.history.iter().enumerate() {
+            let role = message.get("role").and_then(Value::as_str).unwrap_or("");
+            match role {
+                "user" => {
+                    let text = history_message_text(message);
+                    if !text.is_empty() {
+                        self.event_sink.push(AcpEvent::user_message_chunk(
+                            &state.session_id,
+                            &history_message_id(&state.session_id, index, role, "message"),
+                            &text,
+                        ));
+                    }
+                }
+                "assistant" => {
+                    let thought = history_reasoning_text(message);
+                    if !thought.is_empty() {
+                        self.event_sink.push(AcpEvent::agent_thought_chunk(
+                            &state.session_id,
+                            &history_message_id(&state.session_id, index, role, "thought"),
+                            &thought,
+                        ));
+                    }
+
+                    let text = history_message_text(message);
+                    if !text.is_empty() {
+                        self.event_sink.push(AcpEvent::agent_message_chunk(
+                            &state.session_id,
+                            &history_message_id(&state.session_id, index, role, "message"),
+                            &text,
+                        ));
+                    }
+
+                    if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+                        for tool_call in tool_calls {
+                            let Some(tool_call_id) = tool_call
+                                .get("id")
+                                .and_then(Value::as_str)
+                                .filter(|id| !id.trim().is_empty())
+                            else {
+                                continue;
+                            };
+                            let tool_name = history_tool_call_name(tool_call);
+                            active_tool_calls.insert(tool_call_id.to_string(), tool_name.clone());
+                            self.event_sink.push(AcpEvent::tool_call_start(
+                                &state.session_id,
+                                tool_call_id,
+                                &tool_name,
+                                history_tool_call_arguments(tool_call),
+                            ));
+                        }
+                    }
+                }
+                "tool" => {
+                    let Some(tool_call_id) = message
+                        .get("tool_call_id")
+                        .or_else(|| message.get("toolCallId"))
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.trim().is_empty())
+                    else {
+                        continue;
+                    };
+                    let tool_name = active_tool_calls
+                        .get(tool_call_id)
+                        .cloned()
+                        .or_else(|| {
+                            message
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .unwrap_or_else(|| "tool".to_string());
+                    let text = history_message_text(message);
+                    self.event_sink.push(AcpEvent::tool_call_complete(
+                        &state.session_id,
+                        tool_call_id,
+                        &tool_name,
+                        (!text.is_empty()).then_some(text),
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn compact_session_history(&self, session_id: &str) -> Option<String> {
         let state = self.session_manager.get_session(session_id)?;
         let total = state.history.len();
@@ -1049,6 +1135,73 @@ fn latest_user_prompt_text(history: &[Value]) -> Option<String> {
     })
 }
 
+fn flatten_history_text(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => text.trim().to_string(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|part| {
+                if let Some(text) = part.as_str() {
+                    return Some(text.trim());
+                }
+                let text = part
+                    .get("text")
+                    .or_else(|| {
+                        (part.get("type").and_then(Value::as_str) == Some("text"))
+                            .then(|| part.get("content"))
+                            .flatten()
+                    })
+                    .and_then(Value::as_str)?;
+                Some(text.trim())
+            })
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+fn history_message_text(message: &Value) -> String {
+    flatten_history_text(message.get("content"))
+}
+
+fn history_reasoning_text(message: &Value) -> String {
+    ["reasoning_content", "reasoning"]
+        .iter()
+        .map(|key| flatten_history_text(message.get(*key)))
+        .find(|text| !text.is_empty())
+        .unwrap_or_default()
+}
+
+fn history_message_id(session_id: &str, index: usize, role: &str, suffix: &str) -> String {
+    format!("history:{session_id}:{index}:{role}:{suffix}")
+}
+
+fn history_tool_call_arguments(tool_call: &Value) -> Option<Value> {
+    let raw = tool_call
+        .get("function")
+        .and_then(|function| function.get("arguments"))
+        .or_else(|| tool_call.get("arguments"))?;
+    match raw {
+        Value::String(text) => serde_json::from_str(text)
+            .ok()
+            .or_else(|| Some(json!(text))),
+        Value::Null => None,
+        other => Some(other.clone()),
+    }
+}
+
+fn history_tool_call_name(tool_call: &Value) -> String {
+    tool_call
+        .get("function")
+        .and_then(|function| function.get("name"))
+        .or_else(|| tool_call.get("name"))
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("tool")
+        .to_string()
+}
+
 fn merge_usage(left: Option<Usage>, right: Option<Usage>) -> Option<Usage> {
     match (left, right) {
         (None, None) => None,
@@ -1192,7 +1345,8 @@ impl AcpHandler for HermesAcpHandler {
                 let cwd = param_str(p, "cwd").unwrap_or(".");
 
                 match self.session_manager.update_cwd(session_id, cwd) {
-                    Some(_) => {
+                    Some(state) => {
+                        self.replay_session_history(&state);
                         self.advertise_available_commands(session_id);
                         AcpResponse::success(request.id, json!({}))
                     }
@@ -1211,9 +1365,9 @@ impl AcpHandler for HermesAcpHandler {
                 let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
                 let cwd = param_str(p, "cwd").unwrap_or(".");
 
-                if self.session_manager.get_session(session_id).is_some() {
-                    self.session_manager.update_cwd(session_id, cwd);
-                    self.advertise_available_commands(session_id);
+                if let Some(state) = self.session_manager.update_cwd(session_id, cwd) {
+                    self.replay_session_history(&state);
+                    self.advertise_available_commands(&state.session_id);
                     AcpResponse::success(request.id, json!({}))
                 } else {
                     let state = self.session_manager.create_session(cwd);
@@ -2171,6 +2325,125 @@ mod tests {
         assert_available_commands_update(
             handler.event_sink.drain_for_session(&forked_session_id),
             &forked_session_id,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_load_session_replays_persisted_history_to_client() {
+        let handler = make_handler();
+        let created = handler.session_manager.create_session("/tmp");
+        let session_id = created.session_id;
+        handler.session_manager.set_history(
+            &session_id,
+            vec![
+                json!({"role": "system", "content": "hidden"}),
+                json!({"role": "user", "content": "what controls slash commands?"}),
+                json!({
+                    "role": "assistant",
+                    "reasoning_content": "Look up the ACP command table first.",
+                    "content": [{"type": "text", "text": "The advertised commands do."}],
+                    "tool_calls": [{
+                        "id": "tc-read",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\"path\":\"/tmp/a.txt\"}"
+                        }
+                    }]
+                }),
+                json!({"role": "tool", "tool_call_id": "tc-read", "content": "file contents"}),
+            ],
+        );
+
+        let loaded = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/load".into(),
+                params: Some(json!({"sessionId": session_id, "cwd": "/tmp"})),
+            })
+            .await;
+        assert!(loaded.error.is_none());
+
+        let events = handler.event_sink.drain_for_session(&session_id);
+        let kinds = events
+            .iter()
+            .map(|event| event.kind.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                AcpEventKind::UserMessageChunk,
+                AcpEventKind::AgentThoughtChunk,
+                AcpEventKind::AgentMessageChunk,
+                AcpEventKind::ToolCallStart,
+                AcpEventKind::ToolCallComplete,
+                AcpEventKind::AvailableCommandsUpdate,
+            ]
+        );
+        assert_eq!(
+            events[0].session_update.as_deref(),
+            Some("user_message_chunk")
+        );
+        assert_eq!(
+            events[0].content.as_ref().unwrap()["text"],
+            "what controls slash commands?"
+        );
+        assert_eq!(
+            events[1].session_update.as_deref(),
+            Some("agent_thought_chunk")
+        );
+        assert_eq!(
+            events[1].content.as_ref().unwrap()["text"],
+            "Look up the ACP command table first."
+        );
+        assert_eq!(
+            events[2].session_update.as_deref(),
+            Some("agent_message_chunk")
+        );
+        assert_eq!(events[3].tool_call_id.as_deref(), Some("tc-read"));
+        assert_eq!(events[3].tool_name.as_deref(), Some("read_file"));
+        assert_eq!(events[3].arguments.as_ref().unwrap()["path"], "/tmp/a.txt");
+        assert_eq!(events[4].result.as_deref(), Some("file contents"));
+        assert!(events[0]
+            .message_id
+            .as_deref()
+            .unwrap()
+            .starts_with(&format!("history:{session_id}:1:user:")));
+    }
+
+    #[tokio::test]
+    async fn test_resume_session_replays_reasoning_only_turn() {
+        let handler = make_handler();
+        let created = handler.session_manager.create_session("/tmp");
+        let session_id = created.session_id;
+        handler.session_manager.set_history(
+            &session_id,
+            vec![json!({
+                "role": "assistant",
+                "reasoning": [{"text": "Reasoning persisted without assistant text."}],
+                "content": ""
+            })],
+        );
+
+        let resumed = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/resume".into(),
+                params: Some(json!({"sessionId": session_id, "cwd": "/tmp"})),
+            })
+            .await;
+        assert!(resumed.error.is_none());
+
+        let events = handler.event_sink.drain_for_session(&session_id);
+        assert_eq!(events[0].kind, AcpEventKind::AgentThoughtChunk);
+        assert_eq!(
+            events[0].content.as_ref().unwrap()["text"],
+            "Reasoning persisted without assistant text."
+        );
+        assert_eq!(
+            events.last().unwrap().kind,
+            AcpEventKind::AvailableCommandsUpdate
         );
     }
 

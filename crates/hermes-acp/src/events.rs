@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::protocol::AvailableCommand;
 use crate::tools::{format_tool_result, tool_completion_status, tool_start_metadata};
@@ -32,6 +32,12 @@ pub enum AcpEventKind {
     MessageDelta,
     /// Complete agent message.
     MessageComplete,
+    /// Replayed or externally supplied user message chunk.
+    UserMessageChunk,
+    /// Replayed or externally supplied assistant message chunk.
+    AgentMessageChunk,
+    /// Replayed or externally supplied assistant thought chunk.
+    AgentThoughtChunk,
     /// Step completed (one LLM turn with optional tool calls).
     StepComplete,
     /// Session-level progress update.
@@ -62,6 +68,10 @@ pub struct AcpEvent {
     pub result: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<Value>,
+    #[serde(rename = "messageId", default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -103,6 +113,8 @@ impl AcpEvent {
             arguments: None,
             result: None,
             status: None,
+            content: None,
+            message_id: None,
             api_call_count: None,
             error: None,
             session_update: None,
@@ -129,6 +141,8 @@ impl AcpEvent {
             text: None,
             result: None,
             status: None,
+            content: None,
+            message_id: None,
             api_call_count: None,
             error: None,
             session_update: None,
@@ -156,6 +170,8 @@ impl AcpEvent {
             text: None,
             arguments: None,
             status: Some(status.to_string()),
+            content: None,
+            message_id: None,
             api_call_count: None,
             error: None,
             session_update: None,
@@ -176,6 +192,8 @@ impl AcpEvent {
             arguments: None,
             result: None,
             status: None,
+            content: None,
+            message_id: None,
             api_call_count: None,
             error: None,
             session_update: None,
@@ -196,9 +214,69 @@ impl AcpEvent {
             arguments: None,
             result: None,
             status: None,
+            content: None,
+            message_id: None,
             api_call_count: None,
             error: None,
             session_update: None,
+            available_commands: None,
+        }
+    }
+
+    pub fn user_message_chunk(session_id: &str, message_id: &str, text: &str) -> Self {
+        Self::history_text_chunk(
+            AcpEventKind::UserMessageChunk,
+            "user_message_chunk",
+            session_id,
+            message_id,
+            text,
+        )
+    }
+
+    pub fn agent_message_chunk(session_id: &str, message_id: &str, text: &str) -> Self {
+        Self::history_text_chunk(
+            AcpEventKind::AgentMessageChunk,
+            "agent_message_chunk",
+            session_id,
+            message_id,
+            text,
+        )
+    }
+
+    pub fn agent_thought_chunk(session_id: &str, message_id: &str, text: &str) -> Self {
+        Self::history_text_chunk(
+            AcpEventKind::AgentThoughtChunk,
+            "agent_thought_chunk",
+            session_id,
+            message_id,
+            text,
+        )
+    }
+
+    fn history_text_chunk(
+        kind: AcpEventKind,
+        session_update: &str,
+        session_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> Self {
+        Self {
+            kind,
+            session_id: session_id.to_string(),
+            timestamp: Self::now(),
+            session_update: Some(session_update.to_string()),
+            message_id: Some(message_id.to_string()),
+            content: Some(json!({"type": "text", "text": text})),
+            text: Some(text.to_string()),
+            tool_call_id: None,
+            tool_name: None,
+            tool_kind: None,
+            title: None,
+            arguments: None,
+            result: None,
+            status: None,
+            api_call_count: None,
+            error: None,
             available_commands: None,
         }
     }
@@ -216,6 +294,8 @@ impl AcpEvent {
             arguments: None,
             result: None,
             status: None,
+            content: None,
+            message_id: None,
             text: None,
             error: None,
             session_update: None,
@@ -236,6 +316,8 @@ impl AcpEvent {
             arguments: None,
             result: None,
             status: None,
+            content: None,
+            message_id: None,
             text: None,
             api_call_count: None,
             session_update: None,
@@ -257,6 +339,8 @@ impl AcpEvent {
             arguments: None,
             result: None,
             status: None,
+            content: None,
+            message_id: None,
             text: None,
             api_call_count: None,
             error: None,
