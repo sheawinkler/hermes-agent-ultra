@@ -847,6 +847,14 @@
     "0b9526b4761bbabc98ca48f5c0a3f2dfda765314": {
       "disposition": "ported",
       "notes": "Rust ACP session/set_model now has handler-level regression coverage proving model switches preserve existing provider/base_url/api_mode route metadata through the public SessionManager update_session_meta path instead of recreating or clearing provider state."
+    },
+    "f92298fe955fe2ddbea27f4c504ce310ec46545b": {
+      "disposition": "ported",
+      "notes": "Rust ACP maps typed top-level AgentResult usage into PromptResponse.usage through the CLI ACP executor boundary; regression coverage proves prompt/completion/total fields populate ACP input/output/total tokens without relying on a nested result usage dict."
+    },
+    "4e78963fe86a5f2758bf754a7979dc31aaf1a3db": {
+      "disposition": "superseded",
+      "notes": "The dead Python nested usage dict path is structurally superseded by Rust's typed AgentResult.usage and PromptExecutionOutput.usage flow; the CLI ACP usage test proves only the top-level typed fields are converted."
     }
   },
   "subject_patterns": [

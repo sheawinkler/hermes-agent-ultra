@@ -26765,6 +26765,16 @@ fn acp_events_from_agent_messages(
     events
 }
 
+fn acp_usage_from_agent_usage(usage: &hermes_core::UsageStats) -> hermes_acp::Usage {
+    hermes_acp::Usage {
+        input_tokens: usage.prompt_tokens,
+        output_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+        thought_tokens: None,
+        cached_read_tokens: None,
+    }
+}
+
 struct CliAcpPromptExecutor {
     config: Arc<hermes_config::GatewayConfig>,
     tool_registry: Arc<hermes_tools::ToolRegistry>,
@@ -26813,13 +26823,7 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
             .and_then(|m| m.content.clone())
             .unwrap_or_default();
 
-        let usage = result.usage.map(|u| hermes_acp::Usage {
-            input_tokens: u.prompt_tokens,
-            output_tokens: u.completion_tokens,
-            total_tokens: u.total_tokens,
-            thought_tokens: None,
-            cached_read_tokens: None,
-        });
+        let usage = result.usage.as_ref().map(acp_usage_from_agent_usage);
 
         Ok(hermes_acp::PromptExecutionOutput {
             response_text,
@@ -27841,6 +27845,24 @@ mod tests {
         assert_eq!(events[0].tool_call_id.as_deref(), Some("tc-untracked"));
         assert_eq!(events[0].tool_name.as_deref(), Some("terminal"));
         assert_eq!(events[0].result.as_deref(), Some("ok"));
+    }
+
+    #[test]
+    fn test_acp_usage_from_agent_usage_maps_top_level_agent_fields() {
+        let usage = hermes_core::UsageStats {
+            prompt_tokens: 123,
+            completion_tokens: 45,
+            total_tokens: 168,
+            estimated_cost: Some(0.0123),
+        };
+
+        let acp_usage = acp_usage_from_agent_usage(&usage);
+
+        assert_eq!(acp_usage.input_tokens, 123);
+        assert_eq!(acp_usage.output_tokens, 45);
+        assert_eq!(acp_usage.total_tokens, 168);
+        assert_eq!(acp_usage.thought_tokens, None);
+        assert_eq!(acp_usage.cached_read_tokens, None);
     }
 
     #[test]
