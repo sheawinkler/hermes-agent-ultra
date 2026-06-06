@@ -963,6 +963,10 @@
     "38695254f851": {
       "disposition": "ported",
       "notes": "Rust session persistence now exposes FTS index counting and optimize_fts maintenance, VACUUM runs FTS optimization before reclaiming pages, and top-level `hermes sessions optimize` reports FTS index count plus before/after sessions.db size with Rust unit/e2e coverage."
+    },
+    "3d1d0a49fe90": {
+      "disposition": "ported",
+      "notes": "Rust MiniMax direct auxiliary defaults now use MiniMax-M3 for minimax and minimax-cn, MiniMax CN registers as a first-class auxiliary direct-key provider, setup defaults and curated picker fallbacks expose MiniMax-M3 first, and regression tests guard against stale/highspeed defaults."
     }
   },
   "subject_patterns": [

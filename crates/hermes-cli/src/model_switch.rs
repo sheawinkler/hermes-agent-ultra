@@ -254,6 +254,8 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
     ),
     ("tencent-tokenhub", &["hy3-preview"]),
     ("zai", &["glm-5.1", "glm-5.0", "glm-4.5-flash"]),
+    ("minimax", &["MiniMax-M3", "MiniMax-M2.7"]),
+    ("minimax-cn", &["MiniMax-M3", "MiniMax-M2.7"]),
     (
         "gemini",
         &[
@@ -1277,6 +1279,22 @@ mod tests {
         assert!(provider_curated_models("arcee-ai").contains(&"trinity-mini"));
         assert!(provider_curated_models("mimo").contains(&"mimo-v2.5-pro"));
         assert!(provider_curated_models("tokenhub").contains(&"hy3-preview"));
+        assert_eq!(provider_curated_models("minimax")[0], "MiniMax-M3");
+        assert_eq!(provider_curated_models("minimax-cn")[0], "MiniMax-M3");
+    }
+
+    #[test]
+    fn minimax_picker_defaults_merge_models_dev_with_m3_fallback() {
+        assert!(is_models_dev_preferred_provider("minimax"));
+        assert!(is_models_dev_preferred_provider("minimax-cn"));
+        for provider in ["minimax", "minimax-cn"] {
+            let models = provider_curated_models(provider);
+            assert!(models.contains(&"MiniMax-M3"));
+            assert!(models.contains(&"MiniMax-M2.7"));
+            assert!(!models
+                .iter()
+                .any(|model| model.to_ascii_lowercase().contains("highspeed")));
+        }
     }
 
     #[test]
