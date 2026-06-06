@@ -7,6 +7,7 @@
 use serde_json::{Map, Value};
 
 pub const NOUS_PRODUCT_TAG: &str = "product=hermes-agent";
+pub const NOUS_CLIENT_TAG_PREFIX: &str = "client=hermes-client-v";
 
 pub fn canonical_provider_profile_id(provider: &str) -> Option<&'static str> {
     let normalized = provider.trim().to_ascii_lowercase();
@@ -74,8 +75,15 @@ pub fn profile_base_url(profile: &str) -> Option<&'static str> {
     }
 }
 
+pub fn hermes_client_tag() -> String {
+    format!("{NOUS_CLIENT_TAG_PREFIX}{}", env!("CARGO_PKG_VERSION"))
+}
+
 pub fn nous_portal_tags() -> Value {
-    Value::Array(vec![Value::String(NOUS_PRODUCT_TAG.to_string())])
+    Value::Array(vec![
+        Value::String(NOUS_PRODUCT_TAG.to_string()),
+        Value::String(hermes_client_tag()),
+    ])
 }
 
 pub fn local_control_key_for_profile(profile: Option<&str>, key: &str) -> bool {
@@ -382,6 +390,27 @@ mod tests {
         assert!(profile_base_url("mimo").unwrap().contains("xiaomimimo.com"));
         assert!(supports_vision("xiaomi"));
         assert!(!supports_vision("kimi"));
+    }
+
+    #[test]
+    fn nous_portal_tags_include_product_and_versioned_client() {
+        assert_eq!(
+            hermes_client_tag(),
+            format!("{NOUS_CLIENT_TAG_PREFIX}{}", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            nous_portal_tags(),
+            serde_json::json!([NOUS_PRODUCT_TAG, hermes_client_tag()])
+        );
+        let mut mutated = nous_portal_tags();
+        mutated
+            .as_array_mut()
+            .expect("portal tags array")
+            .push(Value::String("caller=mutated".to_string()));
+        assert_eq!(
+            nous_portal_tags(),
+            serde_json::json!([NOUS_PRODUCT_TAG, hermes_client_tag()])
+        );
     }
 
     #[test]
