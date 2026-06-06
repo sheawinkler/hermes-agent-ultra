@@ -1051,6 +1051,14 @@
     "72eb42d9ecdf": {
       "disposition": "superseded",
       "notes": "The upstream Python source-checkout updater's stash/restore versus discard mode is superseded in Rust because top-level hermes update is non-mutating release-check behavior and does not run git checkout/pull/reset/clean against the source tree. The remaining shared safety contract, ignoring .hermes-bootstrap-complete so autostash paths do not capture Desktop bootstrap state, is ported separately under b459bac02c98."
+    },
+    "9ecc331be847": {
+      "disposition": "ported",
+      "notes": "Rust resume now falls back from missing exact snapshot stems to session-id search over saved session snapshots, matching exact, prefix, and substring IDs case-insensitively across both file stems and session_info.session_id, with deterministic exact-before-prefix-before-substring ranking and focused CLI tests."
+    },
+    "580d9240979c": {
+      "disposition": "superseded",
+      "notes": "The upstream SQL-bounded desktop SessionDB optimization is superseded for Rust because the relevant runtime surface is file-backed resume snapshots rather than the Python desktop session-search endpoint. The Rust port avoids message-body scans, searches only snapshot stems plus session_info.session_id metadata, and preserves deterministic bounded result selection for resume."
     }
   },
   "subject_patterns": [
