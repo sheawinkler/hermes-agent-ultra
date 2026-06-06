@@ -1052,6 +1052,58 @@
       "disposition": "ported",
       "notes": "Rust gateway now has a dependency-free 48 kHz stereo s16le continuous VoiceMixer with ambient loops, ducked speech overlays, clipping, stop/cleanup, and synthesized ambient PCM, plus VoiceManager voice_fx lifecycle integration for join/remove, active checks, ack phrase selection, speech enqueue/read/stop, and focused mixer/manager unit tests."
     },
+    "4a1907bd10c3": {
+      "disposition": "superseded",
+      "notes": "Upstream change is confined to apps/desktop React i18n wiring and zh-Hans catalog files. Hermes Agent Ultra has no Electron desktop tree in this Rust runtime repo; CLI/TUI/gateway text remains Rust-native and is not backed by the upstream desktop i18n catalog."
+    },
+    "1d9c3ebae0f2": {
+      "disposition": "superseded",
+      "notes": "Upstream persists the Electron desktop language preference through apps/desktop config/runtime stores. Hermes Agent Ultra has no desktop language selector/config surface in this Rust runtime repo, so there is no shared Rust runtime state to port."
+    },
+    "f18a9dbefc59": {
+      "disposition": "superseded",
+      "notes": "Japanese and Traditional Chinese language switching is an apps/desktop component/catalog change. The Rust runtime has no Electron language switcher surface; CLI/TUI/gateway text remains direct Rust command/status output."
+    },
+    "b1b89f843e62": {
+      "disposition": "superseded",
+      "notes": "The upstream nested i18n field-copy refactor only reorganizes apps/desktop TypeScript catalog structures and UI consumers. This Rust runtime repo has no corresponding desktop catalog tree or TypeScript settings-field copy layer."
+    },
+    "812dc6957e19": {
+      "disposition": "superseded",
+      "notes": "Searchable language picker is an apps/desktop React component plus i18n catalog update. Hermes Agent Ultra has no Electron language picker runtime surface to port."
+    },
+    "fbd423b94d50": {
+      "disposition": "superseded",
+      "notes": "Desktop chrome localization only updates apps/desktop UI strings, voice-recorder hooks, and React components. Rust CLI/TUI/gateway chrome is independent and not driven by the upstream desktop i18n catalog."
+    },
+    "112a0732c6a7": {
+      "disposition": "superseded",
+      "notes": "This upstream row only fills apps/desktop Japanese and Traditional Chinese translation files. There is no Rust runtime catalog file or desktop translation asset in this repo."
+    },
+    "c24abf5b3286": {
+      "disposition": "superseded",
+      "notes": "This upstream row only fills apps/desktop Simplified Chinese translation strings. Hermes Agent Ultra has no corresponding desktop translation catalog in the Rust runtime repo."
+    },
+    "1c2189839d0b": {
+      "disposition": "superseded",
+      "notes": "CamelCase settings i18n keys are a desktop TypeScript catalog/runtime-test refactor. No Rust settings parser or gateway command consumes those apps/desktop i18n keys."
+    },
+    "0c0a70774424": {
+      "disposition": "superseded",
+      "notes": "macOS updater-helper repair is confined to upstream apps/bootstrap-installer Tauri paths and Electron main process code. Hermes Agent Ultra's Rust update surface is the CLI release-check path, not an embedded Electron/Tauri helper."
+    },
+    "98528c78c143": {
+      "disposition": "superseded",
+      "notes": "Windows in-app update race handling only touches upstream apps/bootstrap-installer Tauri update code and Electron main process orchestration. This Rust runtime repo does not embed that desktop updater process."
+    },
+    "14fee4f11265": {
+      "disposition": "superseded",
+      "notes": "Windows first-run update handoff retry is an upstream bootstrap-installer Tauri updater behavior. Hermes Agent Ultra has no matching in-app desktop updater; Rust `hermes update` is handled separately by the CLI release-check implementation."
+    },
+    "16beab421f05": {
+      "disposition": "superseded",
+      "notes": "The upstream About-panel fix is Electron-only. Rust already centralizes live version text through hermes_core::version::version_label and exposes it via CLI `version`, TUI `/version`, and gateway `/version`, with focused tests guarding the shared label."
+    },
     "ffb53767bfff": {
       "disposition": "ported",
       "notes": "Rust config now resolves HERMES_PREFILL_MESSAGES_FILE > top-level prefill_messages_file > legacy agent.prefill_messages_file, loads JSON prefill messages relative to HERMES_HOME/config home, injects them ephemerally into CLI/HTTP/gateway/cron agent contexts through AgentConfig.prefill_messages, and strips them from returned/persisted history with focused config/CLI/HTTP/agent/cron/gateway tests."
