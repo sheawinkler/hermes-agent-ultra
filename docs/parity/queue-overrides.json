@@ -891,6 +891,10 @@
     "658947480a01dc59a2aa7a6a06a6434d7214edff": {
       "disposition": "ported",
       "notes": "Rust ACP replay chunk events no longer carry the invalid messageId field; the typed event model omits the field and load replay tests assert serialized user/agent chunks match the ACP schema."
+    },
+    "cdf9793d6d6b97aa99e1b2f27629e52d89eac41d": {
+      "disposition": "ported",
+      "notes": "Rust ACP forwards image prompt blocks as OpenAI-style image_url multimodal content, preserves text-only slash command interception, treats image-bearing slash text as a model prompt, and now advertises promptCapabilities.image during initialize with protocol and handler tests."
     }
   },
   "subject_patterns": [

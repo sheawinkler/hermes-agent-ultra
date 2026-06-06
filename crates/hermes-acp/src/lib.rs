@@ -31,7 +31,7 @@ pub use permissions::{
 pub use protocol::{
     AcpError, AcpMethod, AcpRequest, AcpResponse, AgentCapabilities, AuthMethod, AvailableCommand,
     ClientCapabilities, ContentBlock, Implementation, InitializeResponse, McpServerConfig,
-    PromptResponse, SessionCapabilities, SessionUpdate, StopReason, Usage,
+    PromptCapabilities, PromptResponse, SessionCapabilities, SessionUpdate, StopReason, Usage,
 };
 pub use server::AcpServer;
 pub use session::{SessionInfo, SessionManager, SessionPhase, SessionState};

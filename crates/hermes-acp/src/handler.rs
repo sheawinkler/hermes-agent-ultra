@@ -237,6 +237,52 @@ fn json_image_part(url: impl Into<String>) -> Value {
     })
 }
 
+fn image_block_to_parts(block: &serde_json::Map<String, Value>) -> Vec<Value> {
+    let mime = block
+        .get("mimeType")
+        .or_else(|| block.get("mime_type"))
+        .and_then(|v| v.as_str());
+    let image_mime = canonical_mime(mime).unwrap_or_else(|| "image/png".to_string());
+
+    let data = block
+        .get("data")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if !data.is_empty() {
+        let url = if data.starts_with("data:") {
+            data.to_string()
+        } else {
+            format!("data:{image_mime};base64,{data}")
+        };
+        return vec![
+            json_text_part(format!("[Attached image: {image_mime}]")),
+            json_image_part(url),
+        ];
+    }
+
+    let url = block
+        .get("url")
+        .and_then(|v| v.as_str())
+        .or_else(|| block.get("image_url").and_then(|v| v.as_str()))
+        .or_else(|| {
+            block
+                .get("image_url")
+                .and_then(|v| v.get("url"))
+                .and_then(|v| v.as_str())
+        })
+        .unwrap_or("")
+        .trim();
+    if url.is_empty() {
+        Vec::new()
+    } else {
+        vec![
+            json_text_part(format!("[Attached image]\nURL: {url}")),
+            json_image_part(url),
+        ]
+    }
+}
+
 fn resource_link_to_parts(block: &serde_json::Map<String, Value>) -> Vec<Value> {
     let uri = block
         .get("uri")
@@ -477,22 +523,12 @@ fn extract_prompt_payload(p: &serde_json::Map<String, Value>) -> PromptExtractio
                     }
                     "image" => {
                         text_only_prompt = false;
-                        let url = obj
-                            .get("url")
-                            .and_then(|v| v.as_str())
-                            .or_else(|| {
-                                obj.get("image_url")
-                                    .and_then(|v| v.get("url"))
-                                    .and_then(|v| v.as_str())
-                            })
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        if !url.is_empty() {
-                            let header = format!("[Attached image]\nURL: {url}");
-                            text_parts.push(header.clone());
-                            parts.push(json_text_part(header));
-                            parts.push(json_image_part(url));
+                        let image_parts = image_block_to_parts(obj);
+                        for part in image_parts {
+                            if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                                text_parts.push(text.to_string());
+                            }
+                            parts.push(part);
                         }
                     }
                     "resource_link" => {
@@ -1301,6 +1337,7 @@ impl AcpHandler for HermesAcpHandler {
                     },
                     agent_capabilities: AgentCapabilities {
                         load_session: true,
+                        prompt_capabilities: Some(PromptCapabilities { image: true }),
                         session_capabilities: Some(SessionCapabilities {
                             fork: true,
                             list: true,
@@ -1995,6 +2032,10 @@ mod tests {
         assert_eq!(result["protocolVersion"], 1);
         assert_eq!(result["agentInfo"]["name"], "hermes-agent");
         assert_eq!(result["agentCapabilities"]["loadSession"], true);
+        assert_eq!(
+            result["agentCapabilities"]["promptCapabilities"]["image"],
+            true
+        );
         assert_eq!(
             result["agentCapabilities"]["sessionCapabilities"]["fork"],
             true
@@ -2737,6 +2778,40 @@ mod tests {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         assert!(assistant_text.contains("ACP session"));
+    }
+
+    #[tokio::test]
+    async fn test_prompt_forwards_acp_image_data_blocks_as_multimodal_content() {
+        let handler = make_handler();
+        let session_id = create_session(&handler).await;
+
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "sessionId": session_id.clone(),
+                    "prompt": [
+                        {"type": "text", "text": "What is in this image?"},
+                        {"type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}
+                    ]
+                })),
+            })
+            .await;
+        assert!(resp.error.is_none());
+
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        let parts = state.history[0]["content"].as_array().unwrap();
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[0]["text"], "What is in this image?");
+        assert_eq!(parts[1]["type"], "text");
+        assert_eq!(parts[1]["text"], "[Attached image: image/png]");
+        assert_eq!(parts[2]["type"], "image_url");
+        assert_eq!(
+            parts[2]["image_url"]["url"],
+            "data:image/png;base64,aGVsbG8="
+        );
     }
 
     #[tokio::test]

@@ -143,6 +143,13 @@ impl From<&str> for AcpMethod {
 pub struct AgentCapabilities {
     #[serde(rename = "loadSession", alias = "load_session", default)]
     pub load_session: bool,
+    #[serde(
+        rename = "promptCapabilities",
+        alias = "prompt_capabilities",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prompt_capabilities: Option<PromptCapabilities>,
     #[serde(default)]
     #[serde(
         rename = "sessionCapabilities",
@@ -156,6 +163,13 @@ pub struct AgentCapabilities {
     pub streaming: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub models: Option<Vec<String>>,
+}
+
+/// Prompt-level capabilities.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PromptCapabilities {
+    #[serde(default)]
+    pub image: bool,
 }
 
 /// Session-level capabilities.
@@ -229,7 +243,12 @@ pub enum ContentBlock {
         text: String,
     },
     Image {
+        #[serde(default)]
         url: String,
+        #[serde(default)]
+        data: Option<String>,
+        #[serde(rename = "mimeType", alias = "mime_type", default)]
+        mime_type: Option<String>,
         #[serde(default)]
         alt: Option<String>,
     },
@@ -456,11 +475,33 @@ mod tests {
             ContentBlock::text("hello"),
             ContentBlock::Image {
                 url: "http://img.png".into(),
+                data: None,
+                mime_type: None,
                 alt: None,
             },
             ContentBlock::text("world"),
         ];
         assert_eq!(extract_text(&blocks), "hello\nworld");
+
+        let image: ContentBlock = serde_json::from_value(serde_json::json!({
+            "type": "image",
+            "data": "aGVsbG8=",
+            "mimeType": "image/png"
+        }))
+        .unwrap();
+        match image {
+            ContentBlock::Image {
+                url,
+                data,
+                mime_type,
+                ..
+            } => {
+                assert_eq!(url, "");
+                assert_eq!(data.as_deref(), Some("aGVsbG8="));
+                assert_eq!(mime_type.as_deref(), Some("image/png"));
+            }
+            _ => panic!("expected image block"),
+        }
     }
 
     #[test]
@@ -480,6 +521,7 @@ mod tests {
     fn test_capabilities_serde() {
         let caps = AgentCapabilities {
             load_session: true,
+            prompt_capabilities: Some(PromptCapabilities { image: true }),
             session_capabilities: Some(SessionCapabilities {
                 fork: true,
                 list: true,
@@ -490,6 +532,7 @@ mod tests {
         };
         let json = serde_json::to_value(&caps).unwrap();
         assert_eq!(json["loadSession"], true);
+        assert_eq!(json["promptCapabilities"]["image"], true);
         assert_eq!(json["sessionCapabilities"]["fork"], true);
         assert_eq!(json["streaming"], true);
     }
