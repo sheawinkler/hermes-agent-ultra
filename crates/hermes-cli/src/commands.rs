@@ -59,6 +59,7 @@ use crate::kanban::{
     maybe_checkpoint_to_contextlattice, move_task, remove_attachment_from_task, save_store,
     set_blocked, KanbanActionInput, KanbanBoard, KanbanLane, NewKanbanTaskInput,
 };
+use crate::mcp_config::{load_mcp_config, load_mcp_config_if_exists, McpTransportKind};
 use crate::model_switch::{
     cached_provider_catalog_status, curated_provider_slugs, format_stale_auxiliary_warning,
     normalize_provider_model, provider_catalog_entries_for_config, provider_model_ids,
@@ -24952,33 +24953,31 @@ pub async fn handle_cli_mcp(
             );
         }
         "list" => {
-            if !mcp_config_path.exists() {
+            let Some(config) = load_mcp_config_if_exists(&mcp_config_path)? else {
                 println!("No MCP servers configured ({})", mcp_config_path.display());
                 println!("Add one with `hermes mcp add --server <name-or-url>`.");
                 return Ok(());
-            }
-            let content = std::fs::read_to_string(&mcp_config_path)
-                .map_err(|e| hermes_core::AgentError::Io(format!("Read error: {}", e)))?;
-            let servers: serde_json::Value =
-                serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
-            if let Some(obj) = servers.as_object() {
-                if obj.is_empty() {
-                    println!("No MCP servers configured.");
-                } else {
-                    println!("MCP servers ({}):", mcp_config_path.display());
-                    for (name, cfg) in obj {
-                        let url = cfg.get("url").and_then(|v| v.as_str()).unwrap_or("(stdio)");
-                        let parallel = cfg
-                            .get("supports_parallel_tool_calls")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        println!(
-                            "  • {} — {}  [parallel_tool_calls:{}]",
-                            name,
-                            url,
-                            if parallel { "on" } else { "off" }
-                        );
-                    }
+            };
+            if config.servers.is_empty() {
+                println!("No MCP servers configured.");
+            } else {
+                for warning in config.warnings() {
+                    println!("Warning: {warning}");
+                }
+                println!("MCP servers ({}):", mcp_config_path.display());
+                for entry in &config.servers {
+                    println!(
+                        "  • {} — {}  [{}; enabled:{}; parallel_tool_calls:{}]",
+                        entry.name,
+                        entry.transport_display(),
+                        entry.transport_kind().as_str(),
+                        if entry.enabled { "on" } else { "off" },
+                        if entry.supports_parallel_tool_calls {
+                            "on"
+                        } else {
+                            "off"
+                        }
+                    );
                 }
             }
         }
@@ -25142,30 +25141,29 @@ pub async fn handle_cli_mcp(
                 )
             })?;
             println!("Testing MCP server: {}...", srv);
-            if !mcp_config_path.exists() {
+            let Some(config) = load_mcp_config_if_exists(&mcp_config_path)? else {
                 println!("No MCP config found.");
                 return Ok(());
-            }
-            let content = std::fs::read_to_string(&mcp_config_path)
-                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-            let servers: serde_json::Value =
-                serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
-            match servers.get(&srv) {
-                Some(cfg) => {
-                    let url = cfg.get("url").and_then(|v| v.as_str()).unwrap_or("(stdio)");
-                    let enabled = cfg.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-                    let parallel = cfg
-                        .get("supports_parallel_tool_calls")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
+            };
+            match config.get(&srv) {
+                Some(entry) => {
+                    for warning in &entry.warnings {
+                        println!("Warning: {warning}");
+                    }
                     println!("  Server: {}", srv);
-                    println!("  URL: {}", url);
-                    println!("  Enabled: {}", enabled);
+                    println!("  Transport: {}", entry.transport_kind().as_str());
+                    println!("  Target: {}", entry.transport_display());
+                    println!("  Enabled: {}", entry.enabled);
                     println!(
                         "  Parallel tool calls: {}",
-                        if parallel { "on" } else { "off" }
+                        if entry.supports_parallel_tool_calls {
+                            "on"
+                        } else {
+                            "off"
+                        }
                     );
-                    if url.starts_with("http") {
+                    if entry.transport_kind() == McpTransportKind::Http {
+                        let url = entry.url.as_deref().unwrap_or_default();
                         match reqwest::Client::new()
                             .get(url)
                             .timeout(std::time::Duration::from_secs(5))
@@ -25188,18 +25186,20 @@ pub async fn handle_cli_mcp(
                     "Missing server name. Usage: hermes mcp configure <name>".into(),
                 )
             })?;
-            if !mcp_config_path.exists() {
+            let Some(config) = load_mcp_config_if_exists(&mcp_config_path)? else {
                 println!("No MCP config found. Add a server first with `hermes mcp add`.");
                 return Ok(());
-            }
-            let content = std::fs::read_to_string(&mcp_config_path)
-                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-            let servers: serde_json::Value =
-                serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
-            match servers.get(&srv) {
-                Some(cfg) => {
+            };
+            match config.get(&srv) {
+                Some(entry) => {
+                    for warning in &entry.warnings {
+                        println!("Warning: {warning}");
+                    }
                     println!("Current config for '{}':", srv);
-                    println!("{}", serde_json::to_string_pretty(cfg).unwrap_or_default());
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(entry).unwrap_or_default()
+                    );
                     println!("\nEdit {} to modify settings.", mcp_config_path.display());
                 }
                 None => println!("Server '{}' not found.", srv),
@@ -25217,11 +25217,7 @@ pub async fn handle_cli_mcp(
                     mcp_config_path.display()
                 )));
             }
-            let configured = std::fs::read_to_string(&mcp_config_path)
-                .ok()
-                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                .and_then(|v| v.get(&srv).cloned())
-                .is_some();
+            let configured = load_mcp_config(&mcp_config_path)?.get(&srv).is_some();
             if !configured {
                 return Err(hermes_core::AgentError::Config(format!(
                     "MCP server '{}' is not configured",
