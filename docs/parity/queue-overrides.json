@@ -675,6 +675,14 @@
     "8077e7d2fbbb": {
       "disposition": "superseded",
       "notes": "Upstream _session_resume_lock narrowing applies to Python TUI gateway concurrent live-agent construction; Rust interactive resume is guarded by the process-level interactive session lock and has no session.close RPC lock path to port."
+    },
+    "30412a9771cc": {
+      "disposition": "ported",
+      "notes": "Rust disk-cleanup revalidates stale cron-output entries at dry-run and quick-clean time, drops stale control-plane tracked rows, hard-protects cron/jobs.json plus .tick.lock, and deletes only cron/output payloads; covered by crates/hermes-tools disk_cleanup tests."
+    },
+    "46b2afc56b79": {
+      "disposition": "ported",
+      "notes": "Rust session persistence now runs PRAGMA wal_checkpoint(TRUNCATE) after startup auto-maintenance and exposes truncate_wal_checkpoint(); regression tests force WAL growth and assert the sessions.db-wal sidecar shrinks to zero."
     }
   },
   "subject_patterns": [

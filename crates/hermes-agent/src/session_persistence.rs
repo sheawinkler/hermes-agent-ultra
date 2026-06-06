@@ -356,6 +356,39 @@ impl SessionPersistence {
         Ok(())
     }
 
+    /// Flush committed WAL frames and truncate the `sessions.db-wal` sidecar.
+    ///
+    /// SQLite's PASSIVE checkpoint leaves the WAL file at its high-water mark;
+    /// TRUNCATE reclaims the sidecar after startup maintenance or explicit
+    /// shutdown hooks. Databases not currently in WAL mode accept this pragma
+    /// and return a no-op result.
+    pub fn truncate_wal_checkpoint(&self) -> Result<(), AgentError> {
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let (busy, log_frames, checkpointed_frames): (i64, i64, i64) = conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .map_err(|e| AgentError::Io(format!("Failed to checkpoint sessions WAL: {e}")))?;
+
+        if busy > 0 {
+            tracing::warn!(
+                "sessions.db WAL checkpoint could not truncate immediately: busy={}, log_frames={}, checkpointed_frames={}",
+                busy,
+                log_frames,
+                checkpointed_frames
+            );
+        } else if log_frames > 0 {
+            tracing::debug!(
+                "sessions.db WAL checkpoint truncated {} frame(s); checkpointed={}",
+                log_frames,
+                checkpointed_frames
+            );
+        }
+        Ok(())
+    }
+
     /// Delete sessions whose `updated_at` is older than the retention window.
     ///
     /// Returns the number of deleted sessions.
@@ -455,6 +488,10 @@ impl SessionPersistence {
         if let Err(e) = self.set_meta("last_auto_prune", &now.to_string()) {
             result.error = Some(e.to_string());
             return result;
+        }
+
+        if let Err(e) = self.truncate_wal_checkpoint() {
+            tracing::warn!("sessions.db WAL checkpoint failed: {}", e);
         }
 
         result
@@ -966,6 +1003,51 @@ mod tests {
         .expect("update updated_at");
     }
 
+    fn grow_sessions_wal(
+        sp: &SessionPersistence,
+    ) -> (rusqlite::Connection, std::path::PathBuf, u64) {
+        sp.ensure_db().unwrap();
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+        conn.execute_batch("PRAGMA wal_autocheckpoint=0;").unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS wal_growth (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payload TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        let payload = "x".repeat(64 * 1024);
+        let tx = conn.unchecked_transaction().unwrap();
+        for _ in 0..96 {
+            tx.execute(
+                "INSERT INTO wal_growth (payload) VALUES (?1)",
+                params![&payload],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+
+        let wal_path = std::path::PathBuf::from(format!("{}-wal", sp.db_path.display()));
+        let wal_len = std::fs::metadata(&wal_path)
+            .map(|meta| meta.len())
+            .unwrap_or(0);
+        assert!(
+            wal_len > 0,
+            "test setup should create a non-empty sessions.db-wal sidecar"
+        );
+        (conn, wal_path, wal_len)
+    }
+
+    fn wal_len(path: &Path) -> u64 {
+        std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
+    }
+
     #[test]
     fn test_persist_and_load_session() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1403,6 +1485,39 @@ mod tests {
         assert_eq!(sp.get_meta("k1").unwrap().as_deref(), Some("v1"));
         sp.set_meta("k1", "v2").unwrap();
         assert_eq!(sp.get_meta("k1").unwrap().as_deref(), Some("v2"));
+    }
+
+    #[test]
+    fn test_truncate_wal_checkpoint_shrinks_sessions_wal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let (_conn, wal_path, before) = grow_sessions_wal(&sp);
+
+        sp.truncate_wal_checkpoint().unwrap();
+
+        assert_eq!(
+            wal_len(&wal_path),
+            0,
+            "TRUNCATE checkpoint should shrink WAL from {before} bytes"
+        );
+    }
+
+    #[test]
+    fn test_auto_maintenance_truncates_wal_after_meta_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let (_conn, wal_path, before) = grow_sessions_wal(&sp);
+
+        let result = sp.maybe_auto_prune_and_vacuum(90, 0, false);
+
+        assert!(!result.skipped);
+        assert_eq!(result.pruned, 0);
+        assert!(result.error.is_none());
+        assert_eq!(
+            wal_len(&wal_path),
+            0,
+            "auto-maintenance should truncate WAL from {before} bytes"
+        );
     }
 
     #[test]
