@@ -855,6 +855,18 @@
     "4e78963fe86a5f2758bf754a7979dc31aaf1a3db": {
       "disposition": "superseded",
       "notes": "The dead Python nested usage dict path is structurally superseded by Rust's typed AgentResult.usage and PromptExecutionOutput.usage flow; the CLI ACP usage test proves only the top-level typed fields are converted."
+    },
+    "1bcc87a1535cd4c17dc2bfe45fd198863404e892": {
+      "disposition": "ported",
+      "notes": "Rust ACP initialize advertises loadSession and sessionCapabilities.resume in the wire-format agentCapabilities object; handler tests assert the ACP aliases so editor clients can discover load/resume support."
+    },
+    "c71b1d197f446e264a94f962fd55f285c9dc231f": {
+      "disposition": "ported",
+      "notes": "Rust ACP now converts its slash command table into availableCommands updates with input hints and emits available_commands_update after session new/load/resume/fork; handler and server run_on tests prove the lifecycle and JSON-RPC notification path."
+    },
+    "4764e06fdefa65cb75961da64da1ed63c99a0a2a": {
+      "disposition": "ported",
+      "notes": "Rust ACP exposes the editor session-management surface with load/resume/fork/list plus model/mode/config updates, now including the stable session/set_config_option method alias; handler tests cover camelCase routing and persisted session config."
     }
   },
   "subject_patterns": [
