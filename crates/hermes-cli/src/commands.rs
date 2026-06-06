@@ -26,7 +26,9 @@ use hermes_intelligence::model_metadata::{get_model_context_length, get_model_in
 use hermes_intelligence::models_dev::default_client;
 use hermes_intelligence::{build_swarm_execution_plan, swarm_runtime_status, SwarmExecutionMode};
 use hermes_tools::skill_commands::{
-    resolve_installed_skill_slash_command, SkillCommandResolverConfig, SkillSlashInvocation,
+    build_skill_reload_system_note, installed_skill_slash_command_snapshot,
+    render_skill_slash_command_snapshot, resolve_installed_skill_slash_command,
+    SkillCommandResolverConfig, SkillSlashInvocation,
 };
 use hermes_tools::ToolPolicyEngine;
 use regex::Regex;
@@ -3380,8 +3382,7 @@ fn canonical_command(cmd: &str) -> &str {
         "/scheduler" => "/background",
         "/gateway" => "/platforms",
         "/onboard" => "/walkthrough",
-        "/reload-skills" => "/reload",
-        "/reload_skills" => "/reload",
+        "/reload-skills" | "/reload_skills" => "/reload-skills",
         "/reload_mcp" => "/reload-mcp",
         "/fork" => "/branch",
         "/tt" => "/timetravel",
@@ -3649,7 +3650,9 @@ async fn dispatch_slash_command(
         "/plugins" => handle_plugins_command(app),
         "/disk-cleanup" => handle_disk_cleanup_command(app, args),
         "/mcp" => handle_mcp_command(app),
-        "/reload" | "/reload-mcp" => handle_reload_command(app, canonical_command(cmd)),
+        "/reload" | "/reload-skills" | "/reload-mcp" => {
+            handle_reload_command(app, canonical_command(cmd))
+        }
         "/cron" => handle_cron_command(app),
         "/agents" => handle_agents_command(app, args),
         "/kanban" => handle_kanban_command(app, args),
@@ -14576,6 +14579,15 @@ fn handle_reload_command(app: &mut App, cmd: &str) -> Result<CommandResult, Agen
             app,
             "MCP reload requested. Restart session/gateway for full connector renegotiation.",
         );
+    } else if cmd == "/reload-skills" {
+        let config = SkillCommandResolverConfig {
+            enabled: app.config.skills.enabled.clone(),
+            disabled: app.config.skills.disabled.clone(),
+            ..SkillCommandResolverConfig::default()
+        };
+        let snapshot = installed_skill_slash_command_snapshot(&config);
+        app.queue_next_turn_system_note(build_skill_reload_system_note(&snapshot));
+        emit_command_output(app, render_skill_slash_command_snapshot(&snapshot));
     } else {
         hermes_config::loader::load_dotenv();
         match hermes_config::load_config(app.state_root.to_str()) {
@@ -27634,6 +27646,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cli_reload_skills_reports_snapshot_and_queues_note() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let skill_dir = tmp.path().join("skills").join("release-captain");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: Release Captain\ndescription: Release workflow\n---\n# Release Captain\n1. Inspect changed files\n",
+        )
+        .expect("write skill");
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        handle_slash_command(&mut app, "/reload-skills", &[])
+            .await
+            .expect("reload skills");
+
+        let out = latest_ui_assistant_text(&app);
+        assert!(out.contains("Reloaded installed skill commands"));
+        assert!(out.contains("/release-captain"));
+        assert!(out.contains("no prompt cache was invalidated"));
+        assert_eq!(app.pending_system_note_count(), 1);
+    }
+
+    #[tokio::test]
     async fn promoted_snapshot_command_lists_snapshots() {
         let _guard = env_test_lock();
         let tmp = tempdir().expect("tempdir");
@@ -28966,8 +29003,8 @@ mod tests {
     #[test]
     fn test_upstream_compat_aliases_are_mapped() {
         assert_eq!(canonical_command("/topic"), "/title");
-        assert_eq!(canonical_command("/reload-skills"), "/reload");
-        assert_eq!(canonical_command("/reload_skills"), "/reload");
+        assert_eq!(canonical_command("/reload-skills"), "/reload-skills");
+        assert_eq!(canonical_command("/reload_skills"), "/reload-skills");
         assert_eq!(canonical_command("/swarms"), "/swarm");
         assert_eq!(canonical_command("/summary"), "/recap");
         assert_eq!(canonical_command("/whoami"), "/profile");

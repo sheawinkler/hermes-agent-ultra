@@ -74,6 +74,8 @@ pub enum GatewayCommandResult {
     },
     /// Reload MCP server registry/state.
     ReloadMcp,
+    /// Refresh installed skill slash command inventory.
+    ReloadSkills,
     /// Switch active provider.
     SwitchProvider { provider: String, reply: String },
     /// Switch active profile.
@@ -270,6 +272,12 @@ pub fn all_commands() -> Vec<CommandInfo> {
             aliases: &["/mcp_reload"],
             description: "Reload MCP tool/server registrations",
             usage: "/reload_mcp",
+        },
+        CommandInfo {
+            name: "/reload-skills",
+            aliases: &["/reload_skills"],
+            description: "Refresh installed skill slash command inventory",
+            usage: "/reload-skills",
         },
         CommandInfo {
             name: "/provider",
@@ -568,6 +576,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 .to_string(),
         ),
         "/reload_mcp" | "/mcp_reload" => GatewayCommandResult::ReloadMcp,
+        "/reload_skills" => GatewayCommandResult::ReloadSkills,
         "/provider" => {
             if args.is_empty() {
                 GatewayCommandResult::Reply(
@@ -790,6 +799,18 @@ mod tests {
         match handle_command("/xyz123") {
             GatewayCommandResult::Unknown(_) => {}
             other => panic!("Expected Unknown, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_reload_skills_command() {
+        match handle_command("/reload-skills") {
+            GatewayCommandResult::ReloadSkills => {}
+            other => panic!("Expected ReloadSkills for /reload-skills, got {:?}", other),
+        }
+        match handle_command("/reload_skills") {
+            GatewayCommandResult::ReloadSkills => {}
+            other => panic!("Expected ReloadSkills for /reload_skills, got {:?}", other),
         }
     }
 

@@ -1232,6 +1232,14 @@
       "disposition": "ported",
       "notes": "Rust CLI and gateway now resolve otherwise-unknown installed SKILL.md slash commands from configured skill roots, apply enabled/disabled/platform/security filtering, inject full skill content plus invocation args into the normal agent turn, and cover the shared resolver plus CLI and gateway routing with focused tests."
     },
+    "7966560fb50f": {
+      "disposition": "ported",
+      "notes": "Rust now exposes first-class /reload-skills and /reload_skills in CLI and gateway. The command snapshots installed SKILL.md slash commands through the shared Rust resolver, reports available/blocked/skipped commands, queues an agent-visible next-turn note, and deliberately avoids prompt-cache invalidation. The upstream skills_reload agent tool portion is superseded by the later upstream refactor and not mirrored."
+    },
+    "dd2d1ba5e61c": {
+      "disposition": "ported",
+      "notes": "Rust /reload-skills follows the final upstream behavior: it queues a one-shot system note for the next agent turn, confirms dynamic SKILL.md slash commands are scanned live, and does not delete prompt caches or expose a skills_reload agent tool. CLI and gateway tests cover command routing, snapshot rendering, and one-shot gateway note injection."
+    },
     "3824b0323793": {
       "disposition": "superseded",
       "notes": "Python TUI session.title DB/RPC edge cases are superseded by Rust gateway in-memory Session.title storage and command tests; there is no pending DB row queue or Python RPC failure mode in this runtime path."
