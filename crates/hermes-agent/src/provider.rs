@@ -763,6 +763,9 @@ impl GenericProvider {
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
             .json(body);
+        if provider_profiles::is_kimi_code_base_url(&self.base_url) {
+            req = req.header("User-Agent", provider_profiles::KIMI_CODE_USER_AGENT);
+        }
         for (key, value) in &self.extra_headers {
             req = req.header(key.as_str(), value.as_str());
         }
@@ -2844,6 +2847,55 @@ mod tests {
 
         assert!(request.headers().get("originator").is_none());
         assert!(request.headers().get("ChatGPT-Account-ID").is_none());
+    }
+
+    #[test]
+    fn generic_provider_attaches_kimi_code_user_agent_for_code_endpoint() {
+        let provider = GenericProvider::new(
+            provider_profiles::KIMI_CODE_BASE_URL,
+            "sk-kimi-test",
+            "kimi-k2.6",
+        );
+        let request = provider
+            .build_request(
+                &Client::new(),
+                &format!("{}/chat/completions", provider_profiles::KIMI_CODE_BASE_URL),
+                "sk-kimi-test",
+                &serde_json::json!({"model": "kimi-k2.6", "messages": []}),
+            )
+            .build()
+            .expect("request");
+
+        assert_eq!(
+            request
+                .headers()
+                .get("User-Agent")
+                .and_then(|h| h.to_str().ok()),
+            Some(provider_profiles::KIMI_CODE_USER_AGENT)
+        );
+    }
+
+    #[test]
+    fn generic_provider_does_not_attach_kimi_code_user_agent_to_legacy_endpoint() {
+        let provider = GenericProvider::new(
+            provider_profiles::KIMI_LEGACY_BASE_URL,
+            "sk-legacy",
+            "kimi-k2.6",
+        );
+        let request = provider
+            .build_request(
+                &Client::new(),
+                &format!(
+                    "{}/chat/completions",
+                    provider_profiles::KIMI_LEGACY_BASE_URL
+                ),
+                "sk-legacy",
+                &serde_json::json!({"model": "kimi-k2.6", "messages": []}),
+            )
+            .build()
+            .expect("request");
+
+        assert!(request.headers().get("User-Agent").is_none());
     }
 
     #[test]

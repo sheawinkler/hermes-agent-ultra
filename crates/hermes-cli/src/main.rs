@@ -10,6 +10,7 @@ use base64::Engine as _;
 use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::{generate, Shell as CompletionShell};
+use hermes_agent::provider_profiles;
 use hermes_agent::session_persistence::SessionPersistence;
 use hermes_agent::{leading_system_prompt_for_persist, AgentCallbacks, AgentLoop};
 use hermes_auth::{
@@ -6014,6 +6015,13 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
 }
 
 fn provider_env_var(provider: &str) -> Option<&'static str> {
+    let raw_provider = provider.trim().to_ascii_lowercase();
+    match raw_provider.as_str() {
+        "kimi-coding" => return Some("KIMI_CODING_API_KEY"),
+        "moonshot" | "kimi" => return Some("KIMI_API_KEY"),
+        _ => {}
+    }
+
     match normalize_secret_provider(provider).as_str() {
         "openai" => Some("HERMES_OPENAI_API_KEY"),
         "openai-codex" => Some("HERMES_OPENAI_CODEX_API_KEY"),
@@ -6025,7 +6033,7 @@ fn provider_env_var(provider: &str) -> Option<&'static str> {
         "qwen" | "alibaba" => Some("DASHSCOPE_API_KEY"),
         "alibaba-coding-plan" => Some("ALIBABA_CODING_PLAN_API_KEY"),
         "qwen-oauth" => Some("HERMES_QWEN_OAUTH_API_KEY"),
-        "moonshot" | "kimi" | "kimi-coding" => Some("KIMI_API_KEY"),
+        "kimi-coding" => Some("KIMI_CODING_API_KEY"),
         "kimi-coding-cn" => Some("KIMI_CN_API_KEY"),
         "minimax" => Some("MINIMAX_API_KEY"),
         "minimax-cn" => Some("MINIMAX_CN_API_KEY"),
@@ -9976,7 +9984,8 @@ const SETUP_NOUS_ENV_KEYS: &[&str] = &["NOUS_API_KEY"];
 const SETUP_QWEN_ENV_KEYS: &[&str] = &["DASHSCOPE_API_KEY"];
 const SETUP_QWEN_OAUTH_ENV_KEYS: &[&str] = &["HERMES_QWEN_OAUTH_API_KEY", "DASHSCOPE_API_KEY"];
 const SETUP_ALIBABA_CODING_PLAN_ENV_KEYS: &[&str] = &["ALIBABA_CODING_PLAN_API_KEY"];
-const SETUP_KIMI_CODING_ENV_KEYS: &[&str] = &["KIMI_API_KEY", "KIMI_CODING_API_KEY"];
+const SETUP_KIMI_CODING_ENV_KEYS: &[&str] =
+    &["KIMI_CODING_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY"];
 const SETUP_KIMI_CODING_CN_ENV_KEYS: &[&str] = &["KIMI_CN_API_KEY"];
 const SETUP_MINIMAX_ENV_KEYS: &[&str] = &["MINIMAX_API_KEY"];
 const SETUP_MINIMAX_CN_ENV_KEYS: &[&str] = &["MINIMAX_CN_API_KEY"];
@@ -10097,7 +10106,7 @@ const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
     SetupModelOption {
         provider: "kimi-coding",
         model: "kimi-coding:kimi-k2.6",
-        label: "Kimi Coding (Moonshot)",
+        label: "Kimi Code API",
     },
     SetupModelOption {
         provider: "kimi-coding-cn",
@@ -10417,8 +10426,8 @@ fn setup_provider_default_base_url(provider: &str) -> Option<&'static str> {
         "qwen" | "alibaba" => Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
         "alibaba-coding-plan" => Some("https://coding-intl.dashscope.aliyuncs.com/v1"),
         "deepseek" => Some("https://api.deepseek.com/v1"),
-        "kimi-coding" => Some("https://api.moonshot.ai/v1"),
-        "kimi-coding-cn" => Some("https://api.moonshot.cn/v1"),
+        "kimi-coding" => Some(provider_profiles::KIMI_CODE_BASE_URL),
+        "kimi-coding-cn" => Some(provider_profiles::KIMI_CN_BASE_URL),
         "minimax-cn" => Some("https://api.minimaxi.com/anthropic"),
         "novita" => Some("https://api.novita.ai/openai/v1"),
         "stepfun" => Some("https://api.stepfun.ai/step_plan/v1"),
@@ -15118,6 +15127,8 @@ mod tests {
             provider_env_var("qwen-oauth"),
             Some("HERMES_QWEN_OAUTH_API_KEY")
         );
+        assert_eq!(provider_env_var("kimi-coding"), Some("KIMI_CODING_API_KEY"));
+        assert_eq!(provider_env_var("kimi"), Some("KIMI_API_KEY"));
         assert_eq!(provider_env_var("copilot"), Some("COPILOT_GITHUB_TOKEN"));
         assert_eq!(
             secret_provider_aliases("copilot"),
@@ -15774,6 +15785,14 @@ mod tests {
         assert_eq!(
             setup_provider_default_base_url("nous-api"),
             Some(DEFAULT_NOUS_INFERENCE_URL)
+        );
+        assert_eq!(
+            setup_provider_env_keys("kimi-coding"),
+            &["KIMI_CODING_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY"]
+        );
+        assert_eq!(
+            setup_provider_default_base_url("kimi-coding"),
+            Some(provider_profiles::KIMI_CODE_BASE_URL)
         );
         assert_eq!(
             setup_provider_env_keys("ollama-local"),

@@ -8,6 +8,29 @@ use serde_json::{Map, Value};
 
 pub const NOUS_PRODUCT_TAG: &str = "product=hermes-agent";
 pub const NOUS_CLIENT_TAG_PREFIX: &str = "client=hermes-client-v";
+pub const KIMI_CODE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
+pub const KIMI_LEGACY_BASE_URL: &str = "https://api.moonshot.ai/v1";
+pub const KIMI_CN_BASE_URL: &str = "https://api.moonshot.cn/v1";
+pub const KIMI_CODE_USER_AGENT: &str = "KimiCLI/1.0";
+
+pub fn is_kimi_code_base_url(base_url: &str) -> bool {
+    base_url
+        .trim()
+        .to_ascii_lowercase()
+        .contains("api.kimi.com")
+}
+
+pub fn kimi_base_url_for_api_key(api_key: &str, legacy_default: &str) -> &'static str {
+    if api_key.trim().starts_with("sk-kimi-") {
+        KIMI_CODE_BASE_URL
+    } else if legacy_default.trim().is_empty() {
+        KIMI_LEGACY_BASE_URL
+    } else if legacy_default.trim() == KIMI_CN_BASE_URL {
+        KIMI_CN_BASE_URL
+    } else {
+        KIMI_LEGACY_BASE_URL
+    }
+}
 
 pub fn canonical_provider_profile_id(provider: &str) -> Option<&'static str> {
     let normalized = provider.trim().to_ascii_lowercase();
@@ -67,8 +90,8 @@ pub fn profile_auth_type(profile: &str) -> Option<&'static str> {
 pub fn profile_base_url(profile: &str) -> Option<&'static str> {
     match canonical_provider_profile_id(profile)? {
         "nvidia" => Some("https://integrate.api.nvidia.com/v1"),
-        "kimi-coding" => Some("https://api.moonshot.ai/v1"),
-        "kimi-coding-cn" => Some("https://api.moonshot.cn/v1"),
+        "kimi-coding" => Some(KIMI_CODE_BASE_URL),
+        "kimi-coding-cn" => Some(KIMI_CN_BASE_URL),
         "openrouter" => Some("https://openrouter.ai/api/v1"),
         "nous" => Some("https://inference-api.nousresearch.com/v1"),
         "qwen-oauth" => Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
@@ -388,12 +411,22 @@ mod tests {
         assert_eq!(profile_auth_type("nous"), Some("oauth_device_code"));
         assert_eq!(profile_auth_type("qwen-oauth"), Some("oauth_external"));
         assert!(profile_base_url("nvidia").unwrap().contains("nvidia.com"));
+        assert_eq!(profile_base_url("kimi-coding"), Some(KIMI_CODE_BASE_URL));
         assert!(profile_base_url("kimi-coding-cn")
             .unwrap()
             .contains("moonshot.cn"));
         assert!(profile_base_url("mimo").unwrap().contains("xiaomimimo.com"));
         assert!(supports_vision("xiaomi"));
         assert!(!supports_vision("kimi"));
+        assert!(is_kimi_code_base_url(KIMI_CODE_BASE_URL));
+        assert_eq!(
+            kimi_base_url_for_api_key("sk-kimi-test", KIMI_LEGACY_BASE_URL),
+            KIMI_CODE_BASE_URL
+        );
+        assert_eq!(
+            kimi_base_url_for_api_key("sk-legacy-test", KIMI_LEGACY_BASE_URL),
+            KIMI_LEGACY_BASE_URL
+        );
     }
 
     #[test]

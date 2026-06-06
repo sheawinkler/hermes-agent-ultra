@@ -22,6 +22,7 @@ use hermes_agent::provider::{
     openai_codex_provider_with_timeout, AnthropicProvider, GenericProvider, OpenAiProvider,
     OpenRouterProvider, OPENAI_CODEX_BASE_URL,
 };
+use hermes_agent::provider_profiles;
 use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
@@ -5274,6 +5275,44 @@ mod tests {
     }
 
     #[test]
+    fn test_provider_api_key_from_env_prefers_kimi_coding_key_for_code_provider() {
+        let _guard = env_test_lock();
+        for key in [
+            "KIMI_CODING_API_KEY",
+            "KIMI_API_KEY",
+            "MOONSHOT_API_KEY",
+            "KIMI_CN_API_KEY",
+        ] {
+            std::env::remove_var(key);
+        }
+
+        std::env::set_var("KIMI_API_KEY", "sk-legacy");
+        std::env::set_var("KIMI_CODING_API_KEY", "sk-kimi-code");
+        assert_eq!(
+            provider_api_key_from_env("kimi-coding").as_deref(),
+            Some("sk-kimi-code")
+        );
+        assert_eq!(
+            provider_api_key_from_env("kimi").as_deref(),
+            Some("sk-legacy")
+        );
+        std::env::set_var("KIMI_CN_API_KEY", "sk-cn");
+        assert_eq!(
+            provider_api_key_from_env("kimi-coding-cn").as_deref(),
+            Some("sk-cn")
+        );
+
+        for key in [
+            "KIMI_CODING_API_KEY",
+            "KIMI_API_KEY",
+            "MOONSHOT_API_KEY",
+            "KIMI_CN_API_KEY",
+        ] {
+            std::env::remove_var(key);
+        }
+    }
+
+    #[test]
     fn test_provider_api_key_from_env_supports_extended_registry() {
         let _guard = env_test_lock();
         let env_vars = [
@@ -5480,6 +5519,10 @@ mod tests {
         std::env::set_var("KIMI_BASE_URL", "https://kimi.example/v1");
         assert_eq!(
             provider_base_url_from_env("moonshot").as_deref(),
+            Some("https://kimi.example/v1")
+        );
+        assert_eq!(
+            provider_base_url_from_env("kimi-coding").as_deref(),
             Some("https://kimi.example/v1")
         );
         std::env::set_var("MINIMAX_CN_BASE_URL", "https://minimax-cn.example/v1");
@@ -6404,8 +6447,9 @@ const ALIBABA_CODING_PLAN_BASE_URL: &str = "https://coding-intl.dashscope.aliyun
 const GOOGLE_GEMINI_CLI_BASE_URL: &str = "cloudcode-pa://google";
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 const AI_GATEWAY_BASE_URL: &str = "https://ai-gateway.vercel.sh/v1";
-const KIMI_CODING_BASE_URL: &str = "https://api.moonshot.ai/v1";
-const KIMI_CODING_CN_BASE_URL: &str = "https://api.moonshot.cn/v1";
+const KIMI_CODING_BASE_URL: &str = provider_profiles::KIMI_CODE_BASE_URL;
+const KIMI_LEGACY_BASE_URL: &str = provider_profiles::KIMI_LEGACY_BASE_URL;
+const KIMI_CODING_CN_BASE_URL: &str = provider_profiles::KIMI_CN_BASE_URL;
 const MINIMAX_CN_BASE_URL: &str = "https://api.minimaxi.com/anthropic";
 const NOVITA_BASE_URL: &str = "https://api.novita.ai/openai/v1";
 const XAI_BASE_URL: &str = "https://api.x.ai/v1";
@@ -6479,7 +6523,8 @@ fn provider_default_base_url(provider: &str) -> Option<&'static str> {
         "stepfun" | "step" | "step-plan" => Some(STEPFUN_BASE_URL),
         "ai-gateway" | "aigateway" | "vercel" => Some(AI_GATEWAY_BASE_URL),
         "kimi-coding" => Some(KIMI_CODING_BASE_URL),
-        "kimi-coding-cn" | "moonshot" | "kimi" => Some(KIMI_CODING_CN_BASE_URL),
+        "kimi" | "moonshot" => Some(KIMI_LEGACY_BASE_URL),
+        "kimi-coding-cn" => Some(KIMI_CODING_CN_BASE_URL),
         "minimax-cn" | "minimax_cn" => Some(MINIMAX_CN_BASE_URL),
         "novita" | "novita-ai" | "novitaai" => Some(NOVITA_BASE_URL),
         "xai" => Some(XAI_BASE_URL),
@@ -6785,6 +6830,16 @@ fn url_is_local_or_private(base_url: &str) -> bool {
 /// Resolve API key / token for a named LLM provider from well-known environment variables.
 pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
     let raw_provider = provider.trim().to_ascii_lowercase();
+    if raw_provider == "kimi-coding-cn" {
+        return ["KIMI_CN_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY"]
+            .iter()
+            .find_map(|env_var| {
+                std::env::var(env_var)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            });
+    }
     if matches!(raw_provider.as_str(), "minimax-cn" | "minimax_cn") {
         return std::env::var("MINIMAX_CN_API_KEY")
             .ok()
@@ -6830,15 +6885,24 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
             .filter(|s| !s.trim().is_empty())
             .or_else(|| std::env::var("DASHSCOPE_API_KEY").ok())
             .filter(|s| !s.trim().is_empty()),
-        "kimi" | "moonshot" => std::env::var("KIMI_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| std::env::var("KIMI_CODING_API_KEY").ok())
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| std::env::var("MOONSHOT_API_KEY").ok())
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| std::env::var("KIMI_CN_API_KEY").ok())
-            .filter(|s| !s.trim().is_empty()),
+        "kimi" | "moonshot" => {
+            let env_vars: &[&str] = if raw_provider == "kimi-coding" {
+                &["KIMI_CODING_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY"]
+            } else {
+                &[
+                    "KIMI_API_KEY",
+                    "KIMI_CODING_API_KEY",
+                    "MOONSHOT_API_KEY",
+                    "KIMI_CN_API_KEY",
+                ]
+            };
+            env_vars.iter().find_map(|env_var| {
+                std::env::var(env_var)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
+        }
         "minimax" => std::env::var("MINIMAX_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty())

@@ -979,6 +979,10 @@
     "de07aa7c4046": {
       "disposition": "ported",
       "notes": "Rust now exposes a first-class `nous-api` direct API-key provider with aliases, non-OAuth provider capability, setup catalog entry, NOUS_API_KEY/NOUS_BASE_URL runtime resolution, Nous provider construction, Nous model normalization/catalog reuse, and targeted core/CLI/agent tests."
+    },
+    "4447e7d71afa": {
+      "disposition": "ported",
+      "notes": "Rust runtime now supports Kimi Code sk-kimi-* routing to https://api.kimi.com/coding/v1 with KimiCLI user-agent while preserving KIMI_BASE_URL override and legacy Moonshot fallback."
     }
   },
   "subject_patterns": [

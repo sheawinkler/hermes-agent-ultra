@@ -2866,10 +2866,17 @@ impl AgentLoop {
             "qwen" | "qwen-oauth" => std::env::var("DASHSCOPE_API_KEY")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
-            "kimi" | "moonshot" | "kimi-coding" => std::env::var("KIMI_CODING_API_KEY")
+            "kimi-coding" => std::env::var("KIMI_CODING_API_KEY")
                 .ok()
                 .filter(|v| !v.trim().is_empty())
                 .or_else(|| std::env::var("KIMI_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("MOONSHOT_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty()),
+            "kimi" | "moonshot" => std::env::var("KIMI_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("KIMI_CODING_API_KEY").ok())
                 .filter(|v| !v.trim().is_empty())
                 .or_else(|| std::env::var("MOONSHOT_API_KEY").ok())
                 .filter(|v| !v.trim().is_empty()),
@@ -2958,10 +2965,16 @@ impl AgentLoop {
                         .or_else(|| Some("https://inference-api.nousresearch.com/v1".to_string()))
                 } else if provider == "stepfun" {
                     Some("https://api.stepfun.ai/step_plan/v1".to_string())
-                } else if provider == "kimi-coding" {
-                    Some("https://api.moonshot.ai/v1".to_string())
+                } else if matches!(provider, "kimi" | "moonshot" | "kimi-coding") {
+                    std::env::var("KIMI_BASE_URL")
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| {
+                            Some(crate::provider_profiles::KIMI_LEGACY_BASE_URL.to_string())
+                        })
                 } else if provider == "kimi-coding-cn" {
-                    Some("https://api.moonshot.cn/v1".to_string())
+                    Some(crate::provider_profiles::KIMI_CN_BASE_URL.to_string())
                 } else if provider == "minimax-cn" || provider == "minimax_cn" {
                     Some("https://api.minimaxi.com/anthropic".to_string())
                 } else if provider == "copilot" {
@@ -2988,6 +3001,50 @@ impl AgentLoop {
                     None
                 }
             })
+    }
+
+    fn has_explicit_runtime_base_url(&self, provider: &str, route_base_url: Option<&str>) -> bool {
+        if route_base_url
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+        {
+            return true;
+        }
+        if self
+            .runtime_provider_config(provider)
+            .and_then(|c| c.base_url.as_deref())
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+        {
+            return true;
+        }
+        if matches!(provider, "kimi" | "moonshot" | "kimi-coding") {
+            return std::env::var("KIMI_BASE_URL")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .is_some_and(|value| !value.is_empty());
+        }
+        false
+    }
+
+    fn resolve_kimi_runtime_base_url_for_key(
+        &self,
+        provider: &str,
+        route_base_url: Option<&str>,
+        api_key: &str,
+        base_url: Option<String>,
+    ) -> Option<String> {
+        if !matches!(provider, "kimi" | "moonshot" | "kimi-coding") {
+            return base_url;
+        }
+        if self.has_explicit_runtime_base_url(provider, route_base_url) {
+            return base_url;
+        }
+        if api_key.trim().starts_with("sk-kimi-") {
+            Some(crate::provider_profiles::KIMI_CODE_BASE_URL.to_string())
+        } else {
+            base_url.or_else(|| Some(crate::provider_profiles::KIMI_LEGACY_BASE_URL.to_string()))
+        }
     }
 
     fn resolve_runtime_request_timeout_seconds(&self, provider: &str) -> Option<f64> {
@@ -3485,6 +3542,12 @@ impl AgentLoop {
                 ))
             })?;
         let base_url = self.resolve_runtime_base_url(provider, route_base_url);
+        let base_url = self.resolve_kimi_runtime_base_url_for_key(
+            provider,
+            route_base_url,
+            &api_key,
+            base_url,
+        );
         let request_timeout_seconds = self.resolve_runtime_request_timeout_seconds(provider);
         let mode = api_mode.unwrap_or(&self.config.api_mode);
         let normalized_model_name =
@@ -3547,7 +3610,7 @@ impl AgentLoop {
                 }
                 Arc::new(p)
             }
-            "kimi" | "moonshot" => {
+            "kimi" | "moonshot" | "kimi-coding" => {
                 let mut p = KimiProvider::new(&api_key)
                     .with_model(model_name)
                     .with_optional_request_timeout_seconds(request_timeout_seconds);
@@ -14214,6 +14277,10 @@ mod tests {
         let _tokenhub = EnvVarGuard::remove("TOKENHUB_API_KEY");
         let _nous = EnvVarGuard::remove("NOUS_API_KEY");
         let _nous_base = EnvVarGuard::remove("NOUS_BASE_URL");
+        let _kimi_coding = EnvVarGuard::remove("KIMI_CODING_API_KEY");
+        let _kimi = EnvVarGuard::remove("KIMI_API_KEY");
+        let _moonshot = EnvVarGuard::remove("MOONSHOT_API_KEY");
+        let _kimi_base = EnvVarGuard::remove("KIMI_BASE_URL");
 
         let agent = AgentLoop::new(
             AgentConfig::default(),
@@ -14274,6 +14341,59 @@ mod tests {
                 .is_ok(),
             "nous-api direct-key runtime provider should build"
         );
+        drop(_nous_key);
+        drop(_nous_base_override);
+
+        let kimi_code_key = EnvVarGuard::set("KIMI_CODING_API_KEY", "sk-kimi-code-secret");
+        assert_eq!(
+            agent.resolve_runtime_api_key("kimi-coding", None, None),
+            Some("sk-kimi-code-secret".to_string())
+        );
+        let auto_kimi_code_base = agent.resolve_kimi_runtime_base_url_for_key(
+            "kimi-coding",
+            None,
+            "sk-kimi-code-secret",
+            agent.resolve_runtime_base_url("kimi-coding", None),
+        );
+        assert_eq!(
+            auto_kimi_code_base.as_deref(),
+            Some(crate::provider_profiles::KIMI_CODE_BASE_URL)
+        );
+        assert!(
+            agent
+                .build_runtime_provider("kimi-coding", "kimi-k2.6", None, None, None, None, None)
+                .is_ok(),
+            "kimi-coding runtime provider should build through the Kimi provider"
+        );
+        drop(kimi_code_key);
+
+        let kimi_legacy_key = EnvVarGuard::set("KIMI_API_KEY", "sk-legacy-secret");
+        let legacy_base = agent.resolve_kimi_runtime_base_url_for_key(
+            "kimi-coding",
+            None,
+            "sk-legacy-secret",
+            agent.resolve_runtime_base_url("kimi-coding", None),
+        );
+        assert_eq!(
+            legacy_base.as_deref(),
+            Some(crate::provider_profiles::KIMI_LEGACY_BASE_URL)
+        );
+        drop(kimi_legacy_key);
+
+        let kimi_code_key = EnvVarGuard::set("KIMI_CODING_API_KEY", "sk-kimi-code-secret");
+        let kimi_override = EnvVarGuard::set("KIMI_BASE_URL", "https://kimi.override.test/v1");
+        let override_base = agent.resolve_kimi_runtime_base_url_for_key(
+            "kimi-coding",
+            None,
+            "sk-kimi-code-secret",
+            agent.resolve_runtime_base_url("kimi-coding", None),
+        );
+        assert_eq!(
+            override_base.as_deref(),
+            Some("https://kimi.override.test/v1")
+        );
+        drop(kimi_override);
+        drop(kimi_code_key);
 
         assert_eq!(
             agent

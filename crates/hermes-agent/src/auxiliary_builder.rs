@@ -16,6 +16,7 @@ use hermes_intelligence::auxiliary::{
 use crate::provider::{
     openai_codex_provider, AnthropicProvider, GenericProvider, OpenRouterProvider,
 };
+use crate::provider_profiles;
 use crate::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
@@ -240,15 +241,7 @@ pub fn build_auxiliary_client_with_main_runtime(
         default_models::ZAI,
         main_label.as_deref(),
     );
-    register_direct_key(
-        &mut builder,
-        &mut summary,
-        "KIMI_API_KEY",
-        "kimi",
-        "https://api.moonshot.ai/v1",
-        default_models::KIMI,
-        main_label.as_deref(),
-    );
+    register_kimi_direct_key(&mut builder, &mut summary, main_label.as_deref());
     register_direct_key(
         &mut builder,
         &mut summary,
@@ -541,6 +534,20 @@ fn default_base_url(label: &str) -> Option<&'static str> {
     }
 }
 
+fn kimi_base_url_from_env_or_key(api_key: &str) -> String {
+    std::env::var("KIMI_BASE_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            provider_profiles::kimi_base_url_for_api_key(
+                api_key,
+                provider_profiles::KIMI_LEGACY_BASE_URL,
+            )
+            .to_string()
+        })
+}
+
 fn provider_allows_no_api_key(label: &str, base_url: Option<&str>) -> bool {
     matches!(
         label,
@@ -593,6 +600,47 @@ fn register_direct_key(
         ),
     );
     summary.registered.push(label.to_string());
+}
+
+fn register_kimi_direct_key(
+    builder: &mut hermes_intelligence::auxiliary::AuxiliaryClientBuilder,
+    summary: &mut AuxiliaryWiringSummary,
+    skip_label: Option<&str>,
+) {
+    const LABEL: &str = "kimi";
+    if skip_label == Some(LABEL) {
+        summary
+            .skipped
+            .push(format!("{LABEL} (covered by main runtime)"));
+        return;
+    }
+
+    let Some(key) = ["KIMI_CODING_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY"]
+        .iter()
+        .find_map(|env_var| {
+            std::env::var(env_var)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+    else {
+        summary.skipped.push(format!("{LABEL} (no key)"));
+        return;
+    };
+    let base_url = kimi_base_url_from_env_or_key(key.as_str());
+    let provider: Arc<dyn LlmProvider> = Arc::new(
+        GenericProvider::new(base_url, key, default_models::KIMI)
+            .with_provider_profile("kimi-coding"),
+    );
+    add_candidate(
+        builder,
+        ProviderCandidate::new(
+            AuxiliarySource::DirectKey(LABEL.to_string()),
+            default_models::KIMI,
+            provider,
+        ),
+    );
+    summary.registered.push(LABEL.to_string());
 }
 
 #[cfg(test)]
@@ -790,7 +838,24 @@ mod tests {
         }
         std::env::remove_var("MINIMAX_CN_API_KEY");
 
-        // Scenario 9: full chain, deterministic order.
+        // Scenario 9: Kimi Code direct API keys register the Kimi auxiliary source.
+        std::env::set_var("KIMI_CODING_API_KEY", "sk-kimi-aux");
+        {
+            let (client, summary) = build_default_auxiliary_client(AuxiliaryConfig::default());
+            assert_eq!(client.chain_labels(), vec!["kimi"]);
+            assert_eq!(
+                client.chain_entries(),
+                vec![(
+                    "kimi".to_string(),
+                    "kimi-k2-turbo-preview".to_string(),
+                    true,
+                )]
+            );
+            assert_eq!(summary.registered, vec!["kimi"]);
+        }
+        std::env::remove_var("KIMI_CODING_API_KEY");
+
+        // Scenario 10: full chain, deterministic order.
         std::env::set_var("OPENROUTER_API_KEY", "sk-or");
         std::env::set_var("HERMES_OPENAI_API_KEY", "sk-hermes-oa");
         std::env::set_var("OPENAI_API_KEY", "sk-oa-legacy");
