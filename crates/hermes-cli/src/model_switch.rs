@@ -535,6 +535,9 @@ pub fn provider_picker_description(provider: &str) -> &'static str {
         "lmstudio" | "lm-studio" => "LM Studio (Local desktop app with built-in model server)",
         "minimax-cn" | "minimax_cn" => "MiniMax China (Domestic direct API)",
         "xai-oauth" => "xAI Grok OAuth (SuperGrok / Premium+ subscription)",
+        "nous-api" | "nous_api" | "nousapi" | "nous-portal-api" => {
+            "Nous Portal API key (direct API key access to Nous inference)"
+        }
         raw => match canonical_provider_id(raw).as_str() {
             "nous" => {
                 "Nous Portal (Everything your agent needs, 300+ models with bundled tool use)"
@@ -615,6 +618,11 @@ pub fn merge_with_models_dev(models_dev: &[String], curated: &[&str]) -> Vec<Str
 
 pub fn provider_curated_models(provider: &str) -> &'static [&'static str] {
     let normalized = canonical_provider_id(provider);
+    let normalized = if normalized == "nous-api" {
+        "nous".to_string()
+    } else {
+        normalized
+    };
     for (slug, models) in CURATED_PROVIDER_MODELS {
         if slug.eq_ignore_ascii_case(&normalized) {
             return models;
@@ -954,7 +962,7 @@ pub async fn provider_model_ids_with_client(
             }
         }
         merged
-    } else if normalized == "nous" {
+    } else if matches!(normalized.as_str(), "nous" | "nous-api") {
         // Nous model picker should always include curated compatibility picks
         // (including kimi-k2.6), then append live/models.dev discoveries.
         let mut seen: HashSet<String> = HashSet::new();
@@ -1315,6 +1323,7 @@ mod tests {
     #[test]
     fn provider_picker_descriptions_match_refreshed_upstream_copy() {
         assert!(provider_picker_description("nous").contains("300+ models"));
+        assert!(provider_picker_description("nous-api").contains("direct API key"));
         assert!(provider_picker_description("openrouter").contains("Pay-per-use API aggregator"));
         assert!(provider_picker_description("google-gemini-cli").contains("Code Assist OAuth flow"));
         assert!(provider_picker_description("xai").contains("Grok"));
@@ -1470,6 +1479,11 @@ mod tests {
         assert!(
             out.iter().any(|m| m == "openai/gpt-5.5"),
             "expected openrouter-derived models in nous catalog"
+        );
+        let direct = provider_model_ids_with_client("nous-api", &client).await;
+        assert_eq!(
+            direct, out,
+            "nous-api should reuse the Nous Portal model catalog"
         );
     }
 

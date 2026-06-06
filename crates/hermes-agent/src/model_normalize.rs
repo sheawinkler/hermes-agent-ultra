@@ -14,6 +14,7 @@ fn canonical_provider(provider: &str) -> String {
         "github-copilot-acp" | "copilot-acp-agent" => "copilot-acp".to_string(),
         "opencode" | "zen" => "opencode-zen".to_string(),
         "go" => "opencode-go".to_string(),
+        "nous_api" | "nousapi" | "nous-portal-api" => "nous-api".to_string(),
         "moonshot" | "kimi-coding" | "kimi-coding-cn" => "kimi".to_string(),
         "glm" | "z-ai" | "z_ai" | "zhipu" => "zai".to_string(),
         "claude" | "claude-code" => "anthropic".to_string(),
@@ -185,7 +186,7 @@ pub fn normalize_model_for_provider(model: &str, provider: &str) -> String {
 
     match provider.as_str() {
         "anthropic" => normalize_anthropic_model_name(trimmed, false),
-        "openrouter" | "nous" => normalize_for_aggregator(trimmed),
+        "openrouter" | "nous" | "nous-api" => normalize_for_aggregator(trimmed),
         "opencode-go" => strip_if_vendor_matches(trimmed, &["opencode-go", "go"]).to_string(),
         "opencode-zen" => normalize_for_opencode_zen(trimmed),
         "copilot" | "copilot-acp" => normalize_for_copilot(trimmed),
@@ -269,6 +270,10 @@ mod tests {
         );
         assert_eq!(
             normalize_model_for_provider("gpt-5.4", "nous"),
+            "openai/gpt-5.4"
+        );
+        assert_eq!(
+            normalize_model_for_provider("gpt-5.4", "nous-api"),
             "openai/gpt-5.4"
         );
         assert_eq!(

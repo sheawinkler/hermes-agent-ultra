@@ -30,8 +30,8 @@ use hermes_cli::auth::{
     CodexDeviceCodeOptions, GeminiOAuthLoginOptions, NousAuthState, NousDeviceCodeOptions,
     NousRuntimeCredentials, ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL,
     CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL,
-    DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS, DEFAULT_NOUS_CLIENT_ID, DEFAULT_NOUS_PORTAL_URL,
-    DEFAULT_OPENAI_BASE_URL, NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+    DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS, DEFAULT_NOUS_CLIENT_ID, DEFAULT_NOUS_INFERENCE_URL,
+    DEFAULT_NOUS_PORTAL_URL, DEFAULT_OPENAI_BASE_URL, NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
     QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_OAUTH_CLIENT_ID, QWEN_OAUTH_TOKEN_URL,
 };
 use hermes_cli::cli::{Cli, CliCommand};
@@ -5813,6 +5813,7 @@ fn normalize_auth_provider(provider: &str) -> String {
         "claude" | "claude-code" => "anthropic".to_string(),
         "codex" => "openai-codex".to_string(),
         "openai-oauth" | "openai-cli" => "openai".to_string(),
+        "nous_api" | "nousapi" | "nous-portal-api" => "nous-api".to_string(),
         "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         "google" | "google-gemini" | "google-ai-studio" => "gemini".to_string(),
@@ -5882,6 +5883,7 @@ fn normalize_secret_provider(provider: &str) -> String {
         "claude" | "claude-code" => "anthropic".to_string(),
         "codex" => "openai-codex".to_string(),
         "openai-oauth" | "openai-cli" => "openai".to_string(),
+        "nous_api" | "nousapi" | "nous-portal-api" => "nous-api".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         "google" | "google-gemini" | "google-ai-studio" => "gemini".to_string(),
         "moonshot" | "kimi" => "kimi-coding".to_string(),
@@ -5925,6 +5927,12 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
         ],
         "kimi-coding-cn" => vec!["kimi-coding-cn".to_string()],
         "stepfun" => vec!["stepfun".to_string(), "step".to_string()],
+        "nous-api" => vec![
+            "nous-api".to_string(),
+            "nous_api".to_string(),
+            "nousapi".to_string(),
+            "nous-portal-api".to_string(),
+        ],
         "copilot" => vec![
             "copilot".to_string(),
             "github-copilot".to_string(),
@@ -6022,7 +6030,7 @@ fn provider_env_var(provider: &str) -> Option<&'static str> {
         "minimax" => Some("MINIMAX_API_KEY"),
         "minimax-cn" => Some("MINIMAX_CN_API_KEY"),
         "stepfun" => Some("STEPFUN_API_KEY"),
-        "nous" => Some("NOUS_API_KEY"),
+        "nous" | "nous-api" => Some("NOUS_API_KEY"),
         "copilot" => Some("COPILOT_GITHUB_TOKEN"),
         "ai-gateway" => Some("AI_GATEWAY_API_KEY"),
         "arcee" => Some("ARCEEAI_API_KEY"),
@@ -10017,6 +10025,11 @@ const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
         label: "Nous (recommended, OAuth)",
     },
     SetupModelOption {
+        provider: "nous-api",
+        model: "nous-api:openai/gpt-5.5-pro",
+        label: "Nous Portal API key",
+    },
+    SetupModelOption {
         provider: "openai",
         model: "openai:gpt-4o",
         label: "OpenAI gpt-4o",
@@ -10290,7 +10303,7 @@ fn setup_default_model_pick_index(
         return idx;
     }
 
-    if selected_provider == "nous" {
+    if matches!(selected_provider, "nous" | "nous-api") {
         if let Some(idx) = displayed_suggested_models.iter().position(|candidate| {
             candidate
                 .trim()
@@ -10311,6 +10324,7 @@ fn setup_provider_display(provider: &str) -> &'static str {
         "google-gemini-cli" => "Google Gemini CLI",
         "gemini" => "Google AI Studio",
         "openrouter" => "OpenRouter",
+        "nous-api" => "Nous Portal API",
         "qwen" => "Alibaba DashScope",
         "alibaba" => "Alibaba Cloud DashScope",
         "qwen-oauth" => "Qwen OAuth",
@@ -10367,7 +10381,7 @@ fn setup_provider_env_keys(provider: &str) -> &'static [&'static str] {
         "minimax-cn" => SETUP_MINIMAX_CN_ENV_KEYS,
         "novita" => SETUP_NOVITA_ENV_KEYS,
         "stepfun" => SETUP_STEPFUN_ENV_KEYS,
-        "nous" => SETUP_NOUS_ENV_KEYS,
+        "nous" | "nous-api" => SETUP_NOUS_ENV_KEYS,
         "ai-gateway" => SETUP_AI_GATEWAY_ENV_KEYS,
         "arcee" => SETUP_ARCEE_ENV_KEYS,
         "bedrock" => SETUP_BEDROCK_ENV_KEYS,
@@ -10397,6 +10411,7 @@ fn setup_provider_env_keys(provider: &str) -> &'static [&'static str] {
 fn setup_provider_default_base_url(provider: &str) -> Option<&'static str> {
     match provider {
         "openai-codex" => Some("https://chatgpt.com/backend-api/codex"),
+        "nous-api" => Some(DEFAULT_NOUS_INFERENCE_URL),
         "google-gemini-cli" => Some("cloudcode-pa://google"),
         "gemini" => Some("https://generativelanguage.googleapis.com/v1beta"),
         "qwen" | "alibaba" => Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
@@ -10958,7 +10973,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
 
     // 6. Prompt for model after provider auth is established.
     let suggested_provider_models = provider_model_ids(&selected_provider).await;
-    let suggested_limit = if selected_provider == "nous" {
+    let suggested_limit = if matches!(selected_provider.as_str(), "nous" | "nous-api") {
         usize::MAX
     } else {
         25
@@ -10993,7 +11008,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
             })
             .collect();
         suggested_labels.push("Custom model ID…".to_string());
-        let model_title = if selected_provider == "nous" {
+        let model_title = if matches!(selected_provider.as_str(), "nous" | "nous-api") {
             format!(
                 "Select {} model ({} available)",
                 selected_provider_label,
@@ -15693,6 +15708,7 @@ mod tests {
             );
         }
         assert!(seen.contains("nous"));
+        assert!(seen.contains("nous-api"));
     }
 
     #[test]
@@ -15733,6 +15749,9 @@ mod tests {
         ];
         let idx = setup_default_model_pick_index("nous", "nous:nonexistent/model", &suggested);
         assert_eq!(idx, 1);
+        let idx =
+            setup_default_model_pick_index("nous-api", "nous-api:nonexistent/model", &suggested);
+        assert_eq!(idx, 1);
     }
 
     #[test]
@@ -15750,6 +15769,12 @@ mod tests {
     fn setup_provider_env_keys_include_nous() {
         assert_eq!(setup_provider_display("nous"), "Nous");
         assert_eq!(setup_provider_env_keys("nous"), &["NOUS_API_KEY"]);
+        assert_eq!(setup_provider_display("nous-api"), "Nous Portal API");
+        assert_eq!(setup_provider_env_keys("nous-api"), &["NOUS_API_KEY"]);
+        assert_eq!(
+            setup_provider_default_base_url("nous-api"),
+            Some(DEFAULT_NOUS_INFERENCE_URL)
+        );
         assert_eq!(
             setup_provider_env_keys("ollama-local"),
             &["OLLAMA_LOCAL_API_KEY", "OLLAMA_API_KEY"]

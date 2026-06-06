@@ -975,6 +975,10 @@
     "486b692ddd80": {
       "disposition": "ported",
       "notes": "Rust Nous provider request shaping now centralizes Portal attribution tags as product=hermes-agent plus client=hermes-client-v<workspace version>, and request-body tests prove the versioned tag is applied to actual Nous chat completion payloads."
+    },
+    "de07aa7c4046": {
+      "disposition": "ported",
+      "notes": "Rust now exposes a first-class `nous-api` direct API-key provider with aliases, non-OAuth provider capability, setup catalog entry, NOUS_API_KEY/NOUS_BASE_URL runtime resolution, Nous provider construction, Nous model normalization/catalog reuse, and targeted core/CLI/agent tests."
     }
   },
   "subject_patterns": [
