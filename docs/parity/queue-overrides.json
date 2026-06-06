@@ -1240,6 +1240,22 @@
       "disposition": "ported",
       "notes": "Rust /reload-skills follows the final upstream behavior: it queues a one-shot system note for the next agent turn, confirms dynamic SKILL.md slash commands are scanned live, and does not delete prompt caches or expose a skills_reload agent tool. CLI and gateway tests cover command routing, snapshot rendering, and one-shot gateway note injection."
     },
+    "3c252ae44b52": {
+      "disposition": "ported",
+      "notes": "Rust hermes-mcp provides MCP client support through McpClient and McpManager, stdio and HTTP/SSE transports, OAuth/bearer auth, tools/list, tools/call, resources, prompts, stale transport reconnect, and media caching. CLI mcp add/list/remove/test/configure/login/serve wiring and focused hermes-mcp/hermes-cli tests cover the core client surface."
+    },
+    "60effcfc4427": {
+      "disposition": "ported",
+      "notes": "Rust now mirrors the upstream MCP discovery hardening with McpManager::connect_all_parallel for concurrent per-server discovery reports, user-visible CLI config warnings when url and command conflict, URL/transport validation for mcp list/test/configure/login, and regression tests for conflict detection, invalid configs, and failed-server parallel discovery."
+    },
+    "63f5e14c6993": {
+      "disposition": "mirrored",
+      "notes": "Rust repo now includes docs/mcp.md with client configuration, config validation rules, parallel discovery behavior, mcp serve setup, and Sentrux MCP profile examples, plus a README link near the MCP quick commands."
+    },
+    "6716e66e89fc": {
+      "disposition": "ported",
+      "notes": "Rust hermes mcp serve is implemented in crates/hermes-mcp/src/serve.rs and exposed by hermes-cli handle_cli_mcp serve. Tests cover serve tool definitions, session/resource/event/approval tools, numeric coercion, stringified object arguments, and systems MCP conformance; docs/mcp.md documents the server mode."
+    },
     "3824b0323793": {
       "disposition": "superseded",
       "notes": "Python TUI session.title DB/RPC edge cases are superseded by Rust gateway in-memory Session.title storage and command tests; there is no pending DB row queue or Python RPC failure mode in this runtime path."

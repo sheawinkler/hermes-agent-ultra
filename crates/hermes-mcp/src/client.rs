@@ -155,6 +155,16 @@ pub struct McpProbeResult {
     pub server_info: Option<Value>,
 }
 
+/// Per-server outcome from parallel MCP discovery.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct McpDiscoveryReport {
+    pub name: String,
+    pub connected: bool,
+    pub transport_type: String,
+    pub tool_count: usize,
+    pub error: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // McpServerConfig
 // ---------------------------------------------------------------------------
@@ -266,6 +276,16 @@ impl McpServerConfig {
     /// Returns true if this config is for an HTTP (remote) connection.
     pub fn is_http(&self) -> bool {
         self.url.is_some()
+    }
+}
+
+fn transport_type_for_config(config: &McpServerConfig) -> &'static str {
+    if config.is_http() {
+        "http"
+    } else if config.is_stdio() {
+        "stdio"
+    } else {
+        "unknown"
     }
 }
 
@@ -1045,6 +1065,113 @@ impl McpManager {
         Ok(())
     }
 
+    /// Connect and discover multiple MCP servers concurrently.
+    ///
+    /// Each server gets its own connection future, so one slow MCP server no
+    /// longer consumes the discovery budget for every other configured server.
+    /// The returned reports are intended for user-visible startup summaries.
+    pub async fn connect_all_parallel(
+        &mut self,
+        configs: Vec<(String, McpServerConfig)>,
+    ) -> Vec<McpDiscoveryReport> {
+        let mut reports: Vec<(usize, McpDiscoveryReport)> = Vec::new();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        for (index, (name, config)) in configs.into_iter().enumerate() {
+            if let Some(existing) = self.clients.get(&name) {
+                reports.push((
+                    index,
+                    McpDiscoveryReport {
+                        name,
+                        connected: existing.is_connected(),
+                        transport_type: transport_type_for_config(&existing.config).to_string(),
+                        tool_count: existing.cached_tools().len(),
+                        error: None,
+                    },
+                ));
+                continue;
+            }
+
+            tasks.spawn(async move {
+                let transport_type = transport_type_for_config(&config).to_string();
+                let mut client = McpClient::new(config);
+                let result = client.connect().await;
+                match result {
+                    Ok(()) => {
+                        let tool_count = client.cached_tools().len();
+                        (
+                            index,
+                            McpDiscoveryReport {
+                                name,
+                                connected: true,
+                                transport_type,
+                                tool_count,
+                                error: None,
+                            },
+                            Some(client),
+                        )
+                    }
+                    Err(err) => {
+                        warn!("Failed to connect to MCP server '{}': {}", name, err);
+                        (
+                            index,
+                            McpDiscoveryReport {
+                                name,
+                                connected: false,
+                                transport_type,
+                                tool_count: 0,
+                                error: Some(err.to_string()),
+                            },
+                            None,
+                        )
+                    }
+                }
+            });
+        }
+
+        while let Some(joined) = tasks.join_next().await {
+            match joined {
+                Ok((index, report, client)) => {
+                    if let Some(client) = client {
+                        debug!(
+                            "Discovered {} tools from MCP server '{}'",
+                            report.tool_count, report.name
+                        );
+                        self.clients.insert(report.name.clone(), client);
+                    }
+                    reports.push((index, report));
+                }
+                Err(err) => {
+                    reports.push((
+                        usize::MAX,
+                        McpDiscoveryReport {
+                            name: "mcp-discovery-task".to_string(),
+                            connected: false,
+                            transport_type: "unknown".to_string(),
+                            tool_count: 0,
+                            error: Some(format!("discovery task failed: {err}")),
+                        },
+                    ));
+                }
+            }
+        }
+
+        reports.sort_by_key(|(index, _)| *index);
+        let summary = reports
+            .iter()
+            .fold((0usize, 0usize), |(tools, failed), (_, report)| {
+                (
+                    tools + report.tool_count,
+                    failed + usize::from(!report.connected),
+                )
+            });
+        info!(
+            "MCP discovery complete: {} tool(s), {} failed server(s)",
+            summary.0, summary.1
+        );
+        reports.into_iter().map(|(_, report)| report).collect()
+    }
+
     /// Disconnect from an MCP server and remove it from the active list.
     pub async fn disconnect(&mut self, name: &str) -> Result<(), McpError> {
         if let Some(mut client) = self.clients.remove(name) {
@@ -1282,7 +1409,9 @@ impl McpManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{cache_mcp_image_block, is_stale_transport_error, McpClient, McpServerConfig};
+    use super::{
+        cache_mcp_image_block, is_stale_transport_error, McpClient, McpManager, McpServerConfig,
+    };
     use crate::transport::McpTransport;
     use crate::McpError;
     use async_trait::async_trait;
@@ -1401,6 +1530,34 @@ mod tests {
         assert!(!client.is_connected());
         assert!(client.cached_tools().is_empty());
         assert!(client.cached_resources().is_empty());
+    }
+
+    #[tokio::test]
+    async fn connect_all_parallel_reports_failed_servers_without_aborting_batch() {
+        let registry = Arc::new(hermes_tools::ToolRegistry::new());
+        let mut manager = McpManager::new(registry);
+
+        let reports = manager
+            .connect_all_parallel(vec![
+                (
+                    "missing-a".to_string(),
+                    McpServerConfig::stdio("__hermes_missing_mcp_a__", Vec::new()),
+                ),
+                (
+                    "missing-b".to_string(),
+                    McpServerConfig::stdio("__hermes_missing_mcp_b__", Vec::new()),
+                ),
+            ])
+            .await;
+
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].name, "missing-a");
+        assert_eq!(reports[1].name, "missing-b");
+        assert!(reports.iter().all(|report| !report.connected));
+        assert!(reports.iter().all(|report| report.tool_count == 0));
+        assert!(reports.iter().all(|report| report.error.is_some()));
+        assert!(!manager.is_connected("missing-a"));
+        assert!(!manager.is_connected("missing-b"));
     }
 
     #[test]

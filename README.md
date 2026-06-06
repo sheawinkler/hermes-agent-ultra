@@ -145,6 +145,8 @@ hermes-ultra doctor --deep --snapshot --bundle
 
 Optional Sentrux MCP profile:
 
+Full MCP guide: [docs/mcp.md](./docs/mcp.md)
+
 ```bash
 hermes-ultra mcp sentrux
 hermes-ultra mcp sentrux-status
