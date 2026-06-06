@@ -34,6 +34,13 @@ pub struct GatewayConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
 
+    /// Optional JSON few-shot/prefill message file.
+    ///
+    /// This is the canonical upstream-compatible key. Messages are injected at
+    /// runtime only and must not be persisted into session history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefill_messages_file: Option<String>,
+
     /// List of enabled tool names. Defaults to all core tools.
     #[serde(default = "default_tools")]
     pub tools: Vec<String>,
@@ -167,6 +174,7 @@ impl Default for GatewayConfig {
             personality: None,
             max_turns: default_max_turns(),
             system_prompt: None,
+            prefill_messages_file: None,
             tools: default_tools(),
             budget: BudgetConfig::default(),
             tool_output: ToolOutputConfig::default(),
@@ -706,6 +714,12 @@ pub struct AgentLoopBehaviorConfig {
         alias = "apiMaxRetries"
     )]
     pub api_max_retries: Option<u32>,
+    /// Legacy location for `prefill_messages_file`.
+    ///
+    /// The top-level key is canonical; this field is retained so older CLI and
+    /// godmode-generated configs continue to work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefill_messages_file: Option<String>,
 }
 
 fn default_agent_memory_nudge_interval() -> u32 {
@@ -758,6 +772,7 @@ impl Default for AgentLoopBehaviorConfig {
             lsp_context_max_chars: default_agent_lsp_context_max_chars(),
             service_tier: None,
             api_max_retries: None,
+            prefill_messages_file: None,
         }
     }
 }

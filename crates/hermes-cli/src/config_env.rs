@@ -7,11 +7,16 @@ use serde_json::Value;
 /// Returns number of variables set from configuration.
 pub fn hydrate_env_from_config(config: &GatewayConfig) -> usize {
     let mut applied = 0usize;
+    let prefill_messages_file = hermes_config::resolve_prefill_messages_file(config);
 
     applied += set_if_absent("HERMES_MODEL", config.model.as_deref());
     applied += set_if_absent("HERMES_PERSONALITY", config.personality.as_deref());
     applied += set_if_absent_owned("HERMES_MAX_TURNS", config.max_turns.to_string());
     applied += set_if_absent("HERMES_SYSTEM_PROMPT", config.system_prompt.as_deref());
+    applied += set_if_absent(
+        "HERMES_PREFILL_MESSAGES_FILE",
+        prefill_messages_file.as_deref(),
+    );
     applied += set_if_absent_owned(
         "HERMES_ALLOW_PRIVATE_URLS",
         if config.security.allow_private_urls {
@@ -220,6 +225,7 @@ mod tests {
         let _guard = EnvGuard::capture(&[
             "HERMES_MODEL",
             "HERMES_MAX_TURNS",
+            "HERMES_PREFILL_MESSAGES_FILE",
             "DISCORD_ALLOWED_USERS",
             "HERMES_PLATFORM_DISCORD_ALLOWED_USERS",
             "DISCORD_CUSTOM_FLAG",
@@ -230,6 +236,7 @@ mod tests {
         ]);
         std::env::remove_var("HERMES_MODEL");
         std::env::remove_var("HERMES_MAX_TURNS");
+        std::env::remove_var("HERMES_PREFILL_MESSAGES_FILE");
         std::env::remove_var("DISCORD_ALLOWED_USERS");
         std::env::remove_var("HERMES_PLATFORM_DISCORD_ALLOWED_USERS");
         std::env::remove_var("DISCORD_CUSTOM_FLAG");
@@ -241,6 +248,7 @@ mod tests {
         let mut cfg = GatewayConfig {
             model: Some("openai:gpt-4o".to_string()),
             max_turns: 77,
+            prefill_messages_file: Some("prefill.json".to_string()),
             ..GatewayConfig::default()
         };
         let mut discord = PlatformConfig {
@@ -279,6 +287,10 @@ mod tests {
         );
         assert_eq!(std::env::var("HERMES_MAX_TURNS").unwrap(), "77".to_string());
         assert_eq!(
+            std::env::var("HERMES_PREFILL_MESSAGES_FILE").unwrap(),
+            "prefill.json".to_string()
+        );
+        assert_eq!(
             std::env::var("DISCORD_ALLOWED_USERS").unwrap(),
             "123,456".to_string()
         );
@@ -309,21 +321,41 @@ mod tests {
     }
 
     #[test]
+    fn hydrate_env_sets_prefill_from_legacy_agent_key() {
+        let _lock = test_env_lock::lock();
+        let _guard = EnvGuard::capture(&["HERMES_PREFILL_MESSAGES_FILE"]);
+        std::env::remove_var("HERMES_PREFILL_MESSAGES_FILE");
+
+        let mut cfg = GatewayConfig::default();
+        cfg.agent.prefill_messages_file = Some("legacy-prefill.json".to_string());
+
+        let applied = hydrate_env_from_config(&cfg);
+        assert!(applied > 0);
+        assert_eq!(
+            std::env::var("HERMES_PREFILL_MESSAGES_FILE").unwrap(),
+            "legacy-prefill.json"
+        );
+    }
+
+    #[test]
     fn hydrate_env_never_overwrites_existing_values() {
         let _lock = test_env_lock::lock();
         let _guard = EnvGuard::capture(&[
             "HERMES_MODEL",
+            "HERMES_PREFILL_MESSAGES_FILE",
             "DISCORD_ALLOWED_USERS",
             "DISCORD_IGNORED_CHANNELS",
             "DISCORD_REPLY_TO_MODE",
         ]);
         std::env::set_var("HERMES_MODEL", "existing:model");
+        std::env::set_var("HERMES_PREFILL_MESSAGES_FILE", "existing-prefill.json");
         std::env::set_var("DISCORD_ALLOWED_USERS", "from-env");
         std::env::set_var("DISCORD_IGNORED_CHANNELS", "999");
         std::env::set_var("DISCORD_REPLY_TO_MODE", "first");
 
         let mut cfg = GatewayConfig {
             model: Some("openai:gpt-4o".to_string()),
+            prefill_messages_file: Some("config-prefill.json".to_string()),
             ..GatewayConfig::default()
         };
         let mut discord = PlatformConfig {
@@ -345,6 +377,10 @@ mod tests {
         let _ = hydrate_env_from_config(&cfg);
 
         assert_eq!(std::env::var("HERMES_MODEL").unwrap(), "existing:model");
+        assert_eq!(
+            std::env::var("HERMES_PREFILL_MESSAGES_FILE").unwrap(),
+            "existing-prefill.json"
+        );
         assert_eq!(std::env::var("DISCORD_ALLOWED_USERS").unwrap(), "from-env");
         assert_eq!(std::env::var("DISCORD_IGNORED_CHANNELS").unwrap(), "999");
         assert_eq!(std::env::var("DISCORD_REPLY_TO_MODE").unwrap(), "first");

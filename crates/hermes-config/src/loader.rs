@@ -569,7 +569,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -659,6 +659,9 @@ fn apply_user_config_patch_flat(
         }
         "system_prompt" => {
             config.system_prompt = Some(value.to_string());
+        }
+        "prefill_messages_file" => {
+            config.prefill_messages_file = Some(value.to_string());
         }
         other => {
             return Err(ConfigError::NotFound(format!(
@@ -941,6 +944,12 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             "max_turns" => config.max_turns.to_string(),
             "system_prompt" => config
                 .system_prompt
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "(not set)".to_string()),
+            "prefill_messages_file" => config
+                .prefill_messages_file
                 .as_deref()
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
@@ -1529,6 +1538,113 @@ pub fn load_from_json(path: &Path) -> Result<GatewayConfig, ConfigError> {
     Ok(config)
 }
 
+/// Resolve the prefill JSON file using upstream-compatible precedence.
+///
+/// `prefill_messages_file` at the top level is canonical. The nested
+/// `agent.prefill_messages_file` key remains a legacy fallback for older
+/// generated configs.
+pub fn resolve_prefill_messages_file(config: &GatewayConfig) -> Option<String> {
+    env_var_nonempty("HERMES_PREFILL_MESSAGES_FILE")
+        .or_else(|| trimmed_optional(config.prefill_messages_file.as_deref()))
+        .or_else(|| trimmed_optional(config.agent.prefill_messages_file.as_deref()))
+}
+
+/// Resolve a configured prefill JSON path, mapping relative paths under HERMES_HOME.
+pub fn resolve_prefill_messages_path(config: &GatewayConfig) -> Option<PathBuf> {
+    let path = expand_home_path(&resolve_prefill_messages_file(config)?);
+    if path.is_absolute() {
+        return Some(path);
+    }
+    let home = config
+        .home_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(paths::hermes_home);
+    Some(home.join(path))
+}
+
+/// Load configured ephemeral prefill messages.
+///
+/// Invalid or missing files match Python behavior: warn and continue without
+/// prefill rather than blocking startup.
+pub fn load_prefill_messages(config: &GatewayConfig) -> Vec<hermes_core::Message> {
+    let Some(path) = resolve_prefill_messages_path(config) else {
+        return Vec::new();
+    };
+    load_prefill_messages_file(&path)
+}
+
+pub fn load_prefill_messages_file(path: &Path) -> Vec<hermes_core::Message> {
+    if !path.exists() {
+        tracing::warn!("Prefill messages file not found: {}", path.display());
+        return Vec::new();
+    }
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to load prefill messages from {}: {}",
+                path.display(),
+                err
+            );
+            return Vec::new();
+        }
+    };
+    let value = match serde_json::from_str::<serde_json::Value>(&contents) {
+        Ok(value) => value,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to parse prefill messages from {}: {}",
+                path.display(),
+                err
+            );
+            return Vec::new();
+        }
+    };
+    if !value.is_array() {
+        tracing::warn!(
+            "Prefill messages file must contain a JSON array: {}",
+            path.display()
+        );
+        return Vec::new();
+    }
+    match serde_json::from_value::<Vec<hermes_core::Message>>(value) {
+        Ok(messages) => messages,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to parse prefill messages from {}: {}",
+                path.display(),
+                err
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn trimmed_optional(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn expand_home_path(raw: &str) -> PathBuf {
+    let trimmed = raw.trim();
+    if trimmed == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home);
+        }
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(trimmed)
+}
+
 fn env_var_nonempty(name: &str) -> Option<String> {
     std::env::var(name)
         .ok()
@@ -1879,6 +1995,9 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
     }
     if let Ok(v) = std::env::var("HERMES_SYSTEM_PROMPT") {
         config.system_prompt = Some(v);
+    }
+    if let Some(v) = env_var_nonempty("HERMES_PREFILL_MESSAGES_FILE") {
+        config.prefill_messages_file = Some(v);
     }
     if let Ok(v) = std::env::var("HERMES_KANBAN_DISPATCH_IN_GATEWAY") {
         if let Some(parsed) = parse_bool_env("HERMES_KANBAN_DISPATCH_IN_GATEWAY", &v) {
@@ -2758,6 +2877,98 @@ agent:
         .unwrap();
         let camel = load_user_config_file(&camel_path).unwrap();
         assert_eq!(camel.agent.api_max_retries, Some(8));
+    }
+
+    #[test]
+    fn prefill_messages_file_resolution_prefers_env_then_top_level_then_legacy_agent_key() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe { std::env::remove_var("HERMES_PREFILL_MESSAGES_FILE") };
+        let mut cfg = GatewayConfig::default();
+        cfg.agent.prefill_messages_file = Some("legacy.json".to_string());
+        assert_eq!(
+            resolve_prefill_messages_file(&cfg).as_deref(),
+            Some("legacy.json")
+        );
+
+        cfg.prefill_messages_file = Some("top.json".to_string());
+        assert_eq!(
+            resolve_prefill_messages_file(&cfg).as_deref(),
+            Some("top.json")
+        );
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe { std::env::set_var("HERMES_PREFILL_MESSAGES_FILE", "env.json") };
+        assert_eq!(
+            resolve_prefill_messages_file(&cfg).as_deref(),
+            Some("env.json")
+        );
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe { std::env::remove_var("HERMES_PREFILL_MESSAGES_FILE") };
+    }
+
+    #[test]
+    fn load_config_accepts_canonical_and_legacy_prefill_messages_file_keys() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe { std::env::remove_var("HERMES_PREFILL_MESSAGES_FILE") };
+
+        let dir = tempdir().unwrap();
+        let top_path = dir.path().join("top.yaml");
+        std::fs::write(&top_path, "prefill_messages_file: prefill-top.json\n").unwrap();
+        let top = load_user_config_file(&top_path).unwrap();
+        assert_eq!(
+            top.prefill_messages_file.as_deref(),
+            Some("prefill-top.json")
+        );
+
+        let legacy_path = dir.path().join("legacy.yaml");
+        std::fs::write(
+            &legacy_path,
+            "agent:\n  prefill_messages_file: prefill-legacy.json\n",
+        )
+        .unwrap();
+        let legacy = load_user_config_file(&legacy_path).unwrap();
+        assert_eq!(
+            legacy.agent.prefill_messages_file.as_deref(),
+            Some("prefill-legacy.json")
+        );
+        assert_eq!(
+            resolve_prefill_messages_file(&legacy).as_deref(),
+            Some("prefill-legacy.json")
+        );
+    }
+
+    #[test]
+    fn load_prefill_messages_resolves_relative_json_under_config_home() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe { std::env::remove_var("HERMES_PREFILL_MESSAGES_FILE") };
+
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("prefill.json"),
+            r#"[{"role":"system","content":"few-shot system"},{"role":"user","content":"example"}]"#,
+        )
+        .unwrap();
+        let cfg = GatewayConfig {
+            home_dir: Some(dir.path().to_string_lossy().to_string()),
+            prefill_messages_file: Some("prefill.json".to_string()),
+            ..GatewayConfig::default()
+        };
+
+        let messages = load_prefill_messages(&cfg);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, hermes_core::MessageRole::System);
+        assert_eq!(messages[0].content.as_deref(), Some("few-shot system"));
+        assert_eq!(messages[1].role, hermes_core::MessageRole::User);
+        assert_eq!(messages[1].content.as_deref(), Some("example"));
     }
 
     #[test]

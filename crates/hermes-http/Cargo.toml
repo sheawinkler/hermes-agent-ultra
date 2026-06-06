@@ -36,3 +36,4 @@ reqwest = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 tracing-subscriber = { workspace = true }
+tempfile = "3"

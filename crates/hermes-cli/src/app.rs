@@ -4647,6 +4647,36 @@ mod tests {
     }
 
     #[test]
+    fn test_build_agent_config_loads_prefill_messages_from_config() {
+        let _lock = env_test_lock();
+        let _env = EnvSnapshot::capture(&["HERMES_PREFILL_MESSAGES_FILE"]);
+        std::env::remove_var("HERMES_PREFILL_MESSAGES_FILE");
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("prefill.json"),
+            r#"[{"role":"system","content":"cli prefill"},{"role":"user","content":"cli example"}]"#,
+        )
+        .unwrap();
+        let cfg = GatewayConfig {
+            home_dir: Some(dir.path().to_string_lossy().to_string()),
+            prefill_messages_file: Some("prefill.json".to_string()),
+            ..GatewayConfig::default()
+        };
+
+        let agent_cfg = build_agent_config(&cfg, "openai:gpt-4o");
+        assert_eq!(agent_cfg.prefill_messages.len(), 2);
+        assert_eq!(
+            agent_cfg.prefill_messages[0].content.as_deref(),
+            Some("cli prefill")
+        );
+        assert_eq!(
+            agent_cfg.prefill_messages[1].content.as_deref(),
+            Some("cli example")
+        );
+    }
+
+    #[test]
     fn test_build_agent_config_maps_runtime_provider_request_timeout_seconds() {
         let mut cfg = GatewayConfig::default();
         cfg.llm_providers.insert(
@@ -6343,6 +6373,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                 )
             })
             .collect(),
+        prefill_messages: hermes_config::load_prefill_messages(config),
         retry: retry_cfg,
         smart_model_routing: hermes_agent::agent_loop::SmartModelRoutingConfig {
             enabled: config.smart_model_routing.enabled,

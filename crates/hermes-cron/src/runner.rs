@@ -18,7 +18,7 @@ use std::time::Duration as StdDuration;
 use hermes_agent::agent_loop::ToolRegistry;
 use hermes_agent::skill_orchestrator::parse_frontmatter;
 use hermes_agent::{AgentConfig, AgentLoop};
-use hermes_config::{load_config, GatewayConfig};
+use hermes_config::{load_config, load_prefill_messages, GatewayConfig};
 use hermes_core::{AgentResult, LlmProvider, Message, Skill, ToolSchema};
 use hermes_skills::SkillGuard;
 use hermes_tools::{ToolRegistry as ToolsetRegistry, ToolsetManager};
@@ -528,6 +528,18 @@ impl CronRunner {
 
         // Build agent config from job settings
         let mut config = AgentConfig::default();
+        let runtime_config = match load_config(None) {
+            Ok(config) => config,
+            Err(err) => {
+                tracing::warn!(
+                    "Cron runtime config load failed for job '{}'; prefill disabled: {}",
+                    job.id,
+                    err
+                );
+                GatewayConfig::default()
+            }
+        };
+        config.prefill_messages = load_prefill_messages(&runtime_config);
         // Scheduled/background runs should avoid user/workspace context injection
         // so job trajectories stay deterministic and non-user-specific. Per-job
         // workdir intentionally re-enables workspace context for that directory.
@@ -1103,6 +1115,98 @@ tools_config:
 
         let messages = runner.build_messages(&job).expect("messages");
         assert_eq!(messages[0].content.as_deref(), Some("Say hello"));
+    }
+
+    #[test]
+    fn test_run_job_loads_legacy_prefill_messages_without_persisting_them() {
+        #[derive(Clone)]
+        struct CapturingLlmProvider {
+            seen: Arc<Mutex<Vec<Message>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for CapturingLlmProvider {
+            async fn chat_completion(
+                &self,
+                messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, hermes_core::AgentError> {
+                *self.seen.lock().expect("seen messages lock") = messages.to_vec();
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("cron done"),
+                    usage: None,
+                    model: "mock".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> futures::stream::BoxStream<
+                'static,
+                Result<hermes_core::StreamChunk, hermes_core::AgentError>,
+            > {
+                Box::pin(futures::stream::empty())
+            }
+        }
+
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        fs::write(
+            home.path().join("config.yaml"),
+            "agent:\n  prefill_messages_file: prefill.json\n",
+        )
+        .unwrap();
+        fs::write(
+            home.path().join("prefill.json"),
+            r#"[{"role":"system","content":"cron prefill system"},{"role":"user","content":"cron prefill user"}]"#,
+        )
+        .unwrap();
+        let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
+        let _ignore = EnvGuard::remove("HERMES_IGNORE_USER_CONFIG");
+        let _prefill_env = EnvGuard::remove("HERMES_PREFILL_MESSAGES_FILE");
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let runner = CronRunner {
+            llm_provider: Arc::new(CapturingLlmProvider { seen: seen.clone() }),
+            tool_registry: Arc::new(ToolRegistry::new()),
+        };
+        let job = CronJob::new("0 9 * * *", "cron prompt");
+
+        let result = block_on(runner.run_job(&job)).expect("cron run");
+        let seen_messages = seen.lock().expect("seen messages lock");
+        assert!(seen_messages
+            .iter()
+            .any(|m| m.content.as_deref() == Some("cron prefill system")));
+        assert!(seen_messages
+            .iter()
+            .any(|m| m.content.as_deref() == Some("cron prefill user")));
+        assert!(seen_messages
+            .iter()
+            .any(|m| m.content.as_deref() == Some("cron prompt")));
+
+        assert!(!result
+            .messages
+            .iter()
+            .any(|m| m.content.as_deref() == Some("cron prefill system")));
+        assert!(!result
+            .messages
+            .iter()
+            .any(|m| m.content.as_deref() == Some("cron prefill user")));
+        assert!(result
+            .messages
+            .iter()
+            .any(|m| m.content.as_deref() == Some("cron prompt")));
     }
 
     #[test]

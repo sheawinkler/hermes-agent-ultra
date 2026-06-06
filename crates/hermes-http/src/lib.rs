@@ -760,6 +760,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                 )
             })
             .collect(),
+        prefill_messages: hermes_config::load_prefill_messages(config),
         smart_model_routing: hermes_agent::agent_loop::SmartModelRoutingConfig {
             enabled: config.smart_model_routing.enabled,
             max_simple_chars: config.smart_model_routing.max_simple_chars,
@@ -1003,6 +1004,33 @@ mod tests {
                 .get("openai")
                 .and_then(|cfg| cfg.request_timeout_seconds),
             Some(45.5)
+        );
+    }
+
+    #[test]
+    fn build_agent_config_loads_prefill_messages() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("prefill.json"),
+            r#"[{"role":"system","content":"http prefill"},{"role":"user","content":"http example"}]"#,
+        )
+        .unwrap();
+        let config = GatewayConfig {
+            home_dir: Some(dir.path().to_string_lossy().to_string()),
+            prefill_messages_file: Some("prefill.json".to_string()),
+            ..GatewayConfig::default()
+        };
+
+        let agent_config = build_agent_config(&config, "openai:gpt-4o");
+
+        assert_eq!(agent_config.prefill_messages.len(), 2);
+        assert_eq!(
+            agent_config.prefill_messages[0].content.as_deref(),
+            Some("http prefill")
+        );
+        assert_eq!(
+            agent_config.prefill_messages[1].content.as_deref(),
+            Some("http example")
         );
     }
 

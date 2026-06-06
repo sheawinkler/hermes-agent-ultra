@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -516,6 +517,11 @@ pub struct AgentConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ephemeral_system_prompt: Option<String>,
 
+    /// Ephemeral few-shot/prefill messages injected into provider requests.
+    /// These are model-visible but stripped from returned/persisted history.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefill_messages: Vec<Message>,
+
     /// Session-level hard spend limit in USD. When reached, the loop trips
     /// the cost gate and returns early with a summary system message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -835,6 +841,7 @@ impl Default for AgentConfig {
             pass_session_id: false,
             runtime_providers: HashMap::new(),
             ephemeral_system_prompt: None,
+            prefill_messages: Vec::new(),
             max_cost_usd: None,
             cost_guard_degrade_at_ratio: default_cost_guard_degrade_at_ratio(),
             cost_guard_degrade_model: None,
@@ -1847,6 +1854,7 @@ impl AgentLoop {
         &self,
         ctx: &ContextManager,
         persist_user_idx: Option<usize>,
+        prefill_range: Option<Range<usize>>,
     ) -> Vec<Message> {
         let mut msgs = ctx.get_messages().to_vec();
         if let (Some(idx), Some(override_text)) = (
@@ -1857,6 +1865,11 @@ impl AgentLoop {
                 if msg.role == MessageRole::User {
                     msg.content = Some(override_text.to_string());
                 }
+            }
+        }
+        if let Some(range) = prefill_range {
+            if range.start <= range.end && range.end <= msgs.len() {
+                msgs.drain(range);
             }
         }
         msgs
@@ -1871,10 +1884,11 @@ impl AgentLoop {
         session_cost_usd: f64,
         session_started_hooks_fired: bool,
         persist_user_idx: Option<usize>,
+        prefill_range: Option<Range<usize>>,
     ) -> AgentResult {
         self.memory_on_session_end(ctx.get_messages());
         AgentResult {
-            messages: self.messages_for_persisted_result(ctx, persist_user_idx),
+            messages: self.messages_for_persisted_result(ctx, persist_user_idx, prefill_range),
             finished_naturally: false,
             total_turns,
             tool_errors: tool_errors.to_vec(),
@@ -4966,6 +4980,13 @@ impl AgentLoop {
             session_started_hooks_fired = true;
         }
 
+        let prefill_start = ctx.get_messages().len();
+        for msg in &self.config.prefill_messages {
+            ctx.add_message(msg.clone());
+        }
+        let prefill_end = ctx.get_messages().len();
+        let prefill_range = (prefill_end > prefill_start).then_some(prefill_start..prefill_end);
+
         // Add initial messages
         for msg in messages {
             ctx.add_message(msg);
@@ -5075,6 +5096,7 @@ impl AgentLoop {
                     session_cost_usd,
                     session_started_hooks_fired,
                     persist_user_idx,
+                    prefill_range.clone(),
                 ));
             }
 
@@ -5098,7 +5120,11 @@ impl AgentLoop {
                         }),
                     );
                     return Ok(AgentResult {
-                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                        messages: self.messages_for_persisted_result(
+                            &ctx,
+                            persist_user_idx,
+                            prefill_range.clone(),
+                        ),
                         finished_naturally: false,
                         total_turns,
                         tool_errors,
@@ -5237,6 +5263,7 @@ impl AgentLoop {
                         session_cost_usd,
                         session_started_hooks_fired,
                         persist_user_idx,
+                        prefill_range.clone(),
                     ));
                 }
                 let r = match self
@@ -5258,6 +5285,7 @@ impl AgentLoop {
                             session_cost_usd,
                             session_started_hooks_fired,
                             persist_user_idx,
+                            prefill_range.clone(),
                         ));
                     }
                     Err(e) => {
@@ -5427,7 +5455,11 @@ impl AgentLoop {
                     )));
                     self.memory_on_session_end(ctx.get_messages());
                     return Ok(AgentResult {
-                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                        messages: self.messages_for_persisted_result(
+                            &ctx,
+                            persist_user_idx,
+                            prefill_range.clone(),
+                        ),
                         finished_naturally: false,
                         total_turns,
                         tool_errors,
@@ -5614,7 +5646,11 @@ impl AgentLoop {
                     }),
                 );
                 return Ok(AgentResult {
-                    messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                    messages: self.messages_for_persisted_result(
+                        &ctx,
+                        persist_user_idx,
+                        prefill_range.clone(),
+                    ),
                     finished_naturally: true,
                     total_turns,
                     tool_errors,
@@ -5681,7 +5717,11 @@ impl AgentLoop {
                     )));
                     self.memory_on_session_end(ctx.get_messages());
                     return Ok(AgentResult {
-                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                        messages: self.messages_for_persisted_result(
+                            &ctx,
+                            persist_user_idx,
+                            prefill_range.clone(),
+                        ),
                         finished_naturally: false,
                         total_turns,
                         tool_errors,
@@ -5797,6 +5837,7 @@ impl AgentLoop {
                     session_cost_usd,
                     session_started_hooks_fired,
                     persist_user_idx,
+                    prefill_range.clone(),
                 ));
             }
             let tool_span = tracing::info_span!(
@@ -5958,6 +5999,7 @@ impl AgentLoop {
                     session_cost_usd,
                     session_started_hooks_fired,
                     persist_user_idx,
+                    prefill_range.clone(),
                 ));
             }
             if should_trip_tool_loop_guard(
@@ -5994,7 +6036,11 @@ impl AgentLoop {
                 }
                 self.memory_on_session_end(ctx.get_messages());
                 return Ok(AgentResult {
-                    messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                    messages: self.messages_for_persisted_result(
+                        &ctx,
+                        persist_user_idx,
+                        prefill_range.clone(),
+                    ),
                     finished_naturally: false,
                     total_turns,
                     tool_errors,
@@ -6169,6 +6215,13 @@ impl AgentLoop {
             session_started_hooks_fired = true;
         }
 
+        let prefill_start = ctx.get_messages().len();
+        for msg in &self.config.prefill_messages {
+            ctx.add_message(msg.clone());
+        }
+        let prefill_end = ctx.get_messages().len();
+        let prefill_range = (prefill_end > prefill_start).then_some(prefill_start..prefill_end);
+
         for msg in messages {
             ctx.add_message(msg);
         }
@@ -6276,6 +6329,7 @@ impl AgentLoop {
                     session_cost_usd,
                     session_started_hooks_fired,
                     persist_user_idx,
+                    prefill_range.clone(),
                 ));
             }
 
@@ -6299,7 +6353,11 @@ impl AgentLoop {
                         }),
                     );
                     return Ok(AgentResult {
-                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                        messages: self.messages_for_persisted_result(
+                            &ctx,
+                            persist_user_idx,
+                            prefill_range.clone(),
+                        ),
                         finished_naturally: false,
                         total_turns,
                         tool_errors,
@@ -6435,6 +6493,7 @@ impl AgentLoop {
                         session_cost_usd,
                         session_started_hooks_fired,
                         persist_user_idx,
+                        prefill_range.clone(),
                     ));
                 }
                 let r = if inner_attempt == 0 {
@@ -6468,6 +6527,7 @@ impl AgentLoop {
                                 session_cost_usd,
                                 session_started_hooks_fired,
                                 persist_user_idx,
+                                prefill_range.clone(),
                             ));
                         }
                         Err(e) => {
@@ -6501,6 +6561,7 @@ impl AgentLoop {
                                 session_cost_usd,
                                 session_started_hooks_fired,
                                 persist_user_idx,
+                                prefill_range.clone(),
                             ));
                         }
                         Err(e) => {
@@ -6680,7 +6741,11 @@ impl AgentLoop {
                         }),
                     );
                     return Ok(AgentResult {
-                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                        messages: self.messages_for_persisted_result(
+                            &ctx,
+                            persist_user_idx,
+                            prefill_range.clone(),
+                        ),
                         finished_naturally: false,
                         total_turns,
                         tool_errors,
@@ -6899,7 +6964,11 @@ impl AgentLoop {
                     });
                 }
                 return Ok(AgentResult {
-                    messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                    messages: self.messages_for_persisted_result(
+                        &ctx,
+                        persist_user_idx,
+                        prefill_range.clone(),
+                    ),
                     finished_naturally: true,
                     total_turns,
                     tool_errors,
@@ -6989,7 +7058,11 @@ impl AgentLoop {
                     )));
                     self.memory_on_session_end(ctx.get_messages());
                     return Ok(AgentResult {
-                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                        messages: self.messages_for_persisted_result(
+                            &ctx,
+                            persist_user_idx,
+                            prefill_range.clone(),
+                        ),
                         finished_naturally: false,
                         total_turns,
                         tool_errors,
@@ -7097,6 +7170,7 @@ impl AgentLoop {
                     session_cost_usd,
                     session_started_hooks_fired,
                     persist_user_idx,
+                    prefill_range.clone(),
                 ));
             }
 
@@ -7254,6 +7328,7 @@ impl AgentLoop {
                     session_cost_usd,
                     session_started_hooks_fired,
                     persist_user_idx,
+                    prefill_range.clone(),
                 ));
             }
             if should_trip_tool_loop_guard(
@@ -7304,7 +7379,11 @@ impl AgentLoop {
                 }
                 self.memory_on_session_end(ctx.get_messages());
                 return Ok(AgentResult {
-                    messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                    messages: self.messages_for_persisted_result(
+                        &ctx,
+                        persist_user_idx,
+                        prefill_range.clone(),
+                    ),
                     finished_naturally: false,
                     total_turns,
                     tool_errors,
@@ -9811,6 +9890,98 @@ mod tests {
         assert!(!config.smart_model_routing.enabled);
         assert!(config.background_review_metrics_enabled);
         assert_eq!(config.stream_read_max_retries, 2);
+        assert!(config.prefill_messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn prefill_messages_are_model_visible_but_not_returned_for_persistence() {
+        #[derive(Default)]
+        struct CapturingProvider {
+            seen_messages: Mutex<Vec<Message>>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for CapturingProvider {
+            async fn chat_completion(
+                &self,
+                messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<LlmResponse, AgentError> {
+                *self.seen_messages.lock().expect("seen messages lock") = messages.to_vec();
+                Ok(LlmResponse {
+                    message: Message::assistant("done"),
+                    usage: None,
+                    model: "test".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let provider = std::sync::Arc::new(CapturingProvider::default());
+        let mut config = AgentConfig {
+            skip_memory: true,
+            skip_context_files: true,
+            prefill_messages: vec![
+                Message::system("prefill system"),
+                Message::user("prefill user example"),
+            ],
+            ..AgentConfig::default()
+        };
+        let _home = isolate_route_learning_home(&mut config);
+        let agent = AgentLoop::new(
+            config,
+            std::sync::Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        );
+
+        let result = agent
+            .run(vec![Message::user("real question")], Some(Vec::new()))
+            .await
+            .expect("agent run");
+
+        let seen = provider.seen_messages.lock().expect("seen messages lock");
+        assert!(seen
+            .iter()
+            .any(|m| m.content.as_deref() == Some("prefill system")));
+        assert!(seen
+            .iter()
+            .any(|m| m.content.as_deref() == Some("prefill user example")));
+        assert!(seen
+            .iter()
+            .any(|m| m.content.as_deref() == Some("real question")));
+
+        assert!(!result
+            .messages
+            .iter()
+            .any(|m| m.content.as_deref() == Some("prefill system")));
+        assert!(!result
+            .messages
+            .iter()
+            .any(|m| m.content.as_deref() == Some("prefill user example")));
+        assert!(result
+            .messages
+            .iter()
+            .any(|m| m.content.as_deref() == Some("real question")));
+        assert!(result
+            .messages
+            .iter()
+            .any(|m| m.content.as_deref() == Some("done")));
     }
 
     #[test]

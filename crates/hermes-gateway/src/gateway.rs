@@ -2725,14 +2725,7 @@ impl Gateway {
 
     /// Load optional prefill messages.
     pub fn load_prefill_messages(&self, path: &std::path::Path) -> Vec<Message> {
-        let Ok(content) = std::fs::read_to_string(path) else {
-            return vec![];
-        };
-        content
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(Message::user)
-            .collect()
+        hermes_config::load_prefill_messages_file(path)
     }
 
     /// Load optional ephemeral system prompt.
@@ -3044,6 +3037,28 @@ mod tests {
         fn platform_name(&self) -> &str {
             "media-marker-test"
         }
+    }
+
+    #[test]
+    fn gateway_prefill_loader_parses_json_message_array() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("prefill.json");
+        std::fs::write(
+            &path,
+            r#"[{"role":"system","content":"gateway system"},{"role":"assistant","content":"gateway assistant"}]"#,
+        )
+        .unwrap();
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let dm_manager = DmManager::with_ignore_behavior();
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        let messages = gw.load_prefill_messages(&path);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, MessageRole::System);
+        assert_eq!(messages[0].content.as_deref(), Some("gateway system"));
+        assert_eq!(messages[1].role, MessageRole::Assistant);
+        assert_eq!(messages[1].content.as_deref(), Some("gateway assistant"));
     }
 
     #[tokio::test]
