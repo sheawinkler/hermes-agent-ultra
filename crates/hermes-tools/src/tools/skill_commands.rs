@@ -78,6 +78,34 @@ pub struct SkillSlashInvocation {
     pub message: String,
 }
 
+/// One installed skill command discovered during a refresh/snapshot pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillSlashCommandEntry {
+    /// Canonical command key, including leading slash.
+    pub command: String,
+    /// Skill name from frontmatter or the skill directory.
+    pub skill_name: String,
+    /// Short description from frontmatter, if present.
+    pub description: String,
+    /// Path to the resolved `SKILL.md`.
+    pub skill_md_path: PathBuf,
+    /// Security rejection text when the skill was blocked.
+    pub blocked_reason: Option<String>,
+}
+
+/// Snapshot of installed skill slash commands visible to the current runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillSlashCommandSnapshot {
+    /// Skill roots scanned for nested `SKILL.md` files.
+    pub roots: Vec<PathBuf>,
+    /// Safe commands available for slash invocation.
+    pub available: Vec<SkillSlashCommandEntry>,
+    /// Matching skills blocked by the security gate.
+    pub blocked: Vec<SkillSlashCommandEntry>,
+    /// Skills skipped by platform, enable/disable filters, empty slugs, or duplicate commands.
+    pub skipped: usize,
+}
+
 impl SkillCommandRegistry {
     pub fn new() -> Self {
         Self {
@@ -226,6 +254,134 @@ fn security_gate_skill_content(name: &str, body: &str) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
+fn skill_description(skill: &SkillInfo) -> String {
+    skill
+        .frontmatter
+        .get("description")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn skill_command_entry(
+    skill: &SkillInfo,
+    slug: &str,
+    blocked_reason: Option<String>,
+) -> SkillSlashCommandEntry {
+    SkillSlashCommandEntry {
+        command: format!("/{slug}"),
+        skill_name: skill.name.clone(),
+        description: skill_description(skill),
+        skill_md_path: skill.path.join("SKILL.md"),
+        blocked_reason,
+    }
+}
+
+/// Scan installed skills and report the slash commands currently visible.
+///
+/// This is intentionally a snapshot, not a cache invalidation hook. Dynamic
+/// installed-skill slash commands are resolved from disk each time they are
+/// invoked; `/reload-skills` uses this to provide user-visible confirmation and
+/// to queue an agent-visible note for the next turn.
+pub fn installed_skill_slash_command_snapshot(
+    config: &SkillCommandResolverConfig,
+) -> SkillSlashCommandSnapshot {
+    let mut available = Vec::new();
+    let mut blocked = Vec::new();
+    let mut skipped = 0usize;
+    let mut seen_slugs = HashSet::new();
+
+    for skill in discover_skills(&config.roots) {
+        if !skill_matches_platform(&skill, config.platform.as_deref()) {
+            skipped = skipped.saturating_add(1);
+            continue;
+        }
+        let slug = slugify_skill_command_name(&skill.name);
+        if slug.is_empty() || !skill_allowed(&skill.name, &slug, &config.enabled, &config.disabled)
+        {
+            skipped = skipped.saturating_add(1);
+            continue;
+        }
+        if !seen_slugs.insert(slug.clone()) {
+            skipped = skipped.saturating_add(1);
+            continue;
+        }
+        match security_gate_skill_content(&skill.name, &skill.body) {
+            Ok(()) => available.push(skill_command_entry(&skill, &slug, None)),
+            Err(err) => blocked.push(skill_command_entry(&skill, &slug, Some(err))),
+        }
+    }
+
+    available.sort_by(|a, b| a.command.cmp(&b.command));
+    blocked.sort_by(|a, b| a.command.cmp(&b.command));
+
+    SkillSlashCommandSnapshot {
+        roots: config.roots.clone(),
+        available,
+        blocked,
+        skipped,
+    }
+}
+
+/// Render a concise `/reload-skills` reply for CLI/gateway users.
+pub fn render_skill_slash_command_snapshot(snapshot: &SkillSlashCommandSnapshot) -> String {
+    let mut out = format!(
+        "Reloaded installed skill commands: available={} blocked={} skipped={}.\nDynamic SKILL.md slash commands are scanned live; no prompt cache was invalidated.",
+        snapshot.available.len(),
+        snapshot.blocked.len(),
+        snapshot.skipped
+    );
+    if !snapshot.available.is_empty() {
+        let commands = snapshot
+            .available
+            .iter()
+            .map(|entry| format!("{} ({})", entry.command, entry.skill_name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str("\nAvailable: ");
+        out.push_str(&commands);
+    }
+    if !snapshot.blocked.is_empty() {
+        let blocked = snapshot
+            .blocked
+            .iter()
+            .map(|entry| format!("{} ({})", entry.command, entry.skill_name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str("\nBlocked by security policy: ");
+        out.push_str(&blocked);
+    }
+    out
+}
+
+/// Build the one-shot system note queued after `/reload-skills`.
+pub fn build_skill_reload_system_note(snapshot: &SkillSlashCommandSnapshot) -> String {
+    let available = if snapshot.available.is_empty() {
+        "none".to_string()
+    } else {
+        snapshot
+            .available
+            .iter()
+            .map(|entry| format!("{} ({})", entry.command, entry.skill_name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let blocked = if snapshot.blocked.is_empty() {
+        "none".to_string()
+    } else {
+        snapshot
+            .blocked
+            .iter()
+            .map(|entry| format!("{} ({})", entry.command, entry.skill_name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    format!(
+        "[SYSTEM: The user refreshed installed skill slash commands with /reload-skills. Dynamic SKILL.md commands are scanned from disk on invocation; no prompt cache was invalidated. Current available commands: {available}. Blocked commands: {blocked}.]"
+    )
+}
+
 /// Build the agent-facing message for a skill slash command invocation.
 pub fn build_skill_slash_invocation_message(
     skill_name: &str,
@@ -281,12 +437,7 @@ pub fn resolve_installed_skill_slash_command(
         }
         security_gate_skill_content(&skill.name, &skill.body)?;
         let skill_md_path = skill.path.join("SKILL.md");
-        let description = skill
-            .frontmatter
-            .get("description")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default()
-            .to_string();
+        let description = skill_description(&skill);
         let message = build_skill_slash_invocation_message(&skill.name, &skill.body, args);
         return Ok(Some(SkillSlashInvocation {
             command: format!("/{slug}"),
@@ -616,5 +767,53 @@ mod tests {
             .expect_err("dangerous skill should be blocked");
         assert!(err.contains("Guard violation:"));
         assert!(err.contains("Blocked content:"));
+    }
+
+    #[test]
+    fn snapshot_reports_available_blocked_and_skipped_skill_commands() {
+        let tmp = tempdir().unwrap();
+        write_skill(
+            tmp.path(),
+            "release-captain",
+            "name: Release Captain\ndescription: Ship releases safely",
+            "# Release Captain\n1. Inspect changes",
+        );
+        write_skill(
+            tmp.path(),
+            "danger",
+            "name: Danger",
+            "# Danger\n1. Run rm -rf /",
+        );
+        write_skill(
+            tmp.path(),
+            "mac-only",
+            "name: Mac Only\nplatform: darwin",
+            "# Mac Only\n1. Use macOS",
+        );
+        let config = SkillCommandResolverConfig {
+            roots: vec![tmp.path().to_path_buf()],
+            platform: Some("linux".to_string()),
+            ..SkillCommandResolverConfig::default()
+        };
+
+        let snapshot = installed_skill_slash_command_snapshot(&config);
+
+        assert_eq!(snapshot.available.len(), 1);
+        assert_eq!(snapshot.available[0].command, "/release-captain");
+        assert_eq!(snapshot.available[0].description, "Ship releases safely");
+        assert_eq!(snapshot.blocked.len(), 1);
+        assert_eq!(snapshot.blocked[0].command, "/danger");
+        assert!(snapshot.blocked[0].blocked_reason.is_some());
+        assert_eq!(snapshot.skipped, 1);
+
+        let rendered = render_skill_slash_command_snapshot(&snapshot);
+        assert!(rendered.contains("available=1 blocked=1 skipped=1"));
+        assert!(rendered.contains("/release-captain"));
+        assert!(rendered.contains("no prompt cache was invalidated"));
+
+        let note = build_skill_reload_system_note(&snapshot);
+        assert!(note.contains("/reload-skills"));
+        assert!(note.contains("/release-captain"));
+        assert!(note.contains("/danger"));
     }
 }

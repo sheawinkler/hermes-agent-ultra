@@ -24,7 +24,9 @@ use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 use hermes_core::types::{Message, MessageRole};
 use hermes_tools::skill_commands::{
-    resolve_installed_skill_slash_command, SkillCommandResolverConfig,
+    build_skill_reload_system_note, installed_skill_slash_command_snapshot,
+    render_skill_slash_command_snapshot, resolve_installed_skill_slash_command,
+    SkillCommandResolverConfig,
 };
 
 use crate::background::{BackgroundTaskManager, TaskStatus};
@@ -259,6 +261,7 @@ struct SessionRuntimeState {
     verbose: bool,
     yolo: bool,
     reasoning: bool,
+    pending_system_notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -322,6 +325,7 @@ impl Default for SessionRuntimeState {
             verbose: false,
             yolo: false,
             reasoning: false,
+            pending_system_notes: Vec::new(),
         }
     }
 }
@@ -1420,6 +1424,30 @@ impl Gateway {
             .map(|maybe| maybe.map(|invocation| invocation.message))
     }
 
+    async fn apply_reload_skills_command(
+        &self,
+        incoming: &IncomingMessage,
+        session_key: &str,
+    ) -> Result<(), GatewayError> {
+        let config = SkillCommandResolverConfig::default();
+        let snapshot = installed_skill_slash_command_snapshot(&config);
+        {
+            let mut states = self.runtime_state.write().await;
+            states
+                .entry(session_key.to_string())
+                .or_default()
+                .pending_system_notes
+                .push(build_skill_reload_system_note(&snapshot));
+        }
+        self.send_message(
+            &incoming.platform,
+            &incoming.chat_id,
+            &render_skill_slash_command_snapshot(&snapshot),
+            None,
+        )
+        .await
+    }
+
     async fn apply_command_result(
         &self,
         incoming: &IncomingMessage,
@@ -1703,6 +1731,11 @@ impl Gateway {
                     None,
                 )
                 .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ReloadSkills => {
+                self.apply_reload_skills_command(incoming, session_key)
+                    .await?;
                 Ok(true)
             }
             GatewayCommandResult::SwitchProvider { provider, reply } => {
@@ -2239,13 +2272,12 @@ impl Gateway {
         session_key: &str,
         messages: Vec<Message>,
     ) -> Vec<Message> {
-        let state = self
-            .runtime_state
-            .read()
-            .await
-            .get(session_key)
-            .cloned()
-            .unwrap_or_default();
+        let (state, pending_system_notes) = {
+            let mut states = self.runtime_state.write().await;
+            let state = states.entry(session_key.to_string()).or_default();
+            let pending = std::mem::take(&mut state.pending_system_notes);
+            (state.clone(), pending)
+        };
 
         let mut hints = Vec::new();
         if let Some(model) = state.model {
@@ -2266,15 +2298,20 @@ impl Gateway {
         {
             hints.push(format!("service_tier={service_tier}"));
         }
-        if hints.is_empty() {
+        if hints.is_empty() && pending_system_notes.is_empty() {
             return messages;
         }
 
-        let mut out = Vec::with_capacity(messages.len() + 1);
-        out.push(Message::system(format!(
-            "[gateway_runtime]\n{}",
-            hints.join("\n")
-        )));
+        let mut out = Vec::with_capacity(messages.len() + 1 + pending_system_notes.len());
+        if !hints.is_empty() {
+            out.push(Message::system(format!(
+                "[gateway_runtime]\n{}",
+                hints.join("\n")
+            )));
+        }
+        for note in pending_system_notes {
+            out.push(Message::system(note));
+        }
         out.extend(messages);
         out
     }
@@ -3559,6 +3596,102 @@ mod tests {
         assert!(seen[0].contains("Release Captain"));
         assert!(seen[0].contains("Inspect changed files"));
         assert!(seen[0].contains("ship it"));
+    }
+
+    #[tokio::test]
+    async fn gateway_reload_skills_replies_and_injects_one_shot_note() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home_guard = HermesHomeEnvGuard::set(tmp.path());
+        let skill_dir = tmp.path().join("skills").join("release-captain");
+        std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: Release Captain\ndescription: Release workflow\n---\n# Release Captain\n1. Inspect changed files\n",
+        )
+        .expect("write skill");
+
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let seen_messages = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+        let seen_for_handler = seen_messages.clone();
+        gw.set_message_handler(Arc::new(move |messages| {
+            let seen = seen_for_handler.clone();
+            Box::pin(async move {
+                seen.lock().expect("seen lock").push(messages);
+                Ok("agent-ok".to_string())
+            })
+        }))
+        .await;
+
+        gw.route_message(&IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/reload-skills".into(),
+            message_id: None,
+            is_dm: true,
+        })
+        .await
+        .expect("reload skills");
+        gw.route_message(&IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "next turn".into(),
+            message_id: None,
+            is_dm: true,
+        })
+        .await
+        .expect("next turn");
+        gw.route_message(&IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "later turn".into(),
+            message_id: None,
+            is_dm: true,
+        })
+        .await
+        .expect("later turn");
+
+        let sent = sent.lock().expect("sent lock");
+        assert!(sent[0].1.contains("Reloaded installed skill commands"));
+        assert!(sent[0].1.contains("/release-captain"));
+        assert_eq!(sent[1].1, "agent-ok");
+        assert_eq!(sent[2].1, "agent-ok");
+        drop(sent);
+
+        let seen = seen_messages.lock().expect("seen lock");
+        assert_eq!(seen.len(), 2);
+        let first_note_count = seen[0]
+            .iter()
+            .filter(|message| {
+                message.role == MessageRole::System
+                    && message
+                        .content
+                        .as_deref()
+                        .is_some_and(|text| text.contains("/reload-skills"))
+            })
+            .count();
+        let second_note_count = seen[1]
+            .iter()
+            .filter(|message| {
+                message.role == MessageRole::System
+                    && message
+                        .content
+                        .as_deref()
+                        .is_some_and(|text| text.contains("/reload-skills"))
+            })
+            .count();
+        assert_eq!(first_note_count, 1);
+        assert_eq!(second_note_count, 0);
     }
 
     #[async_trait]

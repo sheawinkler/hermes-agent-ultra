@@ -314,6 +314,8 @@ pub struct App {
     pub session_objective: Option<String>,
     /// User text staged back into the composer by commands such as `/undo`.
     pending_input_prefill: Option<String>,
+    /// System notes injected once before the next submitted user message.
+    pending_system_notes: Vec<String>,
     /// One-shot quorum arm state set by `/quorum run`.
     pub quorum_armed_once: bool,
     /// Animated companion pet settings.
@@ -337,6 +339,7 @@ impl std::fmt::Debug for App {
             .field("pending_image_hint", &self.pending_image_hint)
             .field("session_objective", &self.session_objective)
             .field("pending_input_prefill", &self.pending_input_prefill)
+            .field("pending_system_notes", &self.pending_system_notes)
             .field("quorum_armed_once", &self.quorum_armed_once)
             .field("pet_settings", &self.pet_settings)
             .finish_non_exhaustive()
@@ -370,6 +373,7 @@ impl Clone for App {
             pending_image_hint: self.pending_image_hint.clone(),
             session_objective: self.session_objective.clone(),
             pending_input_prefill: self.pending_input_prefill.clone(),
+            pending_system_notes: self.pending_system_notes.clone(),
             quorum_armed_once: self.quorum_armed_once,
             pet_settings: self.pet_settings.clone(),
         }
@@ -2169,6 +2173,7 @@ impl App {
             pending_image_hint: None,
             session_objective: None,
             pending_input_prefill: None,
+            pending_system_notes: Vec::new(),
             quorum_armed_once: false,
             pet_settings: load_pet_settings(),
         };
@@ -2225,9 +2230,24 @@ impl App {
 
     /// Submit text through the normal user-message path and run the agent.
     pub async fn submit_user_message(&mut self, raw: &str) -> Result<(), AgentError> {
+        for note in std::mem::take(&mut self.pending_system_notes) {
+            self.messages.push(hermes_core::Message::system(note));
+        }
         let user_message = self.prepare_user_message(raw);
         self.messages.push(hermes_core::Message::user(user_message));
         self.run_agent().await
+    }
+
+    pub fn queue_next_turn_system_note(&mut self, note: String) {
+        let trimmed = note.trim();
+        if !trimmed.is_empty() {
+            self.pending_system_notes.push(trimmed.to_string());
+        }
+    }
+
+    #[cfg(test)]
+    pub fn pending_system_note_count(&self) -> usize {
+        self.pending_system_notes.len()
     }
 
     pub fn take_pending_input_prefill(&mut self) -> Option<String> {
@@ -3939,6 +3959,7 @@ mod tests {
             pending_image_hint: None,
             session_objective: None,
             pending_input_prefill: None,
+            pending_system_notes: Vec::new(),
             quorum_armed_once: false,
             pet_settings: PetSettings::default(),
         }
