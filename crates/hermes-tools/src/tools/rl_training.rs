@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
-use hermes_rl::{
+use hermes_intelligence::rl::{
     BatchRunner, BatchRunnerConfig, RlEnvironment, RunManager, TrainingConfig, TrainingRun,
     TrainingStatus,
 };
@@ -513,5 +513,115 @@ impl ToolHandler for RlTestInferenceHandler {
             "Test the trained model on a prompt.",
             JsonSchema::object(props, vec!["prompt".into()]),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    async fn execute_json(handler: &dyn ToolHandler, params: Value) -> Value {
+        serde_json::from_str(&handler.execute(params).await.unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn rl_handlers_cover_training_lifecycle_and_inference() {
+        let state = RlState::new(PathBuf::from("/tmp/hermes-rl-handler-test"));
+
+        let envs = execute_json(&RlListEnvironmentsHandler, json!({})).await;
+        assert!(envs["environments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|env| env["name"] == "tinker"));
+
+        let selected = execute_json(
+            &RlSelectEnvironmentHandler {
+                state: state.clone(),
+            },
+            json!({"environment": "atropos"}),
+        )
+        .await;
+        assert_eq!(selected["selected"], "atropos");
+
+        let updated = execute_json(
+            &RlEditConfigHandler {
+                state: state.clone(),
+            },
+            json!({
+                "algo": "grpo",
+                "learning_rate": 0.0002,
+                "batch_size": 64,
+                "max_steps": 2,
+                "reward_model": "rm-local"
+            }),
+        )
+        .await;
+        assert_eq!(updated["updated_config"]["algo"], "grpo");
+        assert_eq!(updated["updated_config"]["batch_size"], 64);
+
+        let started = execute_json(
+            &RlStartTrainingHandler {
+                state: state.clone(),
+            },
+            json!({}),
+        )
+        .await;
+        let run_id = started["run_id"].as_str().unwrap().to_string();
+        assert_eq!(started["status"], "running");
+
+        let status = execute_json(
+            &RlCheckStatusHandler {
+                state: state.clone(),
+            },
+            json!({"run_id": run_id}),
+        )
+        .await;
+        assert_eq!(status["environment"], "atropos");
+        assert!(status["metrics"]["total_steps"].as_u64().unwrap() >= 2);
+
+        let inference = execute_json(
+            &RlTestInferenceHandler {
+                state: state.clone(),
+            },
+            json!({"prompt": "verify the rollout", "run_id": status["run_id"]}),
+        )
+        .await;
+        assert!(inference["response"]
+            .as_str()
+            .unwrap()
+            .contains("[baseline-verification]"));
+
+        let stopped = execute_json(
+            &RlStopTrainingHandler {
+                state: state.clone(),
+            },
+            json!({"run_id": status["run_id"]}),
+        )
+        .await;
+        assert_eq!(stopped["status"], "stopped");
+
+        let results = execute_json(
+            &RlGetResultsHandler {
+                state: state.clone(),
+            },
+            json!({"run_id": status["run_id"]}),
+        )
+        .await;
+        assert_eq!(results["status"], "stopped");
+
+        let runs = execute_json(&RlListRunsHandler { state }, json!({})).await;
+        assert_eq!(runs["count"], 1);
+    }
+
+    #[tokio::test]
+    async fn rl_select_environment_rejects_unknown_environment() {
+        let state = RlState::new(PathBuf::from("/tmp/hermes-rl-handler-test"));
+        let err = RlSelectEnvironmentHandler { state }
+            .execute(json!({"environment": "unknown"}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Unknown environment"));
     }
 }

@@ -8,6 +8,8 @@ use chrono::{DateTime, Utc};
 use hermes_core::{Message, ToolCall};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
 
@@ -76,7 +78,7 @@ impl TrajectoryCompressor {
         for (i, msg) in trajectory.messages.iter().enumerate() {
             let is_first = i == 0;
             let is_last = i == last_idx;
-            let has_tool_calls = msg.tool_calls.as_ref().map_or(false, |tc| !tc.is_empty());
+            let has_tool_calls = msg.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty());
 
             if is_first || is_last || has_tool_calls {
                 compressed_messages.push(msg.clone());
@@ -174,6 +176,271 @@ impl BatchGenerator {
             model
         )
     }
+}
+
+// ---------------------------------------------------------------------------
+// Runtime RL training surface
+// ---------------------------------------------------------------------------
+
+/// Runtime status for a training run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrainingStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Stopped,
+}
+
+/// User-editable training configuration for the Rust RL control surface.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrainingConfig {
+    pub algo: String,
+    pub learning_rate: f64,
+    pub batch_size: usize,
+    pub max_steps: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reward_model: Option<String>,
+}
+
+impl Default for TrainingConfig {
+    fn default() -> Self {
+        Self {
+            algo: "ppo".to_string(),
+            learning_rate: 1e-5,
+            batch_size: 32,
+            max_steps: 1_000,
+            reward_model: None,
+        }
+    }
+}
+
+/// Progress metrics reported by the local RL run manager.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TrainingMetrics {
+    pub total_steps: usize,
+    pub current_step: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reward_mean: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reward_std: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loss: Option<f64>,
+}
+
+/// A supported RL environment descriptor exposed by `rl_list_environments`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RlEnvironment {
+    pub name: String,
+    pub description: String,
+    pub config_schema: serde_json::Value,
+}
+
+impl RlEnvironment {
+    pub fn builtin_environments() -> Vec<Self> {
+        vec![
+            Self {
+                name: "tinker".to_string(),
+                description: "Local Tinker-style text and tool-use rollouts".to_string(),
+                config_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "algo": {"type": "string", "enum": ["ppo", "dpo", "grpo"]},
+                        "learning_rate": {"type": "number"},
+                        "batch_size": {"type": "integer", "minimum": 1},
+                        "max_steps": {"type": "integer", "minimum": 1}
+                    }
+                }),
+            },
+            Self {
+                name: "atropos".to_string(),
+                description: "Atropos-compatible agentic environment metadata".to_string(),
+                config_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "task_family": {"type": "string"},
+                        "reward_model": {"type": "string"},
+                        "max_steps": {"type": "integer", "minimum": 1}
+                    }
+                }),
+            },
+            Self {
+                name: "custom".to_string(),
+                description: "Custom local RL environment configured by the caller".to_string(),
+                config_schema: serde_json::json!({"type": "object"}),
+            },
+        ]
+    }
+}
+
+/// A single tracked training run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrainingRun {
+    pub id: String,
+    pub environment: String,
+    pub status: TrainingStatus,
+    pub config: TrainingConfig,
+    pub metrics: TrainingMetrics,
+    pub started_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+/// In-process run manager used by the Rust `rl_*` tools.
+pub struct RunManager {
+    pub data_dir: PathBuf,
+    runs: HashMap<String, TrainingRun>,
+}
+
+impl RunManager {
+    pub fn new(data_dir: PathBuf) -> Self {
+        Self {
+            data_dir,
+            runs: HashMap::new(),
+        }
+    }
+
+    pub fn create_run(&mut self, environment: &str, config: TrainingConfig) -> String {
+        let id = generate_run_id();
+        let run = TrainingRun {
+            id: id.clone(),
+            environment: environment.to_string(),
+            status: TrainingStatus::Pending,
+            metrics: TrainingMetrics {
+                total_steps: config.max_steps,
+                ..TrainingMetrics::default()
+            },
+            config,
+            started_at: Utc::now(),
+            finished_at: None,
+        };
+        self.runs.insert(id.clone(), run);
+        id
+    }
+
+    pub fn get_run(&self, id: &str) -> Option<&TrainingRun> {
+        self.runs.get(id)
+    }
+
+    pub fn get_run_mut(&mut self, id: &str) -> Option<&mut TrainingRun> {
+        self.runs.get_mut(id)
+    }
+
+    pub fn list_runs(&self) -> Vec<&TrainingRun> {
+        let mut runs: Vec<_> = self.runs.values().collect();
+        runs.sort_by(|a, b| {
+            b.started_at
+                .cmp(&a.started_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
+        runs
+    }
+
+    pub fn set_status(&mut self, id: &str, status: TrainingStatus) -> bool {
+        if let Some(run) = self.runs.get_mut(id) {
+            if matches!(
+                status,
+                TrainingStatus::Completed | TrainingStatus::Failed | TrainingStatus::Stopped
+            ) {
+                run.finished_at = Some(Utc::now());
+            }
+            run.status = status;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn update_metrics(&mut self, id: &str, metrics: TrainingMetrics) -> bool {
+        if let Some(run) = self.runs.get_mut(id) {
+            run.metrics = metrics;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn generate_run_id() -> String {
+    static RUN_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+    let seq = RUN_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("run-{}-{seq:04}", Utc::now().timestamp_millis())
+}
+
+/// Configuration for deterministic batch inference smoke paths.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchRunnerConfig {
+    pub max_parallel_jobs: usize,
+    pub max_turns: usize,
+}
+
+impl Default for BatchRunnerConfig {
+    fn default() -> Self {
+        Self {
+            max_parallel_jobs: 4,
+            max_turns: 32,
+        }
+    }
+}
+
+/// Minimal trajectory emitted by the offline batch runner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchTrajectory {
+    pub id: String,
+    pub prompt: String,
+    pub response: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BatchRunner {
+    config: BatchRunnerConfig,
+}
+
+impl BatchRunner {
+    pub fn new(config: BatchRunnerConfig) -> Self {
+        Self { config }
+    }
+
+    pub fn config(&self) -> &BatchRunnerConfig {
+        &self.config
+    }
+
+    /// Generate deterministic local trajectories without model credentials.
+    pub fn generate_batch(&self, prompts: &[String]) -> Vec<BatchTrajectory> {
+        prompts
+            .iter()
+            .enumerate()
+            .map(|(idx, prompt)| BatchTrajectory {
+                id: format!("traj-{}", idx + 1),
+                prompt: prompt.clone(),
+                response: build_baseline_response(prompt, self.config.max_turns),
+                created_at: Utc::now(),
+            })
+            .collect()
+    }
+
+    pub fn generate_stub(&self, prompts: &[String]) -> Vec<BatchTrajectory> {
+        self.generate_batch(prompts)
+    }
+}
+
+fn build_baseline_response(prompt: &str, max_turns: usize) -> String {
+    let lower = prompt.to_lowercase();
+    let style = if lower.contains("bug") || lower.contains("fix") {
+        "diagnostic"
+    } else if lower.contains("plan") || lower.contains("strategy") {
+        "planning"
+    } else if lower.contains("test") || lower.contains("verify") {
+        "verification"
+    } else {
+        "general"
+    };
+    format!(
+        "[baseline-{style}] steps_budget={max_turns}; response: {}",
+        prompt.chars().take(180).collect::<String>()
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -483,5 +750,78 @@ mod tests {
         assert_eq!(config.max_turns_per_trajectory, 10);
         assert_eq!(config.model, "gpt-4o");
         assert!((config.temperature - 0.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn training_status_serde_uses_snake_case() {
+        let json = serde_json::to_string(&TrainingStatus::Running).unwrap();
+        assert_eq!(json, "\"running\"");
+        let parsed: TrainingStatus = serde_json::from_str("\"stopped\"").unwrap();
+        assert_eq!(parsed, TrainingStatus::Stopped);
+    }
+
+    #[test]
+    fn run_manager_tracks_status_metrics_and_sorted_runs() {
+        let mut manager = RunManager::new(PathBuf::from("/tmp/hermes-rl-test"));
+        let config = TrainingConfig {
+            max_steps: 42,
+            ..TrainingConfig::default()
+        };
+        let run_id = manager.create_run("tinker", config.clone());
+
+        let run = manager.get_run(&run_id).unwrap();
+        assert_eq!(run.environment, "tinker");
+        assert_eq!(run.status, TrainingStatus::Pending);
+        assert_eq!(run.metrics.total_steps, 42);
+        assert_eq!(run.config, config);
+
+        assert!(manager.set_status(&run_id, TrainingStatus::Running));
+        assert!(manager.update_metrics(
+            &run_id,
+            TrainingMetrics {
+                total_steps: 42,
+                current_step: 7,
+                reward_mean: Some(0.25),
+                reward_std: Some(0.5),
+                loss: Some(0.75),
+            },
+        ));
+        let run = manager.get_run(&run_id).unwrap();
+        assert_eq!(run.status, TrainingStatus::Running);
+        assert_eq!(run.metrics.current_step, 7);
+
+        assert!(manager.set_status(&run_id, TrainingStatus::Stopped));
+        let run = manager.get_run(&run_id).unwrap();
+        assert_eq!(run.status, TrainingStatus::Stopped);
+        assert!(run.finished_at.is_some());
+        assert_eq!(manager.list_runs().len(), 1);
+    }
+
+    #[test]
+    fn rl_environments_expose_tinker_atropos_and_custom() {
+        let envs = RlEnvironment::builtin_environments();
+        let names: Vec<_> = envs.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"tinker"));
+        assert!(names.contains(&"atropos"));
+        assert!(names.contains(&"custom"));
+        assert!(envs
+            .iter()
+            .all(|e| e.config_schema.get("type").and_then(|v| v.as_str()) == Some("object")));
+    }
+
+    #[test]
+    fn batch_runner_generates_style_tagged_baseline_responses() {
+        let runner = BatchRunner::new(BatchRunnerConfig {
+            max_parallel_jobs: 2,
+            max_turns: 5,
+        });
+        let prompts = vec!["Fix the flaky test and verify it".to_string()];
+        let trajectories = runner.generate_batch(&prompts);
+
+        assert_eq!(trajectories.len(), 1);
+        assert_eq!(trajectories[0].id, "traj-1");
+        assert_eq!(trajectories[0].prompt, prompts[0]);
+        assert!(trajectories[0].response.contains("[baseline-diagnostic]"));
+        assert!(trajectories[0].response.contains("steps_budget=5"));
     }
 }

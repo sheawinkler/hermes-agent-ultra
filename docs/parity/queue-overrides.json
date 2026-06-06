@@ -1355,6 +1355,26 @@
     "8d256779d8fa": {
       "disposition": "ported",
       "notes": "Rust OpenAiVisionBackend handles local image files by MIME-sniffing extensions and base64-encoding data URLs, validates remote image URLs against unsafe hosts/schemes, and normalizes empty vision responses with focused tests."
+    },
+    "f957ec226789": {
+      "disposition": "ported",
+      "notes": "Rust toolset_distributions now covers validated probability-weighted distributions against registered ToolsetManager toolsets, including the first-class rl_training toolset added in this batch, with deterministic and sampling contract tests."
+    },
+    "f018999da978": {
+      "disposition": "ported",
+      "notes": "Initial Python RL training tools and loop are ported as Rust rl_* ToolHandler implementations backed by hermes_intelligence::rl run/config/status/metrics types, registered as built-in tools under the rl_training toolset with lifecycle and inference tests."
+    },
+    "f6574978de39": {
+      "disposition": "ported",
+      "notes": "RL training configuration and tools are now first-class Rust runtime surface: rl_list_environments, rl_select_environment, rl_get_current_config, rl_edit_config, rl_start_training, rl_check_status, rl_stop_training, rl_get_results, rl_list_runs, and rl_test_inference are registered and covered."
+    },
+    "12bbca95ecf4": {
+      "disposition": "superseded",
+      "notes": "The vendored tinker-atropos Python submodule path is superseded by Rust-native RL environment descriptors for tinker, atropos-compatible, and custom environments plus local run-manager control; no Python submodule is required for runtime registration."
+    },
+    "3c0d0dba49f9": {
+      "disposition": "ported",
+      "notes": "Updated RL tools and configuration management are covered by Rust TrainingConfig editing, TrainingStatus serde, TrainingMetrics progression, RunManager lifecycle, registered rl_training toolset membership, and focused hermes-intelligence/hermes-tools tests."
     }
   },
   "subject_patterns": [

@@ -27,6 +27,7 @@ pub mod osv_check;
 pub mod process_registry;
 pub mod raw_trace_control;
 pub mod replay_trace_control;
+pub mod rl_training;
 pub mod runbook;
 pub mod session_search;
 pub mod skill_commands;
