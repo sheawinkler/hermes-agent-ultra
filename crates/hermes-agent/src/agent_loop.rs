@@ -1089,7 +1089,10 @@ fn is_tool_payload_validation_error(err: &str) -> bool {
 fn preferred_tool_payload_fallback_model(provider_hint: &str, model_name: &str) -> Option<String> {
     let provider = provider_hint.trim().to_ascii_lowercase();
     let model = model_name.trim().to_ascii_lowercase();
-    let nous_openai_route = provider == "nous" && model.starts_with("openai/");
+    let nous_openai_route = matches!(
+        provider.as_str(),
+        "nous" | "nous-api" | "nous_api" | "nousapi" | "nous-portal-api"
+    ) && model.starts_with("openai/");
     if !nous_openai_route {
         return None;
     }
@@ -2885,9 +2888,11 @@ impl AgentLoop {
                 .filter(|v| !v.trim().is_empty())
                 .or_else(|| std::env::var("MINIMAX_API_KEY").ok())
                 .filter(|v| !v.trim().is_empty()),
-            "nous" => std::env::var("NOUS_API_KEY")
-                .ok()
-                .filter(|v| !v.trim().is_empty()),
+            "nous" | "nous-api" | "nous_api" | "nousapi" | "nous-portal-api" => {
+                std::env::var("NOUS_API_KEY")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+            }
             "zai" | "glm" | "z-ai" | "z_ai" | "zhipu" => std::env::var("GLM_API_KEY")
                 .ok()
                 .filter(|v| !v.trim().is_empty())
@@ -2942,6 +2947,15 @@ impl AgentLoop {
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())
                         .or_else(|| Some(bedrock_runtime_base_url(&resolve_bedrock_region())))
+                } else if matches!(
+                    provider,
+                    "nous-api" | "nous_api" | "nousapi" | "nous-portal-api"
+                ) {
+                    std::env::var("NOUS_BASE_URL")
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| Some("https://inference-api.nousresearch.com/v1".to_string()))
                 } else if provider == "stepfun" {
                     Some("https://api.stepfun.ai/step_plan/v1".to_string())
                 } else if provider == "kimi-coding" {
@@ -3560,7 +3574,7 @@ impl AgentLoop {
                         .with_provider_profile(provider),
                 )
             }
-            "nous" => {
+            "nous" | "nous-api" | "nous_api" | "nousapi" | "nous-portal-api" => {
                 let mut p = NousProvider::new(&api_key)
                     .with_model(model_name)
                     .with_optional_request_timeout_seconds(request_timeout_seconds);
@@ -9934,6 +9948,10 @@ mod tests {
             Some("nousresearch/hermes-4-70b".to_string())
         );
         assert_eq!(
+            preferred_tool_payload_fallback_model("nous-api", "openai/gpt-5.5"),
+            Some("nousresearch/hermes-4-70b".to_string())
+        );
+        assert_eq!(
             preferred_tool_payload_fallback_model("openrouter", "openai/gpt-5.5"),
             None
         );
@@ -9942,7 +9960,7 @@ mod tests {
             "nousresearch/hermes-4-405b",
         );
         assert_eq!(
-            preferred_tool_payload_fallback_model("nous", "openai/gpt-5.5"),
+            preferred_tool_payload_fallback_model("nous-portal-api", "openai/gpt-5.5"),
             Some("nousresearch/hermes-4-405b".to_string())
         );
         std::env::remove_var("HERMES_TOOL_PAYLOAD_FALLBACK_MODEL");
@@ -14194,6 +14212,8 @@ mod tests {
         let _arcee = EnvVarGuard::remove("ARCEE_API_KEY");
         let _xiaomi = EnvVarGuard::remove("XIAOMI_API_KEY");
         let _tokenhub = EnvVarGuard::remove("TOKENHUB_API_KEY");
+        let _nous = EnvVarGuard::remove("NOUS_API_KEY");
+        let _nous_base = EnvVarGuard::remove("NOUS_BASE_URL");
 
         let agent = AgentLoop::new(
             AgentConfig::default(),
@@ -14230,6 +14250,29 @@ mod tests {
         assert_eq!(
             agent.resolve_runtime_api_key("tencent", None, None),
             Some("tokenhub-secret".to_string())
+        );
+
+        let _nous_key = EnvVarGuard::set("NOUS_API_KEY", "nous-secret");
+        let _nous_base_override = EnvVarGuard::set("NOUS_BASE_URL", "https://nous.example/v1");
+        assert_eq!(
+            agent.resolve_runtime_api_key("nous-api", None, None),
+            Some("nous-secret".to_string())
+        );
+        assert_eq!(
+            agent
+                .resolve_runtime_api_key("nous-portal-api", None, None)
+                .as_deref(),
+            Some("nous-secret")
+        );
+        assert_eq!(
+            agent.resolve_runtime_base_url("nous-api", None).as_deref(),
+            Some("https://nous.example/v1")
+        );
+        assert!(
+            agent
+                .build_runtime_provider("nous-api", "openai/gpt-5.5", None, None, None, None, None)
+                .is_ok(),
+            "nous-api direct-key runtime provider should build"
         );
 
         assert_eq!(

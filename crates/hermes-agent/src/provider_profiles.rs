@@ -19,7 +19,9 @@ pub fn canonical_provider_profile_id(provider: &str) -> Option<&'static str> {
         "kimi" | "moonshot" | "moonshot-ai" | "kimi-coding" => Some("kimi-coding"),
         "kimi-coding-cn" | "kimi-cn" | "moonshot-cn" => Some("kimi-coding-cn"),
         "openrouter" | "or" => Some("openrouter"),
-        "nous" | "nous-portal" => Some("nous"),
+        "nous" | "nous-portal" | "nous-api" | "nous_api" | "nousapi" | "nous-portal-api" => {
+            Some("nous")
+        }
         "qwen" | "qwen-oauth" | "qwen-portal" | "qwen-cli" => Some("qwen-oauth"),
         "xiaomi" | "mimo" | "xiaomi-mimo" => Some("xiaomi"),
         "custom" | "ollama" | "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane"
@@ -365,6 +367,8 @@ mod tests {
         );
         assert_eq!(canonical_provider_profile_id("or"), Some("openrouter"));
         assert_eq!(canonical_provider_profile_id("nous-portal"), Some("nous"));
+        assert_eq!(canonical_provider_profile_id("nous-api"), Some("nous"));
+        assert_eq!(canonical_provider_profile_id("nousapi"), Some("nous"));
         assert_eq!(canonical_provider_profile_id("qwen"), Some("qwen-oauth"));
         assert_eq!(canonical_provider_profile_id("mimo"), Some("xiaomi"));
         assert_eq!(canonical_provider_profile_id("xiaomi-mimo"), Some("xiaomi"));

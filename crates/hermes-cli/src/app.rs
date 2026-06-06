@@ -47,7 +47,8 @@ use crate::auth::{
     login_nous_device_code, resolve_gemini_oauth_runtime_credentials,
     resolve_nous_runtime_credentials, resolve_qwen_runtime_credentials, save_nous_auth_state,
     NousDeviceCodeOptions, NousRuntimeCredentials, DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-    NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+    DEFAULT_NOUS_INFERENCE_URL, NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+    QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
 };
 use crate::cli::Cli;
 use crate::commands::recover_queued_background_jobs;
@@ -5192,6 +5193,7 @@ mod tests {
             "Z_AI_API_KEY",
             "GMI_API_KEY",
             "MINIMAX_CN_API_KEY",
+            "NOUS_API_KEY",
             "COPILOT_GITHUB_TOKEN",
             "GH_TOKEN",
             "GITHUB_TOKEN",
@@ -5237,6 +5239,8 @@ mod tests {
             ("TOKENHUB_API_KEY", "tencent"),
             ("TOKENHUB_API_KEY", "tokenhub"),
             ("MINIMAX_CN_API_KEY", "minimax_cn"),
+            ("NOUS_API_KEY", "nous-api"),
+            ("NOUS_API_KEY", "nous-portal-api"),
             ("COPILOT_GITHUB_TOKEN", "github-copilot"),
             ("GH_TOKEN", "github-models"),
             ("GITHUB_TOKEN", "copilot"),
@@ -5263,6 +5267,12 @@ mod tests {
         assert_eq!(
             normalize_runtime_provider_name("gemini-cli"),
             "google-gemini-cli"
+        );
+        assert_eq!(normalize_runtime_provider_name("nous_api"), "nous-api");
+        assert_eq!(normalize_runtime_provider_name("nousapi"), "nous-api");
+        assert_eq!(
+            normalize_runtime_provider_name("nous-portal-api"),
+            "nous-api"
         );
         assert_eq!(normalize_runtime_provider_name("moonshot"), "kimi");
         assert_eq!(normalize_runtime_provider_name("novita-ai"), "novita");
@@ -6317,6 +6327,7 @@ fn normalize_runtime_provider_name(provider: &str) -> String {
     match normalized.as_str() {
         "codex" => "openai-codex".to_string(),
         "claude" | "claude-code" => "anthropic".to_string(),
+        "nous_api" | "nousapi" | "nous-portal-api" => "nous-api".to_string(),
         "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         "google" | "google-gemini" | "google-ai-studio" => "gemini".to_string(),
@@ -6352,6 +6363,7 @@ fn normalize_runtime_provider_name(provider: &str) -> String {
 fn provider_default_base_url(provider: &str) -> Option<&'static str> {
     match provider.trim().to_ascii_lowercase().as_str() {
         "openai-codex" | "codex" => Some(OPENAI_CODEX_BASE_URL),
+        "nous-api" | "nous_api" | "nousapi" | "nous-portal-api" => Some(DEFAULT_NOUS_INFERENCE_URL),
         "google-gemini-cli" | "gemini-cli" | "gemini-oauth" => Some(GOOGLE_GEMINI_CLI_BASE_URL),
         "gemini" | "google" | "google-gemini" | "google-ai-studio" => Some(GEMINI_BASE_URL),
         "qwen" | "alibaba" => Some(QWEN_BASE_URL),
@@ -6571,6 +6583,7 @@ fn provider_base_url_from_env(provider: &str) -> Option<String> {
         _ => match normalized_provider.as_str() {
             "openai" => "OPENAI_BASE_URL",
             "openai-codex" | "codex" => "HERMES_OPENAI_CODEX_BASE_URL",
+            "nous-api" => "NOUS_BASE_URL",
             "anthropic" => "ANTHROPIC_BASE_URL",
             "bedrock" => "BEDROCK_BASE_URL",
             "google-gemini-cli" => "HERMES_GEMINI_BASE_URL",
@@ -6731,7 +6744,7 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
         "novita" => std::env::var("NOVITA_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
-        "nous" => std::env::var("NOUS_API_KEY")
+        "nous" | "nous-api" => std::env::var("NOUS_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
         "copilot" => std::env::var("COPILOT_GITHUB_TOKEN")
@@ -6965,7 +6978,7 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
                     .with_provider_profile(runtime_provider.as_str()),
             )
         }
-        "nous" => {
+        "nous" | "nous-api" => {
             let mut p = NousProvider::new(&api_key)
                 .with_model(model_name.as_str())
                 .with_optional_request_timeout_seconds(request_timeout_seconds);
