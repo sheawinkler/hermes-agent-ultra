@@ -439,6 +439,10 @@ pub struct AgentConfig {
     #[serde(default = "default_max_concurrent_delegates")]
     pub max_concurrent_delegates: u32,
 
+    /// Maximum sub-agent spawn depth. Values below 1 are normalized to 1.
+    #[serde(default = "default_max_delegate_depth")]
+    pub max_delegate_depth: u32,
+
     /// Flush memories every N turns.
     #[serde(default = "default_memory_flush_interval")]
     pub memory_flush_interval: u32,
@@ -654,6 +658,26 @@ fn default_max_concurrent_delegates() -> u32 {
     1
 }
 
+fn default_max_delegate_depth() -> u32 {
+    4
+}
+
+fn normalize_delegate_depth(value: u32) -> u32 {
+    value.max(1)
+}
+
+fn parse_delegate_depth(value: &str) -> Option<u32> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match trimmed.parse::<i128>() {
+        Ok(parsed) if parsed < 1 => Some(1),
+        Ok(parsed) => Some(parsed.min(i128::from(u32::MAX)) as u32),
+        Err(_) => None,
+    }
+}
+
 fn delegation_spawning_paused() -> bool {
     std::env::var("HERMES_DELEGATION_PAUSED")
         .ok()
@@ -774,6 +798,7 @@ impl Default for AgentConfig {
             temperature: None,
             max_tokens: None,
             max_concurrent_delegates: default_max_concurrent_delegates(),
+            max_delegate_depth: default_max_delegate_depth(),
             memory_flush_interval: default_memory_flush_interval(),
             session_id: None,
             hermes_home: None,
@@ -7958,9 +7983,8 @@ impl AgentLoop {
     fn resolve_max_delegate_depth(&self) -> u32 {
         std::env::var("HERMES_MAX_DELEGATE_DEPTH")
             .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(4)
+            .and_then(|v| parse_delegate_depth(&v))
+            .unwrap_or_else(|| normalize_delegate_depth(self.config.max_delegate_depth))
     }
 
     /// Cap concurrent delegate_task calls based on config.
@@ -9528,6 +9552,7 @@ mod tests {
         assert_eq!(config.model, "gpt-4o");
         assert!(!config.stream);
         assert_eq!(config.max_concurrent_delegates, 1);
+        assert_eq!(config.max_delegate_depth, 4);
         assert_eq!(config.memory_flush_interval, 5);
         assert_eq!(config.api_mode, ApiMode::ChatCompletions);
         assert_eq!(config.retry.max_retries, 3);
@@ -9544,6 +9569,83 @@ mod tests {
         assert!(!config.smart_model_routing.enabled);
         assert!(config.background_review_metrics_enabled);
         assert_eq!(config.stream_read_max_retries, 2);
+    }
+
+    #[test]
+    fn delegate_depth_parser_floors_without_legacy_ceiling() {
+        assert_eq!(parse_delegate_depth("99"), Some(99));
+        assert_eq!(parse_delegate_depth(" 12 "), Some(12));
+        assert_eq!(parse_delegate_depth("1"), Some(1));
+        assert_eq!(parse_delegate_depth("0"), Some(1));
+        assert_eq!(parse_delegate_depth("-7"), Some(1));
+        assert_eq!(parse_delegate_depth(""), None);
+        assert_eq!(parse_delegate_depth("not-a-number"), None);
+    }
+
+    #[test]
+    fn max_delegate_depth_resolves_env_then_config_with_floor() {
+        let _guard = env_test_lock();
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let _env = EnvVarGuard::set("HERMES_MAX_DELEGATE_DEPTH", "99");
+        let config = AgentConfig {
+            max_delegate_depth: 2,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config.clone(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        assert_eq!(agent.resolve_max_delegate_depth(), 99);
+        drop(_env);
+
+        let _env = EnvVarGuard::set("HERMES_MAX_DELEGATE_DEPTH", "0");
+        assert_eq!(agent.resolve_max_delegate_depth(), 1);
+        drop(_env);
+
+        let _env = EnvVarGuard::remove("HERMES_MAX_DELEGATE_DEPTH");
+        let config = AgentConfig {
+            max_delegate_depth: 0,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        assert_eq!(agent.resolve_max_delegate_depth(), 1);
     }
 
     #[test]

@@ -54,6 +54,10 @@ pub struct GatewayConfig {
     #[serde(default = "default_platform_toolsets")]
     pub platform_toolsets: HashMap<String, Vec<String>>,
 
+    /// Sub-agent delegation controls.
+    #[serde(default)]
+    pub delegation: DelegationConfig,
+
     /// Session management settings.
     #[serde(default)]
     pub session: SessionConfig,
@@ -168,6 +172,7 @@ impl Default for GatewayConfig {
             tool_output: ToolOutputConfig::default(),
             platforms: HashMap::new(),
             platform_toolsets: default_platform_toolsets(),
+            delegation: DelegationConfig::default(),
             session: SessionConfig::default(),
             sessions: SessionsMaintenanceConfig::default(),
             streaming: StreamingConfig::default(),
@@ -193,6 +198,13 @@ impl Default for GatewayConfig {
             home_dir: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DelegationConfig {
+    /// Maximum sub-agent spawn depth. Values below 1 are floored by runtime consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_spawn_depth: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1423,6 +1435,7 @@ mod tests {
         assert!(cfg.model.is_none());
         assert_eq!(cfg.tool_output, ToolOutputConfig::default());
         assert!(cfg.auxiliary.is_empty());
+        assert!(cfg.delegation.max_spawn_depth.is_none());
         assert!(cfg.tts.is_null());
         assert!(cfg.proxy.is_none());
         assert_eq!(
@@ -1469,6 +1482,23 @@ mod tests {
         assert_eq!(back.tools, cfg.tools);
         assert_eq!(back.auxiliary["vision"].model, "google/gemini-2.5-flash");
         assert_eq!(back.tts["provider"], "piper");
+    }
+
+    #[test]
+    fn delegation_config_accepts_uncapped_max_spawn_depth() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+delegation:
+  max_spawn_depth: 99
+"#,
+        )
+        .expect("delegation config should deserialize");
+
+        assert_eq!(cfg.delegation.max_spawn_depth, Some(99));
+
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: GatewayConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.delegation.max_spawn_depth, Some(99));
     }
 
     #[test]

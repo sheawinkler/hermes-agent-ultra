@@ -947,6 +947,10 @@
     "0f45509daf72": {
       "disposition": "ported",
       "notes": "Rust agent loop now treats formatted /steer redirects as trusted mid-turn out-of-band user messages appended to the last tool result, adds the shared steer channel system-prompt note when tools are available, and wires ACP active-session steer through the shared marker with regression tests preventing the old User guidance label."
+    },
+    "d41427504ef04": {
+      "disposition": "ported",
+      "notes": "Rust delegation depth now has a first-class AgentConfig max_delegate_depth plus delegation.max_spawn_depth config bridge with floor 1 and no legacy ceiling; env/config values above the old cap pass through with agent, CLI, config, and backend tests."
     }
   },
   "subject_patterns": [

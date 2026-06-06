@@ -118,6 +118,7 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
                 tool_output: ToolOutputConfig::default(),
                 platforms: HashMap::new(),
                 platform_toolsets: hermes_config::config::default_platform_toolsets(),
+                delegation: Default::default(),
                 session,
                 sessions: SessionsMaintenanceConfig::default(),
                 streaming,

@@ -1939,7 +1939,7 @@ impl App {
         })
     }
 
-    fn apply_explore_first_runtime_defaults() {
+    fn apply_explore_first_runtime_defaults(config: &GatewayConfig) {
         if std::env::var("HERMES_SKILL_GUARD_MODE")
             .ok()
             .map(|v| v.trim().is_empty())
@@ -1989,10 +1989,11 @@ impl App {
         {
             std::env::set_var("HERMES_TOOL_CALL_MAX_CONCURRENCY", "12");
         }
-        if std::env::var("HERMES_MAX_DELEGATE_DEPTH")
-            .ok()
-            .map(|v| v.trim().is_empty())
-            .unwrap_or(true)
+        if config.delegation.max_spawn_depth.is_none()
+            && std::env::var("HERMES_MAX_DELEGATE_DEPTH")
+                .ok()
+                .map(|v| v.trim().is_empty())
+                .unwrap_or(true)
         {
             std::env::set_var("HERMES_MAX_DELEGATE_DEPTH", "4");
         }
@@ -2010,7 +2011,7 @@ impl App {
 
         let mut config = config;
         apply_cli_runtime_overrides(&mut config, &cli);
-        Self::apply_explore_first_runtime_defaults();
+        Self::apply_explore_first_runtime_defaults(&config);
 
         if config.sessions.auto_prune {
             let resolved_home = config
@@ -3766,6 +3767,32 @@ mod tests {
         test_env_lock::lock()
     }
 
+    struct EnvSnapshot {
+        vars: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvSnapshot {
+        fn capture(keys: &[&'static str]) -> Self {
+            Self {
+                vars: keys
+                    .iter()
+                    .map(|key| (*key, std::env::var(key).ok()))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvSnapshot {
+        fn drop(&mut self) {
+            for (key, value) in &self.vars {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
     struct TestToolHandler {
         name: &'static str,
     }
@@ -4506,6 +4533,50 @@ mod tests {
             .get("custom")
             .expect("runtime provider should exist");
         assert_eq!(runtime.api_key_env.as_deref(), Some("MY_FALLBACK_KEY"));
+    }
+
+    #[test]
+    fn test_build_agent_config_maps_delegation_max_spawn_depth_without_legacy_ceiling() {
+        let mut cfg = GatewayConfig::default();
+        cfg.delegation.max_spawn_depth = Some(99);
+        let agent_cfg = build_agent_config(&cfg, "openai:gpt-4o");
+        assert_eq!(agent_cfg.max_delegate_depth, 99);
+
+        cfg.delegation.max_spawn_depth = Some(0);
+        let agent_cfg = build_agent_config(&cfg, "openai:gpt-4o");
+        assert_eq!(agent_cfg.max_delegate_depth, 1);
+    }
+
+    #[test]
+    fn explore_first_defaults_do_not_shadow_configured_delegation_depth() {
+        let _guard = env_test_lock();
+        let keys = [
+            "HERMES_SKILL_GUARD_MODE",
+            "HERMES_GUARD_MODE",
+            "HERMES_TOOL_POLICY_PRESET",
+            "HERMES_TOOL_POLICY_MODE",
+            "HERMES_REPO_REVIEW_BUDGET_PROFILE",
+            "HERMES_MAX_ITERATIONS",
+            "HERMES_TOOL_CALL_MAX_CONCURRENCY",
+            "HERMES_MAX_DELEGATE_DEPTH",
+        ];
+        let _snapshot = EnvSnapshot::capture(&keys);
+        for key in keys {
+            std::env::remove_var(key);
+        }
+
+        let mut cfg = GatewayConfig::default();
+        cfg.delegation.max_spawn_depth = Some(99);
+        App::apply_explore_first_runtime_defaults(&cfg);
+
+        assert!(std::env::var("HERMES_MAX_DELEGATE_DEPTH").is_err());
+
+        cfg.delegation.max_spawn_depth = None;
+        App::apply_explore_first_runtime_defaults(&cfg);
+        assert_eq!(
+            std::env::var("HERMES_MAX_DELEGATE_DEPTH").ok().as_deref(),
+            Some("4")
+        );
     }
 
     #[tokio::test]
@@ -5992,6 +6063,11 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
     let skip_context_files = config.agent.skip_context_files || skip_context_files_env;
 
     let retry_cfg = build_retry_config(config);
+    let max_delegate_depth = config
+        .delegation
+        .max_spawn_depth
+        .map(|depth| depth.max(1))
+        .unwrap_or_else(|| AgentConfig::default().max_delegate_depth);
 
     AgentConfig {
         max_turns: config.max_turns,
@@ -6003,6 +6079,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         hermes_home: config.home_dir.clone(),
         provider: Some(resolved_provider),
         stream: config.streaming.enabled,
+        max_delegate_depth,
         skip_memory,
         skip_context_files,
         platform: Some("cli".to_string()),

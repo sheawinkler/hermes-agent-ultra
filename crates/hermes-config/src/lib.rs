@@ -21,9 +21,9 @@ pub mod streaming;
 // Re-export key types for convenience
 pub use config::{
     default_auxiliary_task_configs, normalize_service_tier, AgentLoopBehaviorConfig,
-    ApprovalConfig, AuxiliaryTaskConfig, CheapModelRouteConfig, DisplayConfig, GatewayConfig,
-    LlmProviderConfig, McpServerEntry, PlatformDisplayConfig, ProfileConfig, ProxyConfig,
-    QuickCommandConfig, SecurityConfig, SessionsMaintenanceConfig, SkillsSettings,
+    ApprovalConfig, AuxiliaryTaskConfig, CheapModelRouteConfig, DelegationConfig, DisplayConfig,
+    GatewayConfig, LlmProviderConfig, McpServerEntry, PlatformDisplayConfig, ProfileConfig,
+    ProxyConfig, QuickCommandConfig, SecurityConfig, SessionsMaintenanceConfig, SkillsSettings,
     SmartModelRoutingConfig, TerminalBackendType, TerminalConfig, ToolOutputConfig, ToolsSettings,
     WebConfig, WebsiteBlocklistConfig, DEFAULT_TOOL_OUTPUT_MAX_BYTES,
     DEFAULT_TOOL_OUTPUT_MAX_LINES, DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH,
