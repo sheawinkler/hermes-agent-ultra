@@ -708,36 +708,27 @@ impl HermesAcpHandler {
 
     fn replay_session_history(&self, state: &SessionState) {
         let mut active_tool_calls: HashMap<String, String> = HashMap::new();
-        for (index, message) in state.history.iter().enumerate() {
+        for message in &state.history {
             let role = message.get("role").and_then(Value::as_str).unwrap_or("");
             match role {
                 "user" => {
                     let text = history_message_text(message);
                     if !text.is_empty() {
-                        self.event_sink.push(AcpEvent::user_message_chunk(
-                            &state.session_id,
-                            &history_message_id(&state.session_id, index, role, "message"),
-                            &text,
-                        ));
+                        self.event_sink
+                            .push(AcpEvent::user_message_chunk(&state.session_id, &text));
                     }
                 }
                 "assistant" => {
                     let thought = history_reasoning_text(message);
                     if !thought.is_empty() {
-                        self.event_sink.push(AcpEvent::agent_thought_chunk(
-                            &state.session_id,
-                            &history_message_id(&state.session_id, index, role, "thought"),
-                            &thought,
-                        ));
+                        self.event_sink
+                            .push(AcpEvent::agent_thought_chunk(&state.session_id, &thought));
                     }
 
                     let text = history_message_text(message);
                     if !text.is_empty() {
-                        self.event_sink.push(AcpEvent::agent_message_chunk(
-                            &state.session_id,
-                            &history_message_id(&state.session_id, index, role, "message"),
-                            &text,
-                        ));
+                        self.event_sink
+                            .push(AcpEvent::agent_message_chunk(&state.session_id, &text));
                     }
 
                     if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
@@ -1184,10 +1175,6 @@ fn history_reasoning_text(message: &Value) -> String {
         .map(|key| flatten_history_text(message.get(*key)))
         .find(|text| !text.is_empty())
         .unwrap_or_default()
-}
-
-fn history_message_id(session_id: &str, index: usize, role: &str, suffix: &str) -> String {
-    format!("history:{session_id}:{index}:{role}:{suffix}")
 }
 
 fn history_tool_call_arguments(tool_call: &Value) -> Option<Value> {
@@ -2425,11 +2412,10 @@ mod tests {
         assert_eq!(events[3].tool_name.as_deref(), Some("read_file"));
         assert_eq!(events[3].arguments.as_ref().unwrap()["path"], "/tmp/a.txt");
         assert_eq!(events[4].result.as_deref(), Some("file contents"));
-        assert!(events[0]
-            .message_id
-            .as_deref()
-            .unwrap()
-            .starts_with(&format!("history:{session_id}:1:user:")));
+        let replay_user_json = serde_json::to_value(&events[0]).unwrap();
+        let replay_agent_json = serde_json::to_value(&events[2]).unwrap();
+        assert!(replay_user_json.get("messageId").is_none());
+        assert!(replay_agent_json.get("messageId").is_none());
     }
 
     #[tokio::test]

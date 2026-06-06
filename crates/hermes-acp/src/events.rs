@@ -72,9 +72,6 @@ pub struct AcpEvent {
     pub status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<Value>,
-    #[serde(rename = "messageId", default, skip_serializing_if = "Option::is_none")]
-    pub message_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_call_count: Option<u32>,
@@ -118,7 +115,6 @@ impl AcpEvent {
             result: None,
             status: None,
             content: None,
-            message_id: None,
             api_call_count: None,
             error: None,
             session_update: None,
@@ -147,7 +143,6 @@ impl AcpEvent {
             result: None,
             status: None,
             content: None,
-            message_id: None,
             api_call_count: None,
             error: None,
             session_update: None,
@@ -177,7 +172,6 @@ impl AcpEvent {
             arguments: None,
             status: Some(status.to_string()),
             content: None,
-            message_id: None,
             api_call_count: None,
             error: None,
             session_update: None,
@@ -200,7 +194,6 @@ impl AcpEvent {
             result: None,
             status: None,
             content: None,
-            message_id: None,
             api_call_count: None,
             error: None,
             session_update: None,
@@ -223,7 +216,6 @@ impl AcpEvent {
             result: None,
             status: None,
             content: None,
-            message_id: None,
             api_call_count: None,
             error: None,
             session_update: None,
@@ -232,32 +224,29 @@ impl AcpEvent {
         }
     }
 
-    pub fn user_message_chunk(session_id: &str, message_id: &str, text: &str) -> Self {
+    pub fn user_message_chunk(session_id: &str, text: &str) -> Self {
         Self::history_text_chunk(
             AcpEventKind::UserMessageChunk,
             "user_message_chunk",
             session_id,
-            message_id,
             text,
         )
     }
 
-    pub fn agent_message_chunk(session_id: &str, message_id: &str, text: &str) -> Self {
+    pub fn agent_message_chunk(session_id: &str, text: &str) -> Self {
         Self::history_text_chunk(
             AcpEventKind::AgentMessageChunk,
             "agent_message_chunk",
             session_id,
-            message_id,
             text,
         )
     }
 
-    pub fn agent_thought_chunk(session_id: &str, message_id: &str, text: &str) -> Self {
+    pub fn agent_thought_chunk(session_id: &str, text: &str) -> Self {
         Self::history_text_chunk(
             AcpEventKind::AgentThoughtChunk,
             "agent_thought_chunk",
             session_id,
-            message_id,
             text,
         )
     }
@@ -266,7 +255,6 @@ impl AcpEvent {
         kind: AcpEventKind,
         session_update: &str,
         session_id: &str,
-        message_id: &str,
         text: &str,
     ) -> Self {
         Self {
@@ -274,7 +262,6 @@ impl AcpEvent {
             session_id: session_id.to_string(),
             timestamp: Self::now(),
             session_update: Some(session_update.to_string()),
-            message_id: Some(message_id.to_string()),
             content: Some(json!({"type": "text", "text": text})),
             text: Some(text.to_string()),
             tool_call_id: None,
@@ -305,7 +292,6 @@ impl AcpEvent {
             result: None,
             status: None,
             content: None,
-            message_id: None,
             text: None,
             error: None,
             session_update: None,
@@ -328,7 +314,6 @@ impl AcpEvent {
             result: None,
             status: None,
             content: None,
-            message_id: None,
             text: None,
             api_call_count: None,
             session_update: None,
@@ -353,7 +338,6 @@ impl AcpEvent {
             result: None,
             status: None,
             content: None,
-            message_id: None,
             text: None,
             api_call_count: None,
             error: None,
@@ -379,7 +363,6 @@ impl AcpEvent {
             result: None,
             status: None,
             content: None,
-            message_id: None,
             text: None,
             api_call_count: None,
             error: None,

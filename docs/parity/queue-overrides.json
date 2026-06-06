@@ -887,6 +887,10 @@
     "2057977102da26cbf0fa9e699fa4432dbf017566": {
       "disposition": "ported",
       "notes": "Rust ACP session_info_update uses the notification refresh moment for updatedAt instead of relying on stored session updated_at fields; prompt-turn coverage asserts a non-empty fresh numeric timestamp."
+    },
+    "658947480a01dc59a2aa7a6a06a6434d7214edff": {
+      "disposition": "ported",
+      "notes": "Rust ACP replay chunk events no longer carry the invalid messageId field; the typed event model omits the field and load replay tests assert serialized user/agent chunks match the ACP schema."
     }
   },
   "subject_patterns": [
