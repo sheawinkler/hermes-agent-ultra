@@ -54,6 +54,10 @@ pub struct SessionState {
     pub history: Vec<Value>,
     pub mode: Option<String>,
     pub config_options: HashMap<String, String>,
+    /// Prompts queued by `/queue` to run after the current prompt completes.
+    pub queued_prompts: Vec<String>,
+    /// Last interrupted prompt text that `/steer` can replay with guidance.
+    pub interrupted_prompt_text: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
     /// Total prompt tokens across all turns.
@@ -79,6 +83,8 @@ impl SessionState {
             history: Vec::new(),
             mode: None,
             config_options: HashMap::new(),
+            queued_prompts: Vec::new(),
+            interrupted_prompt_text: None,
             created_at: now,
             updated_at: now,
             total_prompt_tokens: 0,
@@ -256,6 +262,65 @@ impl SessionManager {
             state.history = history;
             state.touch();
         }
+    }
+
+    /// Queue a prompt to execute after the current turn.
+    pub fn push_queued_prompt(&self, session_id: &str, prompt: &str) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            let prompt = prompt.trim();
+            if !prompt.is_empty() {
+                state.queued_prompts.push(prompt.to_string());
+                state.touch();
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Drain queued prompts in FIFO order.
+    pub fn take_queued_prompts(&self, session_id: &str) -> Vec<String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            state.touch();
+            return std::mem::take(&mut state.queued_prompts);
+        }
+        Vec::new()
+    }
+
+    /// Pop one queued prompt in FIFO order.
+    pub fn pop_queued_prompt(&self, session_id: &str) -> Option<String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            if !state.queued_prompts.is_empty() {
+                state.touch();
+                return Some(state.queued_prompts.remove(0));
+            }
+        }
+        None
+    }
+
+    /// Store an interrupted prompt for subsequent `/steer` replay.
+    pub fn set_interrupted_prompt_text(&self, session_id: &str, prompt: Option<String>) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            state.interrupted_prompt_text = prompt
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            state.touch();
+            return true;
+        }
+        false
+    }
+
+    /// Take and clear the interrupted prompt text.
+    pub fn take_interrupted_prompt_text(&self, session_id: &str) -> Option<String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            state.touch();
+            return state.interrupted_prompt_text.take();
+        }
+        None
     }
 
     /// Fork a session — deep-copy history into a new session.

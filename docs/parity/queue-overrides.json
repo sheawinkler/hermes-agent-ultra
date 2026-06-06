@@ -787,6 +787,18 @@
     "3260413cc7fa": {
       "disposition": "ported",
       "notes": "Rust STT override env vars are first-class runtime knobs: HERMES_STT_PROVIDER/STT_PROVIDER, STT_OPENAI_MODEL, STT_GROQ_MODEL, STT_MISTRAL_MODEL, and provider base-url overrides are resolved in the Rust transcription/gateway voice surfaces with tests."
+    },
+    "e27b0b76517c903541af20d0bd606fa7b3c83005": {
+      "disposition": "ported",
+      "notes": "Rust ACP now advertises /steer and /queue, queues prompts without racing active sessions, drains queued turns FIFO after current completion, and exposes an AcpPromptExecutor steer hook; hermes-acp queue/steer tests cover slash discovery, no-run queueing, active queueing, active steer signaling, and queued drain."
+    },
+    "78886365c2a04f3367028190b71c5b4a96433279": {
+      "disposition": "ported",
+      "notes": "Rust ACP cancel now captures the interrupted user prompt and idle /steer replays it with explicit correction/guidance; hermes-acp tests cover cancel replay and clearing interrupted_prompt_text."
+    },
+    "41fa1f1b5cf560c22a7e9adb06eb463d7122f9e0": {
+      "disposition": "ported",
+      "notes": "Rust ACP rewrites idle /steer into a regular user prompt instead of silently queueing it, matching upstream editor-client behavior; hermes-acp idle steer test proves the prompt runs immediately and leaves the queue empty."
     }
   },
   "subject_patterns": [

@@ -43,6 +43,10 @@ pub trait AcpPromptExecutor: Send + Sync {
         user_text: &str,
         history: &[Value],
     ) -> Result<PromptExecutionOutput, String>;
+
+    fn steer_prompt(&self, _session: &SessionState, _guidance: &str) -> Result<bool, String> {
+        Ok(false)
+    }
 }
 
 const MAX_ACP_RESOURCE_BYTES: usize = 512 * 1024;
@@ -586,6 +590,14 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         description: "Compress conversation context",
     },
     SlashCommand {
+        name: "steer",
+        description: "Inject guidance into the currently running agent turn",
+    },
+    SlashCommand {
+        name: "queue",
+        description: "Queue a prompt to run after the current turn finishes",
+    },
+    SlashCommand {
         name: "version",
         description: "Show Hermes version",
     },
@@ -741,10 +753,97 @@ impl HermesAcpHandler {
         ))
     }
 
+    async fn execute_prompt_turn(
+        &self,
+        session_id: &str,
+        user_text: String,
+        user_content: Value,
+    ) -> Result<Option<Usage>, String> {
+        let mut history = self
+            .session_manager
+            .get_session(session_id)
+            .map(|s| s.history)
+            .unwrap_or_default();
+        history.push(json!({
+            "role": "user",
+            "content": user_content,
+        }));
+        self.session_manager
+            .set_history(session_id, history.clone());
+
+        self.event_sink
+            .push(AcpEvent::thinking(session_id, "Processing prompt..."));
+        let session_snapshot = self
+            .session_manager
+            .get_session(session_id)
+            .ok_or_else(|| format!("Session not found: {session_id}"))?;
+
+        let prompt_result = if let Some(executor) = &self.prompt_executor {
+            executor
+                .execute_prompt(&session_snapshot, &user_text, &history)
+                .await
+        } else {
+            let turn = history
+                .iter()
+                .filter(|m| {
+                    m.get("role")
+                        .and_then(|v| v.as_str())
+                        .map(|r| r == "user")
+                        .unwrap_or(false)
+                })
+                .count();
+            let snippet = user_text.chars().take(200).collect::<String>();
+            Ok(PromptExecutionOutput {
+                response_text: format!(
+                    "ACP session {} processed turn {}.\n\n{}",
+                    session_id, turn, snippet
+                ),
+                usage: None,
+                total_turns: Some(1),
+                events: Vec::new(),
+            })
+        }?;
+
+        let PromptExecutionOutput {
+            response_text,
+            usage,
+            total_turns,
+            events,
+        } = prompt_result;
+
+        for event in events {
+            self.event_sink.push(event);
+        }
+
+        let response_text = response_text.trim().to_string();
+        if !response_text.is_empty() {
+            self.event_sink
+                .push(AcpEvent::message_delta(session_id, &response_text));
+            self.event_sink
+                .push(AcpEvent::message_complete(session_id, &response_text));
+        }
+        self.event_sink.push(AcpEvent::step_complete(
+            session_id,
+            total_turns.unwrap_or(1),
+        ));
+
+        history.push(json!({
+            "role": "assistant",
+            "content": response_text,
+        }));
+        self.session_manager.set_history(session_id, history);
+
+        if let Some(usage) = usage.as_ref() {
+            self.session_manager
+                .add_usage(session_id, usage.input_tokens, usage.output_tokens);
+        }
+        self.session_manager.save_session(session_id);
+
+        Ok(usage)
+    }
+
     fn handle_slash_command(&self, text: &str, session_id: &str) -> Option<String> {
-        let parts: Vec<&str> = text.splitn(2, ' ').collect();
-        let cmd = parts[0].trim_start_matches('/').to_lowercase();
-        let args = if parts.len() > 1 { parts[1].trim() } else { "" };
+        let (cmd, args) = slash_command_parts(text)?;
 
         match cmd.as_str() {
             "help" => {
@@ -793,6 +892,43 @@ impl HermesAcpHandler {
                 Some("Conversation history cleared.".to_string())
             }
             "compact" => self.compact_session_history(session_id),
+            "queue" => {
+                if args.is_empty() {
+                    return Some("Usage: /queue <prompt>".to_string());
+                }
+                if self.session_manager.push_queued_prompt(session_id, args) {
+                    Some("Queued prompt for the next turn.".to_string())
+                } else {
+                    Some(format!("Session not found: {session_id}"))
+                }
+            }
+            "steer" => {
+                if args.is_empty() {
+                    return Some("Usage: /steer <guidance>".to_string());
+                }
+                let state = self.session_manager.get_session(session_id)?;
+                if state.phase == SessionPhase::Active {
+                    self.session_manager.push_queued_prompt(session_id, args);
+                    let steered = match self.prompt_executor.as_ref() {
+                        Some(executor) => match executor.steer_prompt(&state, args) {
+                            Ok(steered) => steered,
+                            Err(err) => {
+                                return Some(format!(
+                                    "Steer failed; queued prompt for the next turn: {err}"
+                                ));
+                            }
+                        },
+                        None => false,
+                    };
+                    if steered {
+                        Some("Steered the active ACP session.".to_string())
+                    } else {
+                        Some("Queued prompt for the next turn.".to_string())
+                    }
+                } else {
+                    None
+                }
+            }
             "version" => Some(format!("Hermes Agent v{}", self.version)),
             "tools" => {
                 let tools = self.available_tools();
@@ -849,6 +985,65 @@ fn param_value_as_string(p: &serde_json::Map<String, Value>, key: &str) -> Optio
 
 fn param_value_as_string_any(p: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
     keys.iter().find_map(|key| param_value_as_string(p, key))
+}
+
+fn slash_command_parts(text: &str) -> Option<(String, &str)> {
+    let trimmed = text.trim_start();
+    let rest = trimmed.strip_prefix('/')?;
+    let (cmd, args) = rest
+        .split_once(char::is_whitespace)
+        .map(|(cmd, args)| (cmd, args.trim()))
+        .unwrap_or((rest, ""));
+    let cmd = cmd.split('@').next().unwrap_or(cmd).trim();
+    (!cmd.is_empty()).then(|| (cmd.to_ascii_lowercase().replace('-', "_"), args))
+}
+
+fn content_value_to_text(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+    if let Some(parts) = value.as_array() {
+        let text = parts
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return (!text.trim().is_empty()).then_some(text);
+    }
+    None
+}
+
+fn latest_user_prompt_text(history: &[Value]) -> Option<String> {
+    history.iter().rev().find_map(|message| {
+        (message.get("role").and_then(Value::as_str) == Some("user"))
+            .then(|| message.get("content").and_then(content_value_to_text))
+            .flatten()
+    })
+}
+
+fn merge_usage(left: Option<Usage>, right: Option<Usage>) -> Option<Usage> {
+    match (left, right) {
+        (None, None) => None,
+        (Some(usage), None) | (None, Some(usage)) => Some(usage),
+        (Some(mut left), Some(right)) => {
+            left.input_tokens += right.input_tokens;
+            left.output_tokens += right.output_tokens;
+            left.total_tokens += right.total_tokens;
+            left.thought_tokens = match (left.thought_tokens, right.thought_tokens) {
+                (Some(a), Some(b)) => Some(a + b),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            };
+            left.cached_read_tokens = match (left.cached_read_tokens, right.cached_read_tokens) {
+                (Some(a), Some(b)) => Some(a + b),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            };
+            Some(left)
+        }
+    }
 }
 
 fn prompt_response_value(stop_reason: StopReason, usage: Option<Usage>) -> Value {
@@ -1056,6 +1251,14 @@ impl AcpHandler for HermesAcpHandler {
                 let session_id = params_obj(&request.params)
                     .and_then(|p| param_str_any(p, &["sessionId", "session_id"]))
                     .unwrap_or("");
+                if let Some(state) = self.session_manager.get_session(session_id) {
+                    if state.phase == SessionPhase::Active {
+                        self.session_manager.set_interrupted_prompt_text(
+                            session_id,
+                            latest_user_prompt_text(&state.history),
+                        );
+                    }
+                }
                 self.session_manager
                     .set_phase(session_id, SessionPhase::Cancelled);
                 tracing::info!("Cancelled session {}", session_id);
@@ -1077,8 +1280,8 @@ impl AcpHandler for HermesAcpHandler {
                 }
 
                 let extraction = extract_prompt_payload(p);
-                let user_text = extraction.user_text;
-                let user_content = extraction.user_content;
+                let mut user_text = extraction.user_text;
+                let mut user_content = extraction.user_content;
                 let text_only_prompt = extraction.text_only_prompt;
                 let has_content = extraction.has_content;
 
@@ -1087,6 +1290,42 @@ impl AcpHandler for HermesAcpHandler {
                         request.id,
                         prompt_response_value(StopReason::EndTurn, None),
                     );
+                }
+
+                if text_only_prompt {
+                    if let Some((cmd, args)) = slash_command_parts(&user_text) {
+                        if cmd == "steer" {
+                            if args.is_empty() {
+                                self.event_sink.push(AcpEvent::message_complete(
+                                    session_id,
+                                    "Usage: /steer <guidance>",
+                                ));
+                                return AcpResponse::success(
+                                    request.id,
+                                    prompt_response_value(StopReason::EndTurn, None),
+                                );
+                            }
+
+                            let active = self
+                                .session_manager
+                                .get_session(session_id)
+                                .map(|s| s.phase == SessionPhase::Active)
+                                .unwrap_or(false);
+                            if !active {
+                                if let Some(interrupted) = self
+                                    .session_manager
+                                    .take_interrupted_prompt_text(session_id)
+                                {
+                                    user_text = format!(
+                                        "{interrupted}\n\nUser correction/guidance after interrupt: {args}"
+                                    );
+                                } else {
+                                    user_text = args.to_string();
+                                }
+                                user_content = Value::String(user_text.clone());
+                            }
+                        }
+                    }
                 }
 
                 // Intercept slash commands
@@ -1101,64 +1340,37 @@ impl AcpHandler for HermesAcpHandler {
                     }
                 }
 
+                if self
+                    .session_manager
+                    .get_session(session_id)
+                    .map(|s| s.phase == SessionPhase::Active)
+                    .unwrap_or(false)
+                {
+                    let queued_text = if user_text.trim().is_empty() {
+                        "[Image attachment]"
+                    } else {
+                        user_text.trim()
+                    };
+                    self.session_manager
+                        .push_queued_prompt(session_id, queued_text);
+                    self.event_sink.push(AcpEvent::message_complete(
+                        session_id,
+                        "Queued prompt for the next turn.",
+                    ));
+                    return AcpResponse::success(
+                        request.id,
+                        prompt_response_value(StopReason::EndTurn, None),
+                    );
+                }
+
                 self.session_manager
                     .set_phase(session_id, SessionPhase::Active);
 
-                let mut history = self
-                    .session_manager
-                    .get_session(session_id)
-                    .map(|s| s.history)
-                    .unwrap_or_default();
-                history.push(json!({
-                    "role": "user",
-                    "content": user_content,
-                }));
-                self.session_manager
-                    .set_history(session_id, history.clone());
-
-                self.event_sink
-                    .push(AcpEvent::thinking(session_id, "Processing prompt..."));
-                let session_snapshot = self
-                    .session_manager
-                    .get_session(session_id)
-                    .ok_or_else(|| format!("Session not found: {session_id}"));
-                let session_snapshot = match session_snapshot {
-                    Ok(s) => s,
-                    Err(e) => {
-                        self.event_sink.push(AcpEvent::error(session_id, &e));
-                        self.session_manager
-                            .set_phase(session_id, SessionPhase::Failed);
-                        return AcpResponse::error(request.id, -32602, e);
-                    }
-                };
-
-                let prompt_result = if let Some(executor) = &self.prompt_executor {
-                    executor
-                        .execute_prompt(&session_snapshot, &user_text, &history)
-                        .await
-                } else {
-                    let turn = history
-                        .iter()
-                        .filter(|m| {
-                            m.get("role")
-                                .and_then(|v| v.as_str())
-                                .map(|r| r == "user")
-                                .unwrap_or(false)
-                        })
-                        .count();
-                    let snippet = user_text.chars().take(200).collect::<String>();
-                    Ok(PromptExecutionOutput {
-                        response_text: format!(
-                            "ACP session {} processed turn {}.\n\n{}",
-                            session_id, turn, snippet
-                        ),
-                        usage: None,
-                        total_turns: Some(1),
-                        events: Vec::new(),
-                    })
-                };
-                let prompt_result = match prompt_result {
-                    Ok(r) => r,
+                let mut usage = match self
+                    .execute_prompt_turn(session_id, user_text, user_content)
+                    .await
+                {
+                    Ok(usage) => usage,
                     Err(err) => {
                         self.event_sink.push(AcpEvent::error(session_id, &err));
                         self.session_manager
@@ -1167,43 +1379,25 @@ impl AcpHandler for HermesAcpHandler {
                     }
                 };
 
-                let PromptExecutionOutput {
-                    response_text,
-                    usage,
-                    total_turns,
-                    events,
-                } = prompt_result;
-
-                for event in events {
-                    self.event_sink.push(event);
+                while let Some(queued_prompt) = self.session_manager.pop_queued_prompt(session_id) {
+                    let queued_usage = match self
+                        .execute_prompt_turn(
+                            session_id,
+                            queued_prompt.clone(),
+                            Value::String(queued_prompt),
+                        )
+                        .await
+                    {
+                        Ok(usage) => usage,
+                        Err(err) => {
+                            self.event_sink.push(AcpEvent::error(session_id, &err));
+                            self.session_manager
+                                .set_phase(session_id, SessionPhase::Failed);
+                            return AcpResponse::error(request.id, -32000, err);
+                        }
+                    };
+                    usage = merge_usage(usage, queued_usage);
                 }
-
-                let response_text = response_text.trim().to_string();
-                if !response_text.is_empty() {
-                    self.event_sink
-                        .push(AcpEvent::message_delta(session_id, &response_text));
-                    self.event_sink
-                        .push(AcpEvent::message_complete(session_id, &response_text));
-                }
-                self.event_sink.push(AcpEvent::step_complete(
-                    session_id,
-                    total_turns.unwrap_or(1),
-                ));
-
-                history.push(json!({
-                    "role": "assistant",
-                    "content": response_text,
-                }));
-                self.session_manager.set_history(session_id, history);
-
-                if let Some(usage) = usage.as_ref() {
-                    self.session_manager.add_usage(
-                        session_id,
-                        usage.input_tokens,
-                        usage.output_tokens,
-                    );
-                }
-                self.session_manager.save_session(session_id);
 
                 self.session_manager
                     .set_phase(session_id, SessionPhase::Idle);
@@ -1516,12 +1710,56 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct SteeringPromptExecutor {
+        steers: std::sync::Mutex<Vec<String>>,
+        runs: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl AcpPromptExecutor for SteeringPromptExecutor {
+        async fn execute_prompt(
+            &self,
+            _session: &SessionState,
+            user_text: &str,
+            _history: &[Value],
+        ) -> Result<PromptExecutionOutput, String> {
+            self.runs.lock().unwrap().push(user_text.to_string());
+            Ok(PromptExecutionOutput {
+                response_text: format!("ran:{user_text}"),
+                usage: None,
+                total_turns: Some(1),
+                events: Vec::new(),
+            })
+        }
+
+        fn steer_prompt(&self, _session: &SessionState, guidance: &str) -> Result<bool, String> {
+            self.steers.lock().unwrap().push(guidance.to_string());
+            Ok(true)
+        }
+    }
+
     fn make_handler() -> HermesAcpHandler {
         HermesAcpHandler::new(
             Arc::new(SessionManager::new()),
             Arc::new(EventSink::default()),
             Arc::new(PermissionStore::new()),
         )
+    }
+
+    async fn create_session(handler: &HermesAcpHandler) -> String {
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/new".into(),
+                params: Some(json!({"cwd": "."})),
+            })
+            .await;
+        resp.result.unwrap()["sessionId"]
+            .as_str()
+            .unwrap()
+            .to_string()
     }
 
     fn make_handler_with_auth_provider(provider: Option<&'static str>) -> HermesAcpHandler {
@@ -2096,6 +2334,232 @@ mod tests {
 
         let state = handler.session_manager.get_session(&session_id).unwrap();
         assert!(state.history.len() < 14);
+    }
+
+    #[tokio::test]
+    async fn test_help_lists_queue_and_steer_slash_commands() {
+        let handler = make_handler();
+        let session_id = create_session(&handler).await;
+
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "session_id": session_id.clone(),
+                    "text": "/help",
+                })),
+            })
+            .await;
+        assert_eq!(resp.result.unwrap()["stopReason"], "end_turn");
+
+        let events = handler.event_sink.drain_for_session(&session_id);
+        let help_text = events
+            .iter()
+            .filter(|event| matches!(event.kind, AcpEventKind::MessageComplete))
+            .filter_map(|event| event.text.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(help_text.contains("/queue"));
+        assert!(help_text.contains("/steer"));
+    }
+
+    #[tokio::test]
+    async fn test_acp_queue_slash_command_adds_next_turn_without_running_now() {
+        let executor = Arc::new(SteeringPromptExecutor::default());
+        let handler = make_handler().with_prompt_executor(executor.clone());
+        let session_id = create_session(&handler).await;
+
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "session_id": session_id.clone(),
+                    "text": "/queue run the tests after this",
+                })),
+            })
+            .await;
+
+        assert_eq!(resp.result.unwrap()["stopReason"], "end_turn");
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.queued_prompts, vec!["run the tests after this"]);
+        assert!(state.history.is_empty());
+        assert!(executor.runs.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_acp_prompt_drains_queued_turns_after_current_run() {
+        let handler = HermesAcpHandler::new(
+            Arc::new(SessionManager::new()),
+            Arc::new(EventSink::default()),
+            Arc::new(PermissionStore::new()),
+        )
+        .with_prompt_executor(Arc::new(EchoPromptExecutor));
+        let session_id = create_session(&handler).await;
+        handler
+            .session_manager
+            .push_queued_prompt(&session_id, "then run tests");
+
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "session_id": session_id.clone(),
+                    "text": "make the change",
+                })),
+            })
+            .await;
+        let result = resp.result.unwrap();
+        assert_eq!(result["stopReason"], "end_turn");
+        assert_eq!(result["usage"]["inputTokens"], 6);
+        assert_eq!(result["usage"]["outputTokens"], 10);
+
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        let user_turns = state
+            .history
+            .iter()
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+            .filter_map(|message| message.get("content").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(user_turns, vec!["make the change", "then run tests"]);
+        assert!(state.queued_prompts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_acp_regular_prompt_queues_while_session_is_active() {
+        let executor = Arc::new(SteeringPromptExecutor::default());
+        let handler = make_handler().with_prompt_executor(executor.clone());
+        let session_id = create_session(&handler).await;
+        handler
+            .session_manager
+            .set_phase(&session_id, SessionPhase::Active);
+
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "session_id": session_id.clone(),
+                    "text": "follow up after current work",
+                })),
+            })
+            .await;
+
+        assert_eq!(resp.result.unwrap()["stopReason"], "end_turn");
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.queued_prompts, vec!["follow up after current work"]);
+        assert!(state.history.is_empty());
+        assert!(executor.runs.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_acp_steer_slash_command_signals_active_executor_and_queues_guidance() {
+        let executor = Arc::new(SteeringPromptExecutor::default());
+        let handler = make_handler().with_prompt_executor(executor.clone());
+        let session_id = create_session(&handler).await;
+        handler
+            .session_manager
+            .set_phase(&session_id, SessionPhase::Active);
+
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "session_id": session_id.clone(),
+                    "text": "/steer prefer the simpler fix",
+                })),
+            })
+            .await;
+
+        assert_eq!(resp.result.unwrap()["stopReason"], "end_turn");
+        assert_eq!(
+            executor.steers.lock().unwrap().as_slice(),
+            ["prefer the simpler fix"]
+        );
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.queued_prompts, vec!["prefer the simpler fix"]);
+        assert!(executor.runs.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_acp_steer_on_idle_session_runs_as_regular_prompt() {
+        let executor = Arc::new(SteeringPromptExecutor::default());
+        let handler = make_handler().with_prompt_executor(executor.clone());
+        let session_id = create_session(&handler).await;
+
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "session_id": session_id.clone(),
+                    "text": "/steer summarize the README",
+                })),
+            })
+            .await;
+
+        assert_eq!(resp.result.unwrap()["stopReason"], "end_turn");
+        assert_eq!(
+            executor.runs.lock().unwrap().as_slice(),
+            ["summarize the README"]
+        );
+        assert!(executor.steers.lock().unwrap().is_empty());
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert!(state.queued_prompts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_acp_steer_after_cancel_replays_interrupted_prompt_with_guidance() {
+        let executor = Arc::new(SteeringPromptExecutor::default());
+        let handler = make_handler().with_prompt_executor(executor.clone());
+        let session_id = create_session(&handler).await;
+        handler.session_manager.set_history(
+            &session_id,
+            vec![json!({"role": "user", "content": "write hi to a text file"})],
+        );
+        handler
+            .session_manager
+            .set_phase(&session_id, SessionPhase::Active);
+
+        let cancel = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "session/cancel".into(),
+                params: Some(json!({"session_id": session_id.clone()})),
+            })
+            .await;
+        assert_eq!(cancel.result.unwrap()["cancelled"], true);
+
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(3)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "session_id": session_id.clone(),
+                    "text": "/steer write HELLO instead",
+                })),
+            })
+            .await;
+
+        assert_eq!(resp.result.unwrap()["stopReason"], "end_turn");
+        assert_eq!(
+            executor.runs.lock().unwrap().as_slice(),
+            ["write hi to a text file\n\nUser correction/guidance after interrupt: write HELLO instead"]
+        );
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert!(state.interrupted_prompt_text.is_none());
+        assert!(state.queued_prompts.is_empty());
     }
 
     #[tokio::test]

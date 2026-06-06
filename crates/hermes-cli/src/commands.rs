@@ -4,7 +4,7 @@
 //! REPL, and provides auto-completion suggestions.
 
 use std::process::{Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Write as _,
@@ -26769,6 +26769,7 @@ struct CliAcpPromptExecutor {
     config: Arc<hermes_config::GatewayConfig>,
     tool_registry: Arc<hermes_tools::ToolRegistry>,
     tool_schemas: Vec<hermes_core::ToolSchema>,
+    interrupts: Arc<Mutex<HashMap<String, hermes_agent::InterruptController>>>,
 }
 
 #[async_trait::async_trait]
@@ -26790,17 +26791,20 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
         agent_config.session_id = Some(session.session_id.clone());
 
         let agent_tools = Arc::new(crate::app::bridge_tool_registry(&self.tool_registry));
-        let agent = hermes_agent::attach_discovered_memory(hermes_agent::AgentLoop::new(
-            agent_config,
-            agent_tools,
-            provider,
-        ));
+        let interrupt = hermes_agent::InterruptController::new();
+        if let Ok(mut active) = self.interrupts.lock() {
+            active.insert(session.session_id.clone(), interrupt.clone());
+        }
+        let agent = hermes_agent::attach_discovered_memory(
+            hermes_agent::AgentLoop::with_interrupt(agent_config, agent_tools, provider, interrupt),
+        );
         let messages = acp_history_to_messages(history, user_text);
 
-        let result = agent
-            .run(messages, Some(self.tool_schemas.clone()))
-            .await
-            .map_err(|e| e.to_string())?;
+        let result = agent.run(messages, Some(self.tool_schemas.clone())).await;
+        if let Ok(mut active) = self.interrupts.lock() {
+            active.remove(&session.session_id);
+        }
+        let result = result.map_err(|e| e.to_string())?;
         let response_text = result
             .messages
             .iter()
@@ -26823,6 +26827,25 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
             total_turns: Some(result.total_turns),
             events: acp_events_from_agent_messages(&session.session_id, &result.messages),
         })
+    }
+
+    fn steer_prompt(
+        &self,
+        session: &hermes_acp::SessionState,
+        guidance: &str,
+    ) -> Result<bool, String> {
+        let controller = self
+            .interrupts
+            .lock()
+            .map_err(|_| "ACP interrupt registry poisoned".to_string())?
+            .get(&session.session_id)
+            .cloned();
+        if let Some(controller) = controller {
+            controller.interrupt(Some(format!("User guidance: {guidance}")));
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -26925,6 +26948,7 @@ pub async fn handle_cli_acp(
                 config: Arc::new(config.clone()),
                 tool_registry,
                 tool_schemas,
+                interrupts: Arc::new(Mutex::new(HashMap::new())),
             });
 
             let session_manager = Arc::new(hermes_acp::SessionManager::new());
