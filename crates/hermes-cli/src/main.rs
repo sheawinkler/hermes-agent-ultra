@@ -7751,9 +7751,26 @@ async fn run_auth_verify(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PortalActionKind {
+    Setup,
+    Info,
+}
+
+fn portal_action_kind(action: Option<&str>) -> Result<PortalActionKind, AgentError> {
+    match action.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("setup" | "login" | "auth") => Ok(PortalActionKind::Setup),
+        Some("info" | "status" | "check") => Ok(PortalActionKind::Info),
+        Some(other) => Err(AgentError::Config(format!(
+            "Unknown portal action '{}'. Use `hermes-ultra portal` for setup or `hermes-ultra portal info` for status.",
+            other
+        ))),
+    }
+}
+
 async fn run_portal(cli: Cli, action: Option<String>) -> Result<(), AgentError> {
-    match action.as_deref().unwrap_or("status") {
-        "setup" | "login" | "auth" => {
+    match portal_action_kind(action.as_deref())? {
+        PortalActionKind::Setup => {
             println!("Nous Portal setup ({DEFAULT_NOUS_PORTAL_URL})");
             run_auth(
                 cli,
@@ -7767,8 +7784,8 @@ async fn run_portal(cli: Cli, action: Option<String>) -> Result<(), AgentError> 
             )
             .await
         }
-        "status" | "check" => {
-            println!("Nous Portal status ({DEFAULT_NOUS_PORTAL_URL})");
+        PortalActionKind::Info => {
+            println!("Nous Portal info ({DEFAULT_NOUS_PORTAL_URL})");
             run_auth(
                 cli,
                 Some("status".to_string()),
@@ -7781,10 +7798,6 @@ async fn run_portal(cli: Cli, action: Option<String>) -> Result<(), AgentError> 
             )
             .await
         }
-        other => Err(AgentError::Config(format!(
-            "Unknown portal action '{}'. Use `hermes-ultra portal status` or `hermes-ultra portal setup`.",
-            other
-        ))),
     }
 }
 
@@ -14746,6 +14759,34 @@ mod tests {
             .await
             .expect_err("unknown portal actions must fail before auth side effects");
         assert!(err.to_string().contains("Unknown portal action 'bogus'"));
+        assert!(err.to_string().contains("hermes-ultra portal info"));
+    }
+
+    #[test]
+    fn portal_default_runs_setup_alias() {
+        for action in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("setup"),
+            Some("login"),
+            Some("auth"),
+        ] {
+            assert_eq!(
+                portal_action_kind(action).expect("setup portal action"),
+                PortalActionKind::Setup
+            );
+        }
+    }
+
+    #[test]
+    fn portal_info_and_status_are_status_aliases() {
+        for action in [Some("info"), Some("status"), Some("check")] {
+            assert_eq!(
+                portal_action_kind(action).expect("info portal action"),
+                PortalActionKind::Info
+            );
+        }
     }
 
     #[test]

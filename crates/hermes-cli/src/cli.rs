@@ -103,11 +103,11 @@ pub enum CliCommand {
     /// Nous Portal OAuth setup and status.
     ///
     /// Examples:
-    ///   hermes portal          — show Nous Portal auth status
+    ///   hermes portal          — run Nous Portal device-code login
     ///   hermes portal setup    — run Nous Portal device-code login
-    ///   hermes portal status   — show Nous Portal auth status
+    ///   hermes portal info     — show Nous Portal auth status
     Portal {
-        /// Action: "setup", "login", or "status".
+        /// Action: "setup", "login", "info", or "status".
         action: Option<String>,
     },
 

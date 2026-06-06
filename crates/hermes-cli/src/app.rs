@@ -819,6 +819,7 @@ impl App {
     fn auth_error_requires_nous_login(err: &AgentError) -> bool {
         let text = err.to_string().to_ascii_lowercase();
         text.contains("not logged into nous portal")
+            || text.contains("run `hermes portal`")
             || text.contains("re-run `hermes auth nous`")
             || text.contains("stored nous auth state is invalid")
             || text.contains("missing refresh token")
@@ -5818,9 +5819,13 @@ mod tests {
     #[test]
     fn test_auth_error_requires_nous_login_detects_missing_login_shape() {
         let err = AgentError::AuthFailed(
-            "Hermes is not logged into Nous Portal. Run `hermes auth nous`.".to_string(),
+            "Hermes is not logged into Nous Portal. Run `hermes portal`.".to_string(),
         );
         assert!(App::auth_error_requires_nous_login(&err));
+        let legacy = AgentError::AuthFailed(
+            "Stored Nous auth state is invalid; re-run `hermes auth nous`.".to_string(),
+        );
+        assert!(App::auth_error_requires_nous_login(&legacy));
         let unrelated = AgentError::AuthFailed("rate limited".to_string());
         assert!(!App::auth_error_requires_nous_login(&unrelated));
     }

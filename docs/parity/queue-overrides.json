@@ -967,6 +967,10 @@
     "3d1d0a49fe90": {
       "disposition": "ported",
       "notes": "Rust MiniMax direct auxiliary defaults now use MiniMax-M3 for minimax and minimax-cn, MiniMax CN registers as a first-class auxiliary direct-key provider, setup defaults and curated picker fallbacks expose MiniMax-M3 first, and regression tests guard against stale/highspeed defaults."
+    },
+    "da4f407e5173": {
+      "disposition": "ported",
+      "notes": "Rust `hermes portal` now defaults to Nous Portal onboarding/setup, `portal info/status/check` report status, CLI help/README/auth recovery guidance use the human-readable portal alias, and focused CLI tests cover the dispatch without OAuth side effects."
     }
   },
   "subject_patterns": [

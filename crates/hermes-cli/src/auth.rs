@@ -1261,14 +1261,14 @@ pub async fn resolve_nous_runtime_credentials(
     let mut state = if let Some(raw_state) = read_provider_auth_state("nous")? {
         parse_nous_oauth_state(raw_state).ok_or_else(|| {
             AgentError::AuthFailed(
-                "Stored Nous auth state is invalid; re-run `hermes auth nous`.".into(),
+                "Stored Nous auth state is invalid; re-run `hermes portal`.".into(),
             )
         })?
     } else if let Some(imported) = discover_existing_nous_oauth()? {
         imported.state
     } else {
         return Err(AgentError::AuthFailed(
-            "Hermes is not logged into Nous Portal. Run `hermes auth nous`.".into(),
+            "Hermes is not logged into Nous Portal. Run `hermes portal`.".into(),
         ));
     };
 
@@ -1340,7 +1340,7 @@ pub async fn resolve_nous_runtime_credentials(
 
     let api_key = state.runtime_api_key().ok_or_else(|| {
         AgentError::AuthFailed(
-            "Failed to resolve a Nous runtime API key. Re-run `hermes auth nous`.".into(),
+            "Failed to resolve a Nous runtime API key. Re-run `hermes portal`.".into(),
         )
     })?;
     let expires_at = state
