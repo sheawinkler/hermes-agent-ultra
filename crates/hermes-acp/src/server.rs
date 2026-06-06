@@ -238,6 +238,49 @@ mod tests {
         assert_eq!(lines[1]["params"]["arguments"]["path"], "/tmp/a.txt");
     }
 
+    #[tokio::test]
+    async fn run_on_advertises_available_commands_after_new_session() {
+        let session_manager = Arc::new(SessionManager::new());
+        let event_sink = Arc::new(EventSink::default());
+        let permission_store = Arc::new(PermissionStore::new());
+        let handler = Arc::new(HermesAcpHandler::new(
+            session_manager.clone(),
+            event_sink.clone(),
+            permission_store.clone(),
+        ));
+        let server =
+            AcpServer::with_components(handler, session_manager, event_sink, permission_store);
+
+        let input = br#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/tmp"}}"#;
+        let mut output = Vec::new();
+        server.run_on(&input[..], &mut output).await.unwrap();
+
+        let text = String::from_utf8(output).unwrap();
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+
+        assert_eq!(lines.len(), 2);
+        let session_id = lines[0]["result"]["sessionId"].as_str().unwrap();
+        assert_eq!(lines[1]["method"], "session/update");
+        assert_eq!(lines[1]["params"]["kind"], "available_commands_update");
+        assert_eq!(
+            lines[1]["params"]["sessionUpdate"],
+            "available_commands_update"
+        );
+        assert_eq!(lines[1]["params"]["session_id"], session_id);
+        let commands = lines[1]["params"]["availableCommands"]
+            .as_array()
+            .expect("available commands");
+        assert!(commands.iter().any(|command| command["name"] == "help"));
+        let model = commands
+            .iter()
+            .find(|command| command["name"] == "model")
+            .expect("model command");
+        assert_eq!(model["inputHint"], "model name to switch to");
+    }
+
     #[test]
     fn server_permission_stores_are_instance_scoped() {
         let handler_a = Arc::new(HermesAcpHandler::new(

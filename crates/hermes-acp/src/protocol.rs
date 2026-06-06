@@ -117,7 +117,9 @@ impl From<&str> for AcpMethod {
             "prompt" => Self::Prompt,
             "session/set_model" | "set_session_model" => Self::SetSessionModel,
             "session/set_mode" | "set_session_mode" => Self::SetSessionMode,
-            "session/set_config" | "set_config_option" => Self::SetConfigOption,
+            "session/set_config" | "session/set_config_option" | "set_config_option" => {
+                Self::SetConfigOption
+            }
 
             // Legacy methods
             "conversation.create" => Self::CreateConversation,
@@ -418,6 +420,10 @@ mod tests {
         assert_eq!(AcpMethod::from("new_session"), AcpMethod::NewSession);
         assert_eq!(AcpMethod::from("prompt"), AcpMethod::Prompt);
         assert_eq!(AcpMethod::from("cancel"), AcpMethod::Cancel);
+        assert_eq!(
+            AcpMethod::from("session/set_config_option"),
+            AcpMethod::SetConfigOption
+        );
         assert_eq!(
             AcpMethod::from("conversation.create"),
             AcpMethod::CreateConversation

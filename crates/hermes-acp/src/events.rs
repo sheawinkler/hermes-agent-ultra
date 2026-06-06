@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::protocol::AvailableCommand;
 use crate::tools::{format_tool_result, tool_completion_status, tool_start_metadata};
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,8 @@ pub enum AcpEventKind {
     StepComplete,
     /// Session-level progress update.
     Progress,
+    /// Available slash commands changed.
+    AvailableCommandsUpdate,
     /// An error occurred.
     Error,
 }
@@ -65,6 +68,18 @@ pub struct AcpEvent {
     pub api_call_count: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(
+        rename = "sessionUpdate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub session_update: Option<String>,
+    #[serde(
+        rename = "availableCommands",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub available_commands: Option<Vec<AvailableCommand>>,
 }
 
 impl AcpEvent {
@@ -90,6 +105,8 @@ impl AcpEvent {
             status: None,
             api_call_count: None,
             error: None,
+            session_update: None,
+            available_commands: None,
         }
     }
 
@@ -114,6 +131,8 @@ impl AcpEvent {
             status: None,
             api_call_count: None,
             error: None,
+            session_update: None,
+            available_commands: None,
         }
     }
 
@@ -139,6 +158,8 @@ impl AcpEvent {
             status: Some(status.to_string()),
             api_call_count: None,
             error: None,
+            session_update: None,
+            available_commands: None,
         }
     }
 
@@ -157,6 +178,8 @@ impl AcpEvent {
             status: None,
             api_call_count: None,
             error: None,
+            session_update: None,
+            available_commands: None,
         }
     }
 
@@ -175,6 +198,8 @@ impl AcpEvent {
             status: None,
             api_call_count: None,
             error: None,
+            session_update: None,
+            available_commands: None,
         }
     }
 
@@ -193,6 +218,8 @@ impl AcpEvent {
             status: None,
             text: None,
             error: None,
+            session_update: None,
+            available_commands: None,
         }
     }
 
@@ -211,6 +238,28 @@ impl AcpEvent {
             status: None,
             text: None,
             api_call_count: None,
+            session_update: None,
+            available_commands: None,
+        }
+    }
+
+    pub fn available_commands_update(session_id: &str, commands: Vec<AvailableCommand>) -> Self {
+        Self {
+            kind: AcpEventKind::AvailableCommandsUpdate,
+            session_id: session_id.to_string(),
+            timestamp: Self::now(),
+            session_update: Some("available_commands_update".to_string()),
+            available_commands: Some(commands),
+            tool_call_id: None,
+            tool_name: None,
+            tool_kind: None,
+            title: None,
+            arguments: None,
+            result: None,
+            status: None,
+            text: None,
+            api_call_count: None,
+            error: None,
         }
     }
 }
