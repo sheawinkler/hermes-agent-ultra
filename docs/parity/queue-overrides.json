@@ -815,6 +815,14 @@
     "f75b1d21b4c8cacc2b9b9fb87227ff315365cd90": {
       "disposition": "ported",
       "notes": "Rust agent loop now treats advertised tool schemas as the runtime allowlist, rejects registered-but-disabled fabricated tool calls in non-streaming and streaming loops, and makes delegate_task inherit the parent enabled tool surface when no explicit child toolset is requested; execute_code schema remains Rust-only and does not advertise disabled sandbox helper tools."
+    },
+    "e7a7872a874837ca36105ca3e90db464cf7c125a": {
+      "disposition": "ported",
+      "notes": "Rust process_registry now exposes deduplicated process notification receipts via notify/record_event/list_events/clear_events. Completion events are one-shot per process session, watch_match identities include command/pattern/output/suppressed/message_id so distinct matches are preserved, and focused tests cover replay dedup plus distinct watch-match emission."
+    },
+    "5bcb63e400987e937e696b385e01285339b565c5": {
+      "disposition": "superseded",
+      "notes": "The Python TUI global _sessions/_pending lock fix is structurally superseded by Rust session managers and pending stores that already use Mutex/RwLock for compound mutations (hermes-acp SessionManager/PermissionStore, hermes-gateway SessionManager/BusySessionCoordinator). This slice also adds a Mutex-backed process notification receipt store for the overlapping process-event flood path."
     }
   },
   "subject_patterns": [
