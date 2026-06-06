@@ -5,7 +5,7 @@
 //! sends `notifications/tools/list_changed`, the client automatically
 //! rediscovers tools and updates the registry.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -48,8 +48,12 @@ pub struct ResourceInfo {
 // ---------------------------------------------------------------------------
 
 /// Configuration for MCP sampling (server-initiated LLM requests).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SamplingConfig {
+    #[serde(default = "default_sampling_enabled")]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub max_rpm: u32,
     pub max_tokens_cap: u32,
     pub timeout_secs: u64,
@@ -60,6 +64,8 @@ pub struct SamplingConfig {
 impl Default for SamplingConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
+            model: None,
             max_rpm: 10,
             max_tokens_cap: 4096,
             timeout_secs: 60,
@@ -69,8 +75,22 @@ impl Default for SamplingConfig {
     }
 }
 
+fn default_sampling_enabled() -> bool {
+    true
+}
+
+/// Per-client sampling audit counters.
+#[derive(Debug, Clone, Serialize, Default, PartialEq, Eq)]
+pub struct SamplingMetrics {
+    pub requests: u64,
+    pub errors: u64,
+    pub tokens_used: u64,
+    pub tool_use_count: u64,
+    pub rate_limited: u64,
+}
+
 /// Callback type for LLM invocations triggered by MCP sampling.
-pub type LlmCallback = Box<
+pub type LlmCallback = Arc<
     dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, McpError>> + Send>> + Send + Sync,
 >;
 
@@ -191,6 +211,9 @@ pub struct McpServerConfig {
     /// Whether this server supports concurrent tool calls from one session.
     #[serde(default)]
     pub supports_parallel_tool_calls: bool,
+    /// Optional sampling policy for server-initiated LLM requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<SamplingConfig>,
     /// Optional authentication provider for remote servers.
     #[serde(skip)]
     pub auth_provider: Option<Arc<dyn McpAuthProvider>>,
@@ -207,6 +230,7 @@ impl std::fmt::Debug for McpServerConfig {
                 "supports_parallel_tool_calls",
                 &self.supports_parallel_tool_calls,
             )
+            .field("sampling", &self.sampling)
             .field(
                 "auth_provider",
                 &self.auth_provider.as_ref().map(|_| "<McpAuthProvider>"),
@@ -222,6 +246,7 @@ impl PartialEq for McpServerConfig {
             && self.env == other.env
             && self.url == other.url
             && self.supports_parallel_tool_calls == other.supports_parallel_tool_calls
+            && self.sampling == other.sampling
     }
 }
 
@@ -234,6 +259,7 @@ impl McpServerConfig {
             env: HashMap::new(),
             url: None,
             supports_parallel_tool_calls: false,
+            sampling: None,
             auth_provider: None,
         }
     }
@@ -246,6 +272,7 @@ impl McpServerConfig {
             env: HashMap::new(),
             url: Some(url.into()),
             supports_parallel_tool_calls: false,
+            sampling: None,
             auth_provider: None,
         }
     }
@@ -253,6 +280,12 @@ impl McpServerConfig {
     /// Set explicit parallel-tool-call capability for this server.
     pub fn with_parallel_tool_calls(mut self, enabled: bool) -> Self {
         self.supports_parallel_tool_calls = enabled;
+        self
+    }
+
+    /// Set sampling policy for server-initiated LLM requests.
+    pub fn with_sampling_config(mut self, config: SamplingConfig) -> Self {
+        self.sampling = Some(config);
         self
     }
 
@@ -516,6 +549,14 @@ pub struct McpClient {
     connected: bool,
     /// Sampling configuration for server-initiated LLM requests.
     sampling_config: Option<SamplingConfig>,
+    /// LLM callback used for transport-loop sampling/createMessage requests.
+    sampling_callback: Option<LlmCallback>,
+    /// Sliding-window timestamps for sampling rate limiting.
+    sampling_rate_timestamps: VecDeque<Instant>,
+    /// Consecutive sampling tool-use response count.
+    sampling_tool_rounds: u32,
+    /// Per-client sampling audit counters.
+    sampling_metrics: SamplingMetrics,
     /// Timestamp when the client connected (for uptime tracking).
     connected_at: Option<Instant>,
 }
@@ -523,6 +564,7 @@ pub struct McpClient {
 impl McpClient {
     /// Create a new client for the given config. Does not connect yet.
     pub fn new(config: McpServerConfig) -> Self {
+        let sampling_config = config.sampling.clone();
         Self {
             config,
             transport: None,
@@ -530,7 +572,11 @@ impl McpClient {
             resources: Vec::new(),
             next_id: 1,
             connected: false,
-            sampling_config: None,
+            sampling_config,
+            sampling_callback: None,
+            sampling_rate_timestamps: VecDeque::new(),
+            sampling_tool_rounds: 0,
+            sampling_metrics: SamplingMetrics::default(),
             connected_at: None,
         }
     }
@@ -719,6 +765,21 @@ impl McpClient {
         self.sampling_config = Some(config);
     }
 
+    /// Set the callback used to satisfy MCP `sampling/createMessage` requests.
+    pub fn set_sampling_callback(&mut self, callback: LlmCallback) {
+        self.sampling_callback = Some(callback);
+    }
+
+    /// Clear the sampling callback for this client.
+    pub fn clear_sampling_callback(&mut self) {
+        self.sampling_callback = None;
+    }
+
+    /// Return sampling audit counters for this client.
+    pub fn sampling_metrics(&self) -> &SamplingMetrics {
+        &self.sampling_metrics
+    }
+
     // -----------------------------------------------------------------------
     // Prompt support
     // -----------------------------------------------------------------------
@@ -762,20 +823,35 @@ impl McpClient {
     /// The server can ask the client to invoke an LLM on its behalf.
     /// The `llm_callback` performs the actual LLM call.
     pub async fn handle_sampling_request(
-        &self,
+        &mut self,
         params: Value,
         llm_callback: &LlmCallback,
     ) -> Result<Value, McpError> {
-        let config = self.sampling_config.as_ref().ok_or_else(|| {
+        self.sampling_metrics.requests += 1;
+        let config = self.sampling_config.clone().ok_or_else(|| {
             McpError::Config("Sampling not configured on this client".to_string())
         })?;
+        if !config.enabled {
+            self.sampling_metrics.errors += 1;
+            return Err(McpError::Forbidden(
+                "Sampling is disabled on this client".to_string(),
+            ));
+        }
+        if !self.check_sampling_rate_limit(config.max_rpm) {
+            self.sampling_metrics.errors += 1;
+            self.sampling_metrics.rate_limited += 1;
+            return Err(McpError::Forbidden(format!(
+                "Sampling rate limit exceeded (max {} requests/minute)",
+                config.max_rpm
+            )));
+        }
 
-        let model = params
-            .get("model")
-            .and_then(|m| m.as_str())
-            .unwrap_or("default");
+        let model = self.resolve_sampling_model(&params, &config);
 
-        if !config.allowed_models.is_empty() && !config.allowed_models.iter().any(|m| m == model) {
+        if !config.allowed_models.is_empty()
+            && !config.allowed_models.iter().any(|m| m.as_str() == model)
+        {
+            self.sampling_metrics.errors += 1;
             return Err(McpError::InvalidParams(format!(
                 "Model '{}' is not in the allowed list",
                 model
@@ -794,32 +870,162 @@ impl McpClient {
             .unwrap_or(serde_json::json!([]));
         let openai_messages = Self::convert_mcp_messages_to_openai(&messages);
 
-        let llm_request = serde_json::json!({
+        let mut llm_request = serde_json::json!({
             "model": model,
             "messages": openai_messages,
             "max_tokens": max_tokens,
         });
+        if let Some(system_prompt) = params.get("systemPrompt").and_then(Value::as_str) {
+            if let Some(obj) = llm_request.as_object_mut() {
+                obj.insert(
+                    "system_prompt".to_string(),
+                    Value::String(system_prompt.to_string()),
+                );
+            }
+        }
+        if let Some(temperature) = params.get("temperature").and_then(Value::as_f64) {
+            if let Some(obj) = llm_request.as_object_mut() {
+                obj.insert("temperature".to_string(), serde_json::json!(temperature));
+            }
+        }
+        if let Some(stop_sequences) = params.get("stopSequences").cloned() {
+            if let Some(obj) = llm_request.as_object_mut() {
+                obj.insert("stop".to_string(), stop_sequences);
+            }
+        }
 
         let timeout = std::time::Duration::from_secs(config.timeout_secs);
-        let result = tokio::time::timeout(timeout, llm_callback(llm_request))
-            .await
-            .map_err(|_| McpError::ConnectionError("Sampling LLM callback timed out".into()))??;
+        let result = match tokio::time::timeout(timeout, llm_callback(llm_request)).await {
+            Ok(Ok(value)) => value,
+            Ok(Err(err)) => {
+                self.sampling_metrics.errors += 1;
+                return Err(err);
+            }
+            Err(_) => {
+                self.sampling_metrics.errors += 1;
+                return Err(McpError::ConnectionError(
+                    "Sampling LLM callback timed out".into(),
+                ));
+            }
+        };
 
-        let content = result
-            .get("choices")
-            .and_then(|c| c.get(0))
-            .and_then(|c| c.get("message"))
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_str())
-            .unwrap_or("");
+        self.sampling_metrics.tokens_used += result
+            .get("usage")
+            .and_then(|u| u.get("total_tokens").or_else(|| u.get("totalTokens")))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
 
-        let role = result
+        match self.build_sampling_response(&result, &model, &config) {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                self.sampling_metrics.errors += 1;
+                Err(err)
+            }
+        }
+    }
+
+    async fn handle_configured_sampling_request(
+        &mut self,
+        params: Value,
+    ) -> Result<Value, McpError> {
+        let callback = self.sampling_callback.clone().ok_or_else(|| {
+            McpError::NotConfigured("Sampling callback is not configured".to_string())
+        })?;
+        self.handle_sampling_request(params, &callback).await
+    }
+
+    fn check_sampling_rate_limit(&mut self, max_rpm: u32) -> bool {
+        if max_rpm == 0 {
+            return false;
+        }
+        let now = Instant::now();
+        while self
+            .sampling_rate_timestamps
+            .front()
+            .is_some_and(|stamp| now.duration_since(*stamp) > Duration::from_secs(60))
+        {
+            self.sampling_rate_timestamps.pop_front();
+        }
+        if self.sampling_rate_timestamps.len() >= max_rpm as usize {
+            return false;
+        }
+        self.sampling_rate_timestamps.push_back(now);
+        true
+    }
+
+    fn resolve_sampling_model(&self, params: &Value, config: &SamplingConfig) -> String {
+        if let Some(model) = config
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+        {
+            return model.to_string();
+        }
+        if let Some(model) = params.get("model").and_then(Value::as_str) {
+            let trimmed = model.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+        params
+            .get("modelPreferences")
+            .and_then(|prefs| prefs.get("hints"))
+            .and_then(Value::as_array)
+            .and_then(|hints| hints.first())
+            .and_then(|hint| hint.get("name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or("default")
+            .to_string()
+    }
+
+    fn build_sampling_response(
+        &mut self,
+        result: &Value,
+        request_model: &str,
+        config: &SamplingConfig,
+    ) -> Result<Value, McpError> {
+        let choice = result
             .get("choices")
-            .and_then(|c| c.get(0))
-            .and_then(|c| c.get("message"))
-            .and_then(|m| m.get("role"))
-            .and_then(|r| r.as_str())
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .ok_or_else(|| {
+                McpError::Serialization("Sampling response missing choices[0]".into())
+            })?;
+        let message = choice
+            .get("message")
+            .ok_or_else(|| McpError::Serialization("Sampling response missing message".into()))?;
+        let response_model = result
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or(request_model);
+        if let Some(tool_calls) = message
+            .get("tool_calls")
+            .or_else(|| message.get("toolCalls"))
+            .and_then(Value::as_array)
+            .filter(|calls| !calls.is_empty())
+        {
+            return self.build_sampling_tool_use_response(tool_calls, response_model, config);
+        }
+
+        self.sampling_tool_rounds = 0;
+        let content = message.get("content").and_then(Value::as_str).unwrap_or("");
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
             .unwrap_or("assistant");
+        let stop_reason = match choice
+            .get("finish_reason")
+            .or_else(|| choice.get("finishReason"))
+            .and_then(Value::as_str)
+            .unwrap_or("stop")
+        {
+            "length" | "max_tokens" | "maxTokens" => "maxTokens",
+            "tool_calls" | "toolUse" => "toolUse",
+            _ => "endTurn",
+        };
 
         Ok(serde_json::json!({
             "role": role,
@@ -827,7 +1033,71 @@ impl McpClient {
                 "type": "text",
                 "text": content,
             },
-            "model": model,
+            "model": response_model,
+            "stopReason": stop_reason,
+        }))
+    }
+
+    fn build_sampling_tool_use_response(
+        &mut self,
+        tool_calls: &[Value],
+        response_model: &str,
+        config: &SamplingConfig,
+    ) -> Result<Value, McpError> {
+        self.sampling_metrics.tool_use_count += tool_calls.len() as u64;
+        if config.max_tool_rounds == 0 {
+            self.sampling_tool_rounds = 0;
+            return Err(McpError::Forbidden(
+                "Tool loops disabled for sampling (max_tool_rounds=0)".to_string(),
+            ));
+        }
+        self.sampling_tool_rounds += 1;
+        if self.sampling_tool_rounds > config.max_tool_rounds {
+            self.sampling_tool_rounds = 0;
+            return Err(McpError::Forbidden(format!(
+                "Tool loop limit exceeded for sampling (max {} rounds)",
+                config.max_tool_rounds
+            )));
+        }
+
+        let content: Vec<Value> = tool_calls
+            .iter()
+            .enumerate()
+            .map(|(idx, call)| {
+                let function = call.get("function").unwrap_or(call);
+                let name = function
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown_tool");
+                let raw_args = function
+                    .get("arguments")
+                    .or_else(|| function.get("input"))
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let input = match raw_args {
+                    Value::String(raw) => serde_json::from_str::<Value>(&raw)
+                        .unwrap_or_else(|_| serde_json::json!({ "_raw": raw })),
+                    Value::Object(_) => raw_args,
+                    other => serde_json::json!({ "_raw": other.to_string() }),
+                };
+                serde_json::json!({
+                    "type": "tool_use",
+                    "id": call
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("call_{idx}")),
+                    "name": name,
+                    "input": input,
+                })
+            })
+            .collect();
+
+        Ok(serde_json::json!({
+            "role": "assistant",
+            "content": content,
+            "model": response_model,
+            "stopReason": "toolUse",
         }))
     }
 
@@ -837,24 +1107,144 @@ impl McpClient {
             None => return serde_json::json!([]),
         };
 
-        let converted: Vec<Value> = arr
-            .iter()
-            .map(|msg| {
-                let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user");
-                let content = msg
-                    .get("content")
-                    .and_then(|c| c.get("text"))
-                    .and_then(|t| t.as_str())
-                    .or_else(|| msg.get("content").and_then(|c| c.as_str()))
-                    .unwrap_or("");
-                serde_json::json!({
+        let mut converted: Vec<Value> = Vec::new();
+        for msg in arr {
+            let role = msg.get("role").and_then(Value::as_str).unwrap_or("user");
+            let Some(content) = msg.get("content") else {
+                converted.push(serde_json::json!({"role": role, "content": ""}));
+                continue;
+            };
+            if let Some(text) = content.as_str() {
+                converted.push(serde_json::json!({"role": role, "content": text}));
+                continue;
+            }
+            if let Some(text) = content.get("text").and_then(Value::as_str) {
+                converted.push(serde_json::json!({"role": role, "content": text}));
+                continue;
+            }
+            let Some(blocks) = content.as_array() else {
+                converted.push(serde_json::json!({"role": role, "content": ""}));
+                continue;
+            };
+
+            let mut text_parts: Vec<String> = Vec::new();
+            let mut image_parts: Vec<Value> = Vec::new();
+            let mut tool_calls: Vec<Value> = Vec::new();
+            for block in blocks {
+                let block_type = block.get("type").and_then(Value::as_str).unwrap_or("");
+                if block.get("toolUseId").is_some() || block_type == "tool_result" {
+                    let tool_call_id = block
+                        .get("toolUseId")
+                        .or_else(|| block.get("tool_use_id"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("tool_result");
+                    let tool_text = Self::sampling_block_text(block);
+                    converted.push(serde_json::json!({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": tool_text,
+                    }));
+                    continue;
+                }
+                if block_type == "tool_use"
+                    || (block.get("name").is_some() && block.get("input").is_some())
+                {
+                    let name = block
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown_tool");
+                    let input = block
+                        .get("input")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({}));
+                    tool_calls.push(serde_json::json!({
+                        "id": block
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .unwrap_or("tool_call"),
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": input.to_string(),
+                        },
+                    }));
+                    continue;
+                }
+                if block_type == "image" {
+                    if let Some(data) = block.get("data").and_then(Value::as_str) {
+                        let mime = block
+                            .get("mimeType")
+                            .or_else(|| block.get("mime_type"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("image/png");
+                        image_parts.push(serde_json::json!({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": format!("data:{mime};base64,{data}"),
+                            },
+                        }));
+                    }
+                    continue;
+                }
+                let text = Self::sampling_block_text(block);
+                if !text.is_empty() {
+                    text_parts.push(text);
+                }
+            }
+
+            if !tool_calls.is_empty() {
+                let mut message = serde_json::json!({
                     "role": role,
-                    "content": content,
-                })
-            })
-            .collect();
+                    "tool_calls": tool_calls,
+                });
+                if !text_parts.is_empty() {
+                    message["content"] = Value::String(text_parts.join("\n"));
+                }
+                converted.push(message);
+            } else if image_parts.is_empty() {
+                converted.push(serde_json::json!({
+                    "role": role,
+                    "content": text_parts.join("\n"),
+                }));
+            } else {
+                let mut parts = Vec::new();
+                if !text_parts.is_empty() {
+                    parts.push(serde_json::json!({
+                        "type": "text",
+                        "text": text_parts.join("\n"),
+                    }));
+                }
+                parts.extend(image_parts);
+                converted.push(serde_json::json!({
+                    "role": role,
+                    "content": parts,
+                }));
+            }
+        }
 
         Value::Array(converted)
+    }
+
+    fn sampling_block_text(block: &Value) -> String {
+        if let Some(text) = block.get("text").and_then(Value::as_str) {
+            return text.to_string();
+        }
+        if let Some(content) = block.get("content") {
+            if let Some(text) = content.as_str() {
+                return text.to_string();
+            }
+            if let Some(text) = content.get("text").and_then(Value::as_str) {
+                return text.to_string();
+            }
+            if let Some(items) = content.as_array() {
+                return items
+                    .iter()
+                    .filter_map(|item| item.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+            }
+        }
+        String::new()
     }
 
     // -----------------------------------------------------------------------
@@ -905,14 +1295,43 @@ impl McpClient {
             "params": params,
         });
 
-        let transport = self
-            .transport
+        self.transport_mut()?.send(request).await?;
+        loop {
+            let response = self.transport_mut()?.receive().await?;
+            if Self::response_matches_id(&response, id) {
+                return Self::parse_jsonrpc_result(response);
+            }
+            if response.get("method").and_then(Value::as_str).is_some() {
+                if let Some(reply) = self.handle_server_request_message(response).await {
+                    self.transport_mut()?.send(reply).await?;
+                }
+                continue;
+            }
+            debug!(
+                "Ignoring MCP message while waiting for response id {}: {}",
+                id, response
+            );
+        }
+    }
+
+    fn transport_mut(&mut self) -> Result<&mut Box<dyn McpTransport>, McpError> {
+        self.transport
             .as_mut()
-            .ok_or_else(|| McpError::ConnectionError("Not connected".to_string()))?;
+            .ok_or_else(|| McpError::ConnectionError("Not connected".to_string()))
+    }
 
-        transport.send(request).await?;
-        let response = transport.receive().await?;
+    fn response_matches_id(response: &Value, expected_id: u64) -> bool {
+        response
+            .get("id")
+            .and_then(Value::as_u64)
+            .is_some_and(|id| id == expected_id)
+            || response
+                .get("id")
+                .and_then(Value::as_i64)
+                .is_some_and(|id| id >= 0 && id as u64 == expected_id)
+    }
 
+    fn parse_jsonrpc_result(response: Value) -> Result<Value, McpError> {
         if let Some(error) = response.get("error") {
             let code = error.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
             let raw_message = error.get("message").and_then(|m| m.as_str()).unwrap_or("");
@@ -928,6 +1347,56 @@ impl McpClient {
             code: -1,
             message: "Missing result in response".to_string(),
         })
+    }
+
+    async fn handle_server_request_message(&mut self, message: Value) -> Option<Value> {
+        let id = message.get("id").cloned();
+        let method = message
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let Some(id) = id else {
+            debug!("Ignoring MCP notification from server: {}", method);
+            return None;
+        };
+        let result = match method {
+            "sampling/createMessage" => {
+                let params = message
+                    .get("params")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                self.handle_configured_sampling_request(params).await
+            }
+            _ => Err(McpError::MethodNotFound(format!(
+                "Unsupported server-initiated MCP method: {method}"
+            ))),
+        };
+        Some(match result {
+            Ok(result) => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": result,
+            }),
+            Err(err) => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {
+                    "code": Self::jsonrpc_code_for_error(&err),
+                    "message": err.to_string(),
+                },
+            }),
+        })
+    }
+
+    fn jsonrpc_code_for_error(err: &McpError) -> i64 {
+        match err {
+            McpError::MethodNotFound(_) => -32601,
+            McpError::InvalidParams(_) => -32602,
+            McpError::NotConfigured(_) => -32001,
+            McpError::Forbidden(_) => -32600,
+            McpError::Serialization(_) => -32700,
+            _ => -32000,
+        }
     }
 
     fn classify_protocol_error(code: i64, message: impl AsRef<str>) -> McpError {
@@ -1031,6 +1500,8 @@ pub struct McpManager {
     clients: HashMap<String, McpClient>,
     /// Shared tool registry for discovered tools.
     tool_registry: Arc<ToolRegistry>,
+    sampling_config: Option<SamplingConfig>,
+    sampling_callback: Option<LlmCallback>,
 }
 
 impl McpManager {
@@ -1039,6 +1510,8 @@ impl McpManager {
         Self {
             clients: HashMap::new(),
             tool_registry,
+            sampling_config: None,
+            sampling_callback: None,
         }
     }
 
@@ -1051,6 +1524,12 @@ impl McpManager {
         info!("Connecting to MCP server: {}", name);
 
         let mut client = McpClient::new(config);
+        if let Some(config) = self.sampling_config.clone() {
+            client.set_sampling_config(config);
+        }
+        if let Some(callback) = self.sampling_callback.clone() {
+            client.set_sampling_callback(callback);
+        }
         client.connect().await?;
 
         let tools = client.cached_tools();
@@ -1092,9 +1571,17 @@ impl McpManager {
                 continue;
             }
 
+            let sampling_config = self.sampling_config.clone();
+            let sampling_callback = self.sampling_callback.clone();
             tasks.spawn(async move {
                 let transport_type = transport_type_for_config(&config).to_string();
                 let mut client = McpClient::new(config);
+                if let Some(config) = sampling_config {
+                    client.set_sampling_config(config);
+                }
+                if let Some(callback) = sampling_callback {
+                    client.set_sampling_callback(callback);
+                }
                 let result = client.connect().await;
                 match result {
                     Ok(()) => {
@@ -1309,9 +1796,25 @@ impl McpManager {
 
     /// Set the sampling configuration for all connected clients.
     pub fn set_sampling_config(&mut self, config: SamplingConfig) {
+        self.sampling_config = Some(config.clone());
         for client in self.clients.values_mut() {
             client.set_sampling_config(config.clone());
         }
+    }
+
+    /// Set the sampling callback for all connected and future clients.
+    pub fn set_sampling_callback(&mut self, callback: LlmCallback) {
+        self.sampling_callback = Some(callback.clone());
+        for client in self.clients.values_mut() {
+            client.set_sampling_callback(callback.clone());
+        }
+    }
+
+    /// Return sampling audit counters for a connected server.
+    pub fn sampling_metrics(&self, server_name: &str) -> Option<&SamplingMetrics> {
+        self.clients
+            .get(server_name)
+            .map(McpClient::sampling_metrics)
     }
 
     // -----------------------------------------------------------------------
@@ -1410,7 +1913,8 @@ impl McpManager {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache_mcp_image_block, is_stale_transport_error, McpClient, McpManager, McpServerConfig,
+        cache_mcp_image_block, is_stale_transport_error, LlmCallback, McpClient, McpManager,
+        McpServerConfig, SamplingConfig,
     };
     use crate::transport::McpTransport;
     use crate::McpError;
@@ -1418,19 +1922,29 @@ mod tests {
     use serde_json::json;
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
     struct FakeTransport {
         responses: VecDeque<serde_json::Value>,
         closed: Arc<AtomicBool>,
+        sent: Arc<Mutex<Vec<serde_json::Value>>>,
     }
 
     impl FakeTransport {
         fn new(responses: Vec<serde_json::Value>, closed: Arc<AtomicBool>) -> Self {
+            Self::new_with_sent(responses, closed, Arc::new(Mutex::new(Vec::new())))
+        }
+
+        fn new_with_sent(
+            responses: Vec<serde_json::Value>,
+            closed: Arc<AtomicBool>,
+            sent: Arc<Mutex<Vec<serde_json::Value>>>,
+        ) -> Self {
             Self {
                 responses: responses.into(),
                 closed,
+                sent,
             }
         }
     }
@@ -1441,7 +1955,8 @@ mod tests {
             Ok(())
         }
 
-        async fn send(&mut self, _message: serde_json::Value) -> Result<(), McpError> {
+        async fn send(&mut self, message: serde_json::Value) -> Result<(), McpError> {
+            self.sent.lock().expect("sent lock").push(message);
             Ok(())
         }
 
@@ -1558,6 +2073,220 @@ mod tests {
         assert!(reports.iter().all(|report| report.error.is_some()));
         assert!(!manager.is_connected("missing-a"));
         assert!(!manager.is_connected("missing-b"));
+    }
+
+    #[tokio::test]
+    async fn sampling_request_applies_model_cap_rate_limit_and_metrics() {
+        let captured = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let captured_for_callback = captured.clone();
+        let callback: LlmCallback = Arc::new(move |request| {
+            captured_for_callback
+                .lock()
+                .expect("captured lock")
+                .push(request);
+            Box::pin(async move {
+                Ok(json!({
+                    "model": "sample-model",
+                    "choices": [{
+                        "finish_reason": "length",
+                        "message": {
+                            "role": "assistant",
+                            "content": "sampled text"
+                        }
+                    }],
+                    "usage": {"total_tokens": 17}
+                }))
+            })
+        });
+        let mut client = McpClient::new(McpServerConfig::stdio("fake", Vec::new()));
+        client.set_sampling_config(SamplingConfig {
+            max_rpm: 1,
+            max_tokens_cap: 64,
+            allowed_models: vec!["sample-model".to_string()],
+            ..SamplingConfig::default()
+        });
+
+        let result = client
+            .handle_sampling_request(
+                json!({
+                    "model": "sample-model",
+                    "maxTokens": 4096,
+                    "messages": [{"role": "user", "content": {"text": "hello"}}]
+                }),
+                &callback,
+            )
+            .await
+            .expect("sampling response");
+
+        assert_eq!(result["content"]["text"], "sampled text");
+        assert_eq!(result["stopReason"], "maxTokens");
+        assert_eq!(client.sampling_metrics().requests, 1);
+        assert_eq!(client.sampling_metrics().tokens_used, 17);
+        let request = captured.lock().expect("captured lock")[0].clone();
+        assert_eq!(request["max_tokens"], 64);
+        assert_eq!(request["messages"][0]["content"], "hello");
+
+        let err = client
+            .handle_sampling_request(
+                json!({
+                    "model": "sample-model",
+                    "messages": [{"role": "user", "content": "again"}]
+                }),
+                &callback,
+            )
+            .await
+            .expect_err("second request should hit max_rpm=1");
+        assert!(matches!(err, McpError::Forbidden(_)));
+        assert_eq!(client.sampling_metrics().rate_limited, 1);
+    }
+
+    #[tokio::test]
+    async fn sampling_config_can_be_carried_by_server_config() {
+        let callback: LlmCallback = Arc::new(|_request| {
+            Box::pin(async move {
+                Ok(json!({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "configured"
+                        }
+                    }]
+                }))
+            })
+        });
+        let mut client = McpClient::new(
+            McpServerConfig::stdio("fake", Vec::new()).with_sampling_config(SamplingConfig {
+                model: Some("configured-model".to_string()),
+                allowed_models: vec!["configured-model".to_string()],
+                ..SamplingConfig::default()
+            }),
+        );
+
+        let result = client
+            .handle_sampling_request(json!({"messages": []}), &callback)
+            .await
+            .expect("server config sampling policy should be active");
+
+        assert_eq!(result["model"], "configured-model");
+        assert_eq!(result["content"]["text"], "configured");
+    }
+
+    #[tokio::test]
+    async fn sampling_tool_use_enforces_tool_round_limit() {
+        let callback: LlmCallback = Arc::new(|_request| {
+            Box::pin(async move {
+                Ok(json!({
+                    "model": "tool-model",
+                    "choices": [{
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [{
+                                "id": "call_weather",
+                                "type": "function",
+                                "function": {
+                                    "name": "weather",
+                                    "arguments": "{\"city\":\"Denver\"}"
+                                }
+                            }]
+                        }
+                    }],
+                    "usage": {"total_tokens": 5}
+                }))
+            })
+        });
+        let mut client = McpClient::new(McpServerConfig::stdio("fake", Vec::new()));
+        client.set_sampling_config(SamplingConfig {
+            max_tool_rounds: 1,
+            ..SamplingConfig::default()
+        });
+
+        let first = client
+            .handle_sampling_request(json!({"messages": []}), &callback)
+            .await
+            .expect("first tool round allowed");
+        assert_eq!(first["stopReason"], "toolUse");
+        assert_eq!(first["content"][0]["name"], "weather");
+        assert_eq!(first["content"][0]["input"]["city"], "Denver");
+
+        let err = client
+            .handle_sampling_request(json!({"messages": []}), &callback)
+            .await
+            .expect_err("second consecutive tool round should fail");
+        assert!(matches!(err, McpError::Forbidden(_)));
+        assert_eq!(client.sampling_metrics().tool_use_count, 2);
+    }
+
+    #[tokio::test]
+    async fn send_request_replies_to_sampling_request_then_continues_waiting() {
+        let callback: LlmCallback = Arc::new(|request| {
+            Box::pin(async move {
+                assert_eq!(request["messages"][0]["content"], "sample please");
+                Ok(json!({
+                    "model": "loop-model",
+                    "choices": [{
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "sampled in loop"
+                        }
+                    }],
+                    "usage": {"total_tokens": 11}
+                }))
+            })
+        });
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let closed = Arc::new(AtomicBool::new(false));
+        let transport = FakeTransport::new_with_sent(
+            vec![
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"sampling": {}},
+                        "serverInfo": {"name": "fake", "version": "0"}
+                    }
+                }),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": "sample-1",
+                    "method": "sampling/createMessage",
+                    "params": {
+                        "model": "loop-model",
+                        "messages": [{"role": "user", "content": {"text": "sample please"}}]
+                    }
+                }),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {"tools": []}
+                }),
+            ],
+            closed,
+            sent.clone(),
+        );
+        let mut client = McpClient::new(McpServerConfig::stdio("fake", Vec::new()));
+        client.set_sampling_config(SamplingConfig::default());
+        client.set_sampling_callback(callback);
+
+        client
+            .finish_connect_with_transport(Box::new(transport))
+            .await
+            .expect("connect should handle sampling interleave");
+
+        let sent_messages = sent.lock().expect("sent lock");
+        let sampling_reply = sent_messages
+            .iter()
+            .find(|message| message.get("id") == Some(&json!("sample-1")))
+            .expect("sampling reply should be sent");
+        assert_eq!(
+            sampling_reply["result"]["content"]["text"],
+            "sampled in loop"
+        );
+        assert_eq!(client.sampling_metrics().requests, 1);
+        assert_eq!(client.sampling_metrics().tokens_used, 11);
+        assert!(client.is_connected());
     }
 
     #[test]

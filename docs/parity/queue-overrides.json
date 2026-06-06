@@ -1256,6 +1256,10 @@
       "disposition": "ported",
       "notes": "Rust hermes mcp serve is implemented in crates/hermes-mcp/src/serve.rs and exposed by hermes-cli handle_cli_mcp serve. Tests cover serve tool definitions, session/resource/event/approval tools, numeric coercion, stringified object arguments, and systems MCP conformance; docs/mcp.md documents the server mode."
     },
+    "654e16187e71": {
+      "disposition": "ported",
+      "notes": "Rust MCP sampling now handles server-initiated sampling/createMessage inside the client transport receive loop, replies with JSON-RPC results or mapped errors, supports per-client and per-server-config SamplingConfig, LlmCallback wiring, model allowlists, max token caps, max RPM rate limits, timeout errors, tool-use responses with max_tool_rounds governance, and SamplingMetrics audit counters. Focused hermes-mcp tests cover direct sampling governance, config inheritance, tool-loop enforcement, and interleaved transport-loop sampling replies."
+    },
     "3824b0323793": {
       "disposition": "superseded",
       "notes": "Python TUI session.title DB/RPC edge cases are superseded by Rust gateway in-memory Session.title storage and command tests; there is no pending DB row queue or Python RPC failure mode in this runtime path."

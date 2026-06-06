@@ -99,8 +99,9 @@ impl From<serde_json::Error> for McpError {
 // Re-export primary types
 pub use auth::{BearerTokenAuth, McpAuthProvider, OAuthConfig};
 pub use client::{
-    McpClient, McpDiscoveryReport, McpManager, McpProbeResult, McpServerConfig, McpServerStatus,
-    PromptArgument, PromptInfo, PromptMessage, PromptResult, ResourceInfo, SamplingConfig,
+    LlmCallback, McpClient, McpDiscoveryReport, McpManager, McpProbeResult, McpServerConfig,
+    McpServerStatus, PromptArgument, PromptInfo, PromptMessage, PromptResult, ResourceInfo,
+    SamplingConfig, SamplingMetrics,
 };
 pub use serve::{
     ApprovalStore as McpApprovalStore, BridgeEvent, EventBridge, HermesMcpServe,

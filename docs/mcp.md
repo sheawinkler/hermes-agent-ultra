@@ -51,11 +51,52 @@ Validation rules:
 - stdio and HTTP/SSE transports.
 - `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, and `prompts/get` client methods.
 - Parallel connection/discovery reporting through `McpManager::connect_all_parallel`.
+- Server-initiated sampling through `sampling/createMessage` with per-client policy, callback wiring, rate limits, token caps, model allowlists, tool-loop limits, and audit counters.
 - Stale transport detection with one reconnect attempt on tool calls.
 - Bearer/OAuth authentication providers for remote servers.
 - Media block caching for image tool responses.
 
 Parallel discovery gives each configured server an independent connection future, so one slow or broken server does not consume the entire startup budget for other servers.
+
+## Sampling
+
+MCP servers can ask the Hermes Ultra client to run an LLM request with `sampling/createMessage`. Configure policy in Rust with `SamplingConfig` and a callback:
+
+```rust
+use std::sync::Arc;
+
+use hermes_mcp::{LlmCallback, McpClient, McpServerConfig, SamplingConfig};
+
+let callback: LlmCallback = Arc::new(|request| {
+    Box::pin(async move {
+        // Route `request` to the selected Hermes Ultra model backend.
+        Ok(serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "sampled response"
+                }
+            }]
+        }))
+    })
+});
+
+let config = McpServerConfig::stdio("my-mcp-server", vec![])
+    .with_sampling_config(SamplingConfig {
+        max_rpm: 10,
+        max_tokens_cap: 4096,
+        allowed_models: vec![],
+        max_tool_rounds: 5,
+        ..SamplingConfig::default()
+    });
+
+let mut client = McpClient::new(config);
+client.set_sampling_callback(callback);
+```
+
+When a server interleaves `sampling/createMessage` while the client is waiting for another response, the transport loop replies to the sampling request and then continues waiting for the original response.
+
+Use `SamplingConfig { enabled: false, .. }` for untrusted servers.
 
 ## Server Mode
 
