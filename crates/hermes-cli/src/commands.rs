@@ -6365,6 +6365,12 @@ fn handle_usage_command(app: &mut App) -> Result<CommandResult, AgentError> {
         ));
     }
 
+    let nous_credits = hermes_core::credits::render_last_nous_credits_lines();
+    if !nous_credits.is_empty() {
+        output.push_str("\n\n");
+        output.push_str(&nous_credits.join("\n"));
+    }
+
     emit_command_output(app, output);
     Ok(CommandResult::Handled)
 }
@@ -28095,6 +28101,7 @@ mod tests {
     #[tokio::test]
     async fn usage_command_reports_actual_session_usage_and_cost() {
         let _guard = env_test_lock();
+        hermes_core::credits::clear_last_nous_credits_state();
         let tmp = tempdir().expect("tempdir");
         let _home_guard = TempHomeGuard::new(tmp.path());
         let mut app = build_test_app_with_stream(tmp.path()).await;
@@ -28126,6 +28133,41 @@ mod tests {
         assert!(output.contains("Last response: 12 prompt / 3 completion / 15 total tokens"));
         assert!(output.contains("Actual session: 12 prompt / 3 completion / 15 total tokens"));
         assert!(output.contains("Actual cost:   $0.0123"));
+        hermes_core::credits::clear_last_nous_credits_state();
+    }
+
+    #[tokio::test]
+    async fn usage_command_includes_last_nous_credits_state() {
+        let _guard = env_test_lock();
+        hermes_core::credits::clear_last_nous_credits_state();
+        hermes_core::credits::capture_nous_credits_from_pairs([
+            ("x-nous-credits-version", "1"),
+            ("x-nous-credits-remaining-micros", "12000000"),
+            ("x-nous-credits-remaining-usd", "12.00"),
+            ("x-nous-credits-subscription-micros", "5000000"),
+            ("x-nous-credits-subscription-usd", "5.00"),
+            ("x-nous-credits-subscription-limit-micros", "10000000"),
+            ("x-nous-credits-subscription-limit-usd", "10.00"),
+            ("x-nous-credits-rollover-micros", "1000000"),
+            ("x-nous-credits-purchased-micros", "7000000"),
+            ("x-nous-credits-purchased-usd", "7.00"),
+            ("x-nous-credits-denominator-kind", "subscription_cap"),
+            ("x-nous-credits-paid-access", "true"),
+        ])
+        .expect("capture credits");
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_slash_command(&mut app, "/usage", &[])
+            .await
+            .expect("usage command");
+        assert_eq!(result, CommandResult::Handled);
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("Nous credits"));
+        assert!(output.contains("Subscription: 50% remaining (50% used)"));
+        assert!(output.contains("Total usable: 12.00"));
+        hermes_core::credits::clear_last_nous_credits_state();
     }
 
     #[test]

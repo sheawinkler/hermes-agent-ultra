@@ -4,6 +4,7 @@
 //! used across the hermes-agent-rust workspace.
 
 pub mod auth_gate;
+pub mod credits;
 pub mod errors;
 pub mod providers;
 pub mod schema_sanitizer;

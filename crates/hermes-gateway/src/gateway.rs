@@ -2097,7 +2097,7 @@ impl Gateway {
         let stat = usage.get(session_key).cloned().unwrap_or_default();
         let approx_input_tokens = stat.input_chars / 4;
         let approx_output_tokens = stat.output_chars / 4;
-        format!(
+        let mut text = format!(
             "📊 Usage\n- user messages: {}\n- assistant messages: {}\n- input chars: {} (~{} tokens)\n- output chars: {} (~{} tokens)",
             stat.user_messages,
             stat.assistant_messages,
@@ -2105,7 +2105,13 @@ impl Gateway {
             approx_input_tokens,
             stat.output_chars,
             approx_output_tokens
-        )
+        );
+        let nous_credits = hermes_core::credits::render_last_nous_credits_lines();
+        if !nous_credits.is_empty() {
+            text.push_str("\n\n");
+            text.push_str(&nous_credits.join("\n"));
+        }
+        text
     }
 
     fn summarize_removed_messages(messages: &[Message]) -> Result<String, String> {
@@ -4164,6 +4170,36 @@ mod tests {
             }),
             "summary marker should be persisted into compressed transcript"
         );
+    }
+
+    #[tokio::test]
+    async fn gateway_usage_text_includes_last_nous_credits_state() {
+        hermes_core::credits::clear_last_nous_credits_state();
+        hermes_core::credits::capture_nous_credits_from_pairs([
+            ("x-nous-credits-version", "1"),
+            ("x-nous-credits-remaining-micros", "12000000"),
+            ("x-nous-credits-remaining-usd", "12.00"),
+            ("x-nous-credits-subscription-micros", "5000000"),
+            ("x-nous-credits-subscription-usd", "5.00"),
+            ("x-nous-credits-subscription-limit-micros", "10000000"),
+            ("x-nous-credits-subscription-limit-usd", "10.00"),
+            ("x-nous-credits-rollover-micros", "0"),
+            ("x-nous-credits-purchased-micros", "7000000"),
+            ("x-nous-credits-purchased-usd", "7.00"),
+            ("x-nous-credits-denominator-kind", "subscription_cap"),
+            ("x-nous-credits-paid-access", "true"),
+        ])
+        .expect("capture credits");
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let dm_manager = DmManager::with_pair_behavior();
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        let text = gw.build_usage_text("test:chat:user").await;
+
+        assert!(text.contains("Usage"));
+        assert!(text.contains("Nous credits"));
+        assert!(text.contains("Subscription: 50% remaining (50% used)"));
+        hermes_core::credits::clear_last_nous_credits_state();
     }
 
     #[tokio::test]

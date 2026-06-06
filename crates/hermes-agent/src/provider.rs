@@ -772,6 +772,17 @@ impl GenericProvider {
         req
     }
 
+    fn capture_nous_credits_headers(&self, headers: &reqwest::header::HeaderMap) {
+        let _ = hermes_core::credits::capture_nous_credits_from_pairs(headers.iter().filter_map(
+            |(key, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|value| (key.as_str().to_string(), value.to_string()))
+            },
+        ));
+    }
+
     async fn send_with_dead_connection_recovery(
         &self,
         url: &str,
@@ -1050,6 +1061,7 @@ impl LlmProvider for GenericProvider {
             .await?;
 
         self.update_rate_limit(resp.headers());
+        self.capture_nous_credits_headers(resp.headers());
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -1116,6 +1128,7 @@ impl LlmProvider for GenericProvider {
             };
 
             provider.update_rate_limit(resp.headers());
+            provider.capture_nous_credits_headers(resp.headers());
 
             if !resp.status().is_success() {
                 let status = resp.status();
@@ -2896,6 +2909,42 @@ mod tests {
             .expect("request");
 
         assert!(request.headers().get("User-Agent").is_none());
+    }
+
+    #[test]
+    fn generic_provider_captures_nous_credits_headers() {
+        hermes_core::credits::clear_last_nous_credits_state();
+        let provider = GenericProvider::new(
+            "https://inference-api.nousresearch.com/v1",
+            "nous-key",
+            "openai/gpt-5.5-pro",
+        );
+        let mut headers = reqwest::header::HeaderMap::new();
+        for (key, value) in [
+            ("x-nous-credits-version", "1"),
+            ("x-nous-credits-remaining-micros", "12000000"),
+            ("x-nous-credits-remaining-usd", "12.00"),
+            ("x-nous-credits-subscription-micros", "5000000"),
+            ("x-nous-credits-subscription-usd", "5.00"),
+            ("x-nous-credits-subscription-limit-micros", "10000000"),
+            ("x-nous-credits-subscription-limit-usd", "10.00"),
+            ("x-nous-credits-rollover-micros", "0"),
+            ("x-nous-credits-purchased-micros", "7000000"),
+            ("x-nous-credits-purchased-usd", "7.00"),
+            ("x-nous-credits-denominator-kind", "subscription_cap"),
+            ("x-nous-credits-paid-access", "true"),
+        ] {
+            headers.insert(
+                reqwest::header::HeaderName::from_static(key),
+                reqwest::header::HeaderValue::from_static(value),
+            );
+        }
+
+        provider.capture_nous_credits_headers(&headers);
+        let state = hermes_core::credits::last_nous_credits_state().expect("captured state");
+        assert_eq!(state.remaining_usd, "12.00");
+        assert_eq!(state.used_fraction(), Some(0.5));
+        hermes_core::credits::clear_last_nous_credits_state();
     }
 
     #[test]
