@@ -45,6 +45,29 @@ pub fn configured_platform_toolsets(config: &GatewayConfig, platform: &str) -> V
         .unwrap_or_else(|| vec!["hermes-telegram".to_string()])
 }
 
+fn canonical_toolset_token(token: &str) -> String {
+    let token = token.trim().to_ascii_lowercase();
+    match token.as_str() {
+        "image-gen" | "imagegen" => "image_gen".to_string(),
+        "video-gen" | "videogen" => "video_gen".to_string(),
+        "code-execution" | "code" => "code_execution".to_string(),
+        "session-search" => "session_search".to_string(),
+        "home-assistant" | "home_assistant" | "ha" => "homeassistant".to_string(),
+        "mixture-of-agents" | "mixture-of-agent" | "mixture" | "moa" => {
+            "mixture_of_agents".to_string()
+        }
+        "browser-use" | "browser_use" => "browser".to_string(),
+        "voice-mode" | "voice_mode" => "voice".to_string(),
+        "hermes_cli" => "hermes-cli".to_string(),
+        "hermes_api_server" => "hermes-api-server".to_string(),
+        "hermes_telegram" => "hermes-telegram".to_string(),
+        "hermes_discord" => "hermes-discord".to_string(),
+        "hermes_whatsapp" => "hermes-whatsapp".to_string(),
+        "hermes_slack" => "hermes-slack".to_string(),
+        _ => token,
+    }
+}
+
 /// Resolve tool names allowed for this platform based on configured toolsets.
 pub fn resolve_platform_tool_names(
     config: &GatewayConfig,
@@ -56,27 +79,37 @@ pub fn resolve_platform_tool_names(
 
     let mut names: HashSet<String> = HashSet::new();
     for token in requested {
-        let trimmed = token.trim();
-        if trimmed.is_empty() {
+        let original = token.trim();
+        if original.is_empty() {
             continue;
         }
-        if registry.get_tool(trimmed).is_some() {
-            names.insert(trimmed.to_string());
-            continue;
-        }
-        match manager.resolve_toolset(trimmed) {
-            Ok(resolved) => {
+        let canonical = canonical_toolset_token(original);
+        let candidates = if canonical == original {
+            vec![canonical.as_str()]
+        } else {
+            vec![canonical.as_str(), original]
+        };
+        let mut matched = false;
+        for candidate in candidates {
+            if registry.get_tool(candidate).is_some() {
+                names.insert(candidate.to_string());
+                matched = true;
+                break;
+            }
+            if let Ok(resolved) = manager.resolve_toolset(candidate) {
                 for name in resolved {
                     names.insert(name);
                 }
+                matched = true;
+                break;
             }
-            Err(_) => {
-                tracing::warn!(
-                    "Unknown platform toolset/token '{}' for platform '{}'",
-                    trimmed,
-                    platform
-                );
-            }
+        }
+        if !matched {
+            tracing::warn!(
+                "Unknown platform toolset/token '{}' for platform '{}'",
+                original,
+                platform
+            );
         }
     }
 
@@ -225,6 +258,12 @@ mod tests {
         register(&reg, "browser_get_images", "browser");
         register(&reg, "browser_vision", "browser");
         register(&reg, "browser_console", "browser");
+        register(&reg, "video_analyze", "vision");
+        register(&reg, "video_generate", "video_gen");
+        register(&reg, "mixture_of_agents", "mixture_of_agents");
+        register(&reg, "transcription", "voice");
+        register(&reg, "voice_mode", "voice");
+        register(&reg, "process_registry", "terminal");
         reg
     }
 
@@ -326,5 +365,87 @@ mod tests {
         let reg = registry_with_minimal_tools();
         let names = resolve_platform_tool_names(&cfg, "cli", &reg);
         assert!(!names.contains(&"terminal".to_string()));
+    }
+
+    #[test]
+    fn platform_toolsets_all_and_star_aliases_expand_to_available_tools() {
+        let mut cfg = GatewayConfig::default();
+        let reg = registry_with_minimal_tools();
+
+        cfg.platform_toolsets
+            .insert("cli".to_string(), vec!["all".to_string()]);
+        let all_names = resolve_platform_tool_names(&cfg, "cli", &reg);
+        for expected in [
+            "browser_console",
+            "image_generate",
+            "mixture_of_agents",
+            "video_generate",
+            "voice_mode",
+        ] {
+            assert!(
+                all_names.contains(&expected.to_string()),
+                "all alias should include {expected}"
+            );
+        }
+
+        cfg.platform_toolsets
+            .insert("cli".to_string(), vec!["*".to_string()]);
+        let star_names = resolve_platform_tool_names(&cfg, "cli", &reg);
+        assert_eq!(all_names, star_names);
+    }
+
+    #[test]
+    fn platform_toolset_tokens_accept_common_alias_spellings() {
+        let mut cfg = GatewayConfig::default();
+        cfg.platform_toolsets.insert(
+            "cli".to_string(),
+            vec![
+                "Image-Gen".to_string(),
+                "MOA".to_string(),
+                "voice_mode".to_string(),
+                "home-assistant".to_string(),
+                "Terminal".to_string(),
+            ],
+        );
+        let reg = registry_with_minimal_tools();
+        let names = resolve_platform_tool_names(&cfg, "cli", &reg);
+
+        for expected in [
+            "image_generate",
+            "mixture_of_agents",
+            "transcription",
+            "voice_mode",
+            "ha_call_service",
+            "terminal",
+        ] {
+            assert!(
+                names.contains(&expected.to_string()),
+                "alias resolution should include {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn platform_toolset_aliases_preserve_exact_custom_tool_fallback() {
+        let mut cfg = GatewayConfig::default();
+        cfg.platform_toolsets
+            .insert("cli".to_string(), vec!["CustomTool".to_string()]);
+        let reg = registry_with_minimal_tools();
+        let schema = tool_schema("CustomTool", "custom tool", JsonSchema::new("object"));
+        reg.register(
+            "CustomTool",
+            "custom",
+            schema.clone(),
+            Arc::new(NoopTool { schema }),
+            Arc::new(|| true),
+            Vec::new(),
+            true,
+            "custom tool",
+            "x",
+            None,
+        );
+
+        let names = resolve_platform_tool_names(&cfg, "cli", &reg);
+        assert!(names.contains(&"CustomTool".to_string()));
     }
 }

@@ -34,3 +34,4 @@ hex = "0.4"
 proptest = { workspace = true }
 tempfile = "3"
 hermes-config = { workspace = true, features = ["test-helpers"] }
+wiremock = "0.6"

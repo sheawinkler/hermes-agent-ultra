@@ -799,6 +799,14 @@
     "41fa1f1b5cf560c22a7e9adb06eb463d7122f9e0": {
       "disposition": "ported",
       "notes": "Rust ACP rewrites idle /steer into a regular user prompt instead of silently queueing it, matching upstream editor-client behavior; hermes-acp idle steer test proves the prompt runs immediately and leaves the queue empty."
+    },
+    "bc5f0e62d9e6c36f8f14a43e5e6c70982f280069": {
+      "disposition": "ported",
+      "notes": "Rust ToolsetManager resolves all/* to the union of registered toolsets and this slice proves the configured platform-toolset path also accepts all/* while preserving custom-token fallback; platform_toolsets tests cover both aliases."
+    },
+    "3078053795e838e47797ede02b44e6dead731aac": {
+      "disposition": "ported",
+      "notes": "Rust mixture_of_agents is now a first-class OpenAI-compatible two-layer MoA runtime with env/model/base-url configuration, parallel reference fanout, retries, minimum-success threshold, aggregator prompt synthesis, toolset/distribution exposure, and deterministic mock HTTP tests."
     }
   },
   "subject_patterns": [

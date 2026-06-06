@@ -86,7 +86,8 @@ fn base_weights() -> HashMap<String, f64> {
     w.insert("messaging".into(), 0.1);
     w.insert("homeassistant".into(), 0.1);
     w.insert("tts".into(), 0.1);
-    w.insert("voice_mode".into(), 0.1);
+    w.insert("voice".into(), 0.1);
+    w.insert("mixture_of_agents".into(), 0.3);
     w
 }
 
@@ -192,6 +193,7 @@ fn make_balanced() -> ToolsetDistribution {
         "todo",
         "clarify",
         "code_execution",
+        "mixture_of_agents",
     ] {
         w.insert(key.into(), 0.5);
     }
@@ -241,9 +243,10 @@ fn make_creative() -> ToolsetDistribution {
     w.insert("image_gen".into(), 1.0);
     w.insert("video_gen".into(), 0.9);
     w.insert("tts".into(), 0.8);
-    w.insert("voice_mode".into(), 0.7);
+    w.insert("voice".into(), 0.7);
     w.insert("vision".into(), 0.9);
     w.insert("web".into(), 0.9);
+    w.insert("mixture_of_agents".into(), 0.6);
     ToolsetDistribution {
         name: "creative".into(),
         description: "Creative mode with image, voice, and vision tools emphasized".into(),
@@ -259,6 +262,7 @@ fn make_reasoning() -> ToolsetDistribution {
     w.insert("todo".into(), 0.9);
     w.insert("web".into(), 0.6);
     w.insert("file".into(), 0.5);
+    w.insert("mixture_of_agents".into(), 0.8);
     ToolsetDistribution {
         name: "reasoning".into(),
         description: "Focused on reasoning with memory, clarification, and planning".into(),
@@ -329,6 +333,7 @@ fn make_mixed_tasks() -> ToolsetDistribution {
     w.insert("todo".into(), 0.9);
     w.insert("skills".into(), 0.7);
     w.insert("memory".into(), 0.6);
+    w.insert("mixture_of_agents".into(), 0.5);
     ToolsetDistribution {
         name: "mixed_tasks".into(),
         description: "Mixed terminal + browser task automation".into(),
@@ -410,6 +415,10 @@ pub fn validate_distribution(dist: &ToolsetDistribution) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    use crate::{ToolRegistry, ToolsetManager};
 
     #[test]
     fn test_builtin_distributions_count() {
@@ -487,6 +496,23 @@ mod tests {
     }
 
     #[test]
+    fn test_builtin_distribution_weights_reference_registered_toolsets() {
+        let manager = ToolsetManager::new(Arc::new(ToolRegistry::new()));
+        let known: HashSet<_> = manager.list_toolsets().into_iter().collect();
+
+        for dist in builtin_distributions() {
+            for toolset in dist.toolset_weights.keys() {
+                assert!(
+                    known.contains(toolset),
+                    "Built-in distribution '{}' references unknown toolset '{}'",
+                    dist.name,
+                    toolset
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_sample_always_includes_weight_1() {
         let dist = ToolsetDistribution::new("test", "test")
             .with_weight("file", 1.0)
@@ -517,6 +543,13 @@ mod tests {
         let dist = get_distribution("safe").unwrap();
         assert_eq!(*dist.toolset_weights.get("terminal").unwrap(), 0.0);
         assert_eq!(*dist.toolset_weights.get("code_execution").unwrap(), 0.0);
+    }
+
+    #[test]
+    fn test_creative_distribution_uses_voice_toolset_name() {
+        let dist = get_distribution("creative").unwrap();
+        assert!(dist.toolset_weights.contains_key("voice"));
+        assert!(!dist.toolset_weights.contains_key("voice_mode"));
     }
 
     #[test]
