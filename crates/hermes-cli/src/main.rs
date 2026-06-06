@@ -1433,6 +1433,7 @@ fn resolve_latest_nonempty_session_file(
 struct SessionFileSummary {
     message_count: usize,
     canonical: bool,
+    session_id: Option<String>,
 }
 
 fn session_file_summary(path: &Path) -> Option<SessionFileSummary> {
@@ -1457,13 +1458,99 @@ fn session_file_summary(path: &Path) -> Option<SessionFileSummary> {
         .and_then(|v| v.get("session_id"))
         .and_then(|v| v.as_str())
         .map(str::trim)
-        .unwrap_or_default();
-    let canonical =
-        !stem.is_empty() && !session_id.is_empty() && stem.eq_ignore_ascii_case(session_id);
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let canonical = !stem.is_empty()
+        && session_id
+            .as_deref()
+            .is_some_and(|id| stem.eq_ignore_ascii_case(id));
     Some(SessionFileSummary {
         message_count,
         canonical,
+        session_id,
     })
+}
+
+fn resume_session_id_match_score(
+    query: &str,
+    stem: &str,
+    summary: Option<&SessionFileSummary>,
+) -> Option<u8> {
+    let needle = query.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return None;
+    }
+    let mut ids = vec![stem.trim().to_ascii_lowercase()];
+    if let Some(session_id) = summary.and_then(|s| s.session_id.as_deref()) {
+        ids.push(session_id.trim().to_ascii_lowercase());
+    }
+    if ids.iter().any(|id| id == &needle) {
+        return Some(0);
+    }
+    if ids.iter().any(|id| id.starts_with(&needle)) {
+        return Some(1);
+    }
+    if ids.iter().any(|id| id.contains(&needle)) {
+        return Some(2);
+    }
+    None
+}
+
+fn resolve_resume_session_file_by_id_query(
+    sessions_dir: &Path,
+    requested: &str,
+) -> Result<Option<(String, PathBuf)>, AgentError> {
+    #[derive(Debug)]
+    struct Candidate {
+        score: u8,
+        canonical: bool,
+        modified: std::time::SystemTime,
+        resolved_id: String,
+        path: PathBuf,
+    }
+
+    let mut candidates = Vec::new();
+    let rd = std::fs::read_dir(sessions_dir).map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to read sessions directory {}: {}",
+            sessions_dir.display(),
+            e
+        ))
+    })?;
+    for entry in rd.filter_map(|entry| entry.ok()) {
+        let path = entry.path();
+        if !path.extension().map(|ext| ext == "json").unwrap_or(false) {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let summary = session_file_summary(&path);
+        let Some(score) = resume_session_id_match_score(requested, stem, summary.as_ref()) else {
+            continue;
+        };
+        let modified = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        candidates.push(Candidate {
+            score,
+            canonical: summary.as_ref().is_some_and(|s| s.canonical),
+            modified,
+            resolved_id: stem.to_string(),
+            path,
+        });
+    }
+    candidates.sort_by(|a, b| {
+        a.score
+            .cmp(&b.score)
+            .then_with(|| b.canonical.cmp(&a.canonical))
+            .then_with(|| b.modified.cmp(&a.modified))
+            .then_with(|| a.resolved_id.cmp(&b.resolved_id))
+    });
+    Ok(candidates
+        .into_iter()
+        .next()
+        .map(|candidate| (candidate.resolved_id, candidate.path)))
 }
 
 fn resolve_resume_session_file(
@@ -1539,6 +1626,9 @@ fn resolve_resume_session_file(
         path.set_extension("json");
     }
     if !path.exists() {
+        if let Some(found) = resolve_resume_session_file_by_id_query(sessions_dir, req)? {
+            return Ok(found);
+        }
         return Err(AgentError::Config(format!(
             "Session '{}' not found at {}.",
             req,
@@ -16950,6 +17040,67 @@ max_turns: 50
             resolve_resume_session_file(&sessions_dir, None).expect("resolve latest");
         assert_eq!(resolved, "c0ffee00-0000-4000-8000-000000000001");
         assert_eq!(path, canonical);
+    }
+
+    #[test]
+    fn resolve_resume_session_file_searches_session_id_when_exact_file_is_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let sessions_dir = hermes_state_root(&cli).join("sessions");
+        std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+
+        let snapshot = sessions_dir.join("saved-snapshot-name.json");
+        std::fs::write(
+            &snapshot,
+            r#"{
+  "session_info": {"session_id":"20260603_090200_abcd12","model":"nous:openai/gpt-5.5"},
+  "messages":[{"role":"User","content":"hello"}]
+}"#,
+        )
+        .expect("write snapshot");
+
+        let (resolved, path) =
+            resolve_resume_session_file(&sessions_dir, Some("20260603")).expect("resolve prefix");
+        assert_eq!(resolved, "saved-snapshot-name");
+        assert_eq!(path, snapshot);
+
+        let (resolved, path) =
+            resolve_resume_session_file(&sessions_dir, Some("ABCD12")).expect("resolve substring");
+        assert_eq!(resolved, "saved-snapshot-name");
+        assert_eq!(path, snapshot);
+    }
+
+    #[test]
+    fn resolve_resume_session_file_search_ranks_exact_before_prefix() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let sessions_dir = hermes_state_root(&cli).join("sessions");
+        std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+
+        let exact = sessions_dir.join("snap-exact.json");
+        std::fs::write(
+            &exact,
+            r#"{
+  "session_info": {"session_id":"20260603_090200_abcd12","model":"nous:openai/gpt-5.5"},
+  "messages":[{"role":"User","content":"exact"}]
+}"#,
+        )
+        .expect("write exact");
+        let prefix = sessions_dir.join("20260603_090200_abcd12_child.json");
+        std::fs::write(
+            &prefix,
+            r#"{
+  "session_info": {"session_id":"20260603_090200_abcd12_child","model":"nous:openai/gpt-5.5"},
+  "messages":[{"role":"User","content":"prefix"}]
+}"#,
+        )
+        .expect("write prefix");
+
+        let (resolved, path) =
+            resolve_resume_session_file(&sessions_dir, Some("20260603_090200_abcd12"))
+                .expect("resolve exact session_info id");
+        assert_eq!(resolved, "snap-exact");
+        assert_eq!(path, exact);
     }
 
     #[test]
