@@ -9,10 +9,14 @@ use hermes_core::{Message, ToolCall};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
+
+static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 // ---------------------------------------------------------------------------
 // TrajectoryOutcome
@@ -492,6 +496,65 @@ impl BatchRunCheckpoint {
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
+
+    pub fn load_from_path(path: impl AsRef<Path>) -> io::Result<Option<Self>> {
+        let path = path.as_ref();
+        match fs::read_to_string(path) {
+            Ok(raw) => serde_json::from_str(&raw)
+                .map(Some)
+                .map_err(invalid_data_error),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn save_atomic_to_path(&self, path: impl AsRef<Path>) -> io::Result<()> {
+        atomic_json_write(path, self)
+    }
+}
+
+pub fn atomic_json_write<T: Serialize>(path: impl AsRef<Path>, value: &T) -> io::Result<()> {
+    let path = path.as_ref();
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("checkpoint.json");
+    let unique = ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_path = parent.join(format!(
+        ".{file_name}.tmp.{}.{}.{}",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        unique
+    ));
+
+    let write_result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)?;
+        serde_json::to_writer_pretty(&mut file, value).map_err(invalid_data_error)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp_path, path)?;
+        if let Ok(dir) = fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    write_result
+}
+
+fn invalid_data_error(err: serde_json::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, err)
 }
 
 /// Batch dataset runner configuration.
@@ -557,6 +620,8 @@ pub struct BatchRunStatistics {
     pub model: String,
     pub processed: usize,
     pub skipped: usize,
+    #[serde(default)]
+    pub checkpoints_written: usize,
     pub ephemeral_system_prompt_used: bool,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub tool_statistics: HashMap<String, BatchToolStats>,
@@ -593,6 +658,28 @@ impl BatchDatasetRunner {
         config: &BatchDatasetRunConfig,
         checkpoint: Option<BatchRunCheckpoint>,
     ) -> BatchRunReport {
+        self.run_internal(dataset, config, checkpoint, None)
+            .expect("in-memory batch dataset run cannot fail")
+    }
+
+    pub fn run_with_checkpoint_path(
+        &self,
+        dataset: &[BatchDatasetItem],
+        config: &BatchDatasetRunConfig,
+        checkpoint_path: impl AsRef<Path>,
+    ) -> io::Result<BatchRunReport> {
+        let checkpoint_path = checkpoint_path.as_ref();
+        let checkpoint = BatchRunCheckpoint::load_from_path(checkpoint_path)?;
+        self.run_internal(dataset, config, checkpoint, Some(checkpoint_path))
+    }
+
+    fn run_internal(
+        &self,
+        dataset: &[BatchDatasetItem],
+        config: &BatchDatasetRunConfig,
+        checkpoint: Option<BatchRunCheckpoint>,
+        checkpoint_path: Option<&Path>,
+    ) -> io::Result<BatchRunReport> {
         let batch_size = config.batch_size.max(1);
         let limit = config
             .max_samples
@@ -624,6 +711,7 @@ impl BatchDatasetRunner {
         let mut completed_prompt_texts = completed_texts;
         let mut total_skipped = 0usize;
         let mut total_processed = 0usize;
+        let mut checkpoints_written = 0usize;
         let mut tool_statistics: HashMap<String, BatchToolStats> = HashMap::new();
 
         for (batch_num, batch) in items.chunks(batch_size).enumerate() {
@@ -684,17 +772,17 @@ impl BatchDatasetRunner {
                     skipped: batch_skipped,
                 },
             );
+
+            refresh_checkpoint_progress(&mut checkpoint, &completed, &completed_prompt_texts);
+            if let Some(path) = checkpoint_path {
+                checkpoint.save_atomic_to_path(path)?;
+                checkpoints_written += 1;
+            }
         }
 
-        let mut completed_prompts: Vec<_> = completed.into_iter().collect();
-        completed_prompts.sort_unstable();
-        let mut completed_prompt_texts: Vec<_> = completed_prompt_texts.into_iter().collect();
-        completed_prompt_texts.sort();
-        checkpoint.completed_prompts = completed_prompts;
-        checkpoint.completed_prompt_texts = completed_prompt_texts;
-        checkpoint.last_updated = Some(Utc::now());
+        refresh_checkpoint_progress(&mut checkpoint, &completed, &completed_prompt_texts);
 
-        BatchRunReport {
+        Ok(BatchRunReport {
             trajectories,
             checkpoint,
             statistics: BatchRunStatistics {
@@ -706,11 +794,26 @@ impl BatchDatasetRunner {
                 model: config.model.clone(),
                 processed: total_processed,
                 skipped: total_skipped,
+                checkpoints_written,
                 ephemeral_system_prompt_used: config.ephemeral_system_prompt.is_some(),
                 tool_statistics,
             },
-        }
+        })
     }
+}
+
+fn refresh_checkpoint_progress(
+    checkpoint: &mut BatchRunCheckpoint,
+    completed: &HashSet<usize>,
+    completed_prompt_texts: &HashSet<String>,
+) {
+    let mut completed_prompts: Vec<_> = completed.iter().copied().collect();
+    completed_prompts.sort_unstable();
+    let mut prompt_texts: Vec<_> = completed_prompt_texts.iter().cloned().collect();
+    prompt_texts.sort();
+    checkpoint.completed_prompts = completed_prompts;
+    checkpoint.completed_prompt_texts = prompt_texts;
+    checkpoint.last_updated = Some(Utc::now());
 }
 
 pub fn parse_batch_jsonl_dataset(raw: &str) -> Result<Vec<BatchDatasetItem>, String> {
@@ -1299,5 +1402,80 @@ mod tests {
         assert_eq!(report.statistics.processed, 3);
         assert_eq!(report.checkpoint.completed_prompts, [0, 1, 2]);
         assert_eq!(report.trajectories.len(), 3);
+    }
+
+    #[test]
+    fn atomic_json_write_replaces_without_temp_file_leaks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("nested").join("checkpoint.json");
+
+        atomic_json_write(&path, &serde_json::json!({"version": 1})).unwrap();
+        atomic_json_write(&path, &serde_json::json!({"version": 2, "ok": true})).unwrap();
+
+        let value: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(value["version"], 2);
+        assert_eq!(value["ok"], true);
+
+        let leaked_tmp_files: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(leaked_tmp_files.is_empty());
+    }
+
+    #[test]
+    fn batch_dataset_runner_persists_atomic_checkpoint_per_batch_and_resumes_from_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let checkpoint_path = tmp.path().join("checkpoints").join("run.json");
+        let dataset: Vec<_> = (0..4)
+            .map(|idx| BatchDatasetItem {
+                prompt_index: idx,
+                prompt: format!("prompt {idx}"),
+                metadata: Map::new(),
+            })
+            .collect();
+        let config = BatchDatasetRunConfig {
+            run_name: "atomic-run".to_string(),
+            batch_size: 2,
+            ..BatchDatasetRunConfig::default()
+        };
+
+        let first = BatchDatasetRunner::new()
+            .run_with_checkpoint_path(&dataset, &config, &checkpoint_path)
+            .unwrap();
+        assert_eq!(first.statistics.processed, 4);
+        assert_eq!(first.statistics.skipped, 0);
+        assert_eq!(first.statistics.checkpoints_written, 2);
+        assert_eq!(first.checkpoint.completed_prompts, [0, 1, 2, 3]);
+
+        let persisted = BatchRunCheckpoint::load_from_path(&checkpoint_path)
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.run_name, "atomic-run");
+        assert_eq!(persisted.completed_prompts, [0, 1, 2, 3]);
+        assert_eq!(
+            persisted.batch_stats.get("0").unwrap(),
+            &BatchCheckpointStats {
+                processed: 2,
+                skipped: 0,
+            }
+        );
+        assert_eq!(
+            persisted.batch_stats.get("1").unwrap(),
+            &BatchCheckpointStats {
+                processed: 2,
+                skipped: 0,
+            }
+        );
+
+        let resumed = BatchDatasetRunner::new()
+            .run_with_checkpoint_path(&dataset, &config, &checkpoint_path)
+            .unwrap();
+        assert_eq!(resumed.statistics.processed, 0);
+        assert_eq!(resumed.statistics.skipped, 4);
+        assert_eq!(resumed.statistics.checkpoints_written, 2);
+        assert!(resumed.trajectories.is_empty());
+        assert_eq!(resumed.checkpoint.completed_prompts, [0, 1, 2, 3]);
     }
 }

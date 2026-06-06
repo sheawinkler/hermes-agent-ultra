@@ -44,6 +44,10 @@
       "disposition": "ported",
       "notes": "Ephemeral system prompts are first-class in Rust for both batch and agent runners: BatchDatasetRunConfig tracks an ephemeral prompt without persisting it to trajectory JSONL or checkpoints, and AgentConfig::ephemeral_system_prompt is appended only to provider API-call messages and stripped from AgentResult persistence, with focused tests for both paths."
     },
+    "ac6d747fa610": {
+      "disposition": "ported",
+      "notes": "Rust BatchDatasetRunner now supports file-backed checkpoint resumption with BatchRunCheckpoint::load_from_path/save_atomic_to_path, same-directory atomic JSON replacement, per-batch checkpoint writes via run_with_checkpoint_path, and tests proving atomic replacement, no temp-file leaks, per-batch write counts, and resume skips by persisted prompt index/text."
+    },
     "395dbcc873c8": {
       "disposition": "superseded",
       "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"
