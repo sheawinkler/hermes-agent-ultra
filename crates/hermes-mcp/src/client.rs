@@ -5,19 +5,20 @@
 //! sends `notifications/tools/list_changed`, the client automatically
 //! rediscovers tools and updates the registry.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
+use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use hermes_core::{JsonSchema, ToolSchema};
 use hermes_tools::ToolRegistry;
 
 use crate::auth::McpAuthProvider;
@@ -320,6 +321,35 @@ fn transport_type_for_config(config: &McpServerConfig) -> &'static str {
     } else {
         "unknown"
     }
+}
+
+/// Return an MCP server/tool name component safe for provider tool names.
+///
+/// This mirrors the Python adapter's rule: every character outside
+/// `[A-Za-z0-9_]` becomes `_`.
+pub fn sanitize_mcp_name_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn mcp_toolset_name(server_name: &str) -> String {
+    format!("mcp-{}", sanitize_mcp_name_component(server_name))
+}
+
+fn mcp_registered_tool_name(server_name: &str, tool_name: &str) -> String {
+    format!(
+        "mcp_{}_{}",
+        sanitize_mcp_name_component(server_name),
+        sanitize_mcp_name_component(tool_name)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1483,6 +1513,117 @@ impl McpClient {
     }
 }
 
+type SharedMcpClient = Arc<tokio::sync::Mutex<McpClient>>;
+
+struct RegisteredMcpToolHandler {
+    client: SharedMcpClient,
+    original_tool_name: String,
+    schema: ToolSchema,
+    available: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl ToolHandler for RegisteredMcpToolHandler {
+    async fn execute(&self, params: Value) -> Result<String, ToolError> {
+        if !self.available.load(Ordering::SeqCst) {
+            return Err(ToolError::NotFound(self.schema.name.clone()));
+        }
+
+        let mut client = self.client.lock().await;
+        let result = client
+            .call_tool(&self.original_tool_name, params)
+            .await
+            .map_err(|err| {
+                ToolError::ExecutionFailed(format!(
+                    "MCP tool '{}' failed: {}",
+                    self.original_tool_name, err
+                ))
+            })?;
+        Ok(match result {
+            Value::String(text) => text,
+            other => other.to_string(),
+        })
+    }
+
+    fn schema(&self) -> ToolSchema {
+        self.schema.clone()
+    }
+}
+
+struct ManagedMcpClient {
+    client: SharedMcpClient,
+    config: McpServerConfig,
+    transport_type: String,
+    cached_tools: Vec<ToolSchema>,
+    cached_resources: Vec<ResourceInfo>,
+    registered_tools: Vec<String>,
+    available: Arc<AtomicBool>,
+    connected_at: Instant,
+}
+
+fn register_mcp_tools_in_registry(
+    registry: &ToolRegistry,
+    server_name: &str,
+    client: SharedMcpClient,
+    tools: &[ToolSchema],
+    available: Arc<AtomicBool>,
+) -> Vec<String> {
+    let toolset_name = mcp_toolset_name(server_name);
+    let safe_server_name = sanitize_mcp_name_component(server_name);
+    registry.register_toolset_alias(server_name, &toolset_name);
+    if safe_server_name != server_name {
+        registry.register_toolset_alias(&safe_server_name, &toolset_name);
+    }
+
+    let mut seen = HashSet::new();
+    let mut registered = Vec::new();
+    for tool in tools {
+        let registered_name = mcp_registered_tool_name(server_name, &tool.name);
+        if !seen.insert(registered_name.clone()) {
+            warn!(
+                "Skipping duplicate sanitized MCP tool '{}' from server '{}'",
+                registered_name, server_name
+            );
+            continue;
+        }
+
+        let mut schema = tool.clone();
+        schema.name = registered_name.clone();
+        if schema.description.trim().is_empty() {
+            schema.description = format!("MCP tool '{}' from server '{}'", tool.name, server_name);
+        }
+        let handler = Arc::new(RegisteredMcpToolHandler {
+            client: Arc::clone(&client),
+            original_tool_name: tool.name.clone(),
+            schema: schema.clone(),
+            available: Arc::clone(&available),
+        });
+        registry.register(
+            &registered_name,
+            &toolset_name,
+            schema,
+            handler,
+            {
+                let available = Arc::clone(&available);
+                Arc::new(move || available.load(Ordering::SeqCst))
+            },
+            Vec::new(),
+            true,
+            format!("MCP tool '{}' from server '{}'", tool.name, server_name),
+            "mcp",
+            None,
+        );
+        registered.push(registered_name);
+    }
+    registered
+}
+
+fn deregister_mcp_tools(registry: &ToolRegistry, tool_names: Vec<String>) {
+    for tool_name in tool_names {
+        registry.deregister(&tool_name);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // McpManager — manages multiple McpClient instances
 // ---------------------------------------------------------------------------
@@ -1497,7 +1638,7 @@ impl McpClient {
 /// - Automatically update the tool registry when servers notify of changes
 pub struct McpManager {
     /// Active client connections keyed by server name.
-    clients: HashMap<String, McpClient>,
+    clients: HashMap<String, ManagedMcpClient>,
     /// Shared tool registry for discovered tools.
     tool_registry: Arc<ToolRegistry>,
     sampling_config: Option<SamplingConfig>,
@@ -1522,6 +1663,9 @@ impl McpManager {
     /// name (e.g. `"server_name__tool_name"`).
     pub async fn connect(&mut self, name: &str, config: McpServerConfig) -> Result<(), McpError> {
         info!("Connecting to MCP server: {}", name);
+        if self.clients.contains_key(name) {
+            self.disconnect(name).await?;
+        }
 
         let mut client = McpClient::new(config);
         if let Some(config) = self.sampling_config.clone() {
@@ -1535,12 +1679,74 @@ impl McpManager {
         let tools = client.cached_tools();
         debug!("Discovered {} tools from server '{}'", tools.len(), name);
 
-        for tool in tools {
-            let prefixed_name = format!("{}__{}", name, tool.name);
-            debug!("Registered MCP tool: {}", prefixed_name);
-        }
+        let cached_tools = tools.to_vec();
+        let cached_resources = client.cached_resources().to_vec();
+        let transport_type = transport_type_for_config(&client.config).to_string();
+        let config = client.config.clone();
+        let shared_client = Arc::new(tokio::sync::Mutex::new(client));
+        let available = Arc::new(AtomicBool::new(true));
+        let registered_tools = register_mcp_tools_in_registry(
+            self.tool_registry.as_ref(),
+            name,
+            Arc::clone(&shared_client),
+            &cached_tools,
+            Arc::clone(&available),
+        );
 
-        self.clients.insert(name.to_string(), client);
+        self.clients.insert(
+            name.to_string(),
+            ManagedMcpClient {
+                client: shared_client,
+                config,
+                transport_type,
+                cached_tools,
+                cached_resources,
+                registered_tools,
+                available,
+                connected_at: Instant::now(),
+            },
+        );
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn connect_with_transport_for_test(
+        &mut self,
+        name: &str,
+        config: McpServerConfig,
+        transport: Box<dyn McpTransport>,
+    ) -> Result<(), McpError> {
+        if self.clients.contains_key(name) {
+            self.disconnect(name).await?;
+        }
+        let mut client = McpClient::new(config);
+        client.finish_connect_with_transport(transport).await?;
+        let cached_tools = client.cached_tools().to_vec();
+        let cached_resources = client.cached_resources().to_vec();
+        let transport_type = transport_type_for_config(&client.config).to_string();
+        let config = client.config.clone();
+        let shared_client = Arc::new(tokio::sync::Mutex::new(client));
+        let available = Arc::new(AtomicBool::new(true));
+        let registered_tools = register_mcp_tools_in_registry(
+            self.tool_registry.as_ref(),
+            name,
+            Arc::clone(&shared_client),
+            &cached_tools,
+            Arc::clone(&available),
+        );
+        self.clients.insert(
+            name.to_string(),
+            ManagedMcpClient {
+                client: shared_client,
+                config,
+                transport_type,
+                cached_tools,
+                cached_resources,
+                registered_tools,
+                available,
+                connected_at: Instant::now(),
+            },
+        );
         Ok(())
     }
 
@@ -1562,9 +1768,9 @@ impl McpManager {
                     index,
                     McpDiscoveryReport {
                         name,
-                        connected: existing.is_connected(),
-                        transport_type: transport_type_for_config(&existing.config).to_string(),
-                        tool_count: existing.cached_tools().len(),
+                        connected: existing.available.load(Ordering::SeqCst),
+                        transport_type: existing.transport_type.clone(),
+                        tool_count: existing.cached_tools.len(),
                         error: None,
                     },
                 ));
@@ -1624,7 +1830,31 @@ impl McpManager {
                             "Discovered {} tools from MCP server '{}'",
                             report.tool_count, report.name
                         );
-                        self.clients.insert(report.name.clone(), client);
+                        let cached_tools = client.cached_tools().to_vec();
+                        let cached_resources = client.cached_resources().to_vec();
+                        let config = client.config.clone();
+                        let shared_client = Arc::new(tokio::sync::Mutex::new(client));
+                        let available = Arc::new(AtomicBool::new(true));
+                        let registered_tools = register_mcp_tools_in_registry(
+                            self.tool_registry.as_ref(),
+                            &report.name,
+                            Arc::clone(&shared_client),
+                            &cached_tools,
+                            Arc::clone(&available),
+                        );
+                        self.clients.insert(
+                            report.name.clone(),
+                            ManagedMcpClient {
+                                client: shared_client,
+                                config,
+                                transport_type: report.transport_type.clone(),
+                                cached_tools,
+                                cached_resources,
+                                registered_tools,
+                                available,
+                                connected_at: Instant::now(),
+                            },
+                        );
                     }
                     reports.push((index, report));
                 }
@@ -1661,8 +1891,11 @@ impl McpManager {
 
     /// Disconnect from an MCP server and remove it from the active list.
     pub async fn disconnect(&mut self, name: &str) -> Result<(), McpError> {
-        if let Some(mut client) = self.clients.remove(name) {
+        if let Some(managed) = self.clients.remove(name) {
             info!("Disconnecting from MCP server: {}", name);
+            managed.available.store(false, Ordering::SeqCst);
+            deregister_mcp_tools(self.tool_registry.as_ref(), managed.registered_tools);
+            let mut client = managed.client.lock().await;
             client.disconnect().await?;
             Ok(())
         } else {
@@ -1681,7 +1914,9 @@ impl McpManager {
 
     /// Check if a server is connected.
     pub fn is_connected(&self, name: &str) -> bool {
-        self.clients.get(name).map_or(false, |c| c.is_connected())
+        self.clients
+            .get(name)
+            .is_some_and(|c| c.available.load(Ordering::SeqCst))
     }
 
     /// Get the list of connected server names.
@@ -1691,11 +1926,27 @@ impl McpManager {
 
     /// Discover (or re-discover) tools on a connected server.
     pub async fn discover_tools(&mut self, server_name: &str) -> Result<Vec<ToolSchema>, McpError> {
-        let client = self
+        let managed = self
             .clients
             .get_mut(server_name)
             .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
-        client.list_tools().await
+        let tools = {
+            let mut client = managed.client.lock().await;
+            client.list_tools().await?
+        };
+        deregister_mcp_tools(
+            self.tool_registry.as_ref(),
+            std::mem::take(&mut managed.registered_tools),
+        );
+        managed.cached_tools = tools.clone();
+        managed.registered_tools = register_mcp_tools_in_registry(
+            self.tool_registry.as_ref(),
+            server_name,
+            Arc::clone(&managed.client),
+            &tools,
+            Arc::clone(&managed.available),
+        );
+        Ok(tools)
     }
 
     /// Call a tool on a connected MCP server.
@@ -1705,11 +1956,13 @@ impl McpManager {
         tool_name: &str,
         args: Value,
     ) -> Result<Value, McpError> {
+        let managed = self
+            .clients
+            .get_mut(server_name)
+            .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
+
         let reconnect_config: McpServerConfig = {
-            let client = self
-                .clients
-                .get_mut(server_name)
-                .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
+            let mut client = managed.client.lock().await;
             match client.call_tool(tool_name, args.clone()).await {
                 Ok(value) => return Ok(value),
                 Err(err) => {
@@ -1718,20 +1971,46 @@ impl McpManager {
                             "MCP stale transport detected on '{}' ({}); reconnecting once",
                             server_name, err
                         );
-                        client.config.clone()
+                        managed.config.clone()
                     } else {
                         return Err(err);
                     }
                 }
             }
         };
-        let config = reconnect_config;
-        let _ = self.disconnect(server_name).await;
-        self.connect(server_name, config).await?;
-        let client = self
-            .clients
-            .get_mut(server_name)
-            .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
+
+        let mut new_client = McpClient::new(reconnect_config.clone());
+        if let Some(config) = self.sampling_config.clone() {
+            new_client.set_sampling_config(config);
+        }
+        if let Some(callback) = self.sampling_callback.clone() {
+            new_client.set_sampling_callback(callback);
+        }
+        new_client.connect().await?;
+        let tools = new_client.cached_tools().to_vec();
+        let resources = new_client.cached_resources().to_vec();
+        {
+            let mut client = managed.client.lock().await;
+            *client = new_client;
+        }
+        deregister_mcp_tools(
+            self.tool_registry.as_ref(),
+            std::mem::take(&mut managed.registered_tools),
+        );
+        managed.config = reconnect_config;
+        managed.cached_tools = tools.clone();
+        managed.cached_resources = resources;
+        managed.connected_at = Instant::now();
+        managed.available.store(true, Ordering::SeqCst);
+        managed.registered_tools = register_mcp_tools_in_registry(
+            self.tool_registry.as_ref(),
+            server_name,
+            Arc::clone(&managed.client),
+            &tools,
+            Arc::clone(&managed.available),
+        );
+
+        let mut client = managed.client.lock().await;
         client.call_tool(tool_name, args).await
     }
 
@@ -1740,19 +2019,25 @@ impl McpManager {
         &mut self,
         server_name: &str,
     ) -> Result<Vec<ResourceInfo>, McpError> {
-        let client = self
+        let managed = self
             .clients
             .get_mut(server_name)
             .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
-        client.list_resources().await
+        let resources = {
+            let mut client = managed.client.lock().await;
+            client.list_resources().await?
+        };
+        managed.cached_resources = resources.clone();
+        Ok(resources)
     }
 
     /// Read a resource from a connected server.
     pub async fn read_resource(&mut self, server_name: &str, uri: &str) -> Result<Value, McpError> {
-        let client = self
+        let managed = self
             .clients
             .get_mut(server_name)
             .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
+        let mut client = managed.client.lock().await;
         client.read_resource(uri).await
     }
 
@@ -1767,22 +2052,32 @@ impl McpManager {
             "Handling tools/list_changed notification from '{}'",
             server_name
         );
-        let client = self
+        let managed = self
             .clients
             .get_mut(server_name)
             .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
-        let tools = client.list_tools().await?;
+        let tools = {
+            let mut client = managed.client.lock().await;
+            client.list_tools().await?
+        };
         debug!(
             "Re-discovered {} tools from server '{}'",
             tools.len(),
             server_name
         );
+        deregister_mcp_tools(
+            self.tool_registry.as_ref(),
+            std::mem::take(&mut managed.registered_tools),
+        );
+        managed.cached_tools = tools.clone();
+        managed.registered_tools = register_mcp_tools_in_registry(
+            self.tool_registry.as_ref(),
+            server_name,
+            Arc::clone(&managed.client),
+            &tools,
+            Arc::clone(&managed.available),
+        );
         Ok(tools)
-    }
-
-    /// Get a mutable reference to a specific client.
-    pub fn get_client_mut(&mut self, name: &str) -> Option<&mut McpClient> {
-        self.clients.get_mut(name)
     }
 
     /// Get a reference to the tool registry.
@@ -1798,7 +2093,9 @@ impl McpManager {
     pub fn set_sampling_config(&mut self, config: SamplingConfig) {
         self.sampling_config = Some(config.clone());
         for client in self.clients.values_mut() {
-            client.set_sampling_config(config.clone());
+            if let Ok(mut client) = client.client.try_lock() {
+                client.set_sampling_config(config.clone());
+            }
         }
     }
 
@@ -1806,15 +2103,18 @@ impl McpManager {
     pub fn set_sampling_callback(&mut self, callback: LlmCallback) {
         self.sampling_callback = Some(callback.clone());
         for client in self.clients.values_mut() {
-            client.set_sampling_callback(callback.clone());
+            if let Ok(mut client) = client.client.try_lock() {
+                client.set_sampling_callback(callback.clone());
+            }
         }
     }
 
     /// Return sampling audit counters for a connected server.
-    pub fn sampling_metrics(&self, server_name: &str) -> Option<&SamplingMetrics> {
+    pub fn sampling_metrics(&self, server_name: &str) -> Option<SamplingMetrics> {
         self.clients
             .get(server_name)
-            .map(McpClient::sampling_metrics)
+            .and_then(|client| client.client.try_lock().ok())
+            .map(|client| client.sampling_metrics().clone())
     }
 
     // -----------------------------------------------------------------------
@@ -1823,10 +2123,11 @@ impl McpManager {
 
     /// List prompts available on a connected server.
     pub async fn list_prompts(&mut self, server_name: &str) -> Result<Vec<PromptInfo>, McpError> {
-        let client = self
+        let managed = self
             .clients
             .get_mut(server_name)
             .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
+        let mut client = managed.client.lock().await;
         client.list_prompts().await
     }
 
@@ -1837,10 +2138,11 @@ impl McpManager {
         name: &str,
         args: HashMap<String, String>,
     ) -> Result<PromptResult, McpError> {
-        let client = self
+        let managed = self
             .clients
             .get_mut(server_name)
             .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
+        let mut client = managed.client.lock().await;
         client.get_prompt(name, args).await
     }
 
@@ -1853,20 +2155,13 @@ impl McpManager {
         self.clients
             .iter()
             .map(|(name, client)| {
-                let transport_type = if client.config.is_stdio() {
-                    "stdio".to_string()
-                } else if client.config.is_http() {
-                    "http".to_string()
-                } else {
-                    "unknown".to_string()
-                };
                 let status = McpServerStatus {
                     name: name.clone(),
-                    connected: client.is_connected(),
-                    tool_count: client.cached_tools().len(),
-                    resource_count: client.cached_resources().len(),
-                    transport_type,
-                    uptime_secs: client.uptime().map(|d| d.as_secs()),
+                    connected: client.available.load(Ordering::SeqCst),
+                    tool_count: client.cached_tools.len(),
+                    resource_count: client.cached_resources.len(),
+                    transport_type: client.transport_type.clone(),
+                    uptime_secs: Some(client.connected_at.elapsed().as_secs()),
                 };
                 (name.clone(), status)
             })
@@ -1875,18 +2170,26 @@ impl McpManager {
 
     /// Probe a connected MCP server to check reachability and discover capabilities.
     pub async fn probe_server(&mut self, name: &str) -> Result<McpProbeResult, McpError> {
-        let client = self
+        let managed = self
             .clients
             .get_mut(name)
             .ok_or_else(|| McpError::ServerNotFound(name.to_string()))?;
 
         let start = Instant::now();
-        let tools_result = client.list_tools().await;
+        let tools_result = {
+            let mut client = managed.client.lock().await;
+            client.list_tools().await
+        };
         let latency = start.elapsed();
 
         match tools_result {
             Ok(tools) => {
-                let resources = client.list_resources().await.unwrap_or_default();
+                let resources = {
+                    let mut client = managed.client.lock().await;
+                    client.list_resources().await.unwrap_or_default()
+                };
+                managed.cached_tools = tools.clone();
+                managed.cached_resources = resources.clone();
 
                 Ok(McpProbeResult {
                     reachable: true,
@@ -2073,6 +2376,96 @@ mod tests {
         assert!(reports.iter().all(|report| report.error.is_some()));
         assert!(!manager.is_connected("missing-a"));
         assert!(!manager.is_connected("missing-b"));
+    }
+
+    #[tokio::test]
+    async fn manager_registers_discovered_mcp_tools_as_callable_registry_tools() {
+        let registry = Arc::new(hermes_tools::ToolRegistry::new());
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let closed = Arc::new(AtomicBool::new(false));
+        let transport = FakeTransport::new_with_sent(
+            vec![
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "serverInfo": {"name": "fake", "version": "0"}
+                    }
+                }),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "tools": [{
+                            "name": "search-file",
+                            "description": "search files through MCP",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string"}
+                                },
+                                "required": ["query"]
+                            }
+                        }]
+                    }
+                }),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "result": {
+                        "content": [{"type": "text", "text": "mcp search ok"}]
+                    }
+                }),
+            ],
+            closed.clone(),
+            sent.clone(),
+        );
+        let mut manager = McpManager::new(Arc::clone(&registry));
+
+        manager
+            .connect_with_transport_for_test(
+                "dyn.server",
+                McpServerConfig::stdio("fake", Vec::new()),
+                Box::new(transport),
+            )
+            .await
+            .expect("connect fake mcp server");
+
+        let entry = registry
+            .get_tool("mcp_dyn_server_search_file")
+            .expect("registered MCP tool");
+        assert_eq!(entry.toolset, "mcp-dyn_server");
+        assert_eq!(
+            registry.get_toolset_alias_target("dyn.server").as_deref(),
+            Some("mcp-dyn_server")
+        );
+        assert_eq!(
+            registry.tool_names_for_toolset("dyn.server", true),
+            vec!["mcp_dyn_server_search_file".to_string()]
+        );
+
+        let output = registry
+            .dispatch_async("mcp_dyn_server_search_file", json!({"query": "rust"}))
+            .await;
+        let parsed: serde_json::Value = serde_json::from_str(&output).expect("tool json");
+        assert_eq!(parsed["result"], "mcp search ok");
+
+        {
+            let sent = sent.lock().expect("sent lock");
+            let call = sent
+                .iter()
+                .find(|msg| msg["method"] == "tools/call")
+                .expect("tools/call sent");
+            assert_eq!(call["params"]["name"], "search-file");
+            assert_eq!(call["params"]["arguments"]["query"], "rust");
+        }
+
+        manager.disconnect("dyn.server").await.expect("disconnect");
+        assert!(closed.load(Ordering::SeqCst));
+        assert!(registry.get_tool("mcp_dyn_server_search_file").is_none());
+        assert_eq!(registry.get_toolset_alias_target("dyn.server"), None);
     }
 
     #[tokio::test]

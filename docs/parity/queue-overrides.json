@@ -1287,6 +1287,14 @@
     "c10fea8d264e": {
       "disposition": "ported",
       "notes": "Rust ToolRegistry now supports explicit live toolset aliases such as server-name to mcp-server-name mappings, exposes alias targets for inspection, removes aliases only when the target toolset loses its last tool, and platform toolset filtering resolves configured MCP server aliases with hermes-tools and hermes-cli regression coverage."
+    },
+    "9b2fb1cc2e95": {
+      "disposition": "ported",
+      "notes": "Rust ACP now parses client-provided mcpServers/mcp_servers during session new/load/resume/fork, converts stdio and HTTP/SSE configs into hermes_mcp configs, preserves stdio env and bearer Authorization headers, registers reachable MCP servers through McpManager, and exposes discovered MCP tools as real callable ToolRegistry tools with provider-safe names and focused hermes-mcp/hermes-acp coverage."
+    },
+    "dfc5563641f0": {
+      "disposition": "ported",
+      "notes": "Rust ACP sessions now include client-provided MCP server toolsets through live ToolRegistry mcp-{server} toolsets and explicit aliases, so tools.list, /tools, initialize tool names, ToolsetManager resolution, and registered MCP dispatch all see the session MCP surface. Focused tests cover toolset expansion and ACP MCP tool visibility."
     }
   },
   "subject_patterns": [

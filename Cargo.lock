@@ -1623,6 +1623,8 @@ dependencies = [
  "hermes-config",
  "hermes-core",
  "hermes-intelligence",
+ "hermes-mcp",
+ "hermes-tools",
  "serde",
  "serde_json",
  "tokio",

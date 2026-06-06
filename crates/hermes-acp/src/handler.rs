@@ -12,7 +12,13 @@ use base64::Engine as _;
 use hermes_intelligence::model_metadata::{
     estimate_request_tokens_rough, get_model_context_length,
 };
+use hermes_mcp::{
+    sanitize_mcp_name_component, BearerTokenAuth, McpManager,
+    McpServerConfig as HermesMcpServerConfig,
+};
+use hermes_tools::ToolRegistry;
 use serde_json::{json, Value};
+use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 
 use crate::auth::{
@@ -653,6 +659,109 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
     },
 ];
 
+fn acp_mcp_servers_from_params(p: Option<&serde_json::Map<String, Value>>) -> Vec<McpServerConfig> {
+    let Some(value) = p.and_then(|p| p.get("mcpServers").or_else(|| p.get("mcp_servers"))) else {
+        return Vec::new();
+    };
+    let Some(items) = value.as_array() else {
+        tracing::warn!("ACP mcp_servers parameter was not an array; ignoring");
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(
+            |item| match serde_json::from_value::<McpServerConfig>(item.clone()) {
+                Ok(server) => Some(server),
+                Err(err) => {
+                    tracing::warn!("Ignoring invalid ACP MCP server entry: {}", err);
+                    None
+                }
+            },
+        )
+        .collect()
+}
+
+fn bearer_token_from_headers(headers: &[EnvVar]) -> Option<String> {
+    headers
+        .iter()
+        .find(|header| header.name.eq_ignore_ascii_case("authorization"))
+        .map(|header| header.value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("bearer "))
+                .unwrap_or(value)
+                .trim()
+                .to_string()
+        })
+        .filter(|value| !value.is_empty())
+}
+
+fn acp_mcp_server_to_hermes_config(
+    server: &McpServerConfig,
+) -> Option<(String, HermesMcpServerConfig)> {
+    match server {
+        McpServerConfig::Stdio {
+            name,
+            command,
+            args,
+            env,
+        } => {
+            let name = sanitize_mcp_name_component(name.trim());
+            if name.is_empty() || command.trim().is_empty() {
+                return None;
+            }
+            let mut config = HermesMcpServerConfig::stdio(command.trim(), args.clone());
+            for item in env {
+                if !item.name.trim().is_empty() {
+                    config = config.with_env(item.name.trim(), item.value.clone());
+                }
+            }
+            Some((name, config))
+        }
+        McpServerConfig::Http { name, url, headers }
+        | McpServerConfig::Sse { name, url, headers } => {
+            let name = sanitize_mcp_name_component(name.trim());
+            if name.is_empty() || url.trim().is_empty() {
+                return None;
+            }
+            let mut config = HermesMcpServerConfig::http(url.trim());
+            if let Some(token) = bearer_token_from_headers(headers) {
+                config = config.with_auth(Arc::new(BearerTokenAuth::new(token)));
+            }
+            Some((name, config))
+        }
+    }
+}
+
+fn expand_acp_enabled_toolsets(
+    toolsets: impl IntoIterator<Item = String>,
+    mcp_server_names: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let mut expanded = Vec::new();
+    for name in toolsets {
+        let name = name.trim();
+        if !name.is_empty() && !expanded.iter().any(|existing| existing == name) {
+            expanded.push(name.to_string());
+        }
+    }
+    if expanded.is_empty() {
+        expanded.push("hermes-acp".to_string());
+    }
+    for server_name in mcp_server_names {
+        let safe = sanitize_mcp_name_component(server_name.trim());
+        if safe.is_empty() {
+            continue;
+        }
+        let toolset_name = format!("mcp-{safe}");
+        if !expanded.iter().any(|existing| existing == &toolset_name) {
+            expanded.push(toolset_name);
+        }
+    }
+    expanded
+}
+
 // ---------------------------------------------------------------------------
 // HermesAcpHandler
 // ---------------------------------------------------------------------------
@@ -662,6 +771,8 @@ pub struct HermesAcpHandler {
     pub session_manager: Arc<SessionManager>,
     pub event_sink: Arc<EventSink>,
     pub permission_store: Arc<PermissionStore>,
+    tool_registry: Arc<ToolRegistry>,
+    mcp_manager: Arc<AsyncMutex<McpManager>>,
     version: String,
     prompt_executor: Option<Arc<dyn AcpPromptExecutor>>,
     auth_provider_resolver: Arc<dyn Fn() -> Option<String> + Send + Sync>,
@@ -673,10 +784,14 @@ impl HermesAcpHandler {
         event_sink: Arc<EventSink>,
         permission_store: Arc<PermissionStore>,
     ) -> Self {
+        let tool_registry = Arc::new(ToolRegistry::new());
+        let mcp_manager = Arc::new(AsyncMutex::new(McpManager::new(Arc::clone(&tool_registry))));
         Self {
             session_manager,
             event_sink,
             permission_store,
+            tool_registry,
+            mcp_manager,
             version: env!("CARGO_PKG_VERSION").to_string(),
             prompt_executor: None,
             auth_provider_resolver: Arc::new(detect_provider),
@@ -696,24 +811,73 @@ impl HermesAcpHandler {
         self
     }
 
-    fn available_tools(&self) -> Vec<(&'static str, &'static str)> {
-        vec![
-            ("bash", "Execute shell commands with approval controls"),
-            ("read", "Read files from the local workspace"),
-            ("write", "Write or create files in the local workspace"),
-            ("edit", "Patch files in-place"),
-            ("grep", "Search file contents"),
-            ("glob", "Find files by pattern"),
-            ("web_search", "Search the web"),
-            ("web_fetch", "Fetch and parse URLs"),
-            ("memory", "Read/write persistent memory notes"),
-            ("session_search", "Search prior session content"),
-            ("skills_list", "List installed skills"),
-            ("skill_view", "Inspect a specific skill"),
-            ("skill_manage", "Install/update/remove skills"),
-            ("todo", "Track task progress"),
-            ("cronjob", "Schedule recurring jobs"),
-        ]
+    pub fn with_mcp_components(
+        mut self,
+        tool_registry: Arc<ToolRegistry>,
+        mcp_manager: Arc<AsyncMutex<McpManager>>,
+    ) -> Self {
+        self.tool_registry = tool_registry;
+        self.mcp_manager = mcp_manager;
+        self
+    }
+
+    pub fn tool_registry(&self) -> &Arc<ToolRegistry> {
+        &self.tool_registry
+    }
+
+    fn available_tools(&self) -> Vec<(String, String)> {
+        let mut tools = vec![
+            (
+                "bash".to_string(),
+                "Execute shell commands with approval controls".to_string(),
+            ),
+            (
+                "read".to_string(),
+                "Read files from the local workspace".to_string(),
+            ),
+            (
+                "write".to_string(),
+                "Write or create files in the local workspace".to_string(),
+            ),
+            ("edit".to_string(), "Patch files in-place".to_string()),
+            ("grep".to_string(), "Search file contents".to_string()),
+            ("glob".to_string(), "Find files by pattern".to_string()),
+            ("web_search".to_string(), "Search the web".to_string()),
+            ("web_fetch".to_string(), "Fetch and parse URLs".to_string()),
+            (
+                "memory".to_string(),
+                "Read/write persistent memory notes".to_string(),
+            ),
+            (
+                "session_search".to_string(),
+                "Search prior session content".to_string(),
+            ),
+            (
+                "skills_list".to_string(),
+                "List installed skills".to_string(),
+            ),
+            (
+                "skill_view".to_string(),
+                "Inspect a specific skill".to_string(),
+            ),
+            (
+                "skill_manage".to_string(),
+                "Install/update/remove skills".to_string(),
+            ),
+            ("todo".to_string(), "Track task progress".to_string()),
+            ("cronjob".to_string(), "Schedule recurring jobs".to_string()),
+        ];
+        for entry in self
+            .tool_registry
+            .list_tools()
+            .into_iter()
+            .filter(|entry| entry.toolset.starts_with("mcp-"))
+        {
+            tools.push((entry.name, entry.description));
+        }
+        tools.sort_by(|a, b| a.0.cmp(&b.0));
+        tools.dedup_by(|a, b| a.0 == b.0);
+        tools
     }
 
     fn available_commands() -> Vec<AvailableCommand> {
@@ -732,6 +896,52 @@ impl HermesAcpHandler {
             session_id,
             Self::available_commands(),
         ));
+    }
+
+    async fn register_session_mcp_servers(
+        &self,
+        state: &SessionState,
+        servers: Vec<McpServerConfig>,
+    ) {
+        if servers.is_empty() {
+            return;
+        }
+        let configs: Vec<(String, HermesMcpServerConfig)> = servers
+            .iter()
+            .filter_map(acp_mcp_server_to_hermes_config)
+            .collect();
+        if configs.is_empty() {
+            return;
+        }
+        let enabled_toolsets = expand_acp_enabled_toolsets(
+            vec!["hermes-acp".to_string()],
+            configs.iter().map(|(name, _)| name.clone()),
+        );
+        tracing::debug!(
+            "ACP session {} enabling toolsets after MCP registration: {:?}",
+            state.session_id,
+            enabled_toolsets
+        );
+        let reports = {
+            let mut manager = self.mcp_manager.lock().await;
+            manager.connect_all_parallel(configs).await
+        };
+        let connected = reports.iter().filter(|report| report.connected).count();
+        let failed = reports.len().saturating_sub(connected);
+        if failed > 0 {
+            tracing::warn!(
+                "ACP session {} registered {} MCP server(s), {} failed",
+                state.session_id,
+                connected,
+                failed
+            );
+        } else {
+            tracing::info!(
+                "ACP session {} registered {} MCP server(s)",
+                state.session_id,
+                connected
+            );
+        }
     }
 
     fn context_usage_for_state(state: &SessionState) -> Option<(u64, u64)> {
@@ -1462,6 +1672,12 @@ impl AcpHandler for HermesAcpHandler {
                             list: true,
                             resume: true,
                         }),
+                        tools: Some(
+                            self.available_tools()
+                                .into_iter()
+                                .map(|(name, _)| name)
+                                .collect(),
+                        ),
                         streaming: true,
                         ..Default::default()
                     },
@@ -1495,11 +1711,13 @@ impl AcpHandler for HermesAcpHandler {
             AcpMethod::NewSession => {
                 let p = params_obj(&request.params);
                 let cwd = p.and_then(|p| param_str(p, "cwd")).unwrap_or(".");
+                let mcp_servers = acp_mcp_servers_from_params(p);
                 let meta = match p.map(session_meta_from_params).transpose() {
                     Ok(meta) => meta.unwrap_or_default(),
                     Err(err) => return AcpResponse::error(request.id, -32602, err),
                 };
                 let state = self.session_manager.create_session_with_meta(cwd, meta);
+                self.register_session_mcp_servers(&state, mcp_servers).await;
                 self.advertise_available_commands(&state.session_id);
                 self.emit_usage_update(&state.session_id);
                 AcpResponse::success(request.id, session_id_response(&state.session_id))
@@ -1511,6 +1729,7 @@ impl AcpHandler for HermesAcpHandler {
                 };
                 let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
                 let cwd = param_str(p, "cwd").unwrap_or(".");
+                let mcp_servers = acp_mcp_servers_from_params(Some(p));
                 let mut meta = match session_meta_from_params(p) {
                     Ok(meta) => meta,
                     Err(err) => return AcpResponse::error(request.id, -32602, err),
@@ -1519,6 +1738,7 @@ impl AcpHandler for HermesAcpHandler {
 
                 match self.session_manager.update_session_meta(session_id, meta) {
                     Some(state) => {
+                        self.register_session_mcp_servers(&state, mcp_servers).await;
                         self.replay_session_history(&state);
                         self.advertise_available_commands(session_id);
                         self.emit_usage_update(session_id);
@@ -1538,6 +1758,7 @@ impl AcpHandler for HermesAcpHandler {
                 };
                 let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
                 let cwd = param_str(p, "cwd").unwrap_or(".");
+                let mcp_servers = acp_mcp_servers_from_params(Some(p));
                 let mut meta = match session_meta_from_params(p) {
                     Ok(meta) => meta,
                     Err(err) => return AcpResponse::error(request.id, -32602, err),
@@ -1545,6 +1766,7 @@ impl AcpHandler for HermesAcpHandler {
                 meta.cwd = Some(cwd.to_string());
 
                 if let Some(state) = self.session_manager.update_session_meta(session_id, meta) {
+                    self.register_session_mcp_servers(&state, mcp_servers).await;
                     self.replay_session_history(&state);
                     self.advertise_available_commands(&state.session_id);
                     self.emit_usage_update(&state.session_id);
@@ -1555,6 +1777,7 @@ impl AcpHandler for HermesAcpHandler {
                         Err(err) => return AcpResponse::error(request.id, -32602, err),
                     };
                     let state = self.session_manager.create_session_with_meta(cwd, meta);
+                    self.register_session_mcp_servers(&state, mcp_servers).await;
                     self.advertise_available_commands(&state.session_id);
                     self.emit_usage_update(&state.session_id);
                     AcpResponse::success(request.id, session_id_response(&state.session_id))
@@ -1567,6 +1790,7 @@ impl AcpHandler for HermesAcpHandler {
                 };
                 let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
                 let cwd = param_str(p, "cwd").unwrap_or(".");
+                let mcp_servers = acp_mcp_servers_from_params(Some(p));
                 let meta = match session_meta_from_params(p) {
                     Ok(meta) => meta,
                     Err(err) => return AcpResponse::error(request.id, -32602, err),
@@ -1577,6 +1801,8 @@ impl AcpHandler for HermesAcpHandler {
                     .fork_session_with_meta(session_id, cwd, meta)
                 {
                     Some(new_state) => {
+                        self.register_session_mcp_servers(&new_state, mcp_servers)
+                            .await;
                         self.advertise_available_commands(&new_state.session_id);
                         self.emit_usage_update(&new_state.session_id);
                         AcpResponse::success(request.id, session_id_response(&new_state.session_id))
@@ -2044,6 +2270,7 @@ mod tests {
     use super::*;
     use crate::events::AcpEventKind;
     use crate::session::SessionMetaUpdate;
+    use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
     use serde_json::json;
 
     struct EchoPromptExecutor;
@@ -2068,6 +2295,21 @@ mod tests {
                 total_turns: Some(2),
                 events: Vec::new(),
             })
+        }
+    }
+
+    struct NoopTool {
+        schema: ToolSchema,
+    }
+
+    #[async_trait::async_trait]
+    impl ToolHandler for NoopTool {
+        async fn execute(&self, _params: Value) -> Result<String, ToolError> {
+            Ok("ok".to_string())
+        }
+
+        fn schema(&self) -> ToolSchema {
+            self.schema.clone()
         }
     }
 
@@ -2206,6 +2448,105 @@ mod tests {
 
     fn make_handler_with_auth_provider(provider: Option<&'static str>) -> HermesAcpHandler {
         make_handler().with_auth_provider_resolver(Arc::new(move || provider.map(str::to_string)))
+    }
+
+    #[tokio::test]
+    async fn acp_mcp_server_params_convert_to_hermes_configs() {
+        let params = json!({
+            "mcpServers": [
+                {
+                    "type": "stdio",
+                    "name": "bad/name",
+                    "command": "/bin/mcp",
+                    "args": ["--serve"],
+                    "env": [{"name": "MCP_KEY", "value": "v"}]
+                },
+                {
+                    "type": "http",
+                    "name": "remote.server",
+                    "url": "https://example.test/mcp",
+                    "headers": [{"name": "Authorization", "value": "Bearer test-token"}]
+                }
+            ]
+        });
+        let servers = acp_mcp_servers_from_params(params.as_object());
+        assert_eq!(servers.len(), 2);
+
+        let (stdio_name, stdio_config) =
+            acp_mcp_server_to_hermes_config(&servers[0]).expect("stdio config");
+        assert_eq!(stdio_name, "bad_name");
+        assert_eq!(stdio_config.command.as_deref(), Some("/bin/mcp"));
+        assert_eq!(stdio_config.args, vec!["--serve".to_string()]);
+        assert_eq!(
+            stdio_config.env.get("MCP_KEY").map(String::as_str),
+            Some("v")
+        );
+
+        let (http_name, http_config) =
+            acp_mcp_server_to_hermes_config(&servers[1]).expect("http config");
+        assert_eq!(http_name, "remote_server");
+        assert_eq!(http_config.url.as_deref(), Some("https://example.test/mcp"));
+        let token = http_config
+            .auth_provider
+            .as_ref()
+            .expect("bearer auth")
+            .get_token()
+            .await
+            .expect("token");
+        assert_eq!(token, "test-token");
+    }
+
+    #[test]
+    fn acp_enabled_toolsets_include_explicit_mcp_toolsets() {
+        let expanded = expand_acp_enabled_toolsets(
+            vec!["hermes-acp".to_string(), "hermes-acp".to_string()],
+            vec!["srv".to_string(), "remote.server".to_string()],
+        );
+        assert_eq!(
+            expanded,
+            vec![
+                "hermes-acp".to_string(),
+                "mcp-srv".to_string(),
+                "mcp-remote_server".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_list_and_slash_tools_include_registered_mcp_tools() {
+        let handler = make_handler();
+        let schema = tool_schema("mcp_srv_ping", "MCP ping", JsonSchema::new("object"));
+        handler.tool_registry().register(
+            "mcp_srv_ping",
+            "mcp-srv",
+            schema.clone(),
+            Arc::new(NoopTool { schema }),
+            Arc::new(|| true),
+            Vec::new(),
+            true,
+            "MCP ping",
+            "mcp",
+            None,
+        );
+
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "tools.list".into(),
+                params: None,
+            })
+            .await;
+        let tools = resp.result.unwrap()["tools"].as_array().unwrap().clone();
+        assert!(tools
+            .iter()
+            .any(|tool| { tool["name"] == "mcp_srv_ping" && tool["description"] == "MCP ping" }));
+
+        let slash = handler
+            .handle_slash_command("/tools json", "session-id")
+            .expect("tools slash response");
+        assert!(slash.contains("mcp_srv_ping"));
+        assert!(slash.contains("MCP ping"));
     }
 
     #[tokio::test]

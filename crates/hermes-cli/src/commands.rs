@@ -26913,8 +26913,31 @@ fn acp_usage_from_agent_usage(usage: &hermes_core::UsageStats) -> hermes_acp::Us
 struct CliAcpPromptExecutor {
     config: Arc<hermes_config::GatewayConfig>,
     tool_registry: Arc<hermes_tools::ToolRegistry>,
-    tool_schemas: Vec<hermes_core::ToolSchema>,
     interrupts: Arc<Mutex<HashMap<String, hermes_agent::InterruptController>>>,
+}
+
+impl CliAcpPromptExecutor {
+    fn current_tool_schemas(&self) -> Vec<hermes_core::ToolSchema> {
+        let mut schemas = crate::platform_toolsets::resolve_platform_tool_schemas(
+            self.config.as_ref(),
+            "cli",
+            &self.tool_registry,
+        );
+        let mut seen: HashSet<String> = schemas.iter().map(|schema| schema.name.clone()).collect();
+        let mcp_tool_names: HashSet<String> = self
+            .tool_registry
+            .list_tools()
+            .into_iter()
+            .filter(|entry| entry.toolset.starts_with("mcp-"))
+            .map(|entry| entry.name)
+            .collect();
+        for schema in self.tool_registry.get_definitions() {
+            if mcp_tool_names.contains(&schema.name) && seen.insert(schema.name.clone()) {
+                schemas.push(schema);
+            }
+        }
+        schemas
+    }
 }
 
 fn acp_stream_callbacks(
@@ -26984,7 +27007,7 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
         );
         let messages = acp_history_to_messages(history, user_text);
 
-        let result = agent.run(messages, Some(self.tool_schemas.clone())).await;
+        let result = agent.run(messages, Some(self.current_tool_schemas())).await;
         if let Ok(mut active) = self.interrupts.lock() {
             active.remove(&session.session_id);
         }
@@ -27124,16 +27147,13 @@ pub async fn handle_cli_acp(
                 .map_err(|e| hermes_core::AgentError::Config(format!("cron load: {e}")))?;
             cron_scheduler.start().await;
             crate::runtime_tool_wiring::wire_cron_scheduler_backend(&tool_registry, cron_scheduler);
-            let tool_schemas = crate::platform_toolsets::resolve_platform_tool_schemas(
-                &config,
-                "cli",
-                &tool_registry,
-            );
+            let mcp_manager = Arc::new(tokio::sync::Mutex::new(hermes_mcp::McpManager::new(
+                tool_registry.clone(),
+            )));
 
             let prompt_executor = Arc::new(CliAcpPromptExecutor {
                 config: Arc::new(config.clone()),
-                tool_registry,
-                tool_schemas,
+                tool_registry: tool_registry.clone(),
                 interrupts: Arc::new(Mutex::new(HashMap::new())),
             });
 
@@ -27146,6 +27166,7 @@ pub async fn handle_cli_acp(
                     event_sink.clone(),
                     permission_store.clone(),
                 )
+                .with_mcp_components(tool_registry, mcp_manager)
                 .with_prompt_executor(prompt_executor),
             );
             let server = hermes_acp::AcpServer::with_components(
@@ -27738,7 +27759,6 @@ mod tests {
         let executor = CliAcpPromptExecutor {
             config: Arc::new(GatewayConfig::default()),
             tool_registry: Arc::new(hermes_tools::ToolRegistry::new()),
-            tool_schemas: Vec::new(),
             interrupts,
         };
         let session = hermes_acp::SessionState::new(session_id, ".".to_string());
@@ -27758,6 +27778,88 @@ mod tests {
         assert!(marker.contains("prefer the simpler fix"));
         assert!(marker.contains(hermes_agent::STEER_MARKER_CLOSE));
         assert!(!marker.contains("User guidance:"));
+    }
+
+    struct CliNoopTool {
+        schema: hermes_core::ToolSchema,
+    }
+
+    #[async_trait::async_trait]
+    impl hermes_core::ToolHandler for CliNoopTool {
+        async fn execute(
+            &self,
+            _params: serde_json::Value,
+        ) -> Result<String, hermes_core::ToolError> {
+            Ok("ok".to_string())
+        }
+
+        fn schema(&self) -> hermes_core::ToolSchema {
+            self.schema.clone()
+        }
+    }
+
+    #[test]
+    fn acp_prompt_executor_resolves_tool_schemas_from_current_registry() {
+        let mut config = GatewayConfig::default();
+        config
+            .platform_toolsets
+            .insert("cli".to_string(), vec!["file".to_string()]);
+        let tool_registry = Arc::new(hermes_tools::ToolRegistry::new());
+        let executor = CliAcpPromptExecutor {
+            config: Arc::new(config),
+            tool_registry: Arc::clone(&tool_registry),
+            interrupts: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let file_schema = hermes_core::tool_schema(
+            "read_file",
+            "Read file",
+            hermes_core::JsonSchema::new("object"),
+        );
+        tool_registry.register(
+            "read_file",
+            "file",
+            file_schema.clone(),
+            Arc::new(CliNoopTool {
+                schema: file_schema,
+            }),
+            Arc::new(|| true),
+            Vec::new(),
+            true,
+            "Read file",
+            "file",
+            None,
+        );
+        assert!(executor
+            .current_tool_schemas()
+            .iter()
+            .any(|schema| schema.name == "read_file"));
+        assert!(!executor
+            .current_tool_schemas()
+            .iter()
+            .any(|schema| schema.name == "mcp_srv_ping"));
+
+        let schema = hermes_core::tool_schema(
+            "mcp_srv_ping",
+            "MCP ping",
+            hermes_core::JsonSchema::new("object"),
+        );
+        tool_registry.register(
+            "mcp_srv_ping",
+            "mcp-srv",
+            schema.clone(),
+            Arc::new(CliNoopTool { schema }),
+            Arc::new(|| true),
+            Vec::new(),
+            true,
+            "MCP ping",
+            "mcp",
+            None,
+        );
+
+        assert!(executor
+            .current_tool_schemas()
+            .iter()
+            .any(|schema| schema.name == "mcp_srv_ping"));
     }
 
     #[tokio::test]
