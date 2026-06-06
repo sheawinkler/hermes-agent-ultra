@@ -323,6 +323,7 @@ impl SessionPersistence {
                 role TEXT NOT NULL,
                 content TEXT,
                 tool_call_id TEXT,
+                name TEXT,
                 tool_calls TEXT,
                 reasoning_content TEXT,
                 created_at TEXT NOT NULL,
@@ -349,14 +350,8 @@ impl SessionPersistence {
         ] {
             Self::ensure_text_column(&conn, "sessions", column)?;
         }
-        if let Err(e) = conn.execute("ALTER TABLE messages ADD COLUMN reasoning_content TEXT", []) {
-            let msg = e.to_string();
-            if !msg.contains("duplicate column") {
-                return Err(AgentError::Io(format!(
-                    "Failed to migrate messages.reasoning_content: {e}"
-                )));
-            }
-        }
+        Self::ensure_text_column(&conn, "messages", "reasoning_content")?;
+        Self::ensure_text_column(&conn, "messages", "name")?;
         Self::ensure_integer_column(&conn, "sessions", "rewind_count", 0, true)?;
         Self::ensure_integer_column(&conn, "messages", "active", 1, true)?;
         conn.execute(
@@ -867,8 +862,8 @@ impl SessionPersistence {
 
         let mut stmt = conn
             .prepare(
-                "INSERT INTO messages (session_id, role, content, tool_call_id, tool_calls, reasoning_content, created_at, active)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+                "INSERT INTO messages (session_id, role, content, tool_call_id, name, tool_calls, reasoning_content, created_at, active)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
             )
             .map_err(|e| AgentError::Io(format!("Failed to prepare insert: {e}")))?;
 
@@ -890,6 +885,7 @@ impl SessionPersistence {
                 role,
                 msg.content.as_deref(),
                 msg.tool_call_id.as_deref(),
+                msg.name.as_deref(),
                 tool_calls_json.as_deref(),
                 msg.reasoning_content.as_deref(),
                 now,
@@ -1013,7 +1009,7 @@ impl SessionPersistence {
 
         let mut stmt = conn
             .prepare(
-                "SELECT role, content, tool_call_id, tool_calls, reasoning_content
+                "SELECT role, content, tool_call_id, name, tool_calls, reasoning_content
                  FROM messages
                  WHERE session_id = ?1 AND active = 1
                  ORDER BY id ASC",
@@ -1025,8 +1021,9 @@ impl SessionPersistence {
                 let role_str: String = row.get(0)?;
                 let content: Option<String> = row.get(1)?;
                 let tool_call_id: Option<String> = row.get(2)?;
-                let tool_calls_json: Option<String> = row.get(3)?;
-                let reasoning_content: Option<String> = row.get(4)?;
+                let name: Option<String> = row.get(3)?;
+                let tool_calls_json: Option<String> = row.get(4)?;
+                let reasoning_content: Option<String> = row.get(5)?;
 
                 let role = match role_str.as_str() {
                     "system" => MessageRole::System,
@@ -1043,7 +1040,7 @@ impl SessionPersistence {
                     content,
                     tool_calls,
                     tool_call_id,
-                    name: None,
+                    name,
                     reasoning_content,
                     cache_control: None,
                 })
@@ -1176,6 +1173,27 @@ mod tests {
     }
 
     #[test]
+    fn test_persist_and_load_tool_result_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let messages = vec![Message::tool_result_with_name(
+            "call_terminal",
+            "terminal",
+            "stdout",
+        )];
+
+        sp.persist_session("tool-name-session", &messages, None, None, None, None)
+            .unwrap();
+
+        let loaded = sp.load_session("tool-name-session").unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].role, MessageRole::Tool);
+        assert_eq!(loaded[0].tool_call_id.as_deref(), Some("call_terminal"));
+        assert_eq!(loaded[0].name.as_deref(), Some("terminal"));
+        assert_eq!(loaded[0].content.as_deref(), Some("stdout"));
+    }
+
+    #[test]
     fn test_migrates_reasoning_content_column_for_legacy_db() {
         let tmp = tempfile::tempdir().unwrap();
         let db_path = tmp.path().join("sessions.db");
@@ -1233,14 +1251,13 @@ mod tests {
         let mut stmt = conn
             .prepare("PRAGMA table_info(messages)")
             .expect("pragma prepare");
-        let has_reasoning_col = stmt
+        let message_cols = stmt
             .query_map([], |row| row.get::<_, String>(1))
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
-            .unwrap()
-            .iter()
-            .any(|name| name == "reasoning_content");
-        assert!(has_reasoning_col);
+            .unwrap();
+        assert!(message_cols.iter().any(|name| name == "reasoning_content"));
+        assert!(message_cols.iter().any(|name| name == "name"));
 
         let loaded = sp.load_session("legacy-migrate").unwrap();
         assert_eq!(loaded.len(), 1);

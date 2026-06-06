@@ -1875,6 +1875,28 @@ impl AgentLoop {
         msgs
     }
 
+    fn named_tool_result_message(
+        tool_call_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Message {
+        Message::tool_result_with_name(tool_call_id, tool_name, content)
+    }
+
+    fn tool_result_message_from_execution(result: &ToolResult, tool_calls: &[ToolCall]) -> Message {
+        tool_calls
+            .iter()
+            .find(|tc| tc.id == result.tool_call_id)
+            .map(|tc| {
+                Self::named_tool_result_message(
+                    &result.tool_call_id,
+                    &tc.function.name,
+                    &result.content,
+                )
+            })
+            .unwrap_or_else(|| Message::tool_result(&result.tool_call_id, &result.content))
+    }
+
     fn graceful_interrupt_result(
         &self,
         ctx: &ContextManager,
@@ -5745,7 +5767,11 @@ impl AgentLoop {
                     } else {
                         "Skipped: another tool call in this turn used an invalid name. Please retry this tool call.".to_string()
                     };
-                    ctx.add_message(Message::tool_result(tc.id.clone(), content));
+                    ctx.add_message(Self::named_tool_result_message(
+                        tc.id.clone(),
+                        tc.function.name.clone(),
+                        content,
+                    ));
                 }
                 continue;
             }
@@ -5790,7 +5816,11 @@ impl AgentLoop {
                     } else {
                         "Skipped: other tool call in this response had invalid JSON.".to_string()
                     };
-                    ctx.add_message(Message::tool_result(tc.id.clone(), content));
+                    ctx.add_message(Self::named_tool_result_message(
+                        tc.id.clone(),
+                        tc.function.name.clone(),
+                        content,
+                    ));
                 }
                 continue;
             }
@@ -5985,7 +6015,10 @@ impl AgentLoop {
                         "content_preview": result.content.chars().take(240).collect::<String>(),
                     }),
                 );
-                ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
+                ctx.add_message(Self::tool_result_message_from_execution(
+                    &result,
+                    &tool_calls,
+                ));
             }
             if let Some(note) = lsp_note {
                 ctx.add_message(Message::system(note));
@@ -7086,7 +7119,11 @@ impl AgentLoop {
                     } else {
                         "Skipped: another tool call in this turn used an invalid name. Please retry this tool call.".to_string()
                     };
-                    ctx.add_message(Message::tool_result(tc.id.clone(), content));
+                    ctx.add_message(Self::named_tool_result_message(
+                        tc.id.clone(),
+                        tc.function.name.clone(),
+                        content,
+                    ));
                 }
                 continue;
             }
@@ -7131,7 +7168,11 @@ impl AgentLoop {
                     } else {
                         "Skipped: other tool call in this response had invalid JSON.".to_string()
                     };
-                    ctx.add_message(Message::tool_result(tc.id.clone(), content));
+                    ctx.add_message(Self::named_tool_result_message(
+                        tc.id.clone(),
+                        tc.function.name.clone(),
+                        content,
+                    ));
                 }
                 continue;
             }
@@ -7314,7 +7355,10 @@ impl AgentLoop {
                         "content_preview": result.content.chars().take(240).collect::<String>(),
                     }),
                 );
-                ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
+                ctx.add_message(Self::tool_result_message_from_execution(
+                    &result,
+                    &tool_calls,
+                ));
             }
             if let Some(note) = lsp_note {
                 ctx.add_message(Message::system(note));
@@ -12113,12 +12157,20 @@ mod tests {
             .iter()
             .find(|message| message.role == MessageRole::Tool)
             .expect("tool result in second call");
+        assert_eq!(tool_message.name.as_deref(), Some("steer_test"));
         let content = tool_message.content.as_deref().expect("tool content");
         assert!(content.contains("tool output"));
         assert!(content.contains(crate::steer::STEER_MARKER_OPEN));
         assert!(content.contains("prefer the simpler fix"));
         assert!(content.contains(crate::steer::STEER_MARKER_CLOSE));
         assert!(!content.contains("User guidance:"));
+
+        let persisted_tool_message = result
+            .messages
+            .iter()
+            .find(|message| message.role == MessageRole::Tool)
+            .expect("persisted tool result");
+        assert_eq!(persisted_tool_message.name.as_deref(), Some("steer_test"));
     }
 
     #[test]
