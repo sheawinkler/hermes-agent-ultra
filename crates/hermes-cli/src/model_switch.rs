@@ -7,7 +7,7 @@ use hermes_agent::bedrock::{
     curated_bedrock_models_for_region, discover_bedrock_model_ids, has_aws_credentials,
     resolve_bedrock_region,
 };
-use hermes_config::StaleAuxiliaryAssignment;
+use hermes_config::{GatewayConfig, LlmProviderConfig, StaleAuxiliaryAssignment};
 use hermes_core::AgentError;
 use hermes_intelligence::models_dev::{default_client, ModelsDevClient};
 use hmac::{Hmac, Mac};
@@ -671,6 +671,151 @@ pub fn provider_curated_models(provider: &str) -> &'static [&'static str] {
     &[]
 }
 
+fn configured_llm_provider<'a>(
+    config: &'a GatewayConfig,
+    provider: &str,
+) -> Option<(&'a String, &'a LlmProviderConfig)> {
+    let trimmed = provider.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    config.llm_providers.get_key_value(trimmed).or_else(|| {
+        config
+            .llm_providers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(trimmed))
+    })
+}
+
+fn dedup_model_ids(models: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for model in models {
+        let trimmed = model.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let key = trimmed.to_ascii_lowercase();
+        if seen.insert(key) {
+            out.push(trimmed.to_string());
+        }
+    }
+    out
+}
+
+fn resolve_configured_api_key(provider: &LlmProviderConfig) -> Option<String> {
+    if let Some(env_name) = provider
+        .api_key_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if let Ok(value) = std::env::var(env_name) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+
+    let raw = provider.api_key.as_deref()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Some(env_name) = raw.strip_prefix("${").and_then(|v| v.strip_suffix('}')) {
+        return std::env::var(env_name.trim())
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+    }
+    Some(raw.to_string())
+}
+
+pub fn provider_slugs_for_config(config: &GatewayConfig) -> Vec<String> {
+    let mut providers = Vec::new();
+    let mut seen = HashSet::new();
+
+    for provider in curated_provider_slugs() {
+        let key = provider.to_ascii_lowercase();
+        if seen.insert(key) {
+            providers.push(provider.to_string());
+        }
+    }
+
+    let mut configured: Vec<String> = config
+        .llm_providers
+        .keys()
+        .map(|provider| provider.trim().to_string())
+        .filter(|provider| !provider.is_empty())
+        .collect();
+    configured.sort_by_key(|provider| provider.to_ascii_lowercase());
+    for provider in configured {
+        let key = provider.to_ascii_lowercase();
+        if seen.insert(key) {
+            providers.push(provider);
+        }
+    }
+
+    providers
+}
+
+pub async fn provider_model_ids_for_config(provider: &str, config: &GatewayConfig) -> Vec<String> {
+    let configured = configured_llm_provider(config, provider).map(|(_, cfg)| cfg);
+    if let Some(provider_cfg) = configured {
+        let configured_models = dedup_model_ids(provider_cfg.models.clone());
+        if !provider_cfg.discover_models && !configured_models.is_empty() {
+            return configured_models;
+        }
+
+        if let Some(base_url) = provider_cfg
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let api_key = resolve_configured_api_key(provider_cfg);
+            let should_probe =
+                provider_cfg.discover_models && (api_key.is_some() || configured_models.is_empty());
+            if should_probe {
+                let live = fetch_openai_compatible_live_models(base_url, api_key.as_deref()).await;
+                if !live.is_empty() {
+                    return live;
+                }
+            }
+        }
+
+        if !configured_models.is_empty() {
+            return configured_models;
+        }
+    }
+
+    provider_model_ids(provider).await
+}
+
+pub async fn provider_catalog_entries_for_config(
+    config: &GatewayConfig,
+    max_models: usize,
+) -> Vec<ProviderCatalogEntry> {
+    let providers = provider_slugs_for_config(config);
+    let mut entries = Vec::new();
+
+    for provider in providers {
+        let models = provider_model_ids_for_config(&provider, config).await;
+        if models.is_empty() {
+            continue;
+        }
+        let total_models = models.len();
+        let models = models.into_iter().take(max_models).collect();
+        entries.push(ProviderCatalogEntry {
+            provider,
+            models,
+            total_models,
+        });
+    }
+
+    entries
+}
+
 fn is_local_openai_compatible_provider(provider: &str) -> bool {
     matches!(
         provider.trim().to_ascii_lowercase().as_str(),
@@ -1173,8 +1318,10 @@ mod tests {
         cached_provider_catalog_status, is_models_dev_preferred_provider,
         load_provider_catalog_cache, merge_with_models_dev, normalize_provider_model,
         persist_provider_catalog_cache, provider_catalog_cache_path, provider_catalog_entries,
-        provider_curated_models, provider_model_ids_with_client, provider_picker_description,
-        provider_slug_from_provider_model, resolve_huggingface_catalog_endpoint_and_token,
+        provider_catalog_entries_for_config, provider_curated_models,
+        provider_model_ids_for_config, provider_model_ids_with_client, provider_picker_description,
+        provider_slug_from_provider_model, provider_slugs_for_config,
+        resolve_huggingface_catalog_endpoint_and_token,
     };
 
     fn env_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -1600,6 +1747,71 @@ mod tests {
         // Smoke-test the function shape with unknown providers only, avoiding network use.
         let entries = provider_catalog_entries(&["unknown-provider"], 2).await;
         assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn configured_provider_discover_false_keeps_explicit_models() {
+        let mut cfg = hermes_config::GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "qianfan-coding".to_string(),
+            hermes_config::LlmProviderConfig {
+                base_url: Some("https://qianfan.baidubce.com/v2/coding".to_string()),
+                api_key: Some("sk-test".to_string()),
+                models: vec![
+                    " kimi-k2.5 ".to_string(),
+                    "glm-5".to_string(),
+                    "KIMI-K2.5".to_string(),
+                ],
+                discover_models: false,
+                ..hermes_config::LlmProviderConfig::default()
+            },
+        );
+
+        let out = provider_model_ids_for_config("QIANFAN-CODING", &cfg).await;
+
+        assert_eq!(out, vec!["kimi-k2.5", "glm-5"]);
+    }
+
+    #[tokio::test]
+    async fn configured_provider_falls_back_to_explicit_models_when_probe_empty() {
+        let mut cfg = hermes_config::GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "my-gateway".to_string(),
+            hermes_config::LlmProviderConfig {
+                base_url: Some("https://gateway.example.com/v1".to_string()),
+                api_key: Some("sk-test".to_string()),
+                models: vec!["fallback-a".to_string(), "fallback-b".to_string()],
+                ..hermes_config::LlmProviderConfig::default()
+            },
+        );
+
+        let out = provider_model_ids_for_config("my-gateway", &cfg).await;
+
+        assert_eq!(out, vec!["fallback-a", "fallback-b"]);
+    }
+
+    #[tokio::test]
+    async fn config_catalog_entries_include_custom_provider_models() {
+        let mut cfg = hermes_config::GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "baidu-coding".to_string(),
+            hermes_config::LlmProviderConfig {
+                models: vec!["kimi-k2.5".to_string(), "glm-5".to_string()],
+                discover_models: false,
+                ..hermes_config::LlmProviderConfig::default()
+            },
+        );
+
+        let providers = provider_slugs_for_config(&cfg);
+        assert!(providers.iter().any(|provider| provider == "baidu-coding"));
+
+        let entries = provider_catalog_entries_for_config(&cfg, 1).await;
+        let entry = entries
+            .iter()
+            .find(|entry| entry.provider == "baidu-coding")
+            .expect("custom provider entry");
+        assert_eq!(entry.models, vec!["kimi-k2.5"]);
+        assert_eq!(entry.total_models, 2);
     }
 
     #[tokio::test]

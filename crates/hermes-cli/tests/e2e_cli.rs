@@ -9,6 +9,39 @@ fn e2e_cli_model_command_prints_current_model() {
 }
 
 #[test]
+fn e2e_cli_model_command_lists_configured_custom_provider_models() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("config.yaml"),
+        r#"
+model: qianfan-coding:kimi-k2.5
+llm_providers:
+  qianfan-coding:
+    base_url: https://qianfan.baidubce.com/v2/coding
+    discover_models: false
+    models:
+      kimi-k2.5: {}
+      glm-5: {}
+"#,
+    )
+    .expect("write config");
+
+    let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
+    cmd.env("HERMES_HOME", dir.path());
+    cmd.arg("model");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let text = std::str::from_utf8(&out).expect("utf8");
+    assert!(
+        text.contains("qianfan-coding"),
+        "expected custom provider in model list: {text:?}"
+    );
+    assert!(
+        text.contains("kimi-k2.5") && text.contains("glm-5"),
+        "expected configured model subset in model list: {text:?}"
+    );
+}
+
+#[test]
 fn e2e_cli_gateway_status_command_runs() {
     let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
     cmd.args(["gateway", "status"]);
