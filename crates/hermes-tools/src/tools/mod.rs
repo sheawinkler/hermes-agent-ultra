@@ -18,6 +18,7 @@ pub mod dashboard_control;
 pub mod debug_helpers;
 pub mod delegation;
 pub mod env_passthrough;
+pub mod env_probe;
 pub mod feishu;
 pub mod file;
 pub mod fuzzy_match;
