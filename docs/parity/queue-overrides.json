@@ -64,6 +64,46 @@
       "disposition": "superseded",
       "notes": "The upstream per-task Morph instance cleanup/leakage patch is superseded by Rust's non-Morph terminal runtime plus task-scoped cwd registry. TerminalHandler tests now prove task_id isolation and explicit workdir precedence, so one task cannot inherit another task's terminal cwd context."
     },
+    "a5c7422f2315": {
+      "disposition": "superseded",
+      "notes": "Python embedded Hindsight .env setup is superseded by the Rust-only Hindsight runtime: it does not launch hindsight-embed, and legacy local/local_embedded config is normalized to local_external HTTP mode."
+    },
+    "d6b65bbc47cf": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight auto-retain builds structured turn JSON without ASCII escaping, and tests prove non-ASCII user and assistant content survives in the retained payload."
+    },
+    "127048e6430f": {
+      "disposition": "ported",
+      "notes": "Rust HindsightConfig accepts both apiKey and snake_case api_key from config.json, with regression coverage for the snake_case path."
+    },
+    "3e994e38f763": {
+      "disposition": "superseded",
+      "notes": "Hindsight profile env materialization only applies to the upstream Python embedded daemon; the Rust runtime now documents and exposes cloud/local_external HTTP modes only."
+    },
+    "df55660e3c3c": {
+      "disposition": "superseded",
+      "notes": "The unsupported-CPU guard is a Python import workaround for local embedded Hindsight; Rust Hindsight never imports that Python stack and normalizes embedded aliases to local_external."
+    },
+    "93a74f74bf93": {
+      "disposition": "superseded",
+      "notes": "The shared asyncio event-loop shutdown fix is Python-runtime-only; Rust Hindsight uses reqwest blocking clients per operation and has no provider-owned event loop to stop."
+    },
+    "403c82b6b65b": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight supports HINDSIGHT_TIMEOUT and config timeout/hindsight_timeout aliases with a 120s default and focused config coverage."
+    },
+    "f1ba2f0c0b06": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight request clients for auto-recall, auto-retain, and tool calls all use the configured timeout_secs value."
+    },
+    "f9c6c5ab8472": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight now creates a per-initialization document_id and includes it in auto-retain batch bodies, with tests proving resumed sessions get distinct document IDs."
+    },
+    "edff2fbe7efd": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight supports bank_id_template with profile/workspace/platform/user/session placeholders, sanitization tests, schema exposure, and README coverage."
+    },
     "395dbcc873c8": {
       "disposition": "superseded",
       "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"

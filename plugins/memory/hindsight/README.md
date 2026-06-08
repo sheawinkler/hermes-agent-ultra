@@ -1,90 +1,78 @@
 # Hindsight Memory Provider
 
-Long-term memory with knowledge graph, entity resolution, and multi-strategy retrieval. Supports cloud, local embedded, and local external modes.
+Rust-native long-term memory integration for Hindsight, with retain, recall, and
+reflect support over the Hindsight HTTP API.
 
-## Requirements
+Hermes Agent Ultra prefers ContextLattice as the primary memory backbone.
+Hindsight is an optional provider for deployments that explicitly choose a
+Hindsight cloud or self-hosted memory bank.
 
-- **Cloud:** API key from [ui.hindsight.vectorize.io](https://ui.hindsight.vectorize.io)
-- **Local Embedded:** API key for a supported LLM provider (OpenAI, Anthropic, Gemini, Groq, OpenRouter, MiniMax, Ollama, or any OpenAI-compatible endpoint). Embeddings and reranking run locally — no additional API keys needed.
-- **Local External:** A running Hindsight instance (Docker or self-hosted) reachable over HTTP.
+## Supported Modes
+
+- **Cloud:** Hindsight Cloud API. Requires `HINDSIGHT_API_KEY`.
+- **Local External:** A running Hindsight-compatible service reachable over HTTP,
+  such as a Docker or self-hosted instance.
+
+The Rust runtime does not launch or manage a Python embedded Hindsight daemon.
+Legacy `local` and `local_embedded` config values are accepted for compatibility
+and normalized to `local_external`; provide `api_url` or `HINDSIGHT_API_URL` for
+that service.
 
 ## Setup
 
 ```bash
-hermes memory setup    # select "hindsight"
+hermes memory setup
 ```
 
-The setup wizard will install dependencies automatically via `uv` and walk you through configuration.
+Manual cloud configuration:
 
-Or manually (cloud mode with defaults):
 ```bash
 hermes config set memory.provider hindsight
-echo "HINDSIGHT_API_KEY=your-key" >> ~/.hermes/.env
+echo "HINDSIGHT_API_KEY=your-key" >> ~/.hermes-agent-ultra/.env
 ```
 
-### Cloud
+Manual local-external configuration:
 
-Connects to the Hindsight Cloud API. Requires an API key from [ui.hindsight.vectorize.io](https://ui.hindsight.vectorize.io).
-
-### Local Embedded
-
-Hermes spins up a local Hindsight daemon with built-in PostgreSQL. Requires an LLM API key for memory extraction and synthesis. The daemon starts automatically in the background on first use and stops after 5 minutes of inactivity.
-
-Supports any OpenAI-compatible LLM endpoint (llama.cpp, vLLM, LM Studio, etc.) — pick `openai_compatible` as the provider and enter the base URL.
-
-Daemon startup logs: `~/.hermes/logs/hindsight-embed.log`
-Daemon runtime logs: `~/.hindsight/profiles/<profile>.log`
-
-To open the Hindsight web UI (local embedded mode only):
-```bash
-hindsight-embed -p hermes ui start
+```json
+{
+  "mode": "local_external",
+  "api_url": "http://localhost:8888",
+  "bank_id": "hermes"
+}
 ```
-
-### Local External
-
-Points the plugin at an existing Hindsight instance you're already running (Docker, self-hosted, etc.). No daemon management — just a URL and an optional API key.
 
 ## Config
 
-Config file: `~/.hermes/hindsight/config.json`
+Config file: `$HERMES_HOME/hindsight/config.json`; by default this is
+`~/.hermes-agent-ultra/hindsight/config.json`.
 
 ### Connection
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `mode` | `cloud` | `cloud`, `local_embedded`, or `local_external` |
-| `api_url` | `https://api.hindsight.vectorize.io` | API URL (cloud and local_external modes) |
+| `mode` | `cloud` | `cloud` or `local_external`; legacy `local`/`local_embedded` values normalize to `local_external` |
+| `api_url` | cloud API URL | Hindsight HTTP API endpoint |
+| `api_key` | env | Optional API key; `apiKey` is also accepted for compatibility |
+| `hindsight_timeout` | `120` | HTTP timeout in seconds; `timeout` and `HINDSIGHT_TIMEOUT` are also accepted |
 
 ### Memory Bank
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `bank_id` | `hermes` | Memory bank name (static fallback used when `bank_id_template` is unset or resolves empty) |
-| `bank_id_template` | — | Optional template to derive the bank name dynamically. Placeholders: `{profile}`, `{workspace}`, `{platform}`, `{user}`, `{session}`. Example: `hermes-{profile}` isolates memory per active Hermes profile. Empty placeholders collapse cleanly (e.g. `hermes-{user}` with no user becomes `hermes`). |
-| `bank_mission` | — | Reflect mission (identity/framing for reflect reasoning). Applied via Banks API. |
-| `bank_retain_mission` | — | Retain mission (steers what gets extracted). Applied via Banks API. |
+| `bank_id` | `hermes` | Static memory bank fallback |
+| `bank_id_template` | empty | Optional dynamic bank template with `{profile}`, `{workspace}`, `{platform}`, `{user}`, and `{session}` placeholders |
 
 ### Recall
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `recall_budget` | `mid` | Recall thoroughness: `low` / `mid` / `high` |
-| `recall_prefetch_method` | `recall` | Auto-recall method: `recall` (raw facts) or `reflect` (LLM synthesis) |
-| `recall_max_tokens` | `4096` | Maximum tokens for recall results |
+| `recall_budget` | `mid` | Recall thoroughness: `low`, `mid`, or `high` |
+| `recall_prefetch_method` | `recall` | Auto-prefetch method: `recall` or `reflect` |
+| `recall_max_tokens` | `4096` | Maximum tokens requested for recall results |
 | `recall_max_input_chars` | `800` | Maximum input query length for auto-recall |
-| `recall_prompt_preamble` | — | Custom preamble for recalled memories in context |
-| `recall_tags` | — | Tags to filter when searching memories |
-| `recall_tags_match` | `any` | Tag matching mode: `any` / `all` / `any_strict` / `all_strict` |
-| `recall_types` | `observation` | Fact types surfaced by recall (both auto-recall and the `hindsight_recall` tool). Comma-separated string or JSON list. **Default narrowed to `observation` only** (see "Behavior change" below). Set to `observation,world,experience` to also include raw facts. |
+| `recall_prompt_preamble` | empty | Custom preamble for recalled memories injected into context |
+| `recall_types` | `observation` | Fact types surfaced by recall; comma-separated string or JSON list |
 | `auto_recall` | `true` | Automatically recall memories before each turn |
-
-> **Behavior change — `recall_types` defaults to `observation` only.**
->
-> Previously recall returned all three fact types. It now returns only observations.
->
-> Per [Hindsight's docs](https://hindsight.vectorize.io/developer/observations), observations are the **consolidated** knowledge layer Hindsight builds on top of raw facts: deduplicated beliefs grounded in evidence, refined as new facts arrive, with proof counts and freshness signals. Raw `world` / `experience` facts are the individual supporting evidence that feeds them. For per-turn context injection, observations are denser per token and avoid feeding the model multiple raw facts that one observation already summarizes.
->
-> Restore the broad recall with `"recall_types": "observation,world,experience"` (string or JSON list) in `~/.hermes/hindsight/config.json`. This applies to **both** auto-recall and the `hindsight_recall` tool — both read the same `recall_types` setting (the tool schema has no per-call `types` argument), so narrowing the default narrows both paths.
 
 ### Retain
 
@@ -92,33 +80,22 @@ Config file: `~/.hermes/hindsight/config.json`
 |-----|---------|-------------|
 | `auto_retain` | `true` | Automatically retain conversation turns |
 | `retain_async` | `true` | Process retain asynchronously on the Hindsight server |
-| `retain_every_n_turns` | `1` | Retain every N turns (1 = every turn) |
+| `retain_every_n_turns` | `1` | Retain every N turns |
 | `retain_context` | `conversation between Hermes Agent and the User` | Context label for retained memories |
-| `retain_tags` | — | Default tags applied to retained memories; merged with per-call tool tags |
-| `retain_source` | — | Optional `metadata.source` attached to retained memories |
-| `retain_user_prefix` | `User` | Label used before user turns in auto-retained transcripts |
-| `retain_assistant_prefix` | `Assistant` | Label used before assistant turns in auto-retained transcripts |
+
+Automatically retained turns are serialized as structured JSON and sent with a
+per-initialization `document_id` so resumed sessions append to a fresh process
+document instead of overwriting prior retained content.
 
 ### Integration
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `memory_mode` | `hybrid` | How memories are integrated into the agent |
+| `memory_mode` | `hybrid` | `hybrid`, `context`, or `tools` |
 
-**memory_mode:**
-- `hybrid` — automatic context injection + tools available to the LLM
-- `context` — automatic injection only, no tools exposed
-- `tools` — tools only, no automatic injection
-
-### Local Embedded LLM
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `llm_provider` | `openai` | `openai`, `anthropic`, `gemini`, `groq`, `openrouter`, `minimax`, `ollama`, `lmstudio`, `openai_compatible` |
-| `llm_model` | per-provider | Model name (e.g. `gpt-4o-mini`, `qwen/qwen3.5-9b`) |
-| `llm_base_url` | — | Endpoint URL for `openai_compatible` (e.g. `http://192.168.1.10:8080/v1`) |
-
-The LLM API key is stored in `~/.hermes/.env` as `HINDSIGHT_LLM_API_KEY`.
+`hybrid` injects automatic recall context and exposes tools. `context` injects
+automatic recall context without tools. `tools` exposes tools without automatic
+context injection.
 
 ## Tools
 
@@ -126,22 +103,18 @@ Available in `hybrid` and `tools` memory modes:
 
 | Tool | Description |
 |------|-------------|
-| `hindsight_retain` | Store information with auto entity extraction; supports optional per-call `tags` |
-| `hindsight_recall` | Multi-strategy search (semantic + entity graph) |
-| `hindsight_reflect` | Cross-memory synthesis (LLM-powered) |
+| `hindsight_retain` | Store a memory with optional `context` |
+| `hindsight_recall` | Multi-strategy memory search |
+| `hindsight_reflect` | Cross-memory synthesis |
 
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `HINDSIGHT_API_KEY` | API key for Hindsight Cloud |
-| `HINDSIGHT_LLM_API_KEY` | LLM API key for local mode |
-| `HINDSIGHT_API_LLM_BASE_URL` | LLM Base URL for local mode (e.g. OpenRouter) |
+| `HINDSIGHT_API_KEY` | API key for Hindsight Cloud or protected local services |
 | `HINDSIGHT_API_URL` | Override API endpoint |
 | `HINDSIGHT_BANK_ID` | Override bank name |
+| `HINDSIGHT_BANK_ID_TEMPLATE` | Dynamic bank template |
 | `HINDSIGHT_BUDGET` | Override recall budget |
-| `HINDSIGHT_MODE` | Override mode (`cloud`, `local_embedded`, `local_external`) |
-
-## Client Version
-
-Requires `hindsight-client >= 0.4.22`. The plugin auto-upgrades on session start if an older version is detected.
+| `HINDSIGHT_MODE` | Override mode (`cloud` or `local_external`; legacy local values normalize to `local_external`) |
+| `HINDSIGHT_TIMEOUT` | HTTP timeout in seconds |

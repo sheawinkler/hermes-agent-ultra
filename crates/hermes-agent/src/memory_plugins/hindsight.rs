@@ -13,8 +13,9 @@
 //!   - `HINDSIGHT_MODE` (default: "cloud")
 //!   - `$HERMES_HOME/hindsight/config.json` overrides
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
@@ -25,7 +26,9 @@ use crate::memory_plugins::config_io;
 const DEFAULT_API_URL: &str = "https://api.hindsight.vectorize.io";
 const DEFAULT_LOCAL_URL: &str = "http://localhost:8888";
 const DEFAULT_RECALL_TYPE: &str = "observation";
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
 const VALID_BUDGETS: &[&str] = &["low", "mid", "high"];
+static DOCUMENT_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -125,7 +128,8 @@ impl HindsightConfig {
             timeout_secs: std::env::var("HINDSIGHT_TIMEOUT")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(90),
+                .map(|v| v.max(1))
+                .unwrap_or(DEFAULT_TIMEOUT_SECS),
         };
 
         // Try profile-scoped config first, then legacy path
@@ -231,17 +235,14 @@ impl HindsightConfig {
             }
         }
 
+        config.mode = normalize_hindsight_mode(&config.mode);
+
         // Apply defaults for api_url based on mode
         if config.api_url.is_empty() {
             config.api_url = match config.mode.as_str() {
-                "local_embedded" | "local_external" | "local" => DEFAULT_LOCAL_URL.to_string(),
+                "local_external" => DEFAULT_LOCAL_URL.to_string(),
                 _ => DEFAULT_API_URL.to_string(),
             };
-        }
-
-        // Normalize "local" → "local_embedded"
-        if config.mode == "local" {
-            config.mode = "local_embedded".to_string();
         }
 
         config
@@ -256,6 +257,7 @@ impl HindsightConfig {
 pub struct HindsightPlugin {
     config: Mutex<Option<HindsightConfig>>,
     session_id: Mutex<String>,
+    document_id: Mutex<String>,
     prefetch_result: Arc<Mutex<String>>,
     turn_counter: Mutex<u32>,
     session_turns: Mutex<Vec<String>>,
@@ -266,6 +268,7 @@ impl HindsightPlugin {
         Self {
             config: Mutex::new(None),
             session_id: Mutex::new(String::new()),
+            document_id: Mutex::new(String::new()),
             prefetch_result: Arc::new(Mutex::new(String::new())),
             turn_counter: Mutex::new(0),
             session_turns: Mutex::new(Vec::new()),
@@ -290,19 +293,31 @@ impl MemoryProviderPlugin for HindsightPlugin {
     fn is_available(&self) -> bool {
         let api_key = std::env::var("HINDSIGHT_API_KEY").unwrap_or_default();
         let api_url = std::env::var("HINDSIGHT_API_URL").unwrap_or_default();
-        let mode = std::env::var("HINDSIGHT_MODE").unwrap_or_default();
-        if matches!(mode.as_str(), "local" | "local_embedded" | "local_external") {
+        let mode = normalize_hindsight_mode(&std::env::var("HINDSIGHT_MODE").unwrap_or_default());
+        if mode == "local_external" {
+            return true;
+        }
+        let config_path = config_io::default_hermes_home()
+            .join("hindsight")
+            .join("config.json");
+        let config = config_io::read_json_object(&config_path);
+        if config
+            .get("mode")
+            .and_then(Value::as_str)
+            .map(normalize_hindsight_mode)
+            .is_some_and(|mode| mode == "local_external")
+        {
             return true;
         }
         // Cloud mode requires credentials (or explicit API URL for self-hosted).
         !api_key.is_empty()
             || !api_url.is_empty()
-            || config_io::json_file_has_nonempty_string(
-                &config_io::default_hermes_home()
-                    .join("hindsight")
-                    .join("config.json"),
-                &["api_key", "apiKey", "api_url"],
-            )
+            || ["api_key", "apiKey", "api_url"].iter().any(|key| {
+                config
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.trim().is_empty())
+            })
     }
 
     fn initialize(&self, session_id: &str, hermes_home: &str) {
@@ -336,6 +351,7 @@ impl MemoryProviderPlugin for HindsightPlugin {
             config.memory_mode
         );
         *self.session_id.lock().unwrap() = session_id.to_string();
+        *self.document_id.lock().unwrap() = scoped_document_id(session_id);
         *self.turn_counter.lock().unwrap() = 0;
         self.session_turns.lock().unwrap().clear();
         *self.config.lock().unwrap() = Some(config);
@@ -485,16 +501,13 @@ impl MemoryProviderPlugin for HindsightPlugin {
         }
 
         let now = chrono::Utc::now().to_rfc3339();
-        let turn = json!([
-            {"role": "user", "content": user_content, "timestamp": &now},
-            {"role": "assistant", "content": assistant_content, "timestamp": &now},
-        ])
-        .to_string();
+        let turn = hindsight_turn_payload(user_content, assistant_content, &now);
 
         self.session_turns.lock().unwrap().push(turn);
 
         let cfg = config.clone();
         let sid = session_id.to_string();
+        let document_id = self.document_id.lock().unwrap().clone();
         let content = {
             let mut turns = self.session_turns.lock().unwrap();
             let joined = turns.join(",");
@@ -516,10 +529,12 @@ impl MemoryProviderPlugin for HindsightPlugin {
             let base = cfg.api_url.trim_end_matches('/').to_string();
             let bank = urlencode_path(&cfg.bank_id);
             let url = format!("{}/v1/default/banks/{}/memories", base, bank);
-            let body = json!({
-                "items": [{"content": content, "context": cfg.retain_context}],
-                "async": cfg.retain_async,
-            });
+            let body = hindsight_sync_turn_body(
+                &content,
+                &cfg.retain_context,
+                cfg.retain_async,
+                nonempty_str(&document_id),
+            );
             let mut req = client.post(&url).json(&body);
             if !cfg.api_key.is_empty() {
                 req = req.bearer_auth(&cfg.api_key);
@@ -634,12 +649,12 @@ impl MemoryProviderPlugin for HindsightPlugin {
 
     fn get_config_schema(&self) -> Option<Value> {
         Some(json!([
-            {"key": "mode", "description": "Connection mode", "default": "cloud", "choices": ["cloud", "local_embedded", "local_external"]},
+            {"key": "mode", "description": "Connection mode. Legacy local/local_embedded values are treated as local_external in the Rust runtime.", "default": "cloud", "choices": ["cloud", "local_external"]},
             {"key": "api_url", "description": "Hindsight API URL", "default": DEFAULT_API_URL},
             {"key": "api_key", "description": "Hindsight API key", "secret": true, "env_var": "HINDSIGHT_API_KEY", "url": "https://ui.hindsight.vectorize.io"},
             {"key": "bank_id", "description": "Memory bank name", "default": "hermes"},
             {"key": "bank_id_template", "description": "Optional dynamic bank template with placeholders: {profile}, {workspace}, {platform}, {user}, {session}", "default": ""},
-            {"key": "hindsight_timeout", "description": "HTTP timeout in seconds", "default": 90},
+            {"key": "hindsight_timeout", "description": "HTTP timeout in seconds", "default": DEFAULT_TIMEOUT_SECS},
             {"key": "recall_budget", "description": "Recall thoroughness", "default": "mid", "choices": ["low", "mid", "high"]},
             {"key": "recall_types", "description": "Fact types returned by recall", "default": DEFAULT_RECALL_TYPE},
             {"key": "memory_mode", "description": "Memory integration mode", "default": "hybrid", "choices": ["hybrid", "context", "tools"]}
@@ -651,6 +666,37 @@ impl MemoryProviderPlugin for HindsightPlugin {
             .join("hindsight")
             .join("config.json");
         config_io::merge_and_write_owner_only(&path, config)
+    }
+}
+
+fn normalize_hindsight_mode(mode: &str) -> String {
+    match mode.trim() {
+        "local" | "local_embedded" => "local_external".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn nonempty_str(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn scoped_document_id(session_id: &str) -> String {
+    let counter = DOCUMENT_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let started_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let suffix = format!("{}-{}-{}", std::process::id(), started_at, counter);
+    let session = session_id.trim();
+    if session.is_empty() {
+        suffix
+    } else {
+        format!("{}-{}", session, suffix)
     }
 }
 
@@ -760,6 +806,30 @@ fn hindsight_recall_body(
         "max_tokens": max_tokens,
         "types": recall_types,
     })
+}
+
+fn hindsight_turn_payload(user_content: &str, assistant_content: &str, timestamp: &str) -> String {
+    json!([
+        {"role": "user", "content": user_content, "timestamp": timestamp},
+        {"role": "assistant", "content": assistant_content, "timestamp": timestamp},
+    ])
+    .to_string()
+}
+
+fn hindsight_sync_turn_body(
+    content: &str,
+    context: &str,
+    async_mode: bool,
+    document_id: Option<&str>,
+) -> Value {
+    let mut body = json!({
+        "items": [{"content": content, "context": context}],
+        "async": async_mode,
+    });
+    if let Some(document_id) = document_id {
+        body["document_id"] = json!(document_id);
+    }
+    body
 }
 
 struct HindsightRecallRequest<'a> {
@@ -896,6 +966,12 @@ mod tests {
             std::env::set_var(key, value);
             Self { key, previous }
         }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
     }
 
     impl Drop for EnvGuard {
@@ -949,7 +1025,7 @@ mod tests {
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
-            timeout_secs: 90,
+            timeout_secs: DEFAULT_TIMEOUT_SECS,
         });
         assert!(plugin.get_tool_schemas().is_empty());
     }
@@ -976,7 +1052,7 @@ mod tests {
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
-            timeout_secs: 90,
+            timeout_secs: DEFAULT_TIMEOUT_SECS,
         };
 
         *plugin.config.lock().unwrap() = Some(make_config("hybrid"));
@@ -1076,5 +1152,120 @@ mod tests {
             &[("profile", "p1".to_string())],
         );
         assert_eq!(bank, "fallback-bank");
+    }
+
+    fn write_hindsight_config(hermes_home: &std::path::Path, value: &Value) {
+        let path = hermes_home.join("hindsight").join("config.json");
+        std::fs::create_dir_all(path.parent().expect("config parent")).expect("mkdir config");
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(value).expect("serialize config"),
+        )
+        .expect("write config");
+    }
+
+    #[test]
+    fn test_config_accepts_snake_case_api_key_and_timeout_aliases() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let _api_key = EnvGuard::remove("HINDSIGHT_API_KEY");
+        let _api_url = EnvGuard::remove("HINDSIGHT_API_URL");
+        let _bank_id = EnvGuard::remove("HINDSIGHT_BANK_ID");
+        let _mode = EnvGuard::remove("HINDSIGHT_MODE");
+        let _timeout = EnvGuard::remove("HINDSIGHT_TIMEOUT");
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_hindsight_config(
+            tmp.path(),
+            &json!({"mode": "cloud", "api_key": "snake-secret", "timeout": 42}),
+        );
+        let cfg = HindsightConfig::load(tmp.path().to_str().expect("tmp path"));
+        assert_eq!(cfg.api_key, "snake-secret");
+        assert_eq!(cfg.timeout_secs, 42);
+
+        write_hindsight_config(
+            tmp.path(),
+            &json!({"mode": "cloud", "apiKey": "camel-secret", "hindsight_timeout": 17}),
+        );
+        let cfg = HindsightConfig::load(tmp.path().to_str().expect("tmp path"));
+        assert_eq!(cfg.api_key, "camel-secret");
+        assert_eq!(cfg.timeout_secs, 17);
+    }
+
+    #[test]
+    fn test_config_uses_env_timeout_and_normalizes_legacy_local_mode() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let _api_key = EnvGuard::remove("HINDSIGHT_API_KEY");
+        let _api_url = EnvGuard::remove("HINDSIGHT_API_URL");
+        let _bank_id = EnvGuard::remove("HINDSIGHT_BANK_ID");
+        let _mode = EnvGuard::set("HINDSIGHT_MODE", "local_embedded");
+        let _timeout = EnvGuard::set("HINDSIGHT_TIMEOUT", "77");
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_hindsight_config(tmp.path(), &json!({}));
+
+        let cfg = HindsightConfig::load(tmp.path().to_str().expect("tmp path"));
+        assert_eq!(cfg.mode, "local_external");
+        assert_eq!(cfg.api_url, DEFAULT_LOCAL_URL);
+        assert_eq!(cfg.timeout_secs, 77);
+    }
+
+    #[test]
+    fn test_available_with_local_external_config_mode() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _ultra_home = EnvGuard::remove("HERMES_AGENT_ULTRA_HOME");
+        let _api_key = EnvGuard::remove("HINDSIGHT_API_KEY");
+        let _api_url = EnvGuard::remove("HINDSIGHT_API_URL");
+        let _mode = EnvGuard::remove("HINDSIGHT_MODE");
+
+        write_hindsight_config(tmp.path(), &json!({"mode": "local_external"}));
+
+        assert!(HindsightPlugin::new().is_available());
+    }
+
+    #[test]
+    fn test_turn_payload_preserves_non_ascii_and_document_id() {
+        let turn =
+            hindsight_turn_payload("Café 東京 🚀", "Zażółć gęślą jaźń", "2026-06-08T00:00:00Z");
+        assert!(turn.contains("Café 東京 🚀"));
+        assert!(turn.contains("Zażółć gęślą jaźń"));
+        assert!(!turn.contains("\\u"));
+
+        let parsed: Value = serde_json::from_str(&turn).expect("turn json");
+        assert_eq!(parsed[0]["role"], "user");
+        assert_eq!(parsed[0]["content"], "Café 東京 🚀");
+        assert_eq!(parsed[1]["role"], "assistant");
+        assert_eq!(parsed[1]["content"], "Zażółć gęślą jaźń");
+
+        let content = format!("[{}]", turn);
+        let body = hindsight_sync_turn_body(&content, "conversation", false, Some("session-1-doc"));
+        assert_eq!(body["async"], false);
+        assert_eq!(body["document_id"], "session-1-doc");
+        assert_eq!(body["items"][0]["content"], content);
+        assert_eq!(body["items"][0]["context"], "conversation");
+    }
+
+    #[test]
+    fn test_initialize_scopes_document_id_per_lifecycle() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let _api_key = EnvGuard::remove("HINDSIGHT_API_KEY");
+        let _api_url = EnvGuard::remove("HINDSIGHT_API_URL");
+        let _bank_id = EnvGuard::remove("HINDSIGHT_BANK_ID");
+        let _mode = EnvGuard::remove("HINDSIGHT_MODE");
+        let _timeout = EnvGuard::remove("HINDSIGHT_TIMEOUT");
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write_hindsight_config(tmp.path(), &json!({"mode": "cloud", "api_key": "test"}));
+
+        let plugin = HindsightPlugin::new();
+        plugin.initialize("session-1", tmp.path().to_str().expect("tmp path"));
+        let first = plugin.document_id.lock().unwrap().clone();
+        plugin.initialize("session-1", tmp.path().to_str().expect("tmp path"));
+        let second = plugin.document_id.lock().unwrap().clone();
+
+        assert!(first.starts_with("session-1-"));
+        assert!(second.starts_with("session-1-"));
+        assert_ne!(first, second);
     }
 }
