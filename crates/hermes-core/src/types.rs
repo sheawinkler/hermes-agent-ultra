@@ -220,6 +220,24 @@ impl Message {
             cache_control: None,
         }
     }
+
+    /// Create a tool result message with the originating tool name.
+    pub fn tool_result_with_name(
+        tool_call_id: impl Into<String>,
+        name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        let name = name.into();
+        Self {
+            role: MessageRole::Tool,
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.into()),
+            name: (!name.trim().is_empty()).then_some(name),
+            reasoning_content: None,
+            cache_control: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -537,6 +555,12 @@ mod tests {
 
         let err = ToolResult::err("call_2", "failed");
         assert!(err.is_error);
+
+        let msg = Message::tool_result_with_name("call_3", "terminal", "stdout");
+        assert_eq!(msg.role, MessageRole::Tool);
+        assert_eq!(msg.tool_call_id.as_deref(), Some("call_3"));
+        assert_eq!(msg.name.as_deref(), Some("terminal"));
+        assert_eq!(msg.content.as_deref(), Some("stdout"));
     }
 
     #[test]

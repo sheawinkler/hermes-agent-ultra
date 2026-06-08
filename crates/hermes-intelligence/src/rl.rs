@@ -7,9 +7,16 @@
 use chrono::{DateTime, Utc};
 use hermes_core::{Message, ToolCall};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use serde_json::{Map, Value};
+use std::collections::{HashMap, HashSet};
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
+
+static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 // ---------------------------------------------------------------------------
 // TrajectoryOutcome
@@ -76,7 +83,7 @@ impl TrajectoryCompressor {
         for (i, msg) in trajectory.messages.iter().enumerate() {
             let is_first = i == 0;
             let is_last = i == last_idx;
-            let has_tool_calls = msg.tool_calls.as_ref().map_or(false, |tc| !tc.is_empty());
+            let has_tool_calls = msg.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty());
 
             if is_first || is_last || has_tool_calls {
                 compressed_messages.push(msg.clone());
@@ -174,6 +181,717 @@ impl BatchGenerator {
             model
         )
     }
+}
+
+// ---------------------------------------------------------------------------
+// Runtime RL training surface
+// ---------------------------------------------------------------------------
+
+/// Runtime status for a training run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrainingStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Stopped,
+}
+
+/// User-editable training configuration for the Rust RL control surface.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrainingConfig {
+    pub algo: String,
+    pub learning_rate: f64,
+    pub batch_size: usize,
+    pub max_steps: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reward_model: Option<String>,
+}
+
+impl Default for TrainingConfig {
+    fn default() -> Self {
+        Self {
+            algo: "ppo".to_string(),
+            learning_rate: 1e-5,
+            batch_size: 32,
+            max_steps: 1_000,
+            reward_model: None,
+        }
+    }
+}
+
+/// Progress metrics reported by the local RL run manager.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TrainingMetrics {
+    pub total_steps: usize,
+    pub current_step: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reward_mean: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reward_std: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loss: Option<f64>,
+}
+
+/// A supported RL environment descriptor exposed by `rl_list_environments`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RlEnvironment {
+    pub name: String,
+    pub description: String,
+    pub config_schema: serde_json::Value,
+}
+
+impl RlEnvironment {
+    pub fn builtin_environments() -> Vec<Self> {
+        vec![
+            Self {
+                name: "tinker".to_string(),
+                description: "Local Tinker-style text and tool-use rollouts".to_string(),
+                config_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "algo": {"type": "string", "enum": ["ppo", "dpo", "grpo"]},
+                        "learning_rate": {"type": "number"},
+                        "batch_size": {"type": "integer", "minimum": 1},
+                        "max_steps": {"type": "integer", "minimum": 1}
+                    }
+                }),
+            },
+            Self {
+                name: "atropos".to_string(),
+                description: "Atropos-compatible agentic environment metadata".to_string(),
+                config_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "task_family": {"type": "string"},
+                        "reward_model": {"type": "string"},
+                        "max_steps": {"type": "integer", "minimum": 1}
+                    }
+                }),
+            },
+            Self {
+                name: "custom".to_string(),
+                description: "Custom local RL environment configured by the caller".to_string(),
+                config_schema: serde_json::json!({"type": "object"}),
+            },
+        ]
+    }
+}
+
+/// A single tracked training run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrainingRun {
+    pub id: String,
+    pub environment: String,
+    pub status: TrainingStatus,
+    pub config: TrainingConfig,
+    pub metrics: TrainingMetrics,
+    pub started_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<DateTime<Utc>>,
+}
+
+/// In-process run manager used by the Rust `rl_*` tools.
+pub struct RunManager {
+    pub data_dir: PathBuf,
+    runs: HashMap<String, TrainingRun>,
+}
+
+impl RunManager {
+    pub fn new(data_dir: PathBuf) -> Self {
+        Self {
+            data_dir,
+            runs: HashMap::new(),
+        }
+    }
+
+    pub fn create_run(&mut self, environment: &str, config: TrainingConfig) -> String {
+        let id = generate_run_id();
+        let run = TrainingRun {
+            id: id.clone(),
+            environment: environment.to_string(),
+            status: TrainingStatus::Pending,
+            metrics: TrainingMetrics {
+                total_steps: config.max_steps,
+                ..TrainingMetrics::default()
+            },
+            config,
+            started_at: Utc::now(),
+            finished_at: None,
+        };
+        self.runs.insert(id.clone(), run);
+        id
+    }
+
+    pub fn get_run(&self, id: &str) -> Option<&TrainingRun> {
+        self.runs.get(id)
+    }
+
+    pub fn get_run_mut(&mut self, id: &str) -> Option<&mut TrainingRun> {
+        self.runs.get_mut(id)
+    }
+
+    pub fn list_runs(&self) -> Vec<&TrainingRun> {
+        let mut runs: Vec<_> = self.runs.values().collect();
+        runs.sort_by(|a, b| {
+            b.started_at
+                .cmp(&a.started_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
+        runs
+    }
+
+    pub fn set_status(&mut self, id: &str, status: TrainingStatus) -> bool {
+        if let Some(run) = self.runs.get_mut(id) {
+            if matches!(
+                status,
+                TrainingStatus::Completed | TrainingStatus::Failed | TrainingStatus::Stopped
+            ) {
+                run.finished_at = Some(Utc::now());
+            }
+            run.status = status;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn update_metrics(&mut self, id: &str, metrics: TrainingMetrics) -> bool {
+        if let Some(run) = self.runs.get_mut(id) {
+            run.metrics = metrics;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn generate_run_id() -> String {
+    static RUN_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+    let seq = RUN_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("run-{}-{seq:04}", Utc::now().timestamp_millis())
+}
+
+/// Configuration for deterministic batch inference smoke paths.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchRunnerConfig {
+    pub max_parallel_jobs: usize,
+    pub max_turns: usize,
+}
+
+impl Default for BatchRunnerConfig {
+    fn default() -> Self {
+        Self {
+            max_parallel_jobs: 4,
+            max_turns: 32,
+        }
+    }
+}
+
+/// Minimal trajectory emitted by the offline batch runner.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BatchTrajectory {
+    pub id: String,
+    pub prompt: String,
+    pub response: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BatchRunner {
+    config: BatchRunnerConfig,
+}
+
+impl BatchRunner {
+    pub fn new(config: BatchRunnerConfig) -> Self {
+        Self { config }
+    }
+
+    pub fn config(&self) -> &BatchRunnerConfig {
+        &self.config
+    }
+
+    /// Generate deterministic local trajectories without model credentials.
+    pub fn generate_batch(&self, prompts: &[String]) -> Vec<BatchTrajectory> {
+        prompts
+            .iter()
+            .enumerate()
+            .map(|(idx, prompt)| BatchTrajectory {
+                id: format!("traj-{}", idx + 1),
+                prompt: prompt.clone(),
+                response: build_baseline_response(prompt, self.config.max_turns),
+                created_at: Utc::now(),
+            })
+            .collect()
+    }
+
+    pub fn generate_stub(&self, prompts: &[String]) -> Vec<BatchTrajectory> {
+        self.generate_batch(prompts)
+    }
+}
+
+fn build_baseline_response(prompt: &str, max_turns: usize) -> String {
+    let lower = prompt.to_lowercase();
+    let style = if lower.contains("bug") || lower.contains("fix") {
+        "diagnostic"
+    } else if lower.contains("plan") || lower.contains("strategy") {
+        "planning"
+    } else if lower.contains("test") || lower.contains("verify") {
+        "verification"
+    } else {
+        "general"
+    };
+    format!(
+        "[baseline-{style}] steps_budget={max_turns}; response: {}",
+        prompt.chars().take(180).collect::<String>()
+    )
+}
+
+/// Dataset row accepted by the Rust batch runner.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BatchDatasetItem {
+    pub prompt_index: usize,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub metadata: Map<String, Value>,
+}
+
+/// Per-batch checkpoint counters.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchCheckpointStats {
+    pub processed: usize,
+    pub skipped: usize,
+}
+
+/// Resume checkpoint for deterministic batch generation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BatchRunCheckpoint {
+    pub run_name: String,
+    #[serde(default)]
+    pub completed_prompts: Vec<usize>,
+    #[serde(default)]
+    pub completed_prompt_texts: Vec<String>,
+    #[serde(default)]
+    pub batch_stats: HashMap<String, BatchCheckpointStats>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_updated: Option<DateTime<Utc>>,
+}
+
+impl BatchRunCheckpoint {
+    pub fn new(run_name: impl Into<String>) -> Self {
+        Self {
+            run_name: run_name.into(),
+            completed_prompts: Vec::new(),
+            completed_prompt_texts: Vec::new(),
+            batch_stats: HashMap::new(),
+            last_updated: None,
+        }
+    }
+
+    pub fn from_json(raw: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(raw)
+    }
+
+    pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    pub fn load_from_path(path: impl AsRef<Path>) -> io::Result<Option<Self>> {
+        let path = path.as_ref();
+        match fs::read_to_string(path) {
+            Ok(raw) => serde_json::from_str(&raw)
+                .map(Some)
+                .map_err(invalid_data_error),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn load_or_new_for_run(
+        path: impl AsRef<Path>,
+        run_name: impl Into<String>,
+    ) -> io::Result<Self> {
+        let run_name = run_name.into();
+        match Self::load_from_path(path) {
+            Ok(Some(checkpoint)) if checkpoint.run_name == run_name => Ok(checkpoint),
+            Ok(Some(_)) | Ok(None) => Ok(Self::new(run_name)),
+            Err(err) if err.kind() == io::ErrorKind::InvalidData => Ok(Self::new(run_name)),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn save_atomic_to_path(&self, path: impl AsRef<Path>) -> io::Result<()> {
+        atomic_json_write(path, self)
+    }
+}
+
+pub fn atomic_json_write<T: Serialize>(path: impl AsRef<Path>, value: &T) -> io::Result<()> {
+    let path = path.as_ref();
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("checkpoint.json");
+    let unique = ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_path = parent.join(format!(
+        ".{file_name}.tmp.{}.{}.{}",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        unique
+    ));
+
+    let write_result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)?;
+        serde_json::to_writer_pretty(&mut file, value).map_err(invalid_data_error)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp_path, path)?;
+        if let Ok(dir) = fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    write_result
+}
+
+fn invalid_data_error(err: serde_json::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, err)
+}
+
+/// Batch dataset runner configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BatchDatasetRunConfig {
+    pub run_name: String,
+    pub batch_size: usize,
+    pub distribution: String,
+    pub model: String,
+    pub max_turns: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_samples: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ephemeral_system_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_toolsets: Vec<String>,
+}
+
+impl Default for BatchDatasetRunConfig {
+    fn default() -> Self {
+        Self {
+            run_name: "default".to_string(),
+            batch_size: 10,
+            distribution: "default".to_string(),
+            model: "baseline-local".to_string(),
+            max_turns: 10,
+            max_samples: None,
+            ephemeral_system_prompt: None,
+            selected_toolsets: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchToolStats {
+    pub count: usize,
+    pub success: usize,
+    pub failure: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BatchTrajectoryEntry {
+    pub prompt_index: usize,
+    pub conversations: Vec<Message>,
+    pub trajectory: BatchTrajectory,
+    pub completed: bool,
+    pub partial: bool,
+    pub api_calls: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub toolsets_used: Vec<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub tool_stats: HashMap<String, BatchToolStats>,
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BatchRunStatistics {
+    pub run_name: String,
+    pub distribution: String,
+    pub total_prompts: usize,
+    pub total_batches: usize,
+    pub batch_size: usize,
+    pub model: String,
+    pub processed: usize,
+    pub skipped: usize,
+    #[serde(default)]
+    pub checkpoints_written: usize,
+    pub ephemeral_system_prompt_used: bool,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub tool_statistics: HashMap<String, BatchToolStats>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BatchRunReport {
+    pub trajectories: Vec<BatchTrajectoryEntry>,
+    pub checkpoint: BatchRunCheckpoint,
+    pub statistics: BatchRunStatistics,
+}
+
+impl BatchRunReport {
+    pub fn trajectories_jsonl(&self) -> Result<String, serde_json::Error> {
+        let mut lines = Vec::with_capacity(self.trajectories.len());
+        for trajectory in &self.trajectories {
+            lines.push(serde_json::to_string(trajectory)?);
+        }
+        Ok(lines.join("\n"))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BatchDatasetRunner;
+
+impl BatchDatasetRunner {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn run(
+        &self,
+        dataset: &[BatchDatasetItem],
+        config: &BatchDatasetRunConfig,
+        checkpoint: Option<BatchRunCheckpoint>,
+    ) -> BatchRunReport {
+        self.run_internal(dataset, config, checkpoint, None)
+            .expect("in-memory batch dataset run cannot fail")
+    }
+
+    pub fn run_with_checkpoint_path(
+        &self,
+        dataset: &[BatchDatasetItem],
+        config: &BatchDatasetRunConfig,
+        checkpoint_path: impl AsRef<Path>,
+    ) -> io::Result<BatchRunReport> {
+        let checkpoint_path = checkpoint_path.as_ref();
+        let checkpoint =
+            BatchRunCheckpoint::load_or_new_for_run(checkpoint_path, &config.run_name)?;
+        self.run_internal(dataset, config, Some(checkpoint), Some(checkpoint_path))
+    }
+
+    fn run_internal(
+        &self,
+        dataset: &[BatchDatasetItem],
+        config: &BatchDatasetRunConfig,
+        checkpoint: Option<BatchRunCheckpoint>,
+        checkpoint_path: Option<&Path>,
+    ) -> io::Result<BatchRunReport> {
+        let batch_size = config.batch_size.max(1);
+        let limit = config
+            .max_samples
+            .unwrap_or(dataset.len())
+            .min(dataset.len());
+        let items = &dataset[..limit];
+        let total_batches = if items.is_empty() {
+            0
+        } else {
+            items.len().div_ceil(batch_size)
+        };
+
+        let mut checkpoint =
+            checkpoint.unwrap_or_else(|| BatchRunCheckpoint::new(&config.run_name));
+        if checkpoint.run_name != config.run_name {
+            checkpoint = BatchRunCheckpoint::new(&config.run_name);
+        }
+        let completed_indices: HashSet<usize> =
+            checkpoint.completed_prompts.iter().copied().collect();
+        let completed_texts: HashSet<String> =
+            checkpoint.completed_prompt_texts.iter().cloned().collect();
+
+        let runner = BatchRunner::new(BatchRunnerConfig {
+            max_parallel_jobs: 1,
+            max_turns: config.max_turns,
+        });
+        let mut trajectories = Vec::new();
+        let mut completed = completed_indices;
+        let mut completed_prompt_texts = completed_texts;
+        let mut total_skipped = 0usize;
+        let mut total_processed = 0usize;
+        let mut checkpoints_written = 0usize;
+        let mut tool_statistics: HashMap<String, BatchToolStats> = HashMap::new();
+
+        for (batch_num, batch) in items.chunks(batch_size).enumerate() {
+            let mut batch_processed = 0usize;
+            let mut batch_skipped = 0usize;
+
+            for item in batch {
+                if completed.contains(&item.prompt_index)
+                    || completed_prompt_texts.contains(item.prompt.trim())
+                {
+                    completed.insert(item.prompt_index);
+                    completed_prompt_texts.insert(item.prompt.trim().to_string());
+                    batch_skipped += 1;
+                    continue;
+                }
+
+                let generated = runner.generate_batch(std::slice::from_ref(&item.prompt));
+                let Some(trajectory) = generated.into_iter().next() else {
+                    batch_skipped += 1;
+                    continue;
+                };
+
+                completed.insert(item.prompt_index);
+                completed_prompt_texts.insert(item.prompt.trim().to_string());
+                batch_processed += 1;
+
+                for toolset in &config.selected_toolsets {
+                    tool_statistics.entry(toolset.clone()).or_default();
+                }
+
+                let mut metadata = item.metadata.clone();
+                metadata.insert("batch_num".to_string(), Value::from(batch_num));
+                metadata.insert("model".to_string(), Value::from(config.model.clone()));
+                metadata.insert("run_name".to_string(), Value::from(config.run_name.clone()));
+
+                trajectories.push(BatchTrajectoryEntry {
+                    prompt_index: item.prompt_index,
+                    conversations: vec![
+                        Message::user(item.prompt.clone()),
+                        Message::assistant(trajectory.response.clone()),
+                    ],
+                    trajectory,
+                    completed: true,
+                    partial: false,
+                    api_calls: 1,
+                    toolsets_used: config.selected_toolsets.clone(),
+                    tool_stats: HashMap::new(),
+                    metadata: Value::Object(metadata),
+                });
+            }
+
+            total_processed += batch_processed;
+            total_skipped += batch_skipped;
+            checkpoint.batch_stats.insert(
+                batch_num.to_string(),
+                BatchCheckpointStats {
+                    processed: batch_processed,
+                    skipped: batch_skipped,
+                },
+            );
+
+            refresh_checkpoint_progress(&mut checkpoint, &completed, &completed_prompt_texts);
+            if let Some(path) = checkpoint_path {
+                checkpoint.save_atomic_to_path(path)?;
+                checkpoints_written += 1;
+            }
+        }
+
+        refresh_checkpoint_progress(&mut checkpoint, &completed, &completed_prompt_texts);
+
+        Ok(BatchRunReport {
+            trajectories,
+            checkpoint,
+            statistics: BatchRunStatistics {
+                run_name: config.run_name.clone(),
+                distribution: config.distribution.clone(),
+                total_prompts: items.len(),
+                total_batches,
+                batch_size,
+                model: config.model.clone(),
+                processed: total_processed,
+                skipped: total_skipped,
+                checkpoints_written,
+                ephemeral_system_prompt_used: config.ephemeral_system_prompt.is_some(),
+                tool_statistics,
+            },
+        })
+    }
+}
+
+fn refresh_checkpoint_progress(
+    checkpoint: &mut BatchRunCheckpoint,
+    completed: &HashSet<usize>,
+    completed_prompt_texts: &HashSet<String>,
+) {
+    let mut completed_prompts: Vec<_> = completed.iter().copied().collect();
+    completed_prompts.sort_unstable();
+    let mut prompt_texts: Vec<_> = completed_prompt_texts.iter().cloned().collect();
+    prompt_texts.sort();
+    checkpoint.completed_prompts = completed_prompts;
+    checkpoint.completed_prompt_texts = prompt_texts;
+    checkpoint.last_updated = Some(Utc::now());
+}
+
+pub fn parse_batch_jsonl_dataset(raw: &str) -> Result<Vec<BatchDatasetItem>, String> {
+    let mut items = Vec::new();
+    for (line_idx, line) in raw.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let value: Value = serde_json::from_str(line)
+            .map_err(|err| format!("line {}: invalid JSON: {err}", line_idx + 1))?;
+        let Some(prompt) = prompt_from_dataset_value(&value) else {
+            continue;
+        };
+        let mut metadata = match value {
+            Value::Object(map) => map,
+            _ => Map::new(),
+        };
+        metadata.remove("prompt");
+        metadata.remove("conversations");
+        items.push(BatchDatasetItem {
+            prompt_index: items.len(),
+            prompt,
+            metadata,
+        });
+    }
+
+    if items.is_empty() {
+        Err("no valid batch dataset prompts found".to_string())
+    } else {
+        Ok(items)
+    }
+}
+
+fn prompt_from_dataset_value(value: &Value) -> Option<String> {
+    if let Some(prompt) = value.get("prompt").and_then(Value::as_str) {
+        let trimmed = prompt.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let conversations = value.get("conversations")?.as_array()?;
+    for message in conversations {
+        let Some(role) = message
+            .get("role")
+            .or_else(|| message.get("from"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        if role == "user" || role == "human" {
+            let content = message
+                .get("content")
+                .or_else(|| message.get("value"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
+            if !content.is_empty() {
+                return Some(content.to_string());
+            }
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -483,5 +1201,417 @@ mod tests {
         assert_eq!(config.max_turns_per_trajectory, 10);
         assert_eq!(config.model, "gpt-4o");
         assert!((config.temperature - 0.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn training_status_serde_uses_snake_case() {
+        let json = serde_json::to_string(&TrainingStatus::Running).unwrap();
+        assert_eq!(json, "\"running\"");
+        let parsed: TrainingStatus = serde_json::from_str("\"stopped\"").unwrap();
+        assert_eq!(parsed, TrainingStatus::Stopped);
+    }
+
+    #[test]
+    fn run_manager_tracks_status_metrics_and_sorted_runs() {
+        let mut manager = RunManager::new(PathBuf::from("/tmp/hermes-rl-test"));
+        let config = TrainingConfig {
+            max_steps: 42,
+            ..TrainingConfig::default()
+        };
+        let run_id = manager.create_run("tinker", config.clone());
+
+        let run = manager.get_run(&run_id).unwrap();
+        assert_eq!(run.environment, "tinker");
+        assert_eq!(run.status, TrainingStatus::Pending);
+        assert_eq!(run.metrics.total_steps, 42);
+        assert_eq!(run.config, config);
+
+        assert!(manager.set_status(&run_id, TrainingStatus::Running));
+        assert!(manager.update_metrics(
+            &run_id,
+            TrainingMetrics {
+                total_steps: 42,
+                current_step: 7,
+                reward_mean: Some(0.25),
+                reward_std: Some(0.5),
+                loss: Some(0.75),
+            },
+        ));
+        let run = manager.get_run(&run_id).unwrap();
+        assert_eq!(run.status, TrainingStatus::Running);
+        assert_eq!(run.metrics.current_step, 7);
+
+        assert!(manager.set_status(&run_id, TrainingStatus::Stopped));
+        let run = manager.get_run(&run_id).unwrap();
+        assert_eq!(run.status, TrainingStatus::Stopped);
+        assert!(run.finished_at.is_some());
+        assert_eq!(manager.list_runs().len(), 1);
+    }
+
+    #[test]
+    fn rl_environments_expose_tinker_atropos_and_custom() {
+        let envs = RlEnvironment::builtin_environments();
+        let names: Vec<_> = envs.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"tinker"));
+        assert!(names.contains(&"atropos"));
+        assert!(names.contains(&"custom"));
+        assert!(envs
+            .iter()
+            .all(|e| e.config_schema.get("type").and_then(|v| v.as_str()) == Some("object")));
+    }
+
+    #[test]
+    fn batch_runner_generates_style_tagged_baseline_responses() {
+        let runner = BatchRunner::new(BatchRunnerConfig {
+            max_parallel_jobs: 2,
+            max_turns: 5,
+        });
+        let prompts = vec!["Fix the flaky test and verify it".to_string()];
+        let trajectories = runner.generate_batch(&prompts);
+
+        assert_eq!(trajectories.len(), 1);
+        assert_eq!(trajectories[0].id, "traj-1");
+        assert_eq!(trajectories[0].prompt, prompts[0]);
+        assert!(trajectories[0].response.contains("[baseline-diagnostic]"));
+        assert!(trajectories[0].response.contains("steps_budget=5"));
+    }
+
+    #[test]
+    fn parse_batch_jsonl_dataset_accepts_prompt_and_conversation_rows() {
+        let raw = r#"
+{"prompt":" Plan a verification slice ","source":"direct"}
+{"conversations":[{"role":"system","content":"ignore"},{"role":"user","content":"Fix the bug"}],"difficulty":"medium"}
+{"conversations":[{"from":"assistant","value":"hello"},{"from":"human","value":"Write tests"}]}
+{"conversations":[{"role":"assistant","content":"no user prompt"}]}
+
+"#;
+
+        let items = parse_batch_jsonl_dataset(raw).unwrap();
+
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].prompt_index, 0);
+        assert_eq!(items[0].prompt, "Plan a verification slice");
+        assert_eq!(items[0].metadata["source"], "direct");
+        assert_eq!(items[1].prompt, "Fix the bug");
+        assert_eq!(items[1].metadata["difficulty"], "medium");
+        assert_eq!(items[2].prompt, "Write tests");
+        assert!(items[1].metadata.get("conversations").is_none());
+    }
+
+    #[test]
+    fn parse_batch_jsonl_dataset_reports_invalid_or_empty_inputs() {
+        let invalid = parse_batch_jsonl_dataset("{not json").unwrap_err();
+        assert!(invalid.contains("line 1: invalid JSON"));
+
+        let empty = parse_batch_jsonl_dataset(r#"{"prompt":"   "}"#).unwrap_err();
+        assert_eq!(empty, "no valid batch dataset prompts found");
+    }
+
+    #[test]
+    fn batch_dataset_runner_updates_checkpoint_and_resumes_by_index_and_prompt() {
+        let dataset = vec![
+            BatchDatasetItem {
+                prompt_index: 0,
+                prompt: "Fix the parser".to_string(),
+                metadata: Map::new(),
+            },
+            BatchDatasetItem {
+                prompt_index: 1,
+                prompt: "Plan the rollout".to_string(),
+                metadata: Map::new(),
+            },
+            BatchDatasetItem {
+                prompt_index: 2,
+                prompt: "Verify the behavior".to_string(),
+                metadata: Map::new(),
+            },
+        ];
+        let mut prior = BatchRunCheckpoint::new("resume-run");
+        prior.completed_prompts = vec![0];
+        prior.completed_prompt_texts = vec!["Plan the rollout".to_string()];
+        let config = BatchDatasetRunConfig {
+            run_name: "resume-run".to_string(),
+            batch_size: 2,
+            selected_toolsets: vec!["rl_training".to_string()],
+            ..BatchDatasetRunConfig::default()
+        };
+
+        let report = BatchDatasetRunner::new().run(&dataset, &config, Some(prior));
+
+        assert_eq!(report.statistics.total_prompts, 3);
+        assert_eq!(report.statistics.total_batches, 2);
+        assert_eq!(report.statistics.processed, 1);
+        assert_eq!(report.statistics.skipped, 2);
+        assert_eq!(report.trajectories.len(), 1);
+        assert_eq!(report.trajectories[0].prompt_index, 2);
+        assert_eq!(report.trajectories[0].toolsets_used, ["rl_training"]);
+        assert_eq!(report.checkpoint.completed_prompts, [0, 1, 2]);
+        assert!(report
+            .checkpoint
+            .completed_prompt_texts
+            .contains(&"Verify the behavior".to_string()));
+        assert_eq!(
+            report.checkpoint.batch_stats.get("0").unwrap(),
+            &BatchCheckpointStats {
+                processed: 0,
+                skipped: 2,
+            }
+        );
+        assert_eq!(
+            report.checkpoint.batch_stats.get("1").unwrap(),
+            &BatchCheckpointStats {
+                processed: 1,
+                skipped: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn batch_dataset_runner_omits_ephemeral_system_prompt_from_outputs() {
+        let dataset = vec![BatchDatasetItem {
+            prompt_index: 0,
+            prompt: "Test prompt leakage".to_string(),
+            metadata: Map::new(),
+        }];
+        let config = BatchDatasetRunConfig {
+            run_name: "ephemeral-run".to_string(),
+            ephemeral_system_prompt: Some("never persist this system prompt".to_string()),
+            ..BatchDatasetRunConfig::default()
+        };
+
+        let report = BatchDatasetRunner::new().run(&dataset, &config, None);
+        let jsonl = report.trajectories_jsonl().unwrap();
+        let checkpoint = report.checkpoint.to_json_pretty().unwrap();
+
+        assert!(report.statistics.ephemeral_system_prompt_used);
+        assert!(!jsonl.contains("never persist this system prompt"));
+        assert!(!checkpoint.contains("never persist this system prompt"));
+        assert_eq!(
+            report.trajectories[0].conversations[0].content.as_deref(),
+            Some("Test prompt leakage")
+        );
+    }
+
+    #[test]
+    fn batch_dataset_runner_respects_max_samples_and_nonzero_batch_size() {
+        let dataset: Vec<_> = (0..5)
+            .map(|idx| BatchDatasetItem {
+                prompt_index: idx,
+                prompt: format!("prompt {idx}"),
+                metadata: Map::new(),
+            })
+            .collect();
+        let config = BatchDatasetRunConfig {
+            run_name: "limited-run".to_string(),
+            batch_size: 0,
+            max_samples: Some(3),
+            ..BatchDatasetRunConfig::default()
+        };
+
+        let report = BatchDatasetRunner::new().run(&dataset, &config, None);
+
+        assert_eq!(report.statistics.batch_size, 1);
+        assert_eq!(report.statistics.total_prompts, 3);
+        assert_eq!(report.statistics.total_batches, 3);
+        assert_eq!(report.statistics.processed, 3);
+        assert_eq!(report.checkpoint.completed_prompts, [0, 1, 2]);
+        assert_eq!(report.trajectories.len(), 3);
+    }
+
+    #[test]
+    fn atomic_json_write_replaces_without_temp_file_leaks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("nested").join("checkpoint.json");
+
+        atomic_json_write(&path, &serde_json::json!({"version": 1})).unwrap();
+        atomic_json_write(&path, &serde_json::json!({"version": 2, "ok": true})).unwrap();
+
+        let value: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(value["version"], 2);
+        assert_eq!(value["ok"], true);
+
+        let leaked_tmp_files: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(leaked_tmp_files.is_empty());
+    }
+
+    #[test]
+    fn atomic_json_write_preserves_original_on_serialization_error() {
+        struct FailingSerialize;
+
+        impl Serialize for FailingSerialize {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("intentional test failure"))
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("checkpoint.json");
+        atomic_json_write(&path, &serde_json::json!({"preserved": true})).unwrap();
+
+        let err = atomic_json_write(&path, &FailingSerialize).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+
+        let value: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(value, serde_json::json!({"preserved": true}));
+        let leaked_tmp_files: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(leaked_tmp_files.is_empty());
+    }
+
+    #[test]
+    fn atomic_json_write_handles_unicode_and_concurrent_writes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = std::sync::Arc::new(tmp.path().join("concurrent.json"));
+        let mut handles = Vec::new();
+
+        for writer in 0..8 {
+            let path = path.clone();
+            handles.push(std::thread::spawn(move || {
+                let japanese = "\u{65e5}\u{672c}\u{8a9e}";
+                atomic_json_write(
+                    &*path,
+                    &serde_json::json!({
+                        "writer": writer,
+                        "emoji": "sparkles",
+                        "japanese": japanese,
+                        "data": (0..32).collect::<Vec<_>>()
+                    }),
+                )
+            }));
+        }
+
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+
+        let value: Value = serde_json::from_str(&std::fs::read_to_string(&*path).unwrap()).unwrap();
+        assert!(value["writer"].as_u64().unwrap() < 8);
+        assert_eq!(value["japanese"], "\u{65e5}\u{672c}\u{8a9e}");
+        assert_eq!(value["data"].as_array().unwrap().len(), 32);
+    }
+
+    #[test]
+    fn batch_run_checkpoint_load_handles_missing_corrupt_and_mismatched_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("checkpoint.json");
+
+        let missing = BatchRunCheckpoint::load_from_path(&path).unwrap();
+        assert!(missing.is_none());
+
+        std::fs::write(&path, "{broken json").unwrap();
+        let strict_err = BatchRunCheckpoint::load_from_path(&path).unwrap_err();
+        assert_eq!(strict_err.kind(), io::ErrorKind::InvalidData);
+        let recovered = BatchRunCheckpoint::load_or_new_for_run(&path, "fresh-run").unwrap();
+        assert_eq!(recovered.run_name, "fresh-run");
+        assert!(recovered.completed_prompts.is_empty());
+
+        let mut prior = BatchRunCheckpoint::new("old-run");
+        prior.completed_prompts = vec![7, 8, 9];
+        prior.save_atomic_to_path(&path).unwrap();
+        let fresh = BatchRunCheckpoint::load_or_new_for_run(&path, "new-run").unwrap();
+        assert_eq!(fresh.run_name, "new-run");
+        assert!(fresh.completed_prompts.is_empty());
+
+        let existing = BatchRunCheckpoint::load_or_new_for_run(&path, "old-run").unwrap();
+        assert_eq!(existing.completed_prompts, [7, 8, 9]);
+    }
+
+    #[test]
+    fn batch_dataset_runner_persists_atomic_checkpoint_per_batch_and_resumes_from_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let checkpoint_path = tmp.path().join("checkpoints").join("run.json");
+        let dataset: Vec<_> = (0..4)
+            .map(|idx| BatchDatasetItem {
+                prompt_index: idx,
+                prompt: format!("prompt {idx}"),
+                metadata: Map::new(),
+            })
+            .collect();
+        let config = BatchDatasetRunConfig {
+            run_name: "atomic-run".to_string(),
+            batch_size: 2,
+            ..BatchDatasetRunConfig::default()
+        };
+
+        let first = BatchDatasetRunner::new()
+            .run_with_checkpoint_path(&dataset, &config, &checkpoint_path)
+            .unwrap();
+        assert_eq!(first.statistics.processed, 4);
+        assert_eq!(first.statistics.skipped, 0);
+        assert_eq!(first.statistics.checkpoints_written, 2);
+        assert_eq!(first.checkpoint.completed_prompts, [0, 1, 2, 3]);
+
+        let persisted = BatchRunCheckpoint::load_from_path(&checkpoint_path)
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.run_name, "atomic-run");
+        assert!(persisted.last_updated.is_some());
+        assert_eq!(persisted.completed_prompts, [0, 1, 2, 3]);
+        assert_eq!(
+            persisted.batch_stats.get("0").unwrap(),
+            &BatchCheckpointStats {
+                processed: 2,
+                skipped: 0,
+            }
+        );
+        assert_eq!(
+            persisted.batch_stats.get("1").unwrap(),
+            &BatchCheckpointStats {
+                processed: 2,
+                skipped: 0,
+            }
+        );
+
+        let resumed = BatchDatasetRunner::new()
+            .run_with_checkpoint_path(&dataset, &config, &checkpoint_path)
+            .unwrap();
+        assert_eq!(resumed.statistics.processed, 0);
+        assert_eq!(resumed.statistics.skipped, 4);
+        assert_eq!(resumed.statistics.checkpoints_written, 2);
+        assert!(resumed.trajectories.is_empty());
+        assert_eq!(resumed.checkpoint.completed_prompts, [0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn batch_dataset_runner_checkpoint_path_starts_fresh_on_corrupt_or_mismatched_checkpoint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let checkpoint_path = tmp.path().join("checkpoint.json");
+        let dataset = vec![BatchDatasetItem {
+            prompt_index: 0,
+            prompt: "recover from checkpoint".to_string(),
+            metadata: Map::new(),
+        }];
+        let config = BatchDatasetRunConfig {
+            run_name: "fresh-run".to_string(),
+            batch_size: 1,
+            ..BatchDatasetRunConfig::default()
+        };
+
+        std::fs::write(&checkpoint_path, "{broken json").unwrap();
+        let recovered = BatchDatasetRunner::new()
+            .run_with_checkpoint_path(&dataset, &config, &checkpoint_path)
+            .unwrap();
+        assert_eq!(recovered.statistics.processed, 1);
+        assert_eq!(recovered.checkpoint.run_name, "fresh-run");
+
+        let mut wrong_run = BatchRunCheckpoint::new("other-run");
+        wrong_run.completed_prompts = vec![0];
+        wrong_run.save_atomic_to_path(&checkpoint_path).unwrap();
+        let mismatched = BatchDatasetRunner::new()
+            .run_with_checkpoint_path(&dataset, &config, &checkpoint_path)
+            .unwrap();
+        assert_eq!(mismatched.statistics.processed, 1);
+        assert_eq!(mismatched.statistics.skipped, 0);
+        assert_eq!(mismatched.checkpoint.run_name, "fresh-run");
     }
 }

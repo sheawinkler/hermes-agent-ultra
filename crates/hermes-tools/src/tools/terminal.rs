@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use regex::Regex;
 use serde_json::{json, Value};
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use hermes_core::{
     tool_schema, CommandOutput, JsonSchema, TerminalBackend, ToolError, ToolHandler, ToolSchema,
@@ -12,7 +13,100 @@ use hermes_core::{
 
 use crate::approval::{ApprovalDecision, ApprovalManager};
 
-const TERMINAL_FOREGROUND_MAX_TIMEOUT_SECS: u64 = 600;
+const DEFAULT_FOREGROUND_MAX_TIMEOUT_SECS: u64 = 600;
+
+fn foreground_max_timeout_secs() -> u64 {
+    std::env::var("TERMINAL_MAX_FOREGROUND_TIMEOUT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_FOREGROUND_MAX_TIMEOUT_SECS)
+}
+
+fn has_unquoted_trailing_background_operator(command: &str) -> bool {
+    let mut idx = command.len();
+    while idx > 0 {
+        let Some((prev, ch)) = command[..idx].char_indices().next_back() else {
+            return false;
+        };
+        if !ch.is_whitespace() {
+            idx = prev;
+            break;
+        }
+        idx = prev;
+    }
+    if !command[idx..].starts_with('&') {
+        return false;
+    }
+    let mut slash_count = 0usize;
+    let mut pos = idx;
+    while pos > 0 {
+        let Some((prev, ch)) = command[..pos].char_indices().next_back() else {
+            break;
+        };
+        if ch != '\\' {
+            break;
+        }
+        slash_count += 1;
+        pos = prev;
+    }
+    slash_count.is_multiple_of(2)
+}
+
+fn foreground_background_wrapper_error(command: &str) -> Option<String> {
+    let lower = command.trim().to_ascii_lowercase();
+    let padded = format!(" {lower} ");
+    if has_unquoted_trailing_background_operator(command) {
+        return Some(
+            "Foreground command uses '&' shell backgrounding. Use terminal(background=true) so Hermes can track lifecycle and output.".to_string(),
+        );
+    }
+    if lower.starts_with("nohup ") || padded.contains(" nohup ") {
+        return Some(
+            "Foreground command uses nohup. Use terminal(background=true) instead of shell-level background wrappers.".to_string(),
+        );
+    }
+    if lower.starts_with("setsid ") || padded.contains(" setsid ") || padded.contains(" disown ") {
+        return Some(
+            "Foreground command uses setsid/disown. Use terminal(background=true) so Hermes can manage the process.".to_string(),
+        );
+    }
+    None
+}
+
+fn is_help_variant(command: &str) -> bool {
+    command
+        .split_ascii_whitespace()
+        .any(|part| matches!(part, "--help" | "-h" | "help"))
+}
+
+fn long_lived_foreground_error(command: &str) -> Option<String> {
+    if is_help_variant(command) {
+        return None;
+    }
+    let lower = command.trim().to_ascii_lowercase();
+    let padded = format!(" {lower} ");
+    let long_lived = [
+        " pnpm dev ",
+        " npm run dev ",
+        " yarn dev ",
+        " bun dev ",
+        " next dev ",
+        " vite ",
+        " webpack serve ",
+        " cargo watch ",
+        " python -m http.server ",
+        " python3 -m http.server ",
+        " uvicorn ",
+        " gunicorn ",
+    ]
+    .iter()
+    .any(|needle| padded.contains(needle));
+
+    long_lived.then(|| {
+        "This foreground command appears to start a long-lived server/watch process. Run it with background=true, then verify readiness with logs or a health check.".to_string()
+    })
+}
 
 // ---------------------------------------------------------------------------
 // TerminalHandler
@@ -20,16 +114,48 @@ const TERMINAL_FOREGROUND_MAX_TIMEOUT_SECS: u64 = 600;
 
 /// Tool for executing terminal commands via an injected backend.
 pub struct TerminalHandler {
-    backend: std::sync::Arc<dyn TerminalBackend>,
+    backend: Arc<dyn TerminalBackend>,
     approval: ApprovalManager,
+    task_cwds: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl TerminalHandler {
-    pub fn new(backend: std::sync::Arc<dyn TerminalBackend>) -> Self {
+    pub fn new(backend: Arc<dyn TerminalBackend>) -> Self {
         Self {
             backend,
             approval: ApprovalManager::new(),
+            task_cwds: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn set_task_cwd(&self, task_id: impl Into<String>, cwd: impl Into<String>) {
+        let task_id = task_id.into();
+        let cwd = cwd.into();
+        if task_id.trim().is_empty() || cwd.trim().is_empty() {
+            return;
+        }
+        self.task_cwds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(task_id, cwd);
+    }
+
+    pub fn clear_task_cwd(&self, task_id: &str) {
+        self.task_cwds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(task_id);
+    }
+
+    fn task_cwd(&self, task_id: &str) -> Option<String> {
+        if task_id.trim().is_empty() {
+            return None;
+        }
+        self.task_cwds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(task_id)
+            .cloned()
     }
 }
 
@@ -41,7 +167,29 @@ impl ToolHandler for TerminalHandler {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'command' parameter".into()))?;
 
-        match self.approval.check_approval(command) {
+        let timeout = params.get("timeout").and_then(|v| v.as_u64());
+        let background = params
+            .get("background")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !background {
+            if let Some(timeout) = timeout {
+                let max_timeout = foreground_max_timeout_secs();
+                if timeout > max_timeout {
+                    return Err(ToolError::ExecutionFailed(format!(
+                        "Foreground timeout {timeout}s exceeds max {max_timeout}s. Use background=true with process polling for longer commands."
+                    )));
+                }
+            }
+            if let Some(error) = foreground_background_wrapper_error(command) {
+                return Err(ToolError::ExecutionFailed(error));
+            }
+            if let Some(error) = long_lived_foreground_error(command) {
+                return Err(ToolError::ExecutionFailed(error));
+            }
+        }
+
+        match self.approval.check_approval_from_env(command, "local") {
             ApprovalDecision::Denied => {
                 return Err(ToolError::ExecutionFailed(format!(
                     "Command denied by security policy: {}",
@@ -51,21 +199,26 @@ impl ToolHandler for TerminalHandler {
             ApprovalDecision::RequiresConfirmation => {
                 tracing::warn!(
                     command,
-                    "command requires confirmation — auto-approved in agent mode"
+                    "command requires explicit confirmation; denying because no user approval was supplied"
                 );
+                return Err(ToolError::ExecutionFailed(format!(
+                    "Command requires explicit user approval and was not executed: {command}. Do NOT retry, rephrase, or achieve the same outcome via a different command. Silence is not consent."
+                )));
             }
             ApprovalDecision::Approved => {}
         }
 
-        let timeout = params.get("timeout").and_then(|v| v.as_u64());
-
-        let workdir = params.get("workdir").and_then(|v| v.as_str());
-
-        let background = params
-            .get("background")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let timeout_secs = normalize_terminal_timeout(timeout, background)?;
+        let explicit_workdir = params.get("workdir").and_then(|v| v.as_str());
+        let task_workdir = explicit_workdir
+            .is_none()
+            .then(|| {
+                params
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|task_id| self.task_cwd(task_id))
+            })
+            .flatten();
+        let workdir = explicit_workdir.or(task_workdir.as_deref());
 
         let pty = params.get("pty").and_then(|v| v.as_bool()).unwrap_or(false);
         let stdin_data = params.get("stdin_data").and_then(|v| v.as_str());
@@ -76,7 +229,7 @@ impl ToolHandler for TerminalHandler {
             .backend
             .execute_command_with_stdin(
                 &transformed_command,
-                timeout_secs,
+                timeout,
                 workdir,
                 background,
                 pty,
@@ -102,14 +255,24 @@ impl ToolHandler for TerminalHandler {
             "timeout".into(),
             json!({
                 "type": "integer",
-                "description": "Timeout in milliseconds (default: 30000, foreground max: 600000)"
+                "description": format!(
+                    "Timeout in seconds. Foreground commands above {}s are rejected; use background=true for longer jobs.",
+                    foreground_max_timeout_secs()
+                )
             }),
         );
         props.insert(
             "workdir".into(),
             json!({
                 "type": "string",
-                "description": "Working directory for the command"
+                "description": "Working directory for the command. Overrides registered task cwd."
+            }),
+        );
+        props.insert(
+            "task_id".into(),
+            json!({
+                "type": "string",
+                "description": "Optional task/session id used to resolve a registered cwd when workdir is omitted"
             }),
         );
         props.insert(
@@ -142,28 +305,6 @@ impl ToolHandler for TerminalHandler {
             JsonSchema::object(props, vec!["command".into()]),
         )
     }
-}
-
-fn normalize_terminal_timeout(
-    timeout_ms: Option<u64>,
-    background: bool,
-) -> Result<Option<u64>, ToolError> {
-    let Some(timeout_ms) = timeout_ms else {
-        return Ok(None);
-    };
-    if timeout_ms == 0 {
-        return Err(ToolError::InvalidParams(
-            "timeout must be greater than 0 milliseconds".into(),
-        ));
-    }
-    let timeout_secs = timeout_ms.saturating_add(999) / 1000;
-    if !background && timeout_secs > TERMINAL_FOREGROUND_MAX_TIMEOUT_SECS {
-        return Err(ToolError::InvalidParams(format!(
-            "foreground timeout {}s exceeds {}s; use background=true for long-running commands",
-            timeout_secs, TERMINAL_FOREGROUND_MAX_TIMEOUT_SECS
-        )));
-    }
-    Ok(Some(timeout_secs))
 }
 
 /// Format command output for display.
@@ -501,7 +642,45 @@ impl ToolHandler for ProcessHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::approval::TEST_ENV_LOCK;
     use hermes_core::AgentError;
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn remove(key: &'static str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, old }
+        }
+
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(old) = &self.old {
+                std::env::set_var(self.key, old);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
+    }
 
     struct MockBackend;
     #[async_trait]
@@ -546,6 +725,113 @@ mod tests {
         async fn write_file(&self, _path: &str, _content: &str) -> Result<(), AgentError> {
             Ok(())
         }
+        async fn file_exists(&self, _path: &str) -> Result<bool, AgentError> {
+            Ok(true)
+        }
+    }
+
+    struct NonzeroExitBackend;
+
+    #[async_trait]
+    impl TerminalBackend for NonzeroExitBackend {
+        async fn execute_command(
+            &self,
+            command: &str,
+            timeout: Option<u64>,
+            workdir: Option<&str>,
+            background: bool,
+            pty: bool,
+        ) -> Result<CommandOutput, AgentError> {
+            self.execute_command_with_stdin(command, timeout, workdir, background, pty, None)
+                .await
+        }
+
+        async fn execute_command_with_stdin(
+            &self,
+            cmd: &str,
+            _timeout: Option<u64>,
+            _workdir: Option<&str>,
+            _background: bool,
+            _pty: bool,
+            _stdin_data: Option<&str>,
+        ) -> Result<CommandOutput, AgentError> {
+            Ok(CommandOutput {
+                exit_code: 7,
+                stdout: format!("stdout from {cmd}"),
+                stderr: format!("stderr from {cmd}"),
+            })
+        }
+
+        async fn read_file(
+            &self,
+            _path: &str,
+            _offset: Option<u64>,
+            _limit: Option<u64>,
+        ) -> Result<String, AgentError> {
+            Ok(String::new())
+        }
+
+        async fn write_file(&self, _path: &str, _content: &str) -> Result<(), AgentError> {
+            Ok(())
+        }
+
+        async fn file_exists(&self, _path: &str) -> Result<bool, AgentError> {
+            Ok(true)
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingBackend {
+        calls: Arc<Mutex<Vec<Option<String>>>>,
+    }
+
+    #[async_trait]
+    impl TerminalBackend for RecordingBackend {
+        async fn execute_command(
+            &self,
+            cmd: &str,
+            timeout: Option<u64>,
+            workdir: Option<&str>,
+            background: bool,
+            pty: bool,
+        ) -> Result<CommandOutput, AgentError> {
+            self.execute_command_with_stdin(cmd, timeout, workdir, background, pty, None)
+                .await
+        }
+
+        async fn execute_command_with_stdin(
+            &self,
+            _cmd: &str,
+            _timeout: Option<u64>,
+            workdir: Option<&str>,
+            _background: bool,
+            _pty: bool,
+            _stdin_data: Option<&str>,
+        ) -> Result<CommandOutput, AgentError> {
+            self.calls
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(workdir.map(ToString::to_string));
+            Ok(CommandOutput {
+                exit_code: 0,
+                stdout: "ok".to_string(),
+                stderr: String::new(),
+            })
+        }
+
+        async fn read_file(
+            &self,
+            _path: &str,
+            _offset: Option<u64>,
+            _limit: Option<u64>,
+        ) -> Result<String, AgentError> {
+            Ok(String::new())
+        }
+
+        async fn write_file(&self, _path: &str, _content: &str) -> Result<(), AgentError> {
+            Ok(())
+        }
+
         async fn file_exists(&self, _path: &str) -> Result<bool, AgentError> {
             Ok(true)
         }
@@ -608,26 +894,257 @@ mod tests {
         let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
         let schema = handler.schema();
         assert_eq!(schema.name, "terminal");
+        let timeout_desc = schema
+            .parameters
+            .properties
+            .as_ref()
+            .expect("properties")
+            .get("timeout")
+            .and_then(Value::as_object)
+            .and_then(|obj| obj.get("description"))
+            .and_then(Value::as_str)
+            .expect("timeout description");
+        assert!(timeout_desc.contains("600s"));
+        assert!(timeout_desc.contains("background=true"));
     }
 
-    #[tokio::test]
-    async fn test_terminal_handler_execute() {
+    #[test]
+    fn test_terminal_handler_execute() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
         let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
-        let result = handler
-            .execute(json!({"command": "echo hello"}))
-            .await
-            .unwrap();
+        let result = block_on(handler.execute(json!({"command": "echo hello"}))).unwrap();
         assert!(result.contains("echo hello"));
     }
 
-    #[tokio::test]
-    async fn test_terminal_handler_execute_with_stdin_data() {
+    #[test]
+    fn terminal_handler_surfaces_backend_stdout_as_user_visible_output() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
         let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
-        let result = handler
-            .execute(json!({"command": "cat", "stdin_data": "abc123"}))
-            .await
-            .unwrap();
+
+        let result = block_on(handler.execute(json!({"command": "stdout-only"}))).unwrap();
+
+        assert_eq!(result, "output of: stdout-only / stdin=");
+    }
+
+    #[test]
+    fn test_terminal_handler_uses_registered_task_cwd_when_workdir_omitted() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
+        handler.set_task_cwd("acp-session-1", "/workspace/acp");
+
+        block_on(handler.execute(json!({
+            "command": "pwd",
+            "task_id": "acp-session-1"
+        })))
+        .unwrap();
+
+        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(calls.as_slice(), [Some("/workspace/acp".to_string())]);
+    }
+
+    #[test]
+    fn terminal_handler_task_cwds_are_isolated_by_task_id() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
+        handler.set_task_cwd("task-a", "/workspace/task-a");
+        handler.set_task_cwd("task-b", "/workspace/task-b");
+
+        block_on(handler.execute(json!({"command": "pwd", "task_id": "task-a"}))).unwrap();
+        block_on(handler.execute(json!({"command": "pwd", "task_id": "task-b"}))).unwrap();
+        block_on(handler.execute(json!({"command": "pwd"}))).unwrap();
+
+        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            calls.as_slice(),
+            [
+                Some("/workspace/task-a".to_string()),
+                Some("/workspace/task-b".to_string()),
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn test_terminal_handler_explicit_workdir_wins_over_task_cwd() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
+        handler.set_task_cwd("acp-session-1", "/workspace/acp");
+
+        block_on(handler.execute(json!({
+            "command": "pwd",
+            "task_id": "acp-session-1",
+            "workdir": "/explicit/workdir"
+        })))
+        .unwrap();
+
+        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(calls.as_slice(), [Some("/explicit/workdir".to_string())]);
+    }
+
+    #[test]
+    fn test_terminal_handler_rejects_foreground_timeout_above_cap() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _max = EnvGuard::remove("TERMINAL_MAX_FOREGROUND_TIMEOUT");
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let err = block_on(handler.execute(json!({"command": "echo hello", "timeout": 9999})))
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("9999s"));
+        assert!(msg.contains("600s"));
+        assert!(msg.contains("background=true"));
+    }
+
+    #[test]
+    fn test_terminal_handler_allows_background_timeout_above_cap() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _max = EnvGuard::remove("TERMINAL_MAX_FOREGROUND_TIMEOUT");
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let result = block_on(handler.execute(json!({
+            "command": "python server.py",
+            "background": true,
+            "timeout": 9999
+        })))
+        .unwrap();
+        assert!(result.contains("python server.py"));
+    }
+
+    #[test]
+    fn test_terminal_handler_rejects_shell_background_wrappers_in_foreground() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let err = block_on(handler.execute(json!({
+            "command": "nohup pnpm dev > /tmp/hermes-server.log 2>&1 &"
+        })))
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("background=true"));
+        assert!(msg.to_ascii_lowercase().contains("background"));
+    }
+
+    #[test]
+    fn test_terminal_handler_rejects_long_lived_server_foreground() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let err = block_on(handler.execute(json!({"command": "pnpm dev"}))).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.to_ascii_lowercase().contains("long-lived"));
+        assert!(msg.contains("background=true"));
+    }
+
+    #[test]
+    fn test_terminal_handler_allows_help_variant_for_server_command() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let result = block_on(handler.execute(json!({"command": "pnpm dev --help"}))).unwrap();
+        assert!(result.contains("pnpm dev --help"));
+    }
+
+    #[test]
+    fn test_terminal_handler_execute_with_stdin_data() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+        let result =
+            block_on(handler.execute(json!({"command": "cat", "stdin_data": "abc123"}))).unwrap();
         assert!(result.contains("stdin=abc123"));
+    }
+
+    #[test]
+    fn test_terminal_handler_denies_confirmation_without_consent() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+        let err = block_on(handler.execute(json!({"command": "sudo apt update"}))).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Do NOT retry"));
+        assert!(msg.contains("rephrase"));
+        assert!(msg.contains("same outcome"));
+        assert!(msg.contains("Silence is not consent"));
+    }
+
+    #[test]
+    fn test_terminal_handler_yolo_bypasses_recoverable_confirmation() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::set("HERMES_YOLO_MODE", "1");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+        let result =
+            block_on(handler.execute(json!({"command": "rm -rf /tmp/hermes-safe-test"}))).unwrap();
+        assert!(result.contains("rm -rf /tmp/hermes-safe-test"));
+    }
+
+    #[test]
+    fn test_terminal_handler_yolo_does_not_bypass_hardline() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::set("HERMES_YOLO_MODE", "1");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+        let err = block_on(handler.execute(json!({"command": "rm -rf /"}))).unwrap_err();
+        assert!(err.to_string().contains("denied by security policy"));
+    }
+
+    #[test]
+    fn test_terminal_handler_session_yolo_bypasses_recoverable_confirmation() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::set("HERMES_SESSION_KEY", "terminal-session-yolo");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        crate::approval::clear_session("terminal-session-yolo");
+        crate::approval::enable_session_yolo("terminal-session-yolo");
+
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+        let result =
+            block_on(handler.execute(json!({"command": "rm -rf /tmp/hermes-safe-test"}))).unwrap();
+        assert!(result.contains("rm -rf /tmp/hermes-safe-test"));
+
+        crate::approval::clear_session("terminal-session-yolo");
     }
 
     #[tokio::test]
@@ -700,18 +1217,16 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_terminal_timeout_ms_to_secs() {
-        assert_eq!(normalize_terminal_timeout(Some(1_500), false).unwrap(), Some(2));
-        assert_eq!(normalize_terminal_timeout(Some(30_000), false).unwrap(), Some(30));
-    }
+    fn terminal_handler_nonzero_exit_code_is_output_not_tool_failure() {
+        let _env_lock = TEST_ENV_LOCK.lock().expect("test env lock");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(Arc::new(NonzeroExitBackend));
 
-    #[test]
-    fn test_normalize_terminal_timeout_foreground_clamp() {
-        let err = normalize_terminal_timeout(Some(700_000), false).unwrap_err();
-        assert!(err.to_string().contains("foreground timeout"));
-        assert_eq!(
-            normalize_terminal_timeout(Some(700_000), true).unwrap(),
-            Some(700)
-        );
+        let rendered = block_on(handler.execute(json!({"command": "false"})))
+            .expect("nonzero terminal exits should be returned to the model");
+
+        assert!(rendered.contains("stdout from false"));
+        assert!(rendered.contains("stderr from false"));
+        assert!(rendered.contains("[exit code: 7]"));
     }
 }

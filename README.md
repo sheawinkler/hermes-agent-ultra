@@ -132,7 +132,7 @@ hermes-ultra setup --portal
 That starts Nous OAuth setup, sets Nous as the provider, and enables Tool Gateway routing. Inspect the current state with:
 
 ```bash
-hermes-ultra portal status
+hermes-ultra portal info
 ```
 
 You can still bring your own keys for individual tools; gateway routing is per backend, not all-or-nothing.
@@ -144,6 +144,8 @@ hermes-ultra doctor --deep --snapshot --bundle
 ```
 
 Optional Sentrux MCP profile:
+
+Full MCP guide: [docs/mcp.md](./docs/mcp.md)
 
 ```bash
 hermes-ultra mcp sentrux

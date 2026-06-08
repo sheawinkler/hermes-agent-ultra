@@ -9,6 +9,39 @@ fn e2e_cli_model_command_prints_current_model() {
 }
 
 #[test]
+fn e2e_cli_model_command_lists_configured_custom_provider_models() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("config.yaml"),
+        r#"
+model: qianfan-coding:kimi-k2.5
+llm_providers:
+  qianfan-coding:
+    base_url: https://qianfan.baidubce.com/v2/coding
+    discover_models: false
+    models:
+      kimi-k2.5: {}
+      glm-5: {}
+"#,
+    )
+    .expect("write config");
+
+    let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
+    cmd.env("HERMES_HOME", dir.path());
+    cmd.arg("model");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let text = std::str::from_utf8(&out).expect("utf8");
+    assert!(
+        text.contains("qianfan-coding"),
+        "expected custom provider in model list: {text:?}"
+    );
+    assert!(
+        text.contains("kimi-k2.5") && text.contains("glm-5"),
+        "expected configured model subset in model list: {text:?}"
+    );
+}
+
+#[test]
 fn e2e_cli_gateway_status_command_runs() {
     let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
     cmd.args(["gateway", "status"]);
@@ -66,6 +99,115 @@ fn e2e_cli_config_set_dotted_llm_and_get_masks_key() {
         text.contains("***"),
         "expected masked api key, got: {text:?}"
     );
+}
+
+#[test]
+fn e2e_cli_model_switch_warns_on_stale_auxiliary_provider() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+
+    let mut set_compression_provider = Command::cargo_bin("hermes").expect("binary exists");
+    set_compression_provider.env("HERMES_HOME", home);
+    set_compression_provider.args(["config", "set", "auxiliary.compression.provider", "nous"]);
+    set_compression_provider.assert().success();
+
+    let mut set_compression_model = Command::cargo_bin("hermes").expect("binary exists");
+    set_compression_model.env("HERMES_HOME", home);
+    set_compression_model.args(["config", "set", "auxiliary.compression.model", "hermes-4"]);
+    set_compression_model.assert().success();
+
+    let mut set_vision_auto = Command::cargo_bin("hermes").expect("binary exists");
+    set_vision_auto.env("HERMES_HOME", home);
+    set_vision_auto.args(["config", "set", "auxiliary.vision.provider", "auto"]);
+    set_vision_auto.assert().success();
+
+    let mut switch = Command::cargo_bin("hermes").expect("binary exists");
+    switch.env("HERMES_HOME", home);
+    switch.args(["model", "openrouter:anthropic/claude-opus-4.8"]);
+    let out = switch.assert().success().get_output().stdout.clone();
+    let text = std::str::from_utf8(&out).expect("utf8");
+    assert!(
+        text.contains("Model switched to: openrouter:anthropic/claude-opus-4.8"),
+        "expected model switch output, got: {text:?}"
+    );
+    assert!(
+        text.contains(
+            "Warning: 1 auxiliary task (compression=nous/hermes-4) still run on providers other than main 'openrouter'"
+        ),
+        "expected stale auxiliary warning, got: {text:?}"
+    );
+    assert!(
+        !text.contains("vision"),
+        "auto auxiliary provider should not be reported stale: {text:?}"
+    );
+}
+
+#[test]
+fn e2e_cli_profile_list_and_current_show_custom_alias() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+
+    let mut create = Command::cargo_bin("hermes").expect("binary exists");
+    create.env("HERMES_HOME", home);
+    create.args(["profile", "create", "steve", "--no-alias"]);
+    create.assert().success();
+
+    let mut alias = Command::cargo_bin("hermes").expect("binary exists");
+    alias.env("HERMES_HOME", home);
+    alias.args(["profile", "alias", "steve", "--name", "qiaobusi"]);
+    alias.assert().success();
+
+    let mut list = Command::cargo_bin("hermes").expect("binary exists");
+    list.env("HERMES_HOME", home);
+    list.args(["profile", "list"]);
+    let list_out = list.assert().success().get_output().stdout.clone();
+    let list_text = std::str::from_utf8(&list_out).expect("utf8");
+    assert!(
+        list_text.contains("  steve (alias: qiaobusi)"),
+        "expected custom alias in profile list, got: {list_text:?}"
+    );
+
+    let mut use_alias = Command::cargo_bin("hermes").expect("binary exists");
+    use_alias.env("HERMES_HOME", home);
+    use_alias.args(["profile", "use", "qiaobusi"]);
+    use_alias.assert().success();
+
+    let mut current = Command::cargo_bin("hermes").expect("binary exists");
+    current.env("HERMES_HOME", home);
+    current.arg("profile");
+    let current_out = current.assert().success().get_output().stdout.clone();
+    let current_text = std::str::from_utf8(&current_out).expect("utf8");
+    assert!(
+        current_text.contains("Active:      steve"),
+        "expected resolved active profile, got: {current_text:?}"
+    );
+    assert!(
+        current_text.contains("Alias:       qiaobusi"),
+        "expected custom alias in current profile output, got: {current_text:?}"
+    );
+}
+
+#[test]
+fn e2e_cli_sessions_optimize_runs_against_isolated_home() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
+    cmd.env("HERMES_HOME", dir.path());
+    cmd.args(["sessions", "optimize"]);
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let text = std::str::from_utf8(&out).expect("utf8");
+    assert!(
+        text.contains("Optimizing session store"),
+        "expected optimize banner, got: {text:?}"
+    );
+    assert!(
+        text.contains("Optimized") && text.contains("FTS index"),
+        "expected FTS index summary, got: {text:?}"
+    );
+    assert!(
+        text.contains("Database size:"),
+        "expected database size summary, got: {text:?}"
+    );
+    assert!(dir.path().join("sessions.db").exists());
 }
 
 #[test]

@@ -113,6 +113,7 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
                 personality,
                 max_turns,
                 system_prompt: None,
+                prefill_messages_file: None,
                 tools: vec!["bash".into(), "read".into()],
                 budget: BudgetConfig::default(),
                 tool_output: ToolOutputConfig::default(),

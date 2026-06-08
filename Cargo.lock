@@ -173,7 +173,7 @@ dependencies = [
  "objc2-foundation",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
  "x11rb",
 ]
 
@@ -2302,6 +2302,8 @@ dependencies = [
  "hermes-config",
  "hermes-core",
  "hermes-intelligence",
+ "hermes-mcp",
+ "hermes-tools",
  "serde",
  "serde_json",
  "tokio",
@@ -2635,6 +2637,7 @@ dependencies = [
  "reqwest 0.13.4",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower",
  "tower-http",
@@ -2783,6 +2786,8 @@ dependencies = [
  "hermes-config",
  "hermes-core",
  "hermes-insights",
+ "hermes-intelligence",
+ "hermes-skills",
  "hex",
  "indexmap",
  "proptest",
@@ -3567,9 +3572,9 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "liteparse"
-version = "2.0.6"
+version = "2.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d75f13d5aae31d44ecd8f5cb9200f76e14db74bc10ba63f72f07ee64a4942ddb"
+checksum = "1ce4f669e0679a1ff406fd18c0ef06d9ee84cc160fdcbe9c2be8d2594aa7f93d"
 dependencies = [
  "clap",
  "image",
@@ -4964,7 +4969,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7788,9 +7793,9 @@ dependencies = [
 
 [[package]]
 name = "which"
-version = "8.0.2"
+version = "8.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81995fafaaaf6ae47a7d0cc83c67caf92aeb7e5331650ae6ff856f7c0c60c459"
+checksum = "c789537cf2f7f55be8e6192f92e464174ee55f91af622777f7f1ceb0dbccd03e"
 dependencies = [
  "libc",
 ]

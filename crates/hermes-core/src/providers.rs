@@ -17,6 +17,7 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "novita",
     "stepfun",
     "nous",
+    "nous-api",
     "copilot",
     "copilot-acp",
     "ai-gateway",
@@ -69,6 +70,8 @@ pub const MODELS_DEV_MERGED_PROVIDERS: &[&str] = &[
     "nvidia",
     "huggingface",
     "zai",
+    "minimax",
+    "minimax-cn",
     "gemini",
     "google",
 ];
@@ -95,6 +98,7 @@ pub fn canonical_provider_id(provider: &str) -> String {
         "codex" => "openai-codex".to_string(),
         "claude" | "claude-code" => "anthropic".to_string(),
         "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
+        "nous_api" | "nousapi" | "nous-portal-api" => "nous-api".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         "google" | "google-gemini" | "google-ai-studio" => "gemini".to_string(),
         "azure" | "azure-ai-foundry" | "azure_ai_foundry" => "azure-foundry".to_string(),
@@ -236,6 +240,11 @@ mod tests {
         assert!(cap.oauth_supported);
         assert!(cap.managed_tools_supported);
         assert!(!cap.models_dev_merged);
+
+        let direct = provider_capability_for("nous-portal-api").expect("nous-api capability");
+        assert_eq!(direct.id, "nous-api");
+        assert!(!direct.oauth_supported);
+        assert!(!direct.managed_tools_supported);
     }
 
     #[test]

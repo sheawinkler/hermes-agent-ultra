@@ -18,7 +18,7 @@ use hermes_tools::ToolRegistry;
 
 use crate::client::ResourceInfo;
 use crate::transport::McpTransport;
-use crate::{coerce_mcp_tool_arguments, McpError};
+use crate::{coerce_mcp_tool_arguments_for_schema, McpError};
 
 // ---------------------------------------------------------------------------
 // MCP tool format (for exposing to clients)
@@ -233,7 +233,8 @@ impl McpServer {
             .get("arguments")
             .cloned()
             .unwrap_or(Value::Object(serde_json::Map::new()));
-        let arguments = coerce_mcp_tool_arguments(arguments);
+        let schema = self.tool_schema_for_name(tool_name);
+        let arguments = coerce_mcp_tool_arguments_for_schema(arguments, schema.as_ref());
 
         debug!("MCP tools/call: {} with args: {}", tool_name, arguments);
 
@@ -255,6 +256,14 @@ impl McpServer {
             "content": content,
             "isError": is_error,
         }))
+    }
+
+    fn tool_schema_for_name(&self, tool_name: &str) -> Option<Value> {
+        self.tool_registry
+            .get_definitions()
+            .into_iter()
+            .find(|schema| schema.name == tool_name)
+            .and_then(|schema| serde_json::to_value(schema.parameters).ok())
     }
 
     /// Handle resources/list request.
@@ -474,9 +483,9 @@ impl McpServer {
 mod tests {
     use super::{McpCapabilityPolicy, McpPromptInfo, McpServer};
     use crate::client::ResourceInfo;
-    use crate::coerce_mcp_tool_arguments;
+    use crate::coerce_mcp_tool_arguments_for_schema;
     use async_trait::async_trait;
-    use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
+    use hermes_core::{tool_schema, ToolError, ToolHandler, ToolSchema};
     use hermes_tools::ToolRegistry;
     use serde_json::{json, Value};
     use std::sync::Arc;
@@ -500,7 +509,37 @@ mod tests {
         }
 
         fn schema(&self) -> ToolSchema {
-            tool_schema("echo_args", "Echo args", JsonSchema::new("object"))
+            tool_schema(
+                "echo_args",
+                "Echo args",
+                serde_json::from_value(json!({
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "ids": {"type": "array", "items": {"type": "string"}},
+                        "label": {"type": "string"},
+                        "limit": {"type": "integer"},
+                        "payload": {"type": "object", "additionalProperties": true},
+                        "setting": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "nullable": true,
+                            "default": null
+                        },
+                        "stages": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "nullable": true,
+                            "default": null
+                        },
+                        "workdir": {
+                            "anyOf": [{"type": "string"}, {"type": "null"}],
+                            "default": null
+                        }
+                    }
+                }))
+                .expect("test schema"),
+            )
         }
     }
 
@@ -525,19 +564,22 @@ mod tests {
     #[test]
     fn stringified_mcp_arguments_coerce_only_objects_and_arrays() {
         assert_eq!(
-            coerce_mcp_tool_arguments(Value::String(r#"{"path":"Cargo.toml"}"#.to_string())),
+            coerce_mcp_tool_arguments_for_schema(
+                Value::String(r#"{"path":"Cargo.toml"}"#.to_string()),
+                None
+            ),
             json!({"path":"Cargo.toml"})
         );
         assert_eq!(
-            coerce_mcp_tool_arguments(Value::String(r#"[{"x":1}]"#.to_string())),
+            coerce_mcp_tool_arguments_for_schema(Value::String(r#"[{"x":1}]"#.to_string()), None),
             json!([{"x":1}])
         );
         assert_eq!(
-            coerce_mcp_tool_arguments(Value::String(r#""plain""#.to_string())),
+            coerce_mcp_tool_arguments_for_schema(Value::String(r#""plain""#.to_string()), None),
             Value::String(r#""plain""#.to_string())
         );
         assert_eq!(
-            coerce_mcp_tool_arguments(Value::String("not json".to_string())),
+            coerce_mcp_tool_arguments_for_schema(Value::String("not json".to_string()), None),
             Value::String("not json".to_string())
         );
     }
@@ -560,6 +602,46 @@ mod tests {
         let payload: Value = serde_json::from_str(text).expect("tool json");
         assert_eq!(payload["kind"], "object");
         assert_eq!(payload["params"], json!({"path":"Cargo.toml"}));
+    }
+
+    #[tokio::test]
+    async fn tools_call_coerces_schema_typed_string_arguments_before_dispatch() {
+        let server = McpServer::new(registry_with_echo_args());
+        let result = server
+            .handle_request(
+                "tools/call",
+                json!({
+                    "name": "echo_args",
+                    "arguments": {
+                        "enabled": "false",
+                        "ids": "[\"a\", \"b\"]",
+                        "label": "null",
+                        "limit": "1e2",
+                        "payload": "{\"max\":50}",
+                        "setting": "null",
+                        "stages": "null",
+                        "workdir": "null"
+                    }
+                }),
+            )
+            .await
+            .expect("tools/call");
+
+        let text = result["content"][0]["text"].as_str().expect("text");
+        let payload: Value = serde_json::from_str(text).expect("tool json");
+        assert_eq!(
+            payload["params"],
+            json!({
+                "enabled": false,
+                "ids": ["a", "b"],
+                "label": "null",
+                "limit": 100,
+                "payload": {"max": 50},
+                "setting": null,
+                "stages": null,
+                "workdir": null
+            })
+        );
     }
 
     #[tokio::test]

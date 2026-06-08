@@ -10,6 +10,8 @@ description = "Tool registry, toolsets, and tool implementations for Hermes Agen
 hermes-core = { workspace = true }
 hermes-config = { workspace = true }
 hermes-insights = { workspace = true }
+hermes-intelligence = { workspace = true }
+hermes-skills = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

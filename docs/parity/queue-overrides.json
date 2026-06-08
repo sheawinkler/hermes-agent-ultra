@@ -36,6 +36,74 @@
       "disposition": "superseded",
       "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
     },
+    "0e2e69a71dda": {
+      "disposition": "ported",
+      "notes": "Rust hermes_intelligence::rl now has a deterministic BatchDatasetRunner with JSONL prompt/conversation parsing, max-sample batching, resume checkpoints by prompt index/text, per-batch processed/skipped statistics, toolset distribution metadata, JSONL trajectory serialization, and tests for checkpoint resume plus ephemeral prompt non-persistence."
+    },
+    "d36790de9153": {
+      "disposition": "ported",
+      "notes": "Ephemeral system prompts are first-class in Rust for both batch and agent runners: BatchDatasetRunConfig tracks an ephemeral prompt without persisting it to trajectory JSONL or checkpoints, and AgentConfig::ephemeral_system_prompt is appended only to provider API-call messages and stripped from AgentResult persistence, with focused tests for both paths."
+    },
+    "ac6d747fa610": {
+      "disposition": "ported",
+      "notes": "Rust BatchDatasetRunner now supports file-backed checkpoint resumption with BatchRunCheckpoint::load_from_path/save_atomic_to_path, same-directory atomic JSON replacement, per-batch checkpoint writes via run_with_checkpoint_path, and tests proving atomic replacement, no temp-file leaks, per-batch write counts, and resume skips by persisted prompt index/text."
+    },
+    "d63b363cde77": {
+      "disposition": "ported",
+      "notes": "The upstream atomic_json_write/checkpoint test refactor is ported as Rust hermes_intelligence::rl atomic_json_write plus BatchRunCheckpoint load/save helpers and BatchDatasetRunner checkpoint-path resume. Focused tests cover valid/overwrite writes, parent dirs, original preservation on serialization failure, no temp leaks, Unicode/concurrent writes, missing/corrupt checkpoint handling, run-name mismatch fresh starts, last_updated, and persisted resume progress."
+    },
+    "10b4cfeace24": {
+      "disposition": "ported",
+      "notes": "Rust TerminalHandler already surfaces backend CommandOutput.stdout as the user-visible tool return string through format_command_output, including nonzero exit handling. This batch adds an explicit regression test proving backend stdout is returned without relying on a legacy output/stdout compatibility shim."
+    },
+    "a4db3fdee5b9": {
+      "disposition": "superseded",
+      "notes": "The upstream Morph leakage fix is superseded by Rust terminal architecture: terminal execution uses injected TerminalBackend implementations rather than shared Hecate/Morph module globals, and task_id only resolves scoped cwd state. Focused tests prove task-a, task-b, and no-task calls do not share task cwd state."
+    },
+    "fbd3a2fdb88e": {
+      "disposition": "superseded",
+      "notes": "The upstream per-task Morph instance cleanup/leakage patch is superseded by Rust's non-Morph terminal runtime plus task-scoped cwd registry. TerminalHandler tests now prove task_id isolation and explicit workdir precedence, so one task cannot inherit another task's terminal cwd context."
+    },
+    "a5c7422f2315": {
+      "disposition": "superseded",
+      "notes": "Python embedded Hindsight .env setup is superseded by the Rust-only Hindsight runtime: it does not launch hindsight-embed, and legacy local/local_embedded config is normalized to local_external HTTP mode."
+    },
+    "d6b65bbc47cf": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight auto-retain builds structured turn JSON without ASCII escaping, and tests prove non-ASCII user and assistant content survives in the retained payload."
+    },
+    "127048e6430f": {
+      "disposition": "ported",
+      "notes": "Rust HindsightConfig accepts both apiKey and snake_case api_key from config.json, with regression coverage for the snake_case path."
+    },
+    "3e994e38f763": {
+      "disposition": "superseded",
+      "notes": "Hindsight profile env materialization only applies to the upstream Python embedded daemon; the Rust runtime now documents and exposes cloud/local_external HTTP modes only."
+    },
+    "df55660e3c3c": {
+      "disposition": "superseded",
+      "notes": "The unsupported-CPU guard is a Python import workaround for local embedded Hindsight; Rust Hindsight never imports that Python stack and normalizes embedded aliases to local_external."
+    },
+    "93a74f74bf93": {
+      "disposition": "superseded",
+      "notes": "The shared asyncio event-loop shutdown fix is Python-runtime-only; Rust Hindsight uses reqwest blocking clients per operation and has no provider-owned event loop to stop."
+    },
+    "403c82b6b65b": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight supports HINDSIGHT_TIMEOUT and config timeout/hindsight_timeout aliases with a 120s default and focused config coverage."
+    },
+    "f1ba2f0c0b06": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight request clients for auto-recall, auto-retain, and tool calls all use the configured timeout_secs value."
+    },
+    "f9c6c5ab8472": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight now creates a per-initialization document_id and includes it in auto-retain batch bodies, with tests proving resumed sessions get distinct document IDs."
+    },
+    "edff2fbe7efd": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight supports bank_id_template with profile/workspace/platform/user/session placeholders, sanitization tests, schema exposure, and README coverage."
+    },
     "395dbcc873c8": {
       "disposition": "superseded",
       "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"
@@ -952,9 +1020,429 @@
       "disposition": "ported",
       "notes": "Rust delegation depth now has a first-class AgentConfig max_delegate_depth plus delegation.max_spawn_depth config bridge with floor 1 and no legacy ceiling; env/config values above the old cap pass through with agent, CLI, config, and backend tests."
     },
+    "9423fda5cb57": {
+      "disposition": "ported",
+      "notes": "Rust delegation config now accepts delegation.model/provider plus documented direct endpoint fields, exposes them through config set/get, propagates them through CLI/HTTP AgentConfig construction, and makes subagents either inherit the parent provider for model-only overrides or build an independent provider for provider/base_url/api_key overrides with structured credential errors."
+    },
     "f1fe29d1c368": {
       "disposition": "ported",
       "notes": "Rust provider config now accepts llm.<provider>.request_timeout_seconds, validates and exposes it through config set/get, propagates it into AgentConfig RuntimeProviderConfig, and applies it to OpenAI-compatible, Codex Responses, Anthropic, OpenRouter, extra provider, fallback/runtime-routing, and client rebuild paths with targeted tests."
+    },
+    "cf786593cd83": {
+      "disposition": "ported",
+      "notes": "Rust now propagates active provider output caps into AgentConfig.max_tokens so gateway/CLI/cron agent paths pass configured max_tokens into provider requests through the existing AgentLoop max_tokens chain."
+    },
+    "1c909e75e1a0": {
+      "disposition": "ported",
+      "notes": "Rust build_agent_config now honors HERMES_MAX_TOKENS as the highest-precedence output-token override and falls back to active provider config caps for CLI and gateway-created agents, with focused precedence tests."
+    },
+    "14275d7baa1a": {
+      "disposition": "ported",
+      "notes": "Rust llm provider config accepts max_output_tokens as an alias for max_tokens, exposes both dotted config set/get spellings, validates positive values, and uses the active provider cap only when HERMES_MAX_TOKENS is unset."
+    },
+    "2dda393f99cb": {
+      "disposition": "ported",
+      "notes": "Rust regression tests cover the max_tokens propagation chain from config parsing/set-get through build_agent_config into AgentConfig.max_tokens precedence, superseding the upstream Python gateway test-only follow-up."
+    },
+    "4b2d00f845eb": {
+      "disposition": "ported",
+      "notes": "Rust custom provider catalogs now preserve `discover_models: false` from both canonical llm_providers and legacy custom_providers, keep explicit `models` subsets without probing live `/models`, and expose config-aware provider lists with Rust model-switch tests."
+    },
+    "7ae8aac3b9b2": {
+      "disposition": "ported",
+      "notes": "Rust terminal and slash/TUI model flows now include configured custom providers, use explicit provider model lists when discovery is disabled, fall back to configured models after empty probes, and guard direct switches against those configured catalogs with CLI/config tests."
+    },
+    "38695254f851": {
+      "disposition": "ported",
+      "notes": "Rust session persistence now exposes FTS index counting and optimize_fts maintenance, VACUUM runs FTS optimization before reclaiming pages, and top-level `hermes sessions optimize` reports FTS index count plus before/after sessions.db size with Rust unit/e2e coverage."
+    },
+    "3d1d0a49fe90": {
+      "disposition": "ported",
+      "notes": "Rust MiniMax direct auxiliary defaults now use MiniMax-M3 for minimax and minimax-cn, MiniMax CN registers as a first-class auxiliary direct-key provider, setup defaults and curated picker fallbacks expose MiniMax-M3 first, and regression tests guard against stale/highspeed defaults."
+    },
+    "da4f407e5173": {
+      "disposition": "ported",
+      "notes": "Rust `hermes portal` now defaults to Nous Portal onboarding/setup, `portal info/status/check` report status, CLI help/README/auth recovery guidance use the human-readable portal alias, and focused CLI tests cover the dispatch without OAuth side effects."
+    },
+    "486b692ddd80": {
+      "disposition": "ported",
+      "notes": "Rust Nous provider request shaping now centralizes Portal attribution tags as product=hermes-agent plus client=hermes-client-v<workspace version>, and request-body tests prove the versioned tag is applied to actual Nous chat completion payloads."
+    },
+    "de07aa7c4046": {
+      "disposition": "ported",
+      "notes": "Rust now exposes a first-class `nous-api` direct API-key provider with aliases, non-OAuth provider capability, setup catalog entry, NOUS_API_KEY/NOUS_BASE_URL runtime resolution, Nous provider construction, Nous model normalization/catalog reuse, and targeted core/CLI/agent tests."
+    },
+    "4447e7d71afa": {
+      "disposition": "ported",
+      "notes": "Rust runtime now supports Kimi Code sk-kimi-* routing to https://api.kimi.com/coding/v1 with KimiCLI user-agent while preserving KIMI_BASE_URL override and legacy Moonshot fallback."
+    },
+    "fcb1944b4f76": {
+      "disposition": "ported",
+      "notes": "Rust now captures Nous credits headers at the provider HTTP boundary, parses the v1 x-nous-credits and x-nous-tool-pool contracts with strict money/bool validation, stores a last-known credits snapshot, appends the credits block to CLI and gateway /usage output, and surfaces depleted/50/75/90 percent usage notices in the TUI status bar with focused Rust tests. Python dev fixtures and desktop-only scaffolding are superseded by the Rust runtime surface."
+    },
+    "c79b6f23e696": {
+      "disposition": "ported",
+      "notes": "Rust credits notices now classify usage-band, grant-spent, and depleted states, suppress flash-style usage/grant-spent notices when a new TUI processing cycle starts, keep depleted sticky, and regression-test that yielded notices stay quiet until the band or grant-spent condition changes."
+    },
+    "5af899c7ca75": {
+      "disposition": "ported",
+      "notes": "Rust profile management now reverse-displays custom aliases from aliases.json in profile list rows and current-profile output, prefers custom aliases over profile-named self aliases, keeps raw profile show output parse-safe, and covers the real CLI create/alias/list/use/current flow."
+    },
+    "b91aade17683": {
+      "disposition": "ported",
+      "notes": "Rust config now detects auxiliary task pins whose provider differs from the selected main provider, top-level and slash-command model switch persistence surfaces warn without auto-clearing legitimate pins, and focused config/model-switch/e2e tests cover stale vs auto/matching slots."
+    },
+    "7f016f5f3360": {
+      "disposition": "ported",
+      "notes": "Rust model-provider preview surfaces now share DEFAULT_VISIBLE_MODELS_PER_PROVIDER=50 for CLI model listing, TUI provider picker details, and slash /provider output, with a regression test proving a 60-model configured provider exposes the first 50 while preserving total count."
+    },
+    "f94363d1f0de": {
+      "disposition": "superseded",
+      "notes": "Desktop arrow-history UI is superseded by Rust TUI input_history navigation: Up/Down dispatch through App::history_prev/history_next for single-line prompts, Ctrl-R searches history, submitted prompts append to the ring, and a focused Rust unit test proves newest-to-oldest recall plus return to the empty draft sentinel."
+    },
+    "ce5003063474": {
+      "disposition": "superseded",
+      "notes": "Desktop queued-composer history integration is superseded by Rust's split design: TUI input history remains a sent-prompt ring while gateway BusySessionCoordinator owns busy-turn queue/steer semantics with queue, reset, finish, and fallback tests. There is no Rust desktop queued-row editor surface to port."
+    },
+    "0cbcc7593562": {
+      "disposition": "superseded",
+      "notes": "Desktop composer-message queue robustness is superseded by Rust gateway BusySessionCoordinator and CLI background queue handling: busy messages queue without interrupt, accepted steers skip the queue, rejected steers fall back to queue, reset/finish clear state deterministically, and slash/background queue tests cover user-visible status."
+    },
+    "40aef6af91e6": {
+      "disposition": "superseded",
+      "notes": "Desktop composer live-steer controls are superseded by Rust first-class /steer support in CLI/TUI/gateway/ACP: the core trusted steer marker is already ported, active-session ACP steer interrupts with that marker, and gateway busy-session steer mode accepts live steering or falls back to queue."
+    },
+    "efa53fb3be51": {
+      "disposition": "superseded",
+      "notes": "Desktop Cmd/Ctrl+Enter steer keybinding policy is not a Rust runtime surface. Rust TUI has its own terminal key contract: Enter submits, Shift+Enter and Ctrl+J insert newlines, Ctrl+Enter/Ctrl+M are submit fallbacks, and focused tests guard those shortcuts."
+    },
+    "8a9ded5b21b1": {
+      "disposition": "ported",
+      "notes": "Rust gateway now has a dependency-free 48 kHz stereo s16le continuous VoiceMixer with ambient loops, ducked speech overlays, clipping, stop/cleanup, and synthesized ambient PCM, plus VoiceManager voice_fx lifecycle integration for join/remove, active checks, ack phrase selection, speech enqueue/read/stop, and focused mixer/manager unit tests."
+    },
+    "4a1907bd10c3": {
+      "disposition": "superseded",
+      "notes": "Upstream change is confined to apps/desktop React i18n wiring and zh-Hans catalog files. Hermes Agent Ultra has no Electron desktop tree in this Rust runtime repo; CLI/TUI/gateway text remains Rust-native and is not backed by the upstream desktop i18n catalog."
+    },
+    "1d9c3ebae0f2": {
+      "disposition": "superseded",
+      "notes": "Upstream persists the Electron desktop language preference through apps/desktop config/runtime stores. Hermes Agent Ultra has no desktop language selector/config surface in this Rust runtime repo, so there is no shared Rust runtime state to port."
+    },
+    "f18a9dbefc59": {
+      "disposition": "superseded",
+      "notes": "Japanese and Traditional Chinese language switching is an apps/desktop component/catalog change. The Rust runtime has no Electron language switcher surface; CLI/TUI/gateway text remains direct Rust command/status output."
+    },
+    "b1b89f843e62": {
+      "disposition": "superseded",
+      "notes": "The upstream nested i18n field-copy refactor only reorganizes apps/desktop TypeScript catalog structures and UI consumers. This Rust runtime repo has no corresponding desktop catalog tree or TypeScript settings-field copy layer."
+    },
+    "812dc6957e19": {
+      "disposition": "superseded",
+      "notes": "Searchable language picker is an apps/desktop React component plus i18n catalog update. Hermes Agent Ultra has no Electron language picker runtime surface to port."
+    },
+    "fbd423b94d50": {
+      "disposition": "superseded",
+      "notes": "Desktop chrome localization only updates apps/desktop UI strings, voice-recorder hooks, and React components. Rust CLI/TUI/gateway chrome is independent and not driven by the upstream desktop i18n catalog."
+    },
+    "112a0732c6a7": {
+      "disposition": "superseded",
+      "notes": "This upstream row only fills apps/desktop Japanese and Traditional Chinese translation files. There is no Rust runtime catalog file or desktop translation asset in this repo."
+    },
+    "c24abf5b3286": {
+      "disposition": "superseded",
+      "notes": "This upstream row only fills apps/desktop Simplified Chinese translation strings. Hermes Agent Ultra has no corresponding desktop translation catalog in the Rust runtime repo."
+    },
+    "1c2189839d0b": {
+      "disposition": "superseded",
+      "notes": "CamelCase settings i18n keys are a desktop TypeScript catalog/runtime-test refactor. No Rust settings parser or gateway command consumes those apps/desktop i18n keys."
+    },
+    "0c0a70774424": {
+      "disposition": "superseded",
+      "notes": "macOS updater-helper repair is confined to upstream apps/bootstrap-installer Tauri paths and Electron main process code. Hermes Agent Ultra's Rust update surface is the CLI release-check path, not an embedded Electron/Tauri helper."
+    },
+    "98528c78c143": {
+      "disposition": "superseded",
+      "notes": "Windows in-app update race handling only touches upstream apps/bootstrap-installer Tauri update code and Electron main process orchestration. This Rust runtime repo does not embed that desktop updater process."
+    },
+    "14fee4f11265": {
+      "disposition": "superseded",
+      "notes": "Windows first-run update handoff retry is an upstream bootstrap-installer Tauri updater behavior. Hermes Agent Ultra has no matching in-app desktop updater; Rust `hermes update` is handled separately by the CLI release-check implementation."
+    },
+    "16beab421f05": {
+      "disposition": "superseded",
+      "notes": "The upstream About-panel fix is Electron-only. Rust already centralizes live version text through hermes_core::version::version_label and exposes it via CLI `version`, TUI `/version`, and gateway `/version`, with focused tests guarding the shared label."
+    },
+    "b94b3622b5fa": {
+      "disposition": "ported",
+      "notes": "Rust gateway now applies per-session profile switching through `/profile <name>`: it resolves aliases from `$HERMES_HOME/profiles/aliases.json`, loads profile YAML, derives provider from either explicit provider or provider:model, applies model/personality/home/profile into GatewayRuntimeContext, preserves missing-file label behavior with a warning, and verifies status/runtime-state behavior with focused gateway route tests. Upstream desktop cross-profile UI is not a Rust runtime surface."
+    },
+    "4891f9ae78b0": {
+      "disposition": "superseded",
+      "notes": "Concurrent multi-profile gateway sockets are Electron desktop store/socket orchestration only. Rust gateway profile routing is session-scoped runtime state and does not expose the upstream apps/desktop multi-socket dashboard layer."
+    },
+    "1a3e608524a3": {
+      "disposition": "superseded",
+      "notes": "Per-profile remote gateway hosts are apps/desktop Electron connection-config and settings UI only. The Rust runtime has no desktop remote-host registry; gateway profile behavior is handled by session-scoped runtime overlays and explicit home/profile state."
+    },
+    "5df732a355c8": {
+      "disposition": "superseded",
+      "notes": "Quick-create profile from the desktop rail is React desktop UI. Rust profile creation is handled by the CLI `hermes profile create` command and profile YAML files; there is no Rust profile rail to port."
+    },
+    "e0121c59d3b3": {
+      "disposition": "superseded",
+      "notes": "Drag-sort profiles in the rail only changes apps/desktop profile-switcher UI state. Rust profiles are filesystem-backed YAML entries listed deterministically by CLI/gateway surfaces, not an ordered desktop rail."
+    },
+    "f764b0400ad7": {
+      "disposition": "superseded",
+      "notes": "Deleting the active profile fallback is a desktop profile-switcher/delete-dialog behavior. Rust CLI profile delete already clears the active marker when deleting the active profile and does not maintain an Electron active-profile rail."
+    },
+    "7b4acadfe765": {
+      "disposition": "superseded",
+      "notes": "Per-profile plus-button session creation in the all-profiles desktop view is apps/desktop sidebar UI. Rust gateway sessions are created by incoming platform messages and can now receive per-session profile overlays through `/profile`."
+    },
+    "ffb53767bfff": {
+      "disposition": "ported",
+      "notes": "Rust config now resolves HERMES_PREFILL_MESSAGES_FILE > top-level prefill_messages_file > legacy agent.prefill_messages_file, loads JSON prefill messages relative to HERMES_HOME/config home, injects them ephemerally into CLI/HTTP/gateway/cron agent contexts through AgentConfig.prefill_messages, and strips them from returned/persisted history with focused config/CLI/HTTP/agent/cron/gateway tests."
+    },
+    "a61420952e29": {
+      "disposition": "ported",
+      "notes": "Rust now constructs tool-result messages with the originating tool name in Message.name when the ToolCall is known, including invalid-tool and invalid-JSON result paths, persists messages.name through the SQLite session store with legacy DB migration, and regression-tests model-visible plus persisted tool-result name round trips."
+    },
+    "338c07433699": {
+      "disposition": "ported",
+      "notes": "Rust ntfy sends now distinguish explicit tool/router targets from configured publish-topic replies: gateway-backed messaging marks caller recipients explicit, DeliveryTarget routing preserves is_explicit/thread hints for text and file sends, and NtfyAdapter publishes explicit topics directly while retaining configured publish_topic for non-explicit replies."
+    },
+    "ea266f43e9db": {
+      "disposition": "superseded",
+      "notes": "Rust LocalSearchBackend does not shell through rg/grep or parse merged stderr as matches; it compiles regexes with regex::Regex before traversal, skips unreadable/non-UTF8 files without diagnostic payload parsing, and now regression-tests invalid-regex errors plus partial read failures preserving content/files_only/count matches."
+    },
+    "ec46f5912e30": {
+      "disposition": "ported",
+      "notes": "Rust Gemini direct-provider setup and runtime defaults now use Google AI Studio's OpenAI-compatible /v1beta/openai endpoint, normalize manually supplied native Gemini base URLs to that endpoint, and defensively strip OpenAI-only extra_body/profile fields from native-Gemini request bodies while preserving thinking_config/thinkingConfig. The upstream native maxOutputTokens default is superseded by Rust's OpenAI-compatible max_tokens path."
+    },
+    "b459bac02c98": {
+      "disposition": "ported",
+      "notes": "Rust repo update/autostash safety now ignores the Desktop bootstrap marker .hermes-bootstrap-complete in the root .gitignore, with a hermes-cli regression test guarding that gitignore contract so bootstrap runtime state is not swept into update stashes."
+    },
+    "72eb42d9ecdf": {
+      "disposition": "superseded",
+      "notes": "The upstream Python source-checkout updater's stash/restore versus discard mode is superseded in Rust because top-level hermes update is non-mutating release-check behavior and does not run git checkout/pull/reset/clean against the source tree. The remaining shared safety contract, ignoring .hermes-bootstrap-complete so autostash paths do not capture Desktop bootstrap state, is ported separately under b459bac02c98."
+    },
+    "9ecc331be847": {
+      "disposition": "ported",
+      "notes": "Rust resume now falls back from missing exact snapshot stems to session-id search over saved session snapshots, matching exact, prefix, and substring IDs case-insensitively across both file stems and session_info.session_id, with deterministic exact-before-prefix-before-substring ranking and focused CLI tests."
+    },
+    "580d9240979c": {
+      "disposition": "superseded",
+      "notes": "The upstream SQL-bounded desktop SessionDB optimization is superseded for Rust because the relevant runtime surface is file-backed resume snapshots rather than the Python desktop session-search endpoint. The Rust port avoids message-body scans, searches only snapshot stems plus session_info.session_id metadata, and preserves deterministic bounded result selection for resume."
+    },
+    "c54b93587313": {
+      "disposition": "ported",
+      "notes": "Rust gateway /title now persists user-visible Session.title metadata in SessionManager, exposes bare /title, /status and /sessions title surfaces, emits a session:title hook, and copies title metadata when switching sessions; regression tests cover command parsing, session metadata, and gateway routing."
+    },
+    "02d6bf1c39df": {
+      "disposition": "ported",
+      "notes": "Rust ACP sessions now carry profile/home ownership through session/new, session/load, session/resume, session/fork, session/list, and prompt executor snapshots. The upstream desktop Electron routing pieces are not present in this Rust-only repo; the runtime-equivalent profile-scoped session lifecycle is covered by hermes-acp tests."
+    },
+    "6f6eb871d834": {
+      "disposition": "ported",
+      "notes": "Rust ACP session/new now accepts profile/home metadata and preserves it on the SessionState handed to prompt executors, so new chats can remain attached to their owning profile in the Rust runtime surface. Regression coverage asserts create, prompt, list, and fork profile ownership."
+    },
+    "83c13862f107": {
+      "disposition": "superseded",
+      "notes": "Upstream change is Electron desktop remote-profile read routing only (apps/desktop/electron/main.cjs). This Rust repo has no desktop Electron backend-routing layer; profile ownership is represented in Rust ACP/gateway session metadata instead."
+    },
+    "3e4fa8ca9ca3": {
+      "disposition": "superseded",
+      "notes": "Desktop profile-rail drag-axis polish touches only apps/desktop React UI, which is absent from this Rust-only runtime repo."
+    },
+    "9915665e4c51": {
+      "disposition": "superseded",
+      "notes": "Desktop profile-rail cell drag/clamp behavior touches only apps/desktop React UI, which is absent from this Rust-only runtime repo."
+    },
+    "fb18bde89740": {
+      "disposition": "superseded",
+      "notes": "Desktop profile-rail haptic reordering touches only apps/desktop React UI, which is absent from this Rust-only runtime repo."
+    },
+    "76b98f43ca0a": {
+      "disposition": "superseded",
+      "notes": "Desktop ALL-profiles grouping gate touches only apps/desktop sidebar UI, which is absent from this Rust-only runtime repo."
+    },
+    "0c7def31aa86": {
+      "disposition": "superseded",
+      "notes": "Desktop single-profile rail plus-button behavior touches only apps/desktop sidebar UI, which is absent from this Rust-only runtime repo."
+    },
+    "cf9dc366dd0b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop cross-profile read-only icon/action cleanup is tied to apps/desktop and Python web_server/session DB surfaces. Rust runtime profile ownership is handled through ACP/gateway session metadata, not desktop per-session icon routing."
+    },
+    "86371e6cd8d5": {
+      "disposition": "superseded",
+      "notes": "Desktop profile-swap overlay border/radius styling touches only apps/desktop React UI, which is absent from this Rust-only runtime repo."
+    },
+    "1b01fa3acf15": {
+      "disposition": "superseded",
+      "notes": "Desktop long-press profile color picker touches only apps/desktop React UI/storage, which is absent from this Rust-only runtime repo."
+    },
+    "cdfbd89ea539": {
+      "disposition": "ported",
+      "notes": "Rust gateway /title now persists Session.title metadata directly, bare /title reads current title, /status and /sessions expose it, and gateway tests cover the title command lifecycle. No Python TUI session.title RPC is used in the Rust runtime."
+    },
+    "9350e26e681e": {
+      "disposition": "ported",
+      "notes": "Rust exposes the clarify tool as a typed ClarifyHandler with signal, stdio, and gateway channel backends, registers it in built-in/toolset/runtime wiring, and covers schema, trimming, choice normalization, empty-question rejection, stdio auto-answer, and gateway dispatcher roundtrip/timeout behavior."
+    },
+    "c36b256de56a": {
+      "disposition": "ported",
+      "notes": "Rust provides Home Assistant REST tools and backend handlers for entity listing, state lookup, service listing, and service calls, registers the homeassistant toolset and platform aliases, and includes a Home Assistant gateway adapter. Focused tests cover schemas, handler contracts, backend validation, and platform contract startup/routing."
+    },
+    "8e0c48e6d25b": {
+      "disposition": "ported",
+      "notes": "Rust CLI and gateway now resolve otherwise-unknown installed SKILL.md slash commands from configured skill roots, apply enabled/disabled/platform/security filtering, inject full skill content plus invocation args into the normal agent turn, and cover the shared resolver plus CLI and gateway routing with focused tests."
+    },
+    "7966560fb50f": {
+      "disposition": "ported",
+      "notes": "Rust now exposes first-class /reload-skills and /reload_skills in CLI and gateway. The command snapshots installed SKILL.md slash commands through the shared Rust resolver, reports available/blocked/skipped commands, queues an agent-visible next-turn note, and deliberately avoids prompt-cache invalidation. The upstream skills_reload agent tool portion is superseded by the later upstream refactor and not mirrored."
+    },
+    "dd2d1ba5e61c": {
+      "disposition": "ported",
+      "notes": "Rust /reload-skills follows the final upstream behavior: it queues a one-shot system note for the next agent turn, confirms dynamic SKILL.md slash commands are scanned live, and does not delete prompt caches or expose a skills_reload agent tool. CLI and gateway tests cover command routing, snapshot rendering, and one-shot gateway note injection."
+    },
+    "3c252ae44b52": {
+      "disposition": "ported",
+      "notes": "Rust hermes-mcp provides MCP client support through McpClient and McpManager, stdio and HTTP/SSE transports, OAuth/bearer auth, tools/list, tools/call, resources, prompts, stale transport reconnect, and media caching. CLI mcp add/list/remove/test/configure/login/serve wiring and focused hermes-mcp/hermes-cli tests cover the core client surface."
+    },
+    "60effcfc4427": {
+      "disposition": "ported",
+      "notes": "Rust now mirrors the upstream MCP discovery hardening with McpManager::connect_all_parallel for concurrent per-server discovery reports, user-visible CLI config warnings when url and command conflict, URL/transport validation for mcp list/test/configure/login, and regression tests for conflict detection, invalid configs, and failed-server parallel discovery."
+    },
+    "63f5e14c6993": {
+      "disposition": "mirrored",
+      "notes": "Rust repo now includes docs/mcp.md with client configuration, config validation rules, parallel discovery behavior, mcp serve setup, and Sentrux MCP profile examples, plus a README link near the MCP quick commands."
+    },
+    "6716e66e89fc": {
+      "disposition": "ported",
+      "notes": "Rust hermes mcp serve is implemented in crates/hermes-mcp/src/serve.rs and exposed by hermes-cli handle_cli_mcp serve. Tests cover serve tool definitions, session/resource/event/approval tools, numeric coercion, stringified object arguments, and systems MCP conformance; docs/mcp.md documents the server mode."
+    },
+    "654e16187e71": {
+      "disposition": "ported",
+      "notes": "Rust MCP sampling now handles server-initiated sampling/createMessage inside the client transport receive loop, replies with JSON-RPC results or mapped errors, supports per-client and per-server-config SamplingConfig, LlmCallback wiring, model allowlists, max token caps, max RPM rate limits, timeout errors, tool-use responses with max_tool_rounds governance, and SamplingMetrics audit counters. Focused hermes-mcp tests cover direct sampling governance, config inheritance, tool-loop enforcement, and interleaved transport-loop sampling replies."
+    },
+    "3824b0323793": {
+      "disposition": "superseded",
+      "notes": "Python TUI session.title DB/RPC edge cases are superseded by Rust gateway in-memory Session.title storage and command tests; there is no pending DB row queue or Python RPC failure mode in this runtime path."
+    },
+    "492c4c6573b4": {
+      "disposition": "superseded",
+      "notes": "Python TUI pending-title flush/no-op DB lookup edge cases are superseded by Rust gateway Session.title mutation on the active in-memory session, with hook/status/session-list regression coverage."
+    },
+    "3aa86717b60c": {
+      "disposition": "superseded",
+      "notes": "Python TUI pending-title retry and title validation error mapping are superseded by Rust gateway title parsing/storage; invalid empty titles fall through to bare /title read and no DB retry path exists."
+    },
+    "27936ee02dfc": {
+      "disposition": "superseded",
+      "notes": "Python TUI queued-title retry over auto-title DB state is superseded by Rust gateway user title storage on Session.title, which is not delayed behind DB materialization."
+    },
+    "aa948832886a": {
+      "disposition": "ported",
+      "notes": "Rust MCP tools/call now applies schema-aware string argument coercion before dispatch: nullable object/array/type-union fields convert literal \"null\" to JSON null only when the inputSchema permits null, while integer, boolean, object, and array string values are coerced according to the exposed schema. Both generic McpServer and hermes mcp serve paths have focused runtime regression coverage."
+    },
+    "cda64a59612f": {
+      "disposition": "ported",
+      "notes": "Rust ToolsetManager now resolves otherwise-unknown live registry-owned toolsets, including MCP-style dynamic toolsets, through ToolRegistry instead of requiring static toolset registration. Wildcard/list discovery includes live registry toolsets and focused hermes-tools tests cover filtered and unfiltered resolution."
+    },
+    "c10fea8d264e": {
+      "disposition": "ported",
+      "notes": "Rust ToolRegistry now supports explicit live toolset aliases such as server-name to mcp-server-name mappings, exposes alias targets for inspection, removes aliases only when the target toolset loses its last tool, and platform toolset filtering resolves configured MCP server aliases with hermes-tools and hermes-cli regression coverage."
+    },
+    "9b2fb1cc2e95": {
+      "disposition": "ported",
+      "notes": "Rust ACP now parses client-provided mcpServers/mcp_servers during session new/load/resume/fork, converts stdio and HTTP/SSE configs into hermes_mcp configs, preserves stdio env and bearer Authorization headers, registers reachable MCP servers through McpManager, and exposes discovered MCP tools as real callable ToolRegistry tools with provider-safe names and focused hermes-mcp/hermes-acp coverage."
+    },
+    "dfc5563641f0": {
+      "disposition": "ported",
+      "notes": "Rust ACP sessions now include client-provided MCP server toolsets through live ToolRegistry mcp-{server} toolsets and explicit aliases, so tools.list, /tools, initialize tool names, ToolsetManager resolution, and registered MCP dispatch all see the session MCP surface. Focused tests cover toolset expansion and ACP MCP tool visibility."
+    },
+    "f81395975025": {
+      "disposition": "superseded",
+      "notes": "Upstream simple-terminal registration is superseded by Rust TerminalHandler and LocalBackend command execution, explicit background=true lifecycle tracking, timeout/workdir/schema contracts, and process-management tests without the Python Morph VM dependency."
+    },
+    "ab7293bed652": {
+      "disposition": "ported",
+      "notes": "Rust TerminalHandler now has regression coverage proving a nonzero terminal exit code returns normal model-visible command output with [exit code: N] instead of surfacing as ToolError/agent tool failure."
+    },
+    "ba19d530ad24": {
+      "disposition": "superseded",
+      "notes": "Python mini-swe/hecate terminal backend integration is superseded by Rust-native terminal and process backends: command execution, background lifecycle, stdin/PTY/workdir, schema registration, and local runtime contracts are implemented without Python terminal_tool dispatch."
+    },
+    "771cf41fea1f": {
+      "disposition": "superseded",
+      "notes": "Upstream Singularity/run-script terminal environment tuning is not a separate Rust runtime surface; Rust terminal execution already exposes explicit timeout, workdir, background, PTY, stdin, and process-polling contracts through typed handlers and tests."
+    },
+    "bbeed5b5d12d": {
+      "disposition": "superseded",
+      "notes": "Upstream session logging and interactive sudo support is superseded by Rust session-aware terminal/process logging, task cwd mapping, background log reads, SUDO_PASSWORD sudo transformation, approval manager, and gateway/terminal regression coverage."
+    },
+    "5d3398aa8a20": {
+      "disposition": "superseded",
+      "notes": "Upstream terminal approval and CLI feedback refactor is superseded by Rust ApprovalManager plus session-scoped YOLO/approval state, hardline and sudo floors, gateway approval lifecycle, and terminal handler denial/bypass tests."
+    },
+    "bf4223f3818f": {
+      "disposition": "superseded",
+      "notes": "Early Python scrape/crawl compression is superseded by Rust web_extract/web_crawl typed handlers, provider-specific normalized document output, URL secret-exfiltration guards, web content redaction, and tool-result storage/budget controls."
+    },
+    "cde7e64418e0": {
+      "disposition": "ported",
+      "notes": "Rust has first-class web_search/web_extract/web_crawl, vision_analyze, and filtered toolset resolution. This batch adds web_crawl to the web toolset and platform filtering tests, while existing vision tests cover schema, execution, URL safety, local image base64, and response normalization."
+    },
+    "ebb46ba0e6a7": {
+      "disposition": "ported",
+      "notes": "Rust exposes image_generate as a first-class tool with schema/handler coverage and FalImageGenBackend direct/managed transport tests for payload shape, auth routing, model override, and unconfigured errors."
+    },
+    "e1710378b738": {
+      "disposition": "ported",
+      "notes": "Rust builtin registration and toolset resolution now expose image_generate, mixture_of_agents, and the complete web tool trio through typed registries instead of Python model_tools dispatch."
+    },
+    "58d5fa1e4cec": {
+      "disposition": "superseded",
+      "notes": "Python FAL dependency wiring is superseded by Rust reqwest-based FalImageGenBackend with direct FAL_KEY and Nous-managed fal-queue transports plus hermetic backend tests; no Python requirement path remains."
+    },
+    "4ece87efb0dd": {
+      "disposition": "ported",
+      "notes": "Rust Firecrawl support covers search and extract through direct, self-hosted URL, and Nous-managed gateway transports, with response normalization and backend-selection tests for Firecrawl-specific shapes."
+    },
+    "587d1cf72095": {
+      "disposition": "superseded",
+      "notes": "The mixed Python web/MoA/trajectory update is superseded by Rust web provider backends, first-class mixture_of_agents runtime/tests, and Rust session/tool-result persistence. Python trajectory file management is not a separate Rust runtime boundary."
+    },
+    "17608c11422b": {
+      "disposition": "ported",
+      "notes": "Rust ToolsetManager already supports named, recursive, filtered, alias, wildcard, and platform toolsets; this batch ports the upstream web-tools membership by ensuring web_crawl resolves with web_search/web_extract through web and platform defaults."
+    },
+    "8d256779d8fa": {
+      "disposition": "ported",
+      "notes": "Rust OpenAiVisionBackend handles local image files by MIME-sniffing extensions and base64-encoding data URLs, validates remote image URLs against unsafe hosts/schemes, and normalizes empty vision responses with focused tests."
+    },
+    "f957ec226789": {
+      "disposition": "ported",
+      "notes": "Rust toolset_distributions now covers validated probability-weighted distributions against registered ToolsetManager toolsets, including the first-class rl_training toolset added in this batch, with deterministic and sampling contract tests."
+    },
+    "f018999da978": {
+      "disposition": "ported",
+      "notes": "Initial Python RL training tools and loop are ported as Rust rl_* ToolHandler implementations backed by hermes_intelligence::rl run/config/status/metrics types, registered as built-in tools under the rl_training toolset with lifecycle and inference tests."
+    },
+    "f6574978de39": {
+      "disposition": "ported",
+      "notes": "RL training configuration and tools are now first-class Rust runtime surface: rl_list_environments, rl_select_environment, rl_get_current_config, rl_edit_config, rl_start_training, rl_check_status, rl_stop_training, rl_get_results, rl_list_runs, and rl_test_inference are registered and covered."
+    },
+    "12bbca95ecf4": {
+      "disposition": "superseded",
+      "notes": "The vendored tinker-atropos Python submodule path is superseded by Rust-native RL environment descriptors for tinker, atropos-compatible, and custom environments plus local run-manager control; no Python submodule is required for runtime registration."
+    },
+    "3c0d0dba49f9": {
+      "disposition": "ported",
+      "notes": "Updated RL tools and configuration management are covered by Rust TrainingConfig editing, TrainingStatus serde, TrainingMetrics progression, RunManager lifecycle, registered rl_training toolset membership, and focused hermes-intelligence/hermes-tools tests."
     }
   },
   "subject_patterns": [

@@ -11,6 +11,8 @@ hermes-core = { workspace = true }
 hermes-agent = { workspace = true }
 hermes-config = { workspace = true }
 hermes-intelligence = { workspace = true }
+hermes-mcp = { workspace = true }
+hermes-tools = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

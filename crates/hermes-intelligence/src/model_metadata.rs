@@ -582,6 +582,7 @@ pub fn infer_provider_from_url(base_url: &str) -> Option<&'static str> {
         ("bedrock-runtime.", "bedrock"),
         ("api.z.ai", "zai"),
         ("open.bigmodel.cn", "zai"),
+        ("api.kimi.com", "kimi-coding"),
         ("api.moonshot.ai", "kimi-coding"),
         ("api.minimax", "minimax"),
         ("dashscope.aliyuncs.com", "alibaba"),
@@ -772,6 +773,10 @@ mod tests {
         assert_eq!(
             infer_provider_from_url("https://open.bigmodel.cn/api/paas/v4"),
             Some("zai")
+        );
+        assert_eq!(
+            infer_provider_from_url("https://api.kimi.com/coding/v1"),
+            Some("kimi-coding")
         );
         assert_eq!(
             infer_provider_from_url("https://api.gmi-serving.com/v1"),

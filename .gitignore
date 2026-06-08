@@ -20,6 +20,8 @@ artifacts/quorum/
 .hermes-agent-ultra
 .qoder/
 log
+# Desktop/bootstrap install marker written into managed checkout roots.
+.hermes-bootstrap-complete
 
 # Generated PR infographics live in PR bodies, not in-tree.
 infographic/

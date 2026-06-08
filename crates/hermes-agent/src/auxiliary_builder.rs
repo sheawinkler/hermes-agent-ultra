@@ -713,6 +713,20 @@ fn default_base_url(label: &str) -> Option<&'static str> {
     }
 }
 
+fn kimi_base_url_from_env_or_key(api_key: &str) -> String {
+    std::env::var("KIMI_BASE_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            provider_profiles::kimi_base_url_for_api_key(
+                api_key,
+                provider_profiles::KIMI_LEGACY_BASE_URL,
+            )
+            .to_string()
+        })
+}
+
 fn provider_allows_no_api_key(label: &str, base_url: Option<&str>) -> bool {
     matches!(
         label,
@@ -727,18 +741,44 @@ fn is_loopback_base_url(base_url: &str) -> bool {
         || trimmed.starts_with("http://[::1]")
 }
 
-fn kimi_base_url_from_env_or_key(api_key: &str) -> String {
-    std::env::var("KIMI_BASE_URL")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| {
-            provider_profiles::kimi_base_url_for_api_key(
-                api_key,
-                provider_profiles::KIMI_LEGACY_BASE_URL,
-            )
-            .to_string()
-        })
+fn register_direct_key(
+    builder: &mut hermes_intelligence::auxiliary::AuxiliaryClientBuilder,
+    summary: &mut AuxiliaryWiringSummary,
+    env_var: &str,
+    label: &str,
+    base_url: &str,
+    default_model: &str,
+    skip_label: Option<&str>,
+) {
+    if skip_label == Some(label) {
+        summary
+            .skipped
+            .push(format!("{label} (covered by main runtime)"));
+        return;
+    }
+
+    let owned;
+    let key = match std::env::var(env_var) {
+        Ok(v) if !v.trim().is_empty() => {
+            owned = v;
+            owned.trim()
+        }
+        _ => {
+            summary.skipped.push(format!("{label} (no key)"));
+            return;
+        }
+    };
+    let provider: Arc<dyn LlmProvider> =
+        Arc::new(GenericProvider::new(base_url, key, default_model));
+    add_candidate(
+        builder,
+        ProviderCandidate::new(
+            AuxiliarySource::DirectKey(label.to_string()),
+            default_model,
+            provider,
+        ),
+    );
+    summary.registered.push(label.to_string());
 }
 
 fn register_kimi_direct_key(
@@ -780,46 +820,6 @@ fn register_kimi_direct_key(
         ),
     );
     summary.registered.push(LABEL.to_string());
-}
-
-fn register_direct_key(
-    builder: &mut hermes_intelligence::auxiliary::AuxiliaryClientBuilder,
-    summary: &mut AuxiliaryWiringSummary,
-    env_var: &str,
-    label: &str,
-    base_url: &str,
-    default_model: &str,
-    skip_label: Option<&str>,
-) {
-    if skip_label == Some(label) {
-        summary
-            .skipped
-            .push(format!("{label} (covered by main runtime)"));
-        return;
-    }
-
-    let owned;
-    let key = match std::env::var(env_var) {
-        Ok(v) if !v.trim().is_empty() => {
-            owned = v;
-            owned.trim()
-        }
-        _ => {
-            summary.skipped.push(format!("{label} (no key)"));
-            return;
-        }
-    };
-    let provider: Arc<dyn LlmProvider> =
-        Arc::new(GenericProvider::new(base_url, key, default_model));
-    add_candidate(
-        builder,
-        ProviderCandidate::new(
-            AuxiliarySource::DirectKey(label.to_string()),
-            default_model,
-            provider,
-        ),
-    );
-    summary.registered.push(label.to_string());
 }
 
 #[cfg(test)]
