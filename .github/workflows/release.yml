@@ -43,15 +43,21 @@ jobs:
             --repo-root . \
             --report .sync-reports/release-secret-scan.json
       - name: Config redaction tests (CLI)
+        env:
+          RUSTC_WRAPPER: ""
         run: |
           cargo test -p hermes-cli secret_stdout_gate_defaults_false -- --nocapture
           cargo test -p hermes-cli secret_stdout_gate_accepts_truthy_values -- --nocapture
           cargo test -p hermes-cli mask_secret_value_hides_payload -- --nocapture
       - name: Config redaction tests (agent replay)
+        env:
+          RUSTC_WRAPPER: ""
         run: |
           cargo test -p hermes-agent test_redact_json_value_masks_sensitive_fields -- --nocapture
           cargo test -p hermes-agent test_replay_recorder_adds_hash_chain_metadata -- --nocapture
       - name: Generate SBOM (CycloneDX)
+        env:
+          RUSTC_WRAPPER: ""
         run: |
           cargo install cargo-cyclonedx --locked
           cargo cyclonedx --manifest-path crates/hermes-cli/Cargo.toml -f json --override-filename release-sbom.cdx
