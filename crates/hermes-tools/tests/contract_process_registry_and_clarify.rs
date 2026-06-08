@@ -19,7 +19,12 @@ struct CapturingClarifyBackend {
 
 #[async_trait]
 impl ClarifyBackend for CapturingClarifyBackend {
-    async fn ask(&self, question: &str, choices: Option<&[String]>) -> Result<String, ToolError> {
+    async fn ask(
+        &self,
+        question: &str,
+        choices: Option<&[String]>,
+        _session_key: Option<&str>,
+    ) -> Result<String, ToolError> {
         *self.question.lock().expect("lock question") = Some(question.to_string());
         *self.choices.lock().expect("lock choices") = choices.map(|c| c.to_vec());
         Ok("ok".to_string())

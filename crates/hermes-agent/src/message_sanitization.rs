@@ -37,6 +37,28 @@ pub fn strip_system_messages_from_history(messages: &[Message]) -> Vec<Message> 
 /// Synthetic user nudge after a Codex intermediate ack (Python `run_agent.py`).
 pub const CODEX_CONTINUE_USER_MESSAGE: &str = "[System: Continue now. Execute the required tool calls and only send your final answer after completing the task.]";
 
+/// Nudge when the user asked for `clarify` but the model replied with prose only.
+pub const CLARIFY_TOOL_RETRY_USER_MESSAGE: &str = "[System: The user asked for the `clarify` tool. Invoke `clarify` now with `question` and up to 4 `choices`. Do not end with an introduction only.]";
+
+pub const CLARIFY_TOOL_RETRY_MAX: u32 = 2;
+
+/// True when the inbound task text explicitly mentions the clarify tool.
+pub fn user_message_requests_clarify_tool(task_hint: &str) -> bool {
+    let lower = task_hint.to_ascii_lowercase();
+    lower.contains("clarify") || task_hint.contains("澄清")
+}
+
+/// Retry when clarify is available, the user asked for it, and the model ended without tool calls.
+pub fn clarify_tool_invocation_requires_retry(
+    task_hint: &str,
+    clarify_available: bool,
+    retry_count: u32,
+) -> bool {
+    clarify_available
+        && retry_count < CLARIFY_TOOL_RETRY_MAX
+        && user_message_requests_clarify_tool(task_hint)
+}
+
 /// Re-export for continuation prompt branching (defined on [`hermes_core::LlmResponse`]).
 pub use hermes_core::PARTIAL_STREAM_STUB_ID;
 
@@ -477,6 +499,11 @@ pub fn looks_like_codex_intermediate_ack(
     let assistant_targets_workspace = workspace_markers
         .iter()
         .any(|m| assistant_text.contains(*m));
+    if user_message_requests_clarify_tool(user_message)
+        && (assistant_text.contains("clarify") || assistant_text.contains('问'))
+    {
+        return true;
+    }
     (user_targets_workspace || assistant_targets_workspace) && assistant_mentions_action
 }
 
@@ -555,6 +582,27 @@ mod tests {
         let user = "请检查当前目录并更新todo";
         let assistant = "已完成更新。两个 todo 项都已处理完毕。";
         assert!(!looks_like_codex_intermediate_ack(user, assistant, false));
+    }
+
+    #[test]
+    fn clarify_user_request_detected_from_message() {
+        let task = "调用 clarify 给一些买电脑的选型";
+        assert!(user_message_requests_clarify_tool(task));
+        assert!(clarify_tool_invocation_requires_retry(task, true, 0));
+        assert!(!clarify_tool_invocation_requires_retry(task, true, CLARIFY_TOOL_RETRY_MAX));
+    }
+
+    #[test]
+    fn clarify_retry_uses_task_hint_not_synthetic_continue_user() {
+        let task = "调用 clarify 给一些买电脑的选型";
+        assert!(clarify_tool_invocation_requires_retry(task, true, 1));
+    }
+
+    #[test]
+    fn codex_ack_detection_matches_clarify_deferral() {
+        let user = "调用 clarify 给一些买电脑的选型";
+        let assistant = "好的！我先用 clarify 问几个关键问题：";
+        assert!(looks_like_codex_intermediate_ack(user, assistant, false));
     }
 
     #[test]

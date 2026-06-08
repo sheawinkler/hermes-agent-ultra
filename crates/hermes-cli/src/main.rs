@@ -3094,6 +3094,9 @@ async fn run_gateway(
                 .set_messaging_session_context(messaging_session.clone())
                 .await;
             let clarify_dispatcher = ClarifyDispatcher::new();
+            gateway
+                .set_clarify_dispatcher(clarify_dispatcher.clone())
+                .await;
             let agent_tools_for_cron = Arc::new(bridge_tool_registry(&tool_registry));
             let config_arc = Arc::new(config.clone());
             let gateway_agent_cache: GatewayAgentCache =
@@ -3966,6 +3969,20 @@ async fn configure_gateway_platform(
                 wx.home_channel = Some(home.trim().to_string());
             }
         }
+        "wecom" => {
+            run_auth(
+                cli.clone(),
+                Some("login".to_string()),
+                Some("wecom".to_string()),
+                None,
+                None,
+                None,
+                None,
+                true,
+            )
+            .await?;
+            *disk = load_user_config_file(cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
+        }
         "telegram" => {
             let token = resolve_telegram_bot_token_for_gateway_setup(disk).await?;
             let tg = disk
@@ -4780,35 +4797,32 @@ async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<
     }
 }
 
+/// Route one inbound message. Spawned per message so clarify replies can hit the
+/// fast-path while another route for the same chat is blocked in `wait_for`.
+fn spawn_gateway_route(gateway: Arc<Gateway>, incoming: GatewayIncomingMessage, platform: &str) {
+    let platform = platform.to_string();
+    tokio::spawn(async move {
+        if let Err(err) = gateway.route_message(&incoming).await {
+            tracing::warn!(
+                platform = %platform,
+                error = %err,
+                "Failed to route inbound gateway message"
+            );
+            let err_text = format!("⚠️ 请求处理失败，请稍后重试。({})", err);
+            let _ = gateway
+                .send_message(&incoming.platform, &incoming.chat_id, &err_text, None)
+                .await;
+        }
+    });
+}
+
 async fn run_gateway_incoming_loop(
     gateway: Arc<Gateway>,
     mut rx: mpsc::Receiver<GatewayIncomingMessage>,
     platform: &'static str,
 ) {
     while let Some(incoming) = rx.recv().await {
-        if platform == "whatsapp" {
-            let preview: String = incoming.text.chars().take(48).collect();
-            println!("[whatsapp] Gateway routing (preview={preview:?})…");
-        }
-        match gateway.route_message(&incoming).await {
-            Ok(()) => {
-                if platform == "whatsapp" {
-                    println!(
-                        "[whatsapp] Gateway route finished OK (check Sent reply / Send failed above)"
-                    );
-                }
-            }
-            Err(err) => {
-                tracing::warn!("Failed to route {} message: {}", platform, err);
-                if platform == "whatsapp" {
-                    eprintln!("[whatsapp] Gateway route failed: {err}");
-                }
-                let err_text = format!("⚠️ 请求处理失败，请稍后重试。({})", err);
-                let _ = gateway
-                    .send_message(&incoming.platform, &incoming.chat_id, &err_text, None)
-                    .await;
-            }
-        }
+        spawn_gateway_route(gateway.clone(), incoming, platform);
     }
 }
 
@@ -5143,12 +5157,7 @@ async fn register_gateway_adapters(
                         let gw_clone = gateway.clone();
                         sidecar_tasks.push(tokio::spawn(async move {
                             while let Some(incoming) = rx.recv().await {
-                                if let Err(err) = gw_clone.route_message(&incoming).await {
-                                    tracing::warn!(
-                                        "Failed to route wecom_callback message: {}",
-                                        err
-                                    );
-                                }
+                                spawn_gateway_route(gw_clone.clone(), incoming, "wecom_callback");
                             }
                         }));
                     }
@@ -6399,6 +6408,151 @@ async fn qqbot_qr_login_flow(
     Err(AgentError::Timeout(
         "qqbot qr login exhausted refresh retries".to_string(),
     ))
+}
+
+const WECOM_QR_GENERATE_URL: &str = "https://work.weixin.qq.com/ai/qc/generate";
+const WECOM_QR_QUERY_URL: &str = "https://work.weixin.qq.com/ai/qc/query_result";
+const WECOM_QR_CODE_PAGE: &str = "https://work.weixin.qq.com/ai/qc/gen?source=hermes&scode=";
+
+fn wecom_qr_page_url(scode: &str) -> String {
+    format!(
+        "{}{}",
+        WECOM_QR_CODE_PAGE,
+        urlencoding::encode(scode.trim())
+    )
+}
+
+async fn wecom_bot_id_from_env_or_prompt(existing: Option<&str>) -> Result<String, AgentError> {
+    if let Some(v) = existing.map(str::trim).filter(|s| !s.is_empty()) {
+        return Ok(v.to_string());
+    }
+    if let Ok(v) = std::env::var("WECOM_BOT_ID") {
+        let s = v.trim();
+        if !s.is_empty() {
+            return Ok(s.to_string());
+        }
+    }
+    let v = prompt_line("WeCom AI Bot bot_id (WECOM_BOT_ID): ").await?;
+    let s = v.trim();
+    if s.is_empty() {
+        return Err(AgentError::Config(
+            "WeCom bot_id is required (set WECOM_BOT_ID or enter at prompt)".to_string(),
+        ));
+    }
+    Ok(s.to_string())
+}
+
+async fn wecom_secret_from_env_or_prompt(existing: Option<&str>) -> Result<String, AgentError> {
+    if let Some(v) = existing.map(str::trim).filter(|s| !s.is_empty()) {
+        return Ok(v.to_string());
+    }
+    if let Ok(v) = std::env::var("WECOM_SECRET") {
+        let s = v.trim();
+        if !s.is_empty() {
+            return Ok(s.to_string());
+        }
+    }
+    let v = prompt_line("WeCom AI Bot secret (WECOM_SECRET): ").await?;
+    let s = v.trim();
+    if s.is_empty() {
+        return Err(AgentError::Config(
+            "WeCom secret is required (set WECOM_SECRET or enter at prompt)".to_string(),
+        ));
+    }
+    Ok(s.to_string())
+}
+
+async fn wecom_qr_login_flow(timeout_seconds: u64) -> Result<(String, String), AgentError> {
+    const WECOM_QR_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| AgentError::Io(format!("wecom qr client init failed: {e}")))?;
+
+    print!("  Connecting to WeCom...");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+
+    let generate_url = format!("{WECOM_QR_GENERATE_URL}?source=hermes");
+    let raw = client
+        .get(&generate_url)
+        .header("User-Agent", "HermesAgent/1.0")
+        .send()
+        .await
+        .map_err(|e| {
+            println!(" failed: {e}");
+            AgentError::Io(format!("wecom qr generate request: {e}"))
+        })?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| {
+            println!(" failed: {e}");
+            AgentError::Io(format!("wecom qr generate parse: {e}"))
+        })?;
+
+    let data = raw.get("data").cloned().unwrap_or_default();
+    let scode = weixin_extract_string(&data, &["scode"]).ok_or_else(|| {
+        println!(" failed: unexpected response format");
+        AgentError::Config("wecom qr response missing scode".to_string())
+    })?;
+    let auth_url = weixin_extract_string(&data, &["auth_url"]).ok_or_else(|| {
+        println!(" failed: unexpected response format");
+        AgentError::Config("wecom qr response missing auth_url".to_string())
+    })?;
+
+    println!(" done.");
+    println!();
+    render_qr_to_terminal(&auth_url);
+    let page_url = wecom_qr_page_url(&scode);
+    println!("\n  Scan the QR code above, or open this URL directly:\n  {page_url}");
+    println!();
+    print!("  Fetching configuration results...");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(timeout_seconds);
+    let query_url = format!(
+        "{WECOM_QR_QUERY_URL}?scode={}",
+        urlencoding::encode(scode.trim())
+    );
+
+    while std::time::Instant::now() < deadline {
+        if let Ok(resp) = client
+            .get(&query_url)
+            .header("User-Agent", "HermesAgent/1.0")
+            .send()
+            .await
+        {
+            if let Ok(result) = resp.json::<serde_json::Value>().await {
+                let result_data = result.get("data").cloned().unwrap_or_default();
+                let status = weixin_extract_string(&result_data, &["status"])
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                print!(".");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                if status == "success" {
+                    println!();
+                    let bot_info = result_data.get("bot_info").cloned().unwrap_or_default();
+                    let bot_id =
+                        weixin_extract_string(&bot_info, &["botid", "bot_id"]).unwrap_or_default();
+                    let secret = weixin_extract_string(&bot_info, &["secret"]).unwrap_or_default();
+                    if !bot_id.is_empty() && !secret.is_empty() {
+                        return Ok((bot_id, secret));
+                    }
+                    return Err(AgentError::Config(
+                        "wecom qr scan reported success but bot credentials were incomplete"
+                            .to_string(),
+                    ));
+                }
+            }
+        }
+        tokio::time::sleep(WECOM_QR_POLL_INTERVAL).await;
+    }
+
+    println!();
+    Err(AgentError::Timeout(format!(
+        "wecom qr login timed out after {timeout_seconds}s"
+    )))
 }
 
 fn weixin_login_base_url_from_disk(disk: &hermes_config::GatewayConfig) -> String {
@@ -7997,6 +8151,67 @@ async fn run_auth(
                     .map_err(|e| AgentError::Config(e.to_string()))?;
                 println!(
                     "QQBot: app_id/client_secret saved and platform enabled in {}",
+                    cfg_path.display()
+                );
+                return Ok(());
+            }
+            if provider == "wecom" {
+                let cfg_path = hermes_state_root(&cli).join("config.yaml");
+                let mut disk = load_user_config_file(&cfg_path)
+                    .map_err(|e| AgentError::Config(e.to_string()))?;
+                let qr_preferred = qr
+                    || std::env::var("HERMES_WECOM_QR_LOGIN")
+                        .ok()
+                        .map(|v| is_truthy(&v))
+                        .unwrap_or(false);
+
+                let existing_bot_id = disk
+                    .platforms
+                    .get("wecom")
+                    .and_then(|p| p.extra.get("bot_id"))
+                    .and_then(|v| v.as_str());
+                let existing_secret = disk
+                    .platforms
+                    .get("wecom")
+                    .and_then(|p| p.extra.get("secret"))
+                    .and_then(|v| v.as_str());
+
+                let (bot_id, secret) = if qr_preferred {
+                    match wecom_qr_login_flow(300).await {
+                        Ok(pair) => pair,
+                        Err(e) => {
+                            println!("WeCom QR login failed, falling back to manual input: {e}");
+                            let bot_id =
+                                wecom_bot_id_from_env_or_prompt(existing_bot_id).await?;
+                            let secret =
+                                wecom_secret_from_env_or_prompt(existing_secret).await?;
+                            (bot_id, secret)
+                        }
+                    }
+                } else {
+                    let bot_id = wecom_bot_id_from_env_or_prompt(existing_bot_id).await?;
+                    let secret = wecom_secret_from_env_or_prompt(existing_secret).await?;
+                    (bot_id, secret)
+                };
+
+                let wecom = disk
+                    .platforms
+                    .entry("wecom".to_string())
+                    .or_insert_with(PlatformConfig::default);
+                wecom.enabled = true;
+                wecom.extra.insert(
+                    "bot_id".to_string(),
+                    serde_json::Value::String(bot_id.clone()),
+                );
+                wecom.extra.insert(
+                    "secret".to_string(),
+                    serde_json::Value::String(secret.clone()),
+                );
+                validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
+                save_config_yaml(&cfg_path, &disk)
+                    .map_err(|e| AgentError::Config(e.to_string()))?;
+                println!(
+                    "WeCom: bot_id/secret saved and platform enabled in {}",
                     cfg_path.display()
                 );
                 return Ok(());
@@ -15203,6 +15418,15 @@ max_turns: 50
             err.to_string().contains("target path is a directory"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn wecom_qr_page_url_encodes_scode() {
+        let url = wecom_qr_page_url("abc/def");
+        assert!(url.contains("abc%2Fdef"));
+        assert!(url.starts_with(
+            "https://work.weixin.qq.com/ai/qc/gen?source=hermes&scode="
+        ));
     }
 
     #[test]

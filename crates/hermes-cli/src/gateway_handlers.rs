@@ -12,6 +12,9 @@ use hermes_gateway::tool_backends::ClarifyDispatcher;
 use hermes_gateway::{
     Gateway, GatewayError, GatewayRuntimeContext, SessionTeardownContext, SessionTeardownHandler,
 };
+use serde_json::Value;
+use tracing::{debug, warn};
+use hermes_tools::tools::clarify::MAX_CHOICES;
 use hermes_tools::ToolRegistry;
 
 use hermes_cli::app::bridge_tool_registry;
@@ -33,6 +36,38 @@ fn gateway_conversation_reply(conv: &hermes_agent::ConversationResult) -> String
         .unwrap_or_else(|| extract_last_assistant_reply(conv.messages()))
 }
 
+fn prepend_clarify_user_request_hint(
+    user_message: &str,
+    tool_schemas: &[ToolSchema],
+    history: &mut Vec<Message>,
+) {
+    let has_clarify = tool_schemas.iter().any(|s| s.name == "clarify");
+    if !has_clarify {
+        return;
+    }
+    let lower = user_message.to_ascii_lowercase();
+    if !lower.contains("clarify") && !user_message.contains("澄清") {
+        return;
+    }
+    let duplicate = history.iter().any(|m| {
+        m.content
+            .as_deref()
+            .map(|c| c.contains("user explicitly requested the `clarify` tool"))
+            .unwrap_or(false)
+    });
+    if duplicate {
+        return;
+    }
+    history.insert(
+        0,
+        Message::system(
+            "[SYSTEM] The user explicitly requested the `clarify` tool. You MUST call `clarify` \
+             with `question` and up to 4 `choices` in this turn before ending. Do not reply with \
+             only an introduction.",
+        ),
+    );
+}
+
 fn prepend_cross_platform_hint(
     platform: &str,
     tool_schemas: &[ToolSchema],
@@ -45,11 +80,155 @@ fn prepend_cross_platform_hint(
     let duplicate = history.iter().any(|m| {
         m.content
             .as_deref()
-            .map(|c| c.contains("WeChat-class channel") || c.contains("Feishu/Lark"))
+            .map(|c| {
+                c.contains("WeChat-class channel")
+                    || c.contains("Feishu/Lark")
+                    || c.contains("Interactive IM channel:")
+            })
             .unwrap_or(false)
     });
     if !duplicate {
         history.insert(0, Message::system(hint));
+    }
+}
+
+fn clarify_choices_from_args(args: &Value) -> Vec<String> {
+    match args.get("choices") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|v| match v {
+                Value::String(s) => Some(s.trim().to_string()),
+                Value::Number(n) => Some(n.to_string()),
+                Value::Bool(b) => Some(b.to_string()),
+                _ => None,
+            })
+            .filter(|s| !s.is_empty())
+            .take(MAX_CHOICES)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn clarify_choices_with_skip(mut choices: Vec<String>) -> Vec<String> {
+    if !choices
+        .iter()
+        .any(|c| c.contains("Skip") || c.contains("跳过"))
+    {
+        choices.push("Skip / 跳过".to_string());
+    }
+    choices
+}
+
+fn format_clarify_prompt_for_chat(question: &str, choices: &[String]) -> String {
+    if choices.is_empty() {
+        return format!("{question}\n\n请直接回复。");
+    }
+    let mut lines = vec![question.to_string(), String::new()];
+    for (i, choice) in choices.iter().enumerate() {
+        lines.push(format!("{}. {choice}", i + 1));
+    }
+    lines.push(String::new());
+    lines.push("请回复选项编号或文字。".to_string());
+    lines.join("\n")
+}
+
+/// Push clarify question + numbered choices to the active IM chat.
+fn spawn_gateway_clarify_prompt(
+    gateway: Arc<Gateway>,
+    platform: String,
+    chat_id: String,
+    args: &Value,
+) {
+    let Some(question) = args
+        .get("question")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+    else {
+        warn!("gateway clarify: skipped outbound prompt — empty question");
+        return;
+    };
+    let choices = clarify_choices_with_skip(clarify_choices_from_args(args));
+    let text = format_clarify_prompt_for_chat(question, &choices);
+    debug!(
+        platform = %platform,
+        chat_id = %chat_id,
+        choice_count = choices.len(),
+        text_chars = text.chars().count(),
+        "gateway clarify: sending prompt to chat"
+    );
+    tokio::spawn(async move {
+        match gateway.send_message(&platform, &chat_id, &text, None).await {
+            Ok(()) => debug!(
+                platform = %platform,
+                chat_id = %chat_id,
+                "gateway clarify: prompt sent to chat"
+            ),
+            Err(e) => warn!(
+                platform = %platform,
+                chat_id = %chat_id,
+                error = %e,
+                "gateway clarify: failed to send prompt to chat"
+            ),
+        }
+    });
+}
+
+fn clarify_async_mode_enabled() -> bool {
+    matches!(
+        std::env::var("HERMES_CLARIFY_ASYNC")
+            .ok()
+            .map(|s| s.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("1") | Some("true") | Some("yes") | Some("on")
+    )
+}
+
+/// If a clarify request is queued from a prior async turn, treat this inbound
+/// user message as the answer and continue with a normal agent turn.
+async fn gateway_consume_pending_clarify_answer(
+    clarify: &ClarifyDispatcher,
+    messages: &Arc<Vec<Message>>,
+    ctx: &GatewayRuntimeContext,
+    streaming: bool,
+) {
+    if !clarify_async_mode_enabled() {
+        return;
+    }
+    let Some(pending) = clarify.take_next().await else {
+        return;
+    };
+    let answer = messages
+        .iter()
+        .rev()
+        .find_map(|m| {
+            (m.role == MessageRole::User)
+                .then(|| m.content.clone())
+                .flatten()
+        })
+        .unwrap_or_default();
+    debug!(
+        platform = %ctx.platform,
+        session_key = %ctx.session_key,
+        chat_id = %ctx.chat_id,
+        streaming,
+        clarification_id = %pending.id,
+        question = %pending.question,
+        choice_count = pending.choices.len(),
+        answer_len = answer.len(),
+        answer_preview = %truncate_hook_tool_result(&answer),
+        "gateway clarify: consuming pending answer; continuing normal agent turn"
+    );
+    let clarification_id = pending.id.clone();
+    if let Err(e) = pending.respond(clarify, &answer).await {
+        warn!(
+            platform = %ctx.platform,
+            session_key = %ctx.session_key,
+            clarification_id = %clarification_id,
+            error = %e,
+            "gateway clarify: failed to record answer for pending request"
+        );
     }
 }
 
@@ -75,19 +254,7 @@ pub(crate) async fn gateway_handle_message_non_streaming(
         gateway_agent_cache,
     } = deps;
 
-    if let Some(pending) = clarify.take_next().await {
-        let answer = messages
-            .iter()
-            .rev()
-            .find_map(|m| {
-                (m.role == MessageRole::User)
-                    .then(|| m.content.clone())
-                    .flatten()
-            })
-            .unwrap_or_default();
-        let _ = pending.respond(&clarify, answer).await;
-        return Ok("Clarification received. Continuing task execution...".to_string());
-    }
+    gateway_consume_pending_clarify_answer(&clarify, &messages, &ctx, false).await;
     let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
     let _effective_model =
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), &ctx);
@@ -144,8 +311,24 @@ pub(crate) async fn gateway_handle_message_non_streaming(
     );
     let tool_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
     let tool_events_for_start = tool_events.clone();
+    let gateway_for_clarify = gateway_for_review.clone();
+    let platform_for_clarify = ctx.platform.clone();
+    let chat_for_clarify = ctx.chat_id.clone();
     let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
         Box::new(move |name: &str, args: &serde_json::Value| {
+            if name == "clarify" {
+                debug!(
+                    question = args.get("question").and_then(|v| v.as_str()),
+                    choices = ?args.get("choices"),
+                    "gateway clarify: tool call started (non-streaming)"
+                );
+                spawn_gateway_clarify_prompt(
+                    gateway_for_clarify.clone(),
+                    platform_for_clarify.clone(),
+                    chat_for_clarify.clone(),
+                    args,
+                );
+            }
             let preview = build_tool_preview_from_value(name, args, 60).unwrap_or_default();
             let mut event = serde_json::json!({
                 "phase": "start",
@@ -162,6 +345,12 @@ pub(crate) async fn gateway_handle_message_non_streaming(
     let tool_events_for_complete = tool_events.clone();
     let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
         Box::new(move |name: &str, result: &str| {
+            if name == "clarify" {
+                debug!(
+                    result_preview = %truncate_hook_tool_result(result),
+                    "gateway clarify: tool call completed (non-streaming)"
+                );
+            }
             if let Ok(mut guard) = tool_events_for_complete.lock() {
                 guard.push(serde_json::json!({
                     "phase": "complete",
@@ -232,6 +421,7 @@ pub(crate) async fn gateway_handle_message_non_streaming(
     })?;
     let mut history = history;
     prepend_cross_platform_hint(&ctx.platform, &tool_schemas, &mut history);
+    prepend_clarify_user_request_hint(&user_message, &tool_schemas, &mut history);
     let task_id = Some(ctx.session_key.clone());
     let mut agent = agent.lock().await;
     agent.callbacks = Arc::new(callbacks);
@@ -313,19 +503,7 @@ pub(crate) async fn gateway_handle_message_streaming(
         gateway_agent_cache,
     } = deps;
 
-    if let Some(pending) = clarify.take_next().await {
-        let answer = messages
-            .iter()
-            .rev()
-            .find_map(|m| {
-                (m.role == MessageRole::User)
-                    .then(|| m.content.clone())
-                    .flatten()
-            })
-            .unwrap_or_default();
-        let _ = pending.respond(&clarify, answer).await;
-        return Ok("Clarification received. Continuing task execution...".to_string());
-    }
+    gateway_consume_pending_clarify_answer(&clarify, &messages, &ctx, true).await;
     let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
     let _effective_model =
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), &ctx);
@@ -382,8 +560,24 @@ pub(crate) async fn gateway_handle_message_streaming(
     );
     let tool_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
     let tool_events_for_start = tool_events.clone();
+    let gateway_for_clarify = gateway_for_review.clone();
+    let platform_for_clarify = ctx.platform.clone();
+    let chat_for_clarify = ctx.chat_id.clone();
     let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
         Box::new(move |name: &str, args: &serde_json::Value| {
+            if name == "clarify" {
+                debug!(
+                    question = args.get("question").and_then(|v| v.as_str()),
+                    choices = ?args.get("choices"),
+                    "gateway clarify: tool call started (streaming)"
+                );
+                spawn_gateway_clarify_prompt(
+                    gateway_for_clarify.clone(),
+                    platform_for_clarify.clone(),
+                    chat_for_clarify.clone(),
+                    args,
+                );
+            }
             let preview = build_tool_preview_from_value(name, args, 60).unwrap_or_default();
             let mut event = serde_json::json!({
                 "phase": "start",
@@ -400,6 +594,12 @@ pub(crate) async fn gateway_handle_message_streaming(
     let tool_events_for_complete = tool_events.clone();
     let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
         Box::new(move |name: &str, result: &str| {
+            if name == "clarify" {
+                debug!(
+                    result_preview = %truncate_hook_tool_result(result),
+                    "gateway clarify: tool call completed (streaming)"
+                );
+            }
             if let Ok(mut guard) = tool_events_for_complete.lock() {
                 guard.push(serde_json::json!({
                     "phase": "complete",
@@ -507,6 +707,7 @@ pub(crate) async fn gateway_handle_message_streaming(
     })?;
     let mut history = history;
     prepend_cross_platform_hint(&ctx.platform, &tool_schemas, &mut history);
+    prepend_clarify_user_request_hint(&user_message, &tool_schemas, &mut history);
     let task_id = Some(ctx.session_key.clone());
     let mut agent = agent.lock().await;
     agent.callbacks = Arc::new(callbacks);

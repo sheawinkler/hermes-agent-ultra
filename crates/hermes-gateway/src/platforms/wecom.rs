@@ -1667,10 +1667,7 @@ impl WeComAdapter {
         reply_to: Option<&str>,
     ) -> Result<(), GatewayError> {
         let trimmed = content.chars().take(MAX_MESSAGE_LENGTH).collect::<String>();
-        let mut reply_req_id = Self::reply_req_id_for_message(inner, reply_to).await;
-        if reply_req_id.is_none() {
-            reply_req_id = inner.last_chat_req_ids.read().await.get(chat_id).cloned();
-        }
+        let reply_req_id = Self::reply_req_id_for_message(inner, reply_to).await;
         debug!(
             chat_id = %chat_id,
             text_chars = trimmed.chars().count(),
@@ -2030,14 +2027,25 @@ impl PlatformAdapter for WeComAdapter {
         Self::send_markdown_inner(&self.inner, chat_id, text, None).await
     }
 
+    async fn send_message_replying(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        reply_to_message_id: Option<&str>,
+    ) -> Result<Option<String>, GatewayError> {
+        let _ = parse_mode;
+        Self::send_markdown_inner(&self.inner, chat_id, text, reply_to_message_id).await?;
+        Ok(None)
+    }
+
     async fn edit_message(
         &self,
         _chat_id: &str,
         _message_id: &str,
         _text: &str,
     ) -> Result<(), GatewayError> {
-        debug!("WeCom does not support message editing");
-        Ok(())
+        Err(GatewayError::Platform("WeCom does not support message editing".into()))
     }
 
     async fn send_file(
@@ -2074,7 +2082,7 @@ impl PlatformAdapter for WeComAdapter {
     }
 
     fn supports_native_streaming(&self) -> bool {
-        true
+        false
     }
 
     async fn start_native_stream(

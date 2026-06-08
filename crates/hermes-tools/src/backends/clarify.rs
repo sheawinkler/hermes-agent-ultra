@@ -5,6 +5,7 @@ use serde_json::json;
 
 use crate::tools::clarify::ClarifyBackend;
 use hermes_core::ToolError;
+use tracing::debug;
 
 /// Clarify backend that returns a JSON signal for the CLI/gateway layer
 /// to present the question to the user. The actual UI interaction is
@@ -25,7 +26,12 @@ impl Default for SignalClarifyBackend {
 
 #[async_trait]
 impl ClarifyBackend for SignalClarifyBackend {
-    async fn ask(&self, question: &str, choices: Option<&[String]>) -> Result<String, ToolError> {
+    async fn ask(
+        &self,
+        question: &str,
+        choices: Option<&[String]>,
+        _session_key: Option<&str>,
+    ) -> Result<String, ToolError> {
         // Return a structured JSON response that signals the agent loop
         // to pause and ask the user for input.
         let result = json!({
@@ -34,6 +40,11 @@ impl ClarifyBackend for SignalClarifyBackend {
             "choices": choices.unwrap_or(&[]),
             "awaiting_response": true,
         });
+        debug!(
+            question = %question,
+            choice_count = choices.map(|c| c.len()).unwrap_or(0),
+            "signal clarify backend returning clarify_request (no channel UI wired)"
+        );
         Ok(result.to_string())
     }
 }

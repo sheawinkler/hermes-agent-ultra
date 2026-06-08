@@ -444,7 +444,7 @@ impl PlatformAdapter for WeComCallbackAdapter {
         _message_id: &str,
         _text: &str,
     ) -> Result<(), GatewayError> {
-        Ok(())
+        Err(GatewayError::Platform("WeCom callback does not support message editing".into()))
     }
 
     async fn send_file(

@@ -32,9 +32,10 @@ use crate::budget;
 use crate::codex_responses_adapter::summarize_user_message_for_log_str;
 use crate::context::ContextManager;
 use crate::message_sanitization::{
-    CODEX_CONTINUE_USER_MESSAGE, budget_pressure_text, continuation_prompt_for_response,
-    inject_budget_pressure_into_last_tool_result, sanitize_surrogates,
-    strip_system_messages_from_history, strip_think_blocks_for_ack,
+    CLARIFY_TOOL_RETRY_MAX, CLARIFY_TOOL_RETRY_USER_MESSAGE, CODEX_CONTINUE_USER_MESSAGE,
+    budget_pressure_text, clarify_tool_invocation_requires_retry,
+    continuation_prompt_for_response, inject_budget_pressure_into_last_tool_result,
+    sanitize_surrogates, strip_system_messages_from_history, strip_think_blocks_for_ack,
 };
 use crate::plugins::{HookResult, HookType};
 use crate::session_persistence::leading_system_prompt_for_persist;
@@ -804,6 +805,7 @@ impl AgentLoop {
         let mut finalizer_evidence_retries: u32 = 0;
         let mut finalizer_output_quality_retries: u32 = 0;
         let mut finalizer_action_execution_retries: u32 = 0;
+        let mut clarify_tool_retries: u32 = 0;
         let governor_window_limit = governor_window_size();
         let budget_cap = max_turns_limit.unwrap_or(self.config().max_turns);
         let mut iteration_budget = crate::iteration_budget::IterationBudget::new(budget_cap);
@@ -1464,6 +1466,20 @@ impl AgentLoop {
                         );
                 } else {
                     continuation_retries = 0;
+                }
+                if clarify_tool_invocation_requires_retry(
+                    &task_hint,
+                    active_tool_schemas.iter().any(|s| s.name == "clarify"),
+                    clarify_tool_retries,
+                ) {
+                    clarify_tool_retries = clarify_tool_retries.saturating_add(1);
+                    tracing::info!(
+                        retry = clarify_tool_retries,
+                        max = CLARIFY_TOOL_RETRY_MAX,
+                        "clarify tool not invoked for user-requested clarify; retrying"
+                    );
+                    ctx.add_message(Message::user(CLARIFY_TOOL_RETRY_USER_MESSAGE));
+                    continue;
                 }
                 if finalization_signals.ack_detected {
                     if !tool_schemas.is_empty()

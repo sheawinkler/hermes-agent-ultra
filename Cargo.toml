@@ -59,6 +59,7 @@ futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+serde_path_to_error = "0.1"
 
 # HTTP / networking
 reqwest = { version = "0.13", default-features = false, features = ["stream", "json", "rustls", "form", "query", "socks"] }
@@ -87,7 +88,8 @@ cron = "0.16"
 # Utils
 regex = "1"
 async-trait = "0.1"
-liteparse = { version = "2", default-features = false }
+# TODO: re-enable after CI can reliably fetch pdfium (liteparse-pdfium-sys build.rs download)
+# liteparse = { version = "2", default-features = false }
 uuid = { version = "1", features = ["v4", "serde"] }
 base64 = "0.22"
 bytes = "1"

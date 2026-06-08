@@ -125,6 +125,7 @@ impl ClarifyBackend for StdioClarifyBackend {
         &self,
         question: &str,
         choices: Option<&[String]>,
+        _session_key: Option<&str>,
     ) -> Result<String, hermes_core::ToolError> {
         let choices_vec = choices.map(|c| c.to_vec()).unwrap_or_default();
         let auto_answer = std::env::var("HERMES_CLARIFY_AUTO_ANSWER")
@@ -425,7 +426,7 @@ mod tests {
         crate::env_vars::set_var("HERMES_CLARIFY_AUTO_ANSWER", "from-env");
         let backend = StdioClarifyBackend::new();
         let out = backend
-            .ask("pick?", Some(&["a".to_string(), "b".to_string()]))
+            .ask("pick?", Some(&["a".to_string(), "b".to_string()]), None)
             .await
             .expect("clarify should succeed with env override");
         let parsed: serde_json::Value = serde_json::from_str(&out).expect("json output");

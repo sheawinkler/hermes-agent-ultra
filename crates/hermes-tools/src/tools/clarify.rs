@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use std::borrow::Cow;
 
 use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
+use tracing::debug;
 
 use std::sync::Arc;
 
@@ -19,7 +20,15 @@ pub const MAX_CHOICES: usize = 4;
 #[async_trait]
 pub trait ClarifyBackend: Send + Sync {
     /// Ask the user a question and return their answer.
-    async fn ask(&self, question: &str, choices: Option<&[String]>) -> Result<String, ToolError>;
+    ///
+    /// `session_key` is the gateway chat session (injected as `task_id` on IM
+    /// routes) so channel backends can match inbound replies.
+    async fn ask(
+        &self,
+        question: &str,
+        choices: Option<&[String]>,
+        session_key: Option<&str>,
+    ) -> Result<String, ToolError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,9 +88,26 @@ impl ToolHandler for ClarifyHandler {
             }
         };
 
+        let session_key = params
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        debug!(
+            question = %question,
+            choice_count = choices.as_ref().map(|c| c.len()).unwrap_or(0),
+            choices = ?choices,
+            session_key = ?session_key,
+            "clarify tool execute"
+        );
         match choices {
-            Some(ref c) => self.backend.ask(question, Some(c.as_slice())).await,
-            None => self.backend.ask(question, None).await,
+            Some(ref c) => {
+                self.backend
+                    .ask(question, Some(c.as_slice()), session_key)
+                    .await
+            }
+            None => self.backend.ask(question, None, session_key).await,
         }
     }
 
@@ -128,6 +154,7 @@ mod tests {
             &self,
             question: &str,
             choices: Option<&[String]>,
+            _session_key: Option<&str>,
         ) -> Result<String, ToolError> {
             *self.captured_question.lock().expect("lock question") = Some(question.to_string());
             *self.captured_choices.lock().expect("lock choices") = choices.map(|c| c.to_vec());

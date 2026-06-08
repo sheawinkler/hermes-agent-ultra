@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+// TODO: re-enable after CI can reliably fetch pdfium (liteparse-pdfium-sys build.rs download)
+// use liteparse::{LiteParse, LiteParseConfig};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::ChildStdin;
@@ -17,6 +19,86 @@ use tokio::task::JoinHandle;
 
 use hermes_config::TerminalConfig;
 use hermes_core::{AgentError, CommandOutput, TerminalBackend};
+
+/// Extensions that must not be read as UTF-8 text (images, archives, binaries).
+const BINARY_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tif", "tiff", "heic", "heif", "avif",
+    "zip", "gz", "bz2", "xz", "7z", "rar", "tar", "exe", "dll", "so", "dylib", "bin",
+    "wasm", "mp3", "mp4", "wav", "ogg", "webm", "mov", "avi", "mkv", "flac", "aac", "woff",
+    "woff2", "ttf", "otf", "eot", "pyc", "class", "o", "a", "db", "sqlite", "sqlite3",
+];
+
+fn binary_read_error(path: &str, ext: &str) -> AgentError {
+    let hint = if matches!(
+        ext,
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tif" | "tiff" | "heic"
+            | "heif" | "avif"
+    ) {
+        "Use vision_analyze for images instead of read_file."
+    } else {
+        "Use appropriate tools for binary files (not read_file)."
+    };
+    AgentError::Io(format!(
+        "Cannot read binary file '{path}' (.{ext}). {hint}"
+    ))
+}
+
+fn extension_lower(path: &std::path::Path) -> Option<String> {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+}
+
+fn is_blocked_binary_extension(ext: &str) -> bool {
+    BINARY_EXTENSIONS.contains(&ext)
+}
+
+// TODO: re-enable after CI can reliably fetch pdfium (liteparse-pdfium-sys build.rs download)
+// async fn parse_pdf_with_liteparse(path: &std::path::Path) -> Result<String, AgentError> {
+//     let parser = LiteParse::new(LiteParseConfig::default());
+//     let path_str = path.to_string_lossy();
+//     let result = parser.parse(path_str.as_ref()).await.map_err(|e| {
+//         AgentError::Io(format!(
+//             "LiteParse failed for '{}': {}",
+//             path.display(),
+//             e
+//         ))
+//     })?;
+//     Ok(result.text)
+// }
+
+fn pdf_reading_disabled_error(path: &str) -> AgentError {
+    AgentError::Io(format!(
+        "Cannot read PDF file '{path}': PDF text extraction is temporarily disabled (liteparse/pdfium)."
+    ))
+}
+
+fn paginate_content_lines(content: &str, offset: Option<u64>, limit: Option<u64>) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = offset.unwrap_or(0) as usize;
+    let start = start.min(lines.len());
+    let end = if let Some(lim) = limit {
+        (start + lim as usize).min(lines.len())
+    } else {
+        lines.len()
+    };
+    lines[start..end].join("\n")
+}
+
+fn sample_looks_binary(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    if bytes.contains(&0) {
+        return true;
+    }
+    let check_len = bytes.len().min(8192);
+    let non_text = bytes[..check_len]
+        .iter()
+        .filter(|&&b| b < 0x09 || (b > 0x0d && b < 0x20))
+        .count();
+    non_text * 10 > check_len
+}
 
 const PROCESS_OUTPUT_WINDOW_CHARS: usize = 200_000;
 const PROCESS_PREVIEW_CHARS: usize = 1_000;
@@ -1458,25 +1540,27 @@ impl TerminalBackend for LocalBackend {
         limit: Option<u64>,
     ) -> Result<String, AgentError> {
         let resolved = resolve_path(path)?;
-        let content = tokio::fs::read_to_string(&resolved)
+        if extension_lower(&resolved).as_deref() == Some("pdf") {
+            // TODO: re-enable liteparse/pdfium path once CI download is stable.
+            return Err(pdf_reading_disabled_error(path));
+        }
+        if let Some(ext) = extension_lower(&resolved) {
+            if is_blocked_binary_extension(&ext) {
+                return Err(binary_read_error(path, &ext));
+            }
+        }
+        let raw = tokio::fs::read(&resolved)
             .await
             .map_err(|e| AgentError::Io(format!("Failed to read file '{}': {}", path, e)))?;
-
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Apply offset (0-indexed line number to start from)
-        let start = offset.unwrap_or(0) as usize;
-        let start = start.min(lines.len());
-
-        // Apply limit (max number of lines to return)
-        let end = if let Some(lim) = limit {
-            (start + lim as usize).min(lines.len())
-        } else {
-            lines.len()
-        };
-
-        let selected_lines = &lines[start..end];
-        Ok(selected_lines.join("\n"))
+        if sample_looks_binary(&raw) {
+            let ext = extension_lower(&resolved).unwrap_or_else(|| "bin".into());
+            return Err(binary_read_error(path, &ext));
+        }
+        let content = String::from_utf8(raw).map_err(|_| {
+            let ext = extension_lower(&resolved).unwrap_or_else(|| "unknown".into());
+            binary_read_error(path, &ext)
+        })?;
+        Ok(paginate_content_lines(&content, offset, limit))
     }
 
     async fn write_file(&self, path: &str, content: &str) -> Result<(), AgentError> {
@@ -2534,6 +2618,54 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("hello from stdin"));
+    }
+
+    #[tokio::test]
+    async fn test_read_file_rejects_png_extension() {
+        let td = tempdir().unwrap();
+        let png = td.path().join("test.png");
+        std::fs::write(&png, &[0x89, 0x50, 0x4E, 0x47]).unwrap();
+        let backend = LocalBackend::default();
+        let err = backend
+            .read_file(png.to_str().unwrap(), None, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Cannot read binary file"));
+        assert!(err.contains("vision_analyze"));
+    }
+
+    #[test]
+    fn test_pdf_extension_not_blocked_by_binary_guard() {
+        assert!(!is_blocked_binary_extension("pdf"));
+    }
+
+    #[tokio::test]
+    async fn test_read_file_pdf_surfaces_disabled_error() {
+        let td = tempdir().unwrap();
+        let pdf = td.path().join("test.pdf");
+        std::fs::write(&pdf, b"not a valid pdf").unwrap();
+        let backend = LocalBackend::default();
+        let err = backend
+            .read_file(pdf.to_str().unwrap(), None, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("PDF text extraction is temporarily disabled"));
+    }
+
+    #[tokio::test]
+    async fn test_read_file_rejects_binary_content_without_known_ext() {
+        let td = tempdir().unwrap();
+        let bin = td.path().join("data.dat");
+        std::fs::write(&bin, &[0x00, 0x01, 0x02, 0x03]).unwrap();
+        let backend = LocalBackend::default();
+        let err = backend
+            .read_file(bin.to_str().unwrap(), None, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Cannot read binary file"));
     }
 
     #[tokio::test]

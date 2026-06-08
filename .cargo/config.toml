@@ -1,6 +1,16 @@
+# NOTE: Do NOT add `rustc-wrapper` (or `rustc.wrapper`) here.
+# A platform-specific value like `sccache.exe` only works on Windows and will
+# break every Linux/macOS CI runner at `rustc -vV` time (dtolnay/rust-toolchain).
+#
+# If you need sccache, set the RUSTC_WRAPPER environment variable per-machine:
+#   export RUSTC_WRAPPER=sccache      # Linux / macOS
+#   set RUSTC_WRAPPER=sccache.exe     # Windows (or just `sccache`)
+#
+# The CI workflows in .github/workflows/release.yml will strip any accidental
+# wrapper config as a defense-in-depth measure.
+
 [build]
 incremental = true
-rustc-wrapper = "sccache.exe"
 
 [unstable]
 

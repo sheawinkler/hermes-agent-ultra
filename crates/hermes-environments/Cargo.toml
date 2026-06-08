@@ -25,7 +25,8 @@ regex = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
-liteparse = { workspace = true }
+# TODO: re-enable after CI can reliably fetch pdfium (liteparse-pdfium-sys build.rs download)
+# liteparse = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

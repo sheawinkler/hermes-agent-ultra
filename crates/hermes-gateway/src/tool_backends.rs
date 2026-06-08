@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use serde_json::json;
 use tokio::sync::{oneshot, Mutex};
 use tokio::time::timeout;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use hermes_config::resolve_outbound_media_path;
@@ -30,6 +31,20 @@ const DEFAULT_CLARIFY_TIMEOUT_SECS: u64 = 30;
 
 const SKIP_CHOICE_LABEL: &str = "Skip / 跳过";
 
+/// Pull a numeric choice out of IM replies like `@bot 2`.
+pub(crate) fn extract_clarify_choice_token(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(last) = trimmed.split_whitespace().last() {
+        if last.parse::<usize>().is_ok() {
+            return last.to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+/// By default, gateway clarify blocks up to [`DEFAULT_CLARIFY_TIMEOUT_SECS`] for a
+/// reply. Set `HERMES_CLARIFY_ASYNC=1` to return immediately and accept the
+/// answer on a later inbound message instead.
 fn clarify_async_mode() -> bool {
     matches!(
         std::env::var("HERMES_CLARIFY_ASYNC")
@@ -133,14 +148,40 @@ impl ChannelClarifyBackend {
 
 #[async_trait]
 impl ClarifyBackend for ChannelClarifyBackend {
-    async fn ask(&self, question: &str, choices: Option<&[String]>) -> Result<String, ToolError> {
+    async fn ask(
+        &self,
+        question: &str,
+        choices: Option<&[String]>,
+        session_key: Option<&str>,
+    ) -> Result<String, ToolError> {
         let choices_vec = with_skip_choice(choices);
+        let async_mode = clarify_async_mode();
+        let wait_secs = clarify_timeout_secs();
+        debug!(
+            question = %question,
+            choice_count = choices_vec.len(),
+            choices = ?choices_vec,
+            session_key = ?session_key,
+            async_mode,
+            wait_secs,
+            "channel clarify: registering pending request"
+        );
         let id = self
             .dispatcher
-            .register(question, &choices_vec)
+            .register(question, &choices_vec, session_key)
             .await;
+        let queue_depth = self.dispatcher.pending().await;
+        debug!(
+            clarification_id = %id,
+            queue_depth,
+            "channel clarify: registered; awaiting user reply on a future inbound message"
+        );
 
-        if clarify_async_mode() {
+        if async_mode {
+            debug!(
+                clarification_id = %id,
+                "channel clarify: async mode — returning clarify_pending without blocking"
+            );
             return Ok(json!({
                 "type": "clarify_pending",
                 "status": "pending",
@@ -152,24 +193,43 @@ impl ClarifyBackend for ChannelClarifyBackend {
             .to_string());
         }
 
-        let wait_secs = clarify_timeout_secs();
+        debug!(
+            clarification_id = %id,
+            wait_secs,
+            "channel clarify: blocking until user responds or timeout"
+        );
         match self.dispatcher.wait_for(&id, wait_secs).await {
-            Ok(answer) => Ok(json!({
-                "type": "clarify_response",
-                "clarification_id": id,
-                "question": question,
-                "answer": answer,
-            })
-            .to_string()),
-            Err(_) => Ok(json!({
-                "type": "clarify_response",
-                "clarification_id": id,
-                "question": question,
-                "answer": null,
-                "timed_out": true,
-                "hint": "User did not respond within the timeout. Proceed with a reasonable default.",
-            })
-            .to_string()),
+            Ok(answer) => {
+                debug!(
+                    clarification_id = %id,
+                    answer_len = answer.len(),
+                    "channel clarify: received user answer"
+                );
+                Ok(json!({
+                    "type": "clarify_response",
+                    "clarification_id": id,
+                    "question": question,
+                    "answer": answer,
+                })
+                .to_string())
+            }
+            Err(e) => {
+                warn!(
+                    clarification_id = %id,
+                    wait_secs,
+                    error = %e,
+                    "channel clarify: timed out or failed while waiting for user answer"
+                );
+                Ok(json!({
+                    "type": "clarify_response",
+                    "clarification_id": id,
+                    "question": question,
+                    "answer": null,
+                    "timed_out": true,
+                    "hint": "User did not respond within the timeout. Proceed with a reasonable default.",
+                })
+                .to_string())
+            }
         }
     }
 }
@@ -179,6 +239,7 @@ pub struct PendingClarify {
     pub id: String,
     pub question: String,
     pub choices: Vec<String>,
+    pub session_key: Option<String>,
 }
 
 impl PendingClarify {
@@ -193,6 +254,8 @@ pub struct ClarifyDispatcher {
     queue: Arc<Mutex<Vec<PendingClarify>>>,
     senders: Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>,
     receivers: Arc<Mutex<HashMap<String, oneshot::Receiver<String>>>>,
+    /// Session with a clarify currently blocked in `wait_for` (sync IM mode).
+    active_session_waits: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl ClarifyDispatcher {
@@ -200,8 +263,12 @@ impl ClarifyDispatcher {
         Self::default()
     }
 
-    async fn register(&self, question: &str, choices: &[String]) -> String {
+    async fn register(&self, question: &str, choices: &[String], session_key: Option<&str>) -> String {
         let id = Uuid::new_v4().to_string();
+        let session_key = session_key
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
         let (tx, rx) = oneshot::channel::<String>();
         self.senders.lock().await.insert(id.clone(), tx);
         self.receivers.lock().await.insert(id.clone(), rx);
@@ -209,8 +276,56 @@ impl ClarifyDispatcher {
             id: id.clone(),
             question: question.to_string(),
             choices: choices.to_vec(),
+            session_key: session_key.clone(),
         });
+        if let Some(sk) = session_key.as_deref() {
+            self.active_session_waits
+                .lock()
+                .await
+                .insert(sk.to_string(), id.clone());
+        }
+        debug!(
+            clarification_id = %id,
+            question = %question,
+            choice_count = choices.len(),
+            session_key = ?session_key,
+            "clarify dispatcher: registered pending request"
+        );
         id
+    }
+
+    async fn finish_pending(&self, id: &str) {
+        self.senders.lock().await.remove(id);
+        self.receivers.lock().await.remove(id);
+        self.remove_from_queue(id).await;
+        let mut waits = self.active_session_waits.lock().await;
+        waits.retain(|_, v| v != id);
+    }
+
+    async fn remove_from_queue(&self, id: &str) {
+        let mut guard = self.queue.lock().await;
+        if let Some(pos) = guard.iter().position(|p| p.id == id) {
+            guard.remove(pos);
+        }
+    }
+
+    async fn normalize_answer(&self, id: &str, raw: &str) -> String {
+        let trimmed = extract_clarify_choice_token(raw);
+        let choices = self
+            .queue
+            .lock()
+            .await
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.choices.clone());
+        if let Some(choices) = choices {
+            if let Ok(n) = trimmed.parse::<usize>() {
+                if (1..=choices.len()).contains(&n) {
+                    return choices[n - 1].clone();
+                }
+            }
+        }
+        trimmed.to_string()
     }
 
     async fn wait_for(&self, id: &str, wait_secs: u64) -> Result<String, String> {
@@ -222,11 +337,79 @@ impl ClarifyDispatcher {
             .ok_or_else(|| format!("no pending clarify with id {id}"))?;
         match timeout(Duration::from_secs(wait_secs), rx).await {
             Ok(Ok(answer)) => {
-                self.senders.lock().await.remove(id);
+                self.finish_pending(id).await;
+                debug!(
+                    clarification_id = %id,
+                    answer_len = answer.len(),
+                    "clarify dispatcher: wait_for fulfilled"
+                );
                 Ok(answer)
             }
-            Ok(Err(_)) => Err("clarify responder dropped without answering".into()),
-            Err(_) => Err(format!("clarify timed out after {}s", wait_secs)),
+            Ok(Err(_)) => {
+                self.finish_pending(id).await;
+                warn!(
+                    clarification_id = %id,
+                    "clarify dispatcher: responder dropped without answering"
+                );
+                Err("clarify responder dropped without answering".into())
+            }
+            Err(_) => {
+                self.finish_pending(id).await;
+                warn!(
+                    clarification_id = %id,
+                    wait_secs,
+                    "clarify dispatcher: wait_for timed out"
+                );
+                Err(format!("clarify timed out after {}s", wait_secs))
+            }
+        }
+    }
+
+    /// Fulfill the active sync clarify for `session_key` without acquiring the
+    /// per-session route lock. Used when the user replies while an agent turn is
+    /// blocked in `wait_for`.
+    pub async fn try_fulfill_for_session(&self, session_key: &str, raw_answer: &str) -> bool {
+        if clarify_async_mode() {
+            return false;
+        }
+        let id = {
+            let waits = self.active_session_waits.lock().await;
+            waits.get(session_key).cloned()
+        };
+        let Some(id) = id else {
+            debug!(
+                session_key = %session_key,
+                "clarify dispatcher: fast-path skipped — no active session wait"
+            );
+            return false;
+        };
+        if !self.senders.lock().await.contains_key(&id) {
+            debug!(
+                clarification_id = %id,
+                session_key = %session_key,
+                "clarify dispatcher: fast-path skipped — no active sender"
+            );
+            return false;
+        }
+        let answer = self.normalize_answer(&id, raw_answer).await;
+        match self.respond_by_id(&id, answer).await {
+            Ok(()) => {
+                debug!(
+                    clarification_id = %id,
+                    session_key = %session_key,
+                    "clarify dispatcher: fast-path fulfilled active session wait"
+                );
+                true
+            }
+            Err(e) => {
+                debug!(
+                    clarification_id = %id,
+                    session_key = %session_key,
+                    error = %e,
+                    "clarify dispatcher: fast-path fulfill failed"
+                );
+                false
+            }
         }
     }
 
@@ -236,22 +419,37 @@ impl ClarifyDispatcher {
         if guard.is_empty() {
             None
         } else {
-            Some(guard.remove(0))
+            let pending = guard.remove(0);
+            debug!(
+                clarification_id = %pending.id,
+                question = %pending.question,
+                choice_count = pending.choices.len(),
+                remaining_queue = guard.len(),
+                "clarify dispatcher: took next pending request"
+            );
+            Some(pending)
         }
     }
 
     /// Fulfill a pending clarify by id.
     pub async fn respond_by_id(&self, id: &str, answer: impl Into<String>) -> Result<(), String> {
+        let answer = answer.into();
         let sender = self
             .senders
             .lock()
             .await
             .remove(id)
             .ok_or_else(|| format!("no pending clarify with id {id}"))?;
-        self.receivers.lock().await.remove(id);
+        debug!(
+            clarification_id = %id,
+            answer_len = answer.len(),
+            "clarify dispatcher: respond_by_id"
+        );
         sender
-            .send(answer.into())
-            .map_err(|_| "clarify backend was dropped".to_string())
+            .send(answer)
+            .map_err(|_| "clarify backend was dropped".to_string())?;
+        self.receivers.lock().await.remove(id);
+        Ok(())
     }
 
     pub async fn pending(&self) -> usize {
@@ -263,18 +461,22 @@ impl ClarifyDispatcher {
 mod tests {
     use super::*;
     use crate::test_env;
+    use std::sync::LazyLock;
+    use tokio::sync::Mutex as AsyncMutex;
+
+    static CLARIFY_ENV_LOCK: LazyLock<AsyncMutex<()>> = LazyLock::new(|| AsyncMutex::new(()));
 
     #[tokio::test]
     async fn dispatcher_roundtrip() {
+        let _env_guard = CLARIFY_ENV_LOCK.lock().await;
+        test_env::set_var("HERMES_CLARIFY_TIMEOUT_SECS", "5");
+        test_env::remove_var("HERMES_CLARIFY_ASYNC");
         let dispatcher = ClarifyDispatcher::new();
         let backend = ChannelClarifyBackend::new(dispatcher.clone());
 
-        test_env::set_var("HERMES_CLARIFY_TIMEOUT_SECS", "5");
-        test_env::remove_var("HERMES_CLARIFY_ASYNC");
-
         let ask = tokio::spawn(async move {
             backend
-                .ask("pick one?", Some(&["a".into(), "b".into()]))
+                .ask("pick one?", Some(&["a".into(), "b".into()]), None)
                 .await
         });
 
@@ -293,12 +495,13 @@ mod tests {
 
     #[tokio::test]
     async fn dispatcher_times_out() {
-        let dispatcher = ClarifyDispatcher::new();
-        let backend = ChannelClarifyBackend::new(dispatcher.clone());
+        let _env_guard = CLARIFY_ENV_LOCK.lock().await;
         test_env::set_var("HERMES_CLARIFY_TIMEOUT_SECS", "1");
         test_env::remove_var("HERMES_CLARIFY_ASYNC");
+        let dispatcher = ClarifyDispatcher::new();
+        let backend = ChannelClarifyBackend::new(dispatcher.clone());
 
-        let out = backend.ask("q?", None).await.unwrap();
+        let out = backend.ask("q?", None, None).await.unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["timed_out"], true);
         assert!(parsed["answer"].is_null());
@@ -306,14 +509,52 @@ mod tests {
 
     #[tokio::test]
     async fn clarify_async_returns_pending_without_blocking() {
+        let _env_guard = CLARIFY_ENV_LOCK.lock().await;
+        test_env::set_var("HERMES_CLARIFY_ASYNC", "1");
         let dispatcher = ClarifyDispatcher::new();
         let backend = ChannelClarifyBackend::new(dispatcher.clone());
-        test_env::set_var("HERMES_CLARIFY_ASYNC", "1");
 
-        let out = backend.ask("choose?", Some(&["x".into()])).await.unwrap();
+        let out = backend.ask("choose?", Some(&["x".into()]), None).await.unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["status"], "pending");
         let id = parsed["clarification_id"].as_str().unwrap().to_string();
         dispatcher.respond_by_id(&id, "x").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn try_fulfill_for_session_while_sync_wait() {
+        let _env_guard = CLARIFY_ENV_LOCK.lock().await;
+        test_env::remove_var("HERMES_CLARIFY_ASYNC");
+        test_env::set_var("HERMES_CLARIFY_TIMEOUT_SECS", "30");
+        let dispatcher = ClarifyDispatcher::new();
+        let backend = ChannelClarifyBackend::new(dispatcher.clone());
+        let session = "wecom:test-chat";
+
+        let ask = tokio::spawn(async move {
+            backend
+                .ask(
+                    "pick one?",
+                    Some(&["alpha".into(), "beta".into()]),
+                    Some(session),
+                )
+                .await
+        });
+
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(
+            dispatcher
+                .try_fulfill_for_session(session, "@hermes-bot 2")
+                .await,
+            "fast-path should fulfill active sync clarify"
+        );
+
+        let answer = ask.await.unwrap().unwrap();
+        assert!(answer.contains("beta"), "numeric choice 2 should map to beta");
+    }
+
+    #[test]
+    fn extract_clarify_choice_token_parses_mention_reply() {
+        assert_eq!(extract_clarify_choice_token("@李智杨的hermes 2"), "2");
+        assert_eq!(extract_clarify_choice_token("  3 "), "3");
     }
 }

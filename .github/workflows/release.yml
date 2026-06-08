@@ -30,9 +30,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      RUSTC_WRAPPER: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Remove sccache wrapper from all cargo configs
+        run: |
+          # Clean user-level cargo config (set by rust-cache or other actions)
+          if [ -f ~/.cargo/config.toml ]; then
+            sed -i '/rustc.wrapper/d' ~/.cargo/config.toml
+            sed -i '/rustc-wrapper/d' ~/.cargo/config.toml
+          fi
+          # Clean project-level cargo config (defense in depth)
+          if [ -f .cargo/config.toml ]; then
+            sed -i '/rustc.wrapper/d' .cargo/config.toml
+            sed -i '/rustc-wrapper/d' .cargo/config.toml
+          fi
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
@@ -86,6 +100,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Remove sccache wrapper from all cargo configs
+        run: |
+          # Clean user-level cargo config (set by rust-cache or other actions)
+          if [ -f ~/.cargo/config.toml ]; then
+            sed -i '/rustc.wrapper/d' ~/.cargo/config.toml
+            sed -i '/rustc-wrapper/d' ~/.cargo/config.toml
+          fi
+          # Clean project-level cargo config (defense in depth)
+          if [ -f .cargo/config.toml ]; then
+            sed -i '/rustc.wrapper/d' .cargo/config.toml
+            sed -i '/rustc-wrapper/d' .cargo/config.toml
+          fi
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
@@ -96,7 +122,9 @@ jobs:
         env:
           AWS_LC_SYS_CMAKE_BUILDER: "1"
           XDG_CACHE_HOME: /tmp/cross-cache
-        run: cross build --release --target ${{ matrix.target }} -p hermes-cli
+        run: |
+          unset RUSTC_WRAPPER
+          cross build --release --target ${{ matrix.target }} -p hermes-cli
       - name: Package artifact (tar.gz)
         if: "!contains(matrix.artifact, '.zip')"
         run: |
@@ -127,9 +155,23 @@ jobs:
             target: x86_64-apple-darwin
             artifact: hermes-macos-x86_64.tar.gz
     runs-on: ${{ matrix.runner }}
+    env:
+      RUSTC_WRAPPER: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Remove sccache wrapper from all cargo configs
+        run: |
+          # Clean user-level cargo config (set by rust-cache or other actions)
+          if [ -f ~/.cargo/config.toml ]; then
+            sed -i '' '/rustc.wrapper/d' ~/.cargo/config.toml || true
+            sed -i '' '/rustc-wrapper/d' ~/.cargo/config.toml || true
+          fi
+          # Clean project-level cargo config (defense in depth)
+          if [ -f .cargo/config.toml ]; then
+            sed -i '' '/rustc.wrapper/d' .cargo/config.toml || true
+            sed -i '' '/rustc-wrapper/d' .cargo/config.toml || true
+          fi
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -202,3 +244,44 @@ jobs:
             dist/security/release-sbom.cdx.json
             scripts/install.sh
             Formula/hermes-agent-ultra.rb
+<<<<<<< HEAD
+=======
+
+  # ── Phase 4: Upload to ModelScope ──────────────────────────────────────────
+
+  modelscope-upload:
+    needs: [validate-tag, cross-build, macos-build, sign-and-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist/
+          sha256sum hermes-*.tar.gz hermes-*.zip > checksums.sha256
+          cat checksums.sha256
+
+      - name: Upload to ModelScope
+        env:
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+        if: ${{ env.MODELSCOPE_TOKEN != '' }}
+        run: |
+          cp scripts/install.sh dist/
+          if [ -f Formula/hermes-agent-ultra.rb ]; then
+            cp Formula/hermes-agent-ultra.rb dist/
+          fi
+          pip install modelscope
+          python3 scripts/upload-modelscope-release.py \
+            --repo flowy2025/agent \
+            --version "${{ github.ref_name }}" \
+            --dist-dir dist/
+
+>>>>>>> michael-lfx/feat/wecom_websocket

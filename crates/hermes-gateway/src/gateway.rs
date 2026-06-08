@@ -104,6 +104,7 @@ use crate::hooks::{HookEvent, HookRegistry};
 use crate::pairing_store::DmPairingStore;
 use crate::platforms::helpers::extract_inline_images;
 use crate::session::{SessionManager, SessionTeardownSnapshot};
+use crate::tool_backends::ClarifyDispatcher;
 use crate::stream::{StreamConfig, StreamManager};
 use crate::voice::VoiceManager;
 use hermes_config::resolve_outbound_media_path;
@@ -503,6 +504,8 @@ pub struct Gateway {
     turn_outbound: StdMutex<HashMap<String, TurnOutboundTracker>>,
     /// Optional agent-layer hook for POI / memory flush before session removal.
     session_teardown_handler: RwLock<Option<SessionTeardownHandler>>,
+    /// Channel clarify dispatcher for IM fast-path answer delivery.
+    clarify_dispatcher: RwLock<Option<ClarifyDispatcher>>,
     /// Concrete Discord adapter for history backfill (P2-8).
     #[cfg(feature = "discord")]
     discord_adapter: RwLock<Option<Arc<crate::platforms::discord::DiscordAdapter>>>,
@@ -647,9 +650,16 @@ impl Gateway {
             active_routes: RwLock::new(HashMap::new()),
             turn_outbound: StdMutex::new(HashMap::new()),
             session_teardown_handler: RwLock::new(None),
+            clarify_dispatcher: RwLock::new(None),
             #[cfg(feature = "discord")]
             discord_adapter: RwLock::new(None),
         }
+    }
+
+    /// Wire the shared clarify dispatcher so inbound IM replies can fulfill an
+    /// active sync `clarify` wait without waiting for the per-session route lock.
+    pub async fn set_clarify_dispatcher(&self, dispatcher: ClarifyDispatcher) {
+        *self.clarify_dispatcher.write().await = Some(dispatcher);
     }
 
     fn begin_turn_outbound_tracking(&self, session_key: &str, platform: &str, chat_id: &str) {
@@ -1254,6 +1264,26 @@ impl Gateway {
             if matches!(command, GatewayCommandResult::StopAgent(_)) {
                 self.apply_command_result(incoming, &session_key, command).await?;
                 return Ok(());
+            }
+        }
+        if !is_slash_command {
+            if let Some(dispatcher) = self.clarify_dispatcher.read().await.as_ref() {
+                if dispatcher
+                    .try_fulfill_for_session(
+                        &session_key,
+                        &crate::tool_backends::extract_clarify_choice_token(&incoming.text),
+                    )
+                    .await
+                {
+                    debug!(
+                        session_key = %session_key,
+                        platform = %incoming.platform,
+                        chat_id = %incoming.chat_id,
+                        text_chars = incoming.text.chars().count(),
+                        "gateway clarify fast-path: inbound reply fulfilled active clarify wait"
+                    );
+                    return Ok(());
+                }
             }
         }
         let _session_serial = self.acquire_session_serial(&session_key).await;
