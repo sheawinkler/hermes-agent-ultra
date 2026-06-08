@@ -20,7 +20,7 @@ use crate::voice::{SttConfig, TtsConfig};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GatewayConfig {
     /// Default LLM model identifier (e.g. "gpt-4o", "claude-3-opus").
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default = "default_model", skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 
     /// Personality / persona name to load.
@@ -139,7 +139,7 @@ pub struct GatewayConfig {
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
-            model: None,
+            model: default_model(),
             personality: None,
             max_turns: default_max_turns(),
             system_prompt: None,
@@ -349,6 +349,10 @@ impl Default for AgentLoopBehaviorConfig {
             web_research: crate::web_research::WebResearchConfig::default(),
         }
     }
+}
+
+fn default_model() -> Option<String> {
+    Some("gpt-4o".to_string())
 }
 
 fn default_max_turns() -> u32 {
@@ -710,7 +714,7 @@ mod tests {
         let cfg = GatewayConfig::default();
         assert_eq!(cfg.max_turns, 250);
         assert!(!cfg.tools.is_empty());
-        assert!(cfg.model.is_none());
+        assert_eq!(cfg.model, Some("gpt-4o".to_string()));
         assert!(cfg.proxy.is_none());
         assert_eq!(
             cfg.platform_toolsets

@@ -1,6 +1,6 @@
 //! Configuration loading from YAML, JSON, and environment variables.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // Re-export ConfigError for convenience
 pub use hermes_core::ConfigError;
@@ -9,6 +9,76 @@ use crate::config::{GatewayConfig, LlmProviderConfig, ProxyConfig};
 use crate::merge::merge_configs;
 use crate::paths;
 use crate::platform::PlatformConfig;
+
+// ---------------------------------------------------------------------------
+// Rich YAML config error type
+// ---------------------------------------------------------------------------
+
+/// Which stage of YAML parsing failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum YamlParseStage {
+    /// YAML syntax error (string -> Value).
+    Syntax,
+    /// Type mismatch during deserialization (Value -> GatewayConfig).
+    TypeMismatch,
+}
+
+/// Rich error information for YAML config parsing failures.
+///
+/// Marked `#[non_exhaustive]` so future field additions are not breaking changes
+/// for downstream code using struct literal syntax.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct YamlConfigError {
+    pub file_path: PathBuf,
+    pub line: Option<usize>,
+    pub column: Option<usize>,
+    pub field_path: Option<String>,
+    pub message: String,
+    pub stage: YamlParseStage,
+}
+
+impl std::fmt::Display for YamlConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Config parse error in {}", self.file_path.display())?;
+        if let Some(path) = &self.field_path {
+            writeln!(f, "  Field: {path}")?;
+        }
+        match (self.line, self.column) {
+            (Some(l), Some(c)) => writeln!(f, "  Location: line {l}, column {c}")?,
+            (Some(l), None) => writeln!(f, "  Location: line {l}")?,
+            _ => {}
+        }
+        writeln!(f, "  Problem: {}", self.message)?;
+        match self.stage {
+            YamlParseStage::Syntax => {
+                write!(f, "  Note: This is a YAML syntax error.")?
+            }
+            YamlParseStage::TypeMismatch => {
+                write!(
+                    f,
+                    "  Note: Check that the field has the correct type (string/number/object/array)."
+                )?
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Width of the error banner printed to stderr when a config file fails to load.
+const ERROR_BANNER_WIDTH: usize = 60;
+
+/// Print a prominent error banner to stderr and emit a structured tracing error
+/// when a config file fails to load.  Called from `load_config` for both
+/// `config.yaml` and `cli-config.yaml` failures.
+fn log_config_load_failed(file_path: &std::path::Path, error: &ConfigError) {
+    let banner = "=".repeat(ERROR_BANNER_WIDTH);
+    let file = file_path.display().to_string();
+    eprintln!(
+        "\n{banner}\nConfig file load failed\n  File: {file}\n  Error: {error}\n  This file was skipped; falling back to defaults.\n{banner}"
+    );
+    tracing::error!(file, error = %error, "Config file load failed; falling back to defaults");
+}
 
 // ---------------------------------------------------------------------------
 // ConfigError conversion helpers
@@ -199,6 +269,23 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
     let gateway_json_path = Path::new(&effective_home).join("gateway.json");
     let ignore_user_config = env_truthy("HERMES_IGNORE_USER_CONFIG");
 
+    // Ensure config.yaml exists: create with defaults if missing so that
+    // subsequent `hermes config set` operations have a file to write to.
+    if !ignore_user_config && !config_yaml_path.exists() {
+        if let Some(parent) = config_yaml_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let default_config = GatewayConfig::default();
+        if let Err(e) = save_config_yaml(&config_yaml_path, &default_config) {
+            tracing::warn!("Failed to create default config.yaml: {e}");
+        } else {
+            tracing::info!(
+                "Created default config.yaml at {}",
+                config_yaml_path.display()
+            );
+        }
+    }
+
     // Start from defaults
     let mut config = GatewayConfig::default();
 
@@ -219,7 +306,7 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
                 config = merge_configs(&yaml_cfg, &config);
             }
             Err(e) => {
-                tracing::warn!("Failed to load {}: {e}", config_yaml_path.display());
+                log_config_load_failed(&config_yaml_path, &e);
             }
         }
     }
@@ -231,7 +318,7 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
                 config = merge_configs(&cli_cfg, &config);
             }
             Err(e) => {
-                tracing::warn!("Failed to load {}: {e}", cli_config_yaml_path.display());
+                log_config_load_failed(&cli_config_yaml_path, &e);
             }
         }
     }
@@ -256,13 +343,48 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
 /// Load a GatewayConfig from a YAML file.
 pub fn load_from_yaml(path: &Path) -> Result<GatewayConfig, ConfigError> {
     let contents = std::fs::read_to_string(path).map_err(io_to_config_error)?;
-    let mut root: serde_yaml::Value =
-        serde_yaml::from_str(&contents).map_err(yaml_to_config_error)?;
+
+    // Stage (a): YAML syntax -> Value
+    let mut root: serde_yaml::Value = match serde_yaml::from_str(&contents) {
+        Ok(v) => v,
+        Err(e) => {
+            let loc = e.location();
+            let rich = YamlConfigError {
+                file_path: path.to_path_buf(),
+                line: loc.as_ref().map(|l| l.line()),
+                column: loc.as_ref().map(|l| l.column()),
+                field_path: None,
+                message: e.to_string(),
+                stage: YamlParseStage::Syntax,
+            };
+            return Err(ConfigError::ParseError(rich.to_string()));
+        }
+    };
+
     if let serde_yaml::Value::Mapping(ref mut m) = root {
         crate::python_yaml_compat::normalize_config_yaml_root(m);
     }
     mark_platform_enabled_explicit(&mut root, "slack");
-    let config: GatewayConfig = serde_yaml::from_value(root).map_err(yaml_to_config_error)?;
+
+    // Stage (b): Value -> GatewayConfig with field path tracking
+    let config: GatewayConfig = match serde_path_to_error::deserialize(root) {
+        Ok(c) => c,
+        Err(e) => {
+            let field_path = e.path().to_string();
+            let inner: serde_yaml::Error = e.into_inner();
+            let loc = inner.location();
+            let rich = YamlConfigError {
+                file_path: path.to_path_buf(),
+                line: loc.as_ref().map(|l| l.line()),
+                column: loc.as_ref().map(|l| l.column()),
+                field_path: Some(field_path),
+                message: inner.to_string(),
+                stage: YamlParseStage::TypeMismatch,
+            };
+            return Err(ConfigError::ParseError(rich.to_string()));
+        }
+    };
+
     Ok(config)
 }
 
@@ -1600,5 +1722,123 @@ mod tests {
         unsafe {
             std::env::remove_var("HERMES_IGNORE_USER_CONFIG");
         }
+    }
+
+    #[test]
+    fn load_config_creates_default_config_yaml_when_missing() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempdir().expect("tempdir");
+        let cfg_path = home.path().join("config.yaml");
+
+        // Pre-condition: config.yaml must not exist
+        assert!(!cfg_path.exists(), "config.yaml should not exist before load");
+
+        let cfg = load_config(Some(home.path().to_string_lossy().as_ref())).expect("load config");
+
+        // Post-condition 1: config.yaml should have been created
+        assert!(cfg_path.exists(), "config.yaml should be auto-created when missing");
+
+        // Post-condition 2: loaded config should match defaults
+        assert_eq!(cfg.max_turns, GatewayConfig::default().max_turns);
+        assert_eq!(cfg.model, GatewayConfig::default().model);
+
+        // Post-condition 3: the created file should be valid YAML and reloadable
+        let reloaded = load_user_config_file(&cfg_path).expect("reload created config");
+        assert_eq!(reloaded.max_turns, GatewayConfig::default().max_turns);
+        assert_eq!(reloaded.model, GatewayConfig::default().model);
+
+        // Post-condition 4: the created file should contain the default model
+        let content = std::fs::read_to_string(&cfg_path).expect("read config");
+        assert!(
+            content.contains("model: gpt-4o"),
+            "auto-created config should include default model; content:\n{content}"
+        );
+    }
+
+    #[test]
+    fn load_config_does_not_overwrite_existing_config_yaml() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempdir().expect("tempdir");
+        let cfg_path = home.path().join("config.yaml");
+        std::fs::write(&cfg_path, "max_turns: 42\n").expect("write existing config");
+
+        let cfg = load_config(Some(home.path().to_string_lossy().as_ref())).expect("load config");
+
+        // Existing value should be preserved
+        assert_eq!(cfg.max_turns, 42);
+
+        // File content should remain unchanged
+        let content = std::fs::read_to_string(&cfg_path).expect("read config");
+        assert!(content.contains("max_turns: 42"));
+    }
+
+    #[test]
+    fn yaml_syntax_error_includes_line_column() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, "model: \"unclosed\n").unwrap();
+
+        let err = load_from_yaml(&path).unwrap_err();
+        let msg = err.to_string();
+        // Best-effort assertions: these depend on serde_yaml::Error::to_string() output.
+        // If serde_yaml changes its error message format, these may need updating.
+        assert!(msg.contains("line"), "should mention line: {msg}");
+        assert!(msg.contains("Syntax"), "should mention stage: {msg}");
+    }
+
+    #[test]
+    fn yaml_type_mismatch_includes_field_path() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        // max_turns expects u32, give a string
+        std::fs::write(&path, "max_turns: not_a_number\n").unwrap();
+
+        let err = load_from_yaml(&path).unwrap_err();
+        let msg = err.to_string();
+        // Best-effort assertions: these depend on serde_yaml::Error::to_string() output.
+        assert!(msg.contains("max_turns"), "should mention field: {msg}");
+        assert!(msg.contains("TypeMismatch"), "should mention stage: {msg}");
+    }
+
+    #[test]
+    fn yaml_nested_field_path_on_type_mismatch() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        // llm_providers.openai.api_key expects String, give a mapping
+        std::fs::write(
+            &path,
+            "llm_providers:\n  openai:\n    api_key:\n      nested: value\n",
+        )
+        .unwrap();
+
+        let err = load_from_yaml(&path).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("llm_providers.openai.api_key"),
+            "should show full path: {msg}"
+        );
+    }
+
+    #[test]
+    fn load_config_falls_back_to_defaults_on_parse_error() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempdir().expect("tempdir");
+        let cfg_path = home.path().join("config.yaml");
+        std::fs::write(&cfg_path, "max_turns: [1, 2, 3]\n").unwrap();
+
+        let cfg = load_config(Some(home.path().to_string_lossy().as_ref())).expect("should not fail");
+        assert_eq!(cfg.max_turns, GatewayConfig::default().max_turns);
     }
 }

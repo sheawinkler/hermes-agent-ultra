@@ -42,7 +42,7 @@ pub use voice::{
 };
 pub use loader::{
     apply_user_config_patch, load_config, load_user_config_file, save_config_yaml,
-    user_config_field_display, validate_config, ConfigError,
+    user_config_field_display, validate_config, ConfigError, YamlConfigError, YamlParseStage,
 };
 pub use managed_gateway::{
     build_vendor_gateway_url, coerce_modal_mode, env_var_enabled, get_tool_gateway_scheme,
