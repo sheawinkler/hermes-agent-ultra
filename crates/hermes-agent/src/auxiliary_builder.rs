@@ -19,6 +19,7 @@ use hermes_intelligence::auxiliary::{
 use crate::provider::{
     openai_codex_provider, AnthropicProvider, GenericProvider, OpenRouterProvider,
 };
+use crate::provider_profiles;
 use crate::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
@@ -31,7 +32,7 @@ mod default_models {
     pub const OPENAI: &str = "gpt-4o-mini";
     pub const ZAI: &str = "glm-4.5-flash";
     pub const KIMI: &str = "kimi-k2-turbo-preview";
-    pub const MINIMAX: &str = "MiniMax-M2.7";
+    pub const MINIMAX: &str = "MiniMax-M3";
     pub const GEMINI: &str = "gemini-3.5-flash";
     pub const GMI: &str = "google/gemini-3.1-flash-lite-preview";
     pub const TENCENT_TOKENHUB: &str = "hy3-preview";
@@ -47,6 +48,8 @@ mod default_base_urls {
     pub const GMI: &str = "https://api.gmi-serving.com/v1";
     pub const HUGGINGFACE: &str = "https://router.huggingface.co/v1";
     pub const ZAI: &str = "https://api.z.ai/api/paas/v4";
+    pub const MINIMAX: &str = "https://api.minimax.io/v1";
+    pub const MINIMAX_CN: &str = "https://api.minimaxi.com/v1";
     pub const NOVITA: &str = "https://api.novita.ai/openai/v1";
     pub const NVIDIA: &str = "https://integrate.api.nvidia.com/v1";
     pub const ARCEE: &str = "https://api.arcee.ai/api/v1";
@@ -309,21 +312,22 @@ fn build_auxiliary_client_with_main_runtime_inner(
         default_models::ZAI,
         main_label.as_deref(),
     );
-    register_direct_key(
-        &mut builder,
-        &mut summary,
-        "KIMI_API_KEY",
-        "kimi",
-        "https://api.moonshot.ai/v1",
-        default_models::KIMI,
-        main_label.as_deref(),
-    );
+    register_kimi_direct_key(&mut builder, &mut summary, main_label.as_deref());
     register_direct_key(
         &mut builder,
         &mut summary,
         "MINIMAX_API_KEY",
         "minimax",
-        "https://api.minimax.io/v1",
+        default_base_urls::MINIMAX,
+        default_models::MINIMAX,
+        main_label.as_deref(),
+    );
+    register_direct_key(
+        &mut builder,
+        &mut summary,
+        "MINIMAX_CN_API_KEY",
+        "minimax-cn",
+        default_base_urls::MINIMAX_CN,
         default_models::MINIMAX,
         main_label.as_deref(),
     );
@@ -649,7 +653,8 @@ fn provider_api_key_from_env(label: &str) -> Option<String> {
             "MOONSHOT_API_KEY",
             "KIMI_CN_API_KEY",
         ],
-        "minimax" => &["MINIMAX_API_KEY", "MINIMAX_CN_API_KEY"],
+        "minimax" => &["MINIMAX_API_KEY"],
+        "minimax-cn" => &["MINIMAX_CN_API_KEY", "MINIMAX_API_KEY"],
         "copilot" | "copilot-acp" => &["GITHUB_COPILOT_TOKEN", "COPILOT_GITHUB_TOKEN"],
         "deepseek" => &["DEEPSEEK_API_KEY"],
         "gemini" | "google" => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
@@ -692,6 +697,8 @@ fn default_base_url(label: &str) -> Option<&'static str> {
         "tencent-tokenhub" => Some(default_base_urls::TENCENT_TOKENHUB),
         "huggingface" => Some(default_base_urls::HUGGINGFACE),
         "zai" => Some(default_base_urls::ZAI),
+        "minimax" => Some(default_base_urls::MINIMAX),
+        "minimax-cn" => Some(default_base_urls::MINIMAX_CN),
         "novita" => Some(default_base_urls::NOVITA),
         "nvidia" => Some(default_base_urls::NVIDIA),
         "arcee" => Some(default_base_urls::ARCEE),
@@ -718,6 +725,61 @@ fn is_loopback_base_url(base_url: &str) -> bool {
     trimmed.starts_with("http://127.")
         || trimmed.starts_with("http://localhost")
         || trimmed.starts_with("http://[::1]")
+}
+
+fn kimi_base_url_from_env_or_key(api_key: &str) -> String {
+    std::env::var("KIMI_BASE_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            provider_profiles::kimi_base_url_for_api_key(
+                api_key,
+                provider_profiles::KIMI_LEGACY_BASE_URL,
+            )
+            .to_string()
+        })
+}
+
+fn register_kimi_direct_key(
+    builder: &mut hermes_intelligence::auxiliary::AuxiliaryClientBuilder,
+    summary: &mut AuxiliaryWiringSummary,
+    skip_label: Option<&str>,
+) {
+    const LABEL: &str = "kimi";
+    if skip_label == Some(LABEL) {
+        summary
+            .skipped
+            .push(format!("{LABEL} (covered by main runtime)"));
+        return;
+    }
+
+    let Some(key) = ["KIMI_CODING_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY"]
+        .iter()
+        .find_map(|env_var| {
+            std::env::var(env_var)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+    else {
+        summary.skipped.push(format!("{LABEL} (no key)"));
+        return;
+    };
+    let base_url = kimi_base_url_from_env_or_key(key.as_str());
+    let provider: Arc<dyn LlmProvider> = Arc::new(
+        GenericProvider::new(base_url, key, default_models::KIMI)
+            .with_provider_profile("kimi-coding"),
+    );
+    add_candidate(
+        builder,
+        ProviderCandidate::new(
+            AuxiliarySource::DirectKey(LABEL.to_string()),
+            default_models::KIMI,
+            provider,
+        ),
+    );
+    summary.registered.push(LABEL.to_string());
 }
 
 fn register_direct_key(
@@ -921,7 +983,58 @@ mod tests {
         }
         std::env::remove_var("GEMINI_API_KEY");
 
-        // Scenario 7: full chain, deterministic order.
+        // Scenario 7: MiniMax direct API defaults to M3 and avoids highspeed.
+        std::env::set_var("MINIMAX_API_KEY", "sk-minimax");
+        {
+            let (client, summary) = build_default_auxiliary_client(AuxiliaryConfig::default());
+            assert_eq!(client.chain_labels(), vec!["minimax"]);
+            assert_eq!(
+                client.chain_entries(),
+                vec![("minimax".to_string(), "MiniMax-M3".to_string(), true,)]
+            );
+            assert_eq!(summary.registered, vec!["minimax"]);
+            assert!(!client.chain_entries()[0]
+                .1
+                .to_ascii_lowercase()
+                .contains("highspeed"));
+        }
+        std::env::remove_var("MINIMAX_API_KEY");
+
+        // Scenario 8: MiniMax CN is a first-class direct-key auxiliary provider.
+        std::env::set_var("MINIMAX_CN_API_KEY", "sk-minimax-cn");
+        {
+            let (client, summary) = build_default_auxiliary_client(AuxiliaryConfig::default());
+            assert_eq!(client.chain_labels(), vec!["minimax-cn"]);
+            assert_eq!(
+                client.chain_entries(),
+                vec![("minimax-cn".to_string(), "MiniMax-M3".to_string(), true,)]
+            );
+            assert_eq!(summary.registered, vec!["minimax-cn"]);
+            assert!(!client.chain_entries()[0]
+                .1
+                .to_ascii_lowercase()
+                .contains("highspeed"));
+        }
+        std::env::remove_var("MINIMAX_CN_API_KEY");
+
+        // Scenario 9: Kimi Code direct API keys register the Kimi auxiliary source.
+        std::env::set_var("KIMI_CODING_API_KEY", "sk-kimi-aux");
+        {
+            let (client, summary) = build_default_auxiliary_client(AuxiliaryConfig::default());
+            assert_eq!(client.chain_labels(), vec!["kimi"]);
+            assert_eq!(
+                client.chain_entries(),
+                vec![(
+                    "kimi".to_string(),
+                    "kimi-k2-turbo-preview".to_string(),
+                    true,
+                )]
+            );
+            assert_eq!(summary.registered, vec!["kimi"]);
+        }
+        std::env::remove_var("KIMI_CODING_API_KEY");
+
+        // Scenario 10: full chain, deterministic order.
         std::env::set_var("OPENROUTER_API_KEY", "sk-or");
         std::env::set_var("HERMES_OPENAI_API_KEY", "sk-hermes-oa");
         std::env::set_var("OPENAI_API_KEY", "sk-oa-legacy");

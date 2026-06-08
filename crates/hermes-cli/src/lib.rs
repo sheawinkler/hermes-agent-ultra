@@ -29,6 +29,8 @@ pub mod gateway_cmd;
 pub mod gateway_inbound_wiring;
 pub mod gateway_runtime_defaults;
 pub mod kanban;
+pub mod systems;
+pub mod teams_pipeline_cli;
 pub mod live_messaging;
 pub mod lumio;
 pub mod mcp_config;

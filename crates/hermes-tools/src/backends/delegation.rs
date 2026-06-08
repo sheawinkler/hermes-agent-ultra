@@ -132,3 +132,44 @@ impl DelegationBackend for RpcDelegationBackend {
         Ok(text)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[tokio::test]
+    async fn signal_delegation_backend_allows_depths_above_legacy_cap() {
+        let backend = SignalDelegationBackend::new().with_depth(98, 99);
+        let out = backend
+            .delegate(
+                "prove uncapped depth",
+                None,
+                None,
+                None,
+                Some(99),
+                Some(99),
+                None,
+            )
+            .await
+            .expect("depth at configured max should be allowed");
+        let value: Value = serde_json::from_str(&out).expect("delegation envelope json");
+
+        assert_eq!(value["child_depth"], 99);
+        assert_eq!(value["max_depth"], 99);
+        assert_eq!(value["status"], "pending");
+    }
+
+    #[tokio::test]
+    async fn signal_delegation_backend_rejects_only_above_configured_max_depth() {
+        let backend = SignalDelegationBackend::new().with_depth(99, 99);
+        let err = backend
+            .delegate("too deep", None, None, None, Some(100), Some(99), None)
+            .await
+            .expect_err("child depth above configured max should be rejected");
+
+        assert!(err
+            .to_string()
+            .contains("Delegation depth limit reached (100/99)"));
+    }
+}

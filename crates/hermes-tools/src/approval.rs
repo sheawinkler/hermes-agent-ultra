@@ -391,6 +391,7 @@ static DENIED_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         Regex::new(r"(?i)\b(shred|wipefs)\b").unwrap(),
         Regex::new(r"(?i):()\s*>\s*/dev/").unwrap(),
         Regex::new(r"(?i)>\s*/dev/sd[a-z]").unwrap(),
+        Regex::new(r"(?i)\bchmod\s+(?:-[A-Za-z]*R[A-Za-z]*\s+|--recursive\s+)?777\s").unwrap(),
     ]
 });
 
@@ -415,7 +416,6 @@ static CONFIRM_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         // Disk operations
         Regex::new(r"(?i)\bformat\b").unwrap(),
         Regex::new(r"(?is)\bdd\s+.*(?:if=/dev/|of=)").unwrap(),
-        Regex::new(r"(?i)\bchmod\s+(?:-[A-Za-z]*R[A-Za-z]*\s+|--recursive\s+)?777\s").unwrap(),
         // Cron modifications
         Regex::new(r"(?i)\bcrontab\s+-r\b").unwrap(),
         // SQL destructive operations
@@ -1599,7 +1599,7 @@ mod tests {
         );
         assert_eq!(
             check_approval("chmod 777 /etc/passwd"),
-            ApprovalDecision::RequiresConfirmation
+            ApprovalDecision::Denied
         );
     }
 

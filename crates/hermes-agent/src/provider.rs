@@ -30,8 +30,10 @@ use hermes_core::{
 };
 
 use crate::credential_pool::CredentialPool;
+use crate::provider_serialize_cache::ProviderSerializeCache;
 use crate::provider_profiles;
 use crate::rate_limit::RateLimitTracker;
+use crate::usage_parse::usage_stats_from_raw;
 use crate::tool_call_args::arguments_value_to_string;
 
 struct ChatRequestParams<'a> {
@@ -47,6 +49,23 @@ struct ChatRequestParams<'a> {
 const ACP_MULTIMODAL_PREFIX: &str = "__hermes_acp_parts_json__:";
 pub const OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const CODEX_CLOUDFLARE_ORIGINATOR: &str = "codex_cli_rs";
+
+fn rate_limit_headers_json(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let mut map = HashMap::new();
+    for (k, v) in headers.iter() {
+        let kl = k.as_str().to_ascii_lowercase();
+        if kl.starts_with("x-ratelimit-") || kl == "retry-after" {
+            if let Ok(s) = v.to_str() {
+                map.insert(kl, s.to_string());
+            }
+        }
+    }
+    if map.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&map).ok()
+    }
+}
 
 fn request_timeout_duration(seconds: Option<f64>) -> Option<Duration> {
     seconds.and_then(|value| {
@@ -278,6 +297,7 @@ pub struct GenericProvider {
     pub rate_limiter: Option<Arc<RateLimitTracker>>,
     /// Optional credential pool for key rotation.
     pub credential_pool: Option<Arc<CredentialPool>>,
+    serialize_cache: Option<Arc<ProviderSerializeCache>>,
     /// Optional OpenAI-compatible provider profile used for request shaping.
     pub provider_profile: Option<String>,
 }
@@ -300,6 +320,7 @@ impl GenericProvider {
             extra_headers: Vec::new(),
             rate_limiter: None,
             credential_pool: None,
+            serialize_cache: None,
             provider_profile: None,
         }
     }
@@ -360,6 +381,41 @@ impl GenericProvider {
         self
     }
 
+    /// Share per-turn sanitize/tools JSON cache (LLM retry fast path).
+    pub fn with_serialize_cache(mut self, cache: Arc<ProviderSerializeCache>) -> Self {
+        self.serialize_cache = Some(cache);
+        self
+    }
+
+    fn sanitized_messages_for_request(
+        &self,
+        messages: &[Message],
+        strict: bool,
+        effective_model: &str,
+        profile: Option<&str>,
+        extra_body: Option<&Value>,
+    ) -> Value {
+        if let Some(cache) = &self.serialize_cache {
+            cache.sanitized_openai_messages(messages, strict, effective_model, profile, extra_body)
+        } else {
+            Self::sanitize_messages_for_api(messages, strict, effective_model, profile, extra_body)
+        }
+    }
+
+    fn formatted_tools_for_request(&self, tools: &[ToolSchema], effective_model: &str) -> Value {
+        let mut formatted = if let Some(cache) = &self.serialize_cache {
+            cache.formatted_openai_tools(tools)
+        } else {
+            Self::format_tools_for_openai_api(tools)
+        };
+        if is_moonshot_model(effective_model)
+            || AnthropicProvider::is_kimi_coding_endpoint(Some(&self.base_url))
+        {
+            sanitize_moonshot_tools_value(&mut formatted);
+        }
+        formatted
+    }
+
     /// Get the effective API key, using the credential pool if available.
     fn effective_api_key(&self) -> String {
         if let Some(ref pool) = self.credential_pool {
@@ -387,6 +443,17 @@ impl GenericProvider {
         if let Some(ref tracker) = self.rate_limiter {
             tracker.update_from_headers(headers);
         }
+    }
+
+    fn capture_nous_credits_headers(&self, headers: &reqwest::header::HeaderMap) {
+        let _ = hermes_core::credits::capture_nous_credits_from_pairs(headers.iter().filter_map(
+            |(key, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|value| (key.as_str().to_string(), value.to_string()))
+            },
+        ));
     }
 
     /// Inject optional runtime hints: reasoning effort, vision preprocessing,
@@ -603,7 +670,7 @@ impl GenericProvider {
         Self::merge_extra_body_fields(body, cleaned.as_ref());
     }
 
-    fn sanitize_messages_for_api(
+    pub(crate) fn sanitize_messages_for_api(
         messages: &[Message],
         enabled: bool,
         effective_model: &str,
@@ -682,7 +749,7 @@ impl GenericProvider {
         profile.is_some_and(provider_profiles::supports_vision) || supports_vision(effective_model)
     }
 
-    fn format_tools_for_openai_api(tools: &[ToolSchema]) -> Value {
+    pub(crate) fn format_tools_for_openai_api(tools: &[ToolSchema]) -> Value {
         let formatted = Value::Array(
             tools
                 .iter()
@@ -713,7 +780,7 @@ impl GenericProvider {
         } = request;
         let profile = self.profile_for_extra_body(extra_body);
         let strict_tool_sanitize = Self::should_sanitize_tool_calls(extra_body);
-        let mut api_messages = Self::sanitize_messages_for_api(
+        let mut api_messages = self.sanitized_messages_for_request(
             messages,
             strict_tool_sanitize,
             effective_model,
@@ -741,8 +808,7 @@ impl GenericProvider {
             }
         }
         if !tools.is_empty() {
-            body["tools"] =
-                format_tools_for_openai_api_with_model(tools, effective_model, &self.base_url);
+            body["tools"] = self.formatted_tools_for_request(tools, effective_model);
         }
         Self::merge_extra_body_fields_for_profile(&mut body, profile, extra_body);
         self.apply_runtime_hints(&mut body, messages, extra_body);
@@ -763,6 +829,9 @@ impl GenericProvider {
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
             .json(body);
+        if provider_profiles::is_kimi_code_base_url(&self.base_url) {
+            req = req.header("User-Agent", provider_profiles::KIMI_CODE_USER_AGENT);
+        }
         for (key, value) in &self.extra_headers {
             req = req.header(key.as_str(), value.as_str());
         }
@@ -1047,6 +1116,7 @@ impl LlmProvider for GenericProvider {
             .await?;
 
         self.update_rate_limit(resp.headers());
+        self.capture_nous_credits_headers(resp.headers());
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -1113,6 +1183,7 @@ impl LlmProvider for GenericProvider {
             };
 
             provider.update_rate_limit(resp.headers());
+            provider.capture_nous_credits_headers(resp.headers());
 
             if !resp.status().is_success() {
                 let status = resp.status();
@@ -1254,6 +1325,12 @@ impl OpenAiProvider {
             inner: self.inner.with_credential_pool(pool),
         }
     }
+
+    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+        Self {
+            inner: self.inner.with_serialize_cache(cache),
+        }
+    }
 }
 
 #[async_trait]
@@ -1323,6 +1400,7 @@ pub struct AnthropicProvider {
     pub rate_limiter: Option<Arc<RateLimitTracker>>,
     /// Optional credential pool.
     pub credential_pool: Option<Arc<CredentialPool>>,
+    serialize_cache: Option<Arc<ProviderSerializeCache>>,
 }
 
 impl AnthropicProvider {
@@ -1339,6 +1417,7 @@ impl AnthropicProvider {
             api_version: "2023-06-01".to_string(),
             rate_limiter: None,
             credential_pool: None,
+            serialize_cache: None,
         }
     }
 
@@ -1383,6 +1462,30 @@ impl AnthropicProvider {
     pub fn with_credential_pool(mut self, pool: Arc<CredentialPool>) -> Self {
         self.credential_pool = Some(pool);
         self
+    }
+
+    pub fn with_serialize_cache(mut self, cache: Arc<ProviderSerializeCache>) -> Self {
+        self.serialize_cache = Some(cache);
+        self
+    }
+
+    fn converted_messages_for_request(&self, messages: &[Message]) -> (Option<Value>, Vec<Value>) {
+        if let Some(cache) = &self.serialize_cache {
+            cache.converted_anthropic_messages(messages, &self.base_url)
+        } else {
+            Self::convert_messages(messages, Some(self.base_url.as_str()))
+        }
+    }
+
+    fn formatted_tools_for_request(&self, tools: &[ToolSchema]) -> Value {
+        if tools.is_empty() {
+            return Value::Array(vec![]);
+        }
+        if let Some(cache) = &self.serialize_cache {
+            cache.formatted_anthropic_tools(tools)
+        } else {
+            Value::Array(Self::convert_tools(tools))
+        }
     }
 
     fn effective_api_key(&self) -> String {
@@ -1589,24 +1692,45 @@ impl AnthropicProvider {
         get_anthropic_max_output(model).max(1)
     }
 
+    fn is_native_anthropic_endpoint(base_url: Option<&str>) -> bool {
+        let host = base_url
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .and_then(|url| {
+                let without_scheme = url.split("://").nth(1).unwrap_or(url);
+                without_scheme
+                    .split('/')
+                    .next()
+                    .map(|h| h.split(':').next().unwrap_or(h).to_ascii_lowercase())
+            });
+        host.as_deref() == Some("api.anthropic.com")
+    }
+
+    fn attach_cache_control(block: &mut Value, cc: &hermes_core::types::CacheControl) {
+        if let Value::Object(map) = block {
+            map.insert("cache_control".to_string(), cc.to_api_json());
+        }
+    }
+
     /// Convert internal messages to Anthropic format, extracting system message.
-    fn convert_messages(
+    pub(crate) fn convert_messages(
         messages: &[Message],
         base_url: Option<&str>,
-    ) -> (Option<String>, Vec<Value>) {
-        let mut system_text: Option<String> = None;
+    ) -> (Option<Value>, Vec<Value>) {
+        let mut system_blocks: Vec<Value> = Vec::new();
         let mut anthropic_messages: Vec<Value> = Vec::new();
         let is_kimi_endpoint = Self::is_kimi_coding_endpoint(base_url);
+        let native_anthropic = Self::is_native_anthropic_endpoint(base_url);
 
         for msg in messages {
             match msg.role {
                 MessageRole::System => {
-                    // Anthropic: system goes in a separate `system` parameter
                     let content = msg.content.as_deref().unwrap_or("");
-                    system_text = Some(match system_text {
-                        Some(existing) => format!("{existing}\n\n{content}"),
-                        None => content.to_string(),
-                    });
+                    let mut block = serde_json::json!({"type": "text", "text": content});
+                    if let Some(ref cc) = msg.cache_control {
+                        Self::attach_cache_control(&mut block, cc);
+                    }
+                    system_blocks.push(block);
                 }
                 MessageRole::User => {
                     let mut content_blocks = Vec::new();
@@ -1624,15 +1748,23 @@ impl AnthropicProvider {
                         } else {
                             let mut block = serde_json::json!({"type": "text", "text": text});
                             if let Some(ref cc) = msg.cache_control {
-                                block["cache_control"] = serde_json::json!({"type": format!("{:?}", cc.cache_type).to_lowercase()});
+                                Self::attach_cache_control(&mut block, cc);
                             }
                             content_blocks.push(block);
                         }
+                    } else if msg.cache_control.is_some() {
+                        let mut block = serde_json::json!({"type": "text", "text": ""});
+                        if let Some(ref cc) = msg.cache_control {
+                            Self::attach_cache_control(&mut block, cc);
+                        }
+                        content_blocks.push(block);
                     }
-                    anthropic_messages.push(serde_json::json!({
-                        "role": "user",
-                        "content": content_blocks,
-                    }));
+                    if !content_blocks.is_empty() {
+                        anthropic_messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": content_blocks,
+                        }));
+                    }
                 }
                 MessageRole::Assistant => {
                     let mut content_blocks = Vec::new();
@@ -1644,9 +1776,6 @@ impl AnthropicProvider {
                         && msg.reasoning_content.is_some()
                     {
                         let thinking = msg.reasoning_content.as_deref().unwrap_or("");
-                        // Kimi /coding expects assistant tool-call replay messages
-                        // to include reasoning_content semantics; preserve it as
-                        // a thinking block before any text/tool_use blocks.
                         content_blocks
                             .push(serde_json::json!({"type": "thinking", "thinking": thinking}));
                     }
@@ -1655,7 +1784,6 @@ impl AnthropicProvider {
                             content_blocks.push(serde_json::json!({"type": "text", "text": text}));
                         }
                     }
-                    // Convert tool_calls to Anthropic tool_use blocks
                     if let Some(ref tool_calls) = msg.tool_calls {
                         for tc in tool_calls {
                             let input: Value = serde_json::from_str(&tc.function.arguments)
@@ -1669,6 +1797,11 @@ impl AnthropicProvider {
                         }
                     }
                     if !content_blocks.is_empty() {
+                        if let Some(ref cc) = msg.cache_control {
+                            if let Some(last) = content_blocks.last_mut() {
+                                Self::attach_cache_control(last, cc);
+                            }
+                        }
                         anthropic_messages.push(serde_json::json!({
                             "role": "assistant",
                             "content": content_blocks,
@@ -1676,25 +1809,42 @@ impl AnthropicProvider {
                     }
                 }
                 MessageRole::Tool => {
-                    // Anthropic: tool results go as user messages with tool_result content blocks
-                    let content_blocks = vec![serde_json::json!({
+                    let mut block = serde_json::json!({
                         "type": "tool_result",
                         "tool_use_id": msg.tool_call_id.as_deref().unwrap_or(""),
                         "content": msg.content.as_deref().unwrap_or(""),
-                    })];
+                    });
+                    if native_anthropic {
+                        if let Some(ref cc) = msg.cache_control {
+                            Self::attach_cache_control(&mut block, cc);
+                        }
+                    }
                     anthropic_messages.push(serde_json::json!({
                         "role": "user",
-                        "content": content_blocks,
+                        "content": vec![block],
                     }));
                 }
             }
         }
 
-        (system_text, anthropic_messages)
+        let system = if system_blocks.is_empty() {
+            None
+        } else if system_blocks.iter().any(|b| b.get("cache_control").is_some()) {
+            Some(Value::Array(system_blocks))
+        } else {
+            let merged = system_blocks
+                .iter()
+                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            Some(Value::String(merged))
+        };
+
+        (system, anthropic_messages)
     }
 
     /// Convert tool schemas to Anthropic tool format.
-    fn convert_tools(tools: &[ToolSchema]) -> Vec<Value> {
+    pub(crate) fn convert_tools(tools: &[ToolSchema]) -> Vec<Value> {
         tools
             .iter()
             .map(|t| {
@@ -1828,8 +1978,7 @@ impl LlmProvider for AnthropicProvider {
 
         let effective_model = model.unwrap_or(&self.model);
         let api_key = self.effective_api_key();
-        let (system_text, anthropic_messages) =
-            Self::convert_messages(messages, Some(self.base_url.as_str()));
+        let (system, anthropic_messages) = self.converted_messages_for_request(messages);
         let resolved_max_tokens = Self::resolve_messages_max_tokens(max_tokens, effective_model);
 
         let mut body = serde_json::json!({
@@ -1838,14 +1987,14 @@ impl LlmProvider for AnthropicProvider {
             "max_tokens": resolved_max_tokens,
         });
 
-        if let Some(ref sys) = system_text {
-            body["system"] = serde_json::json!(sys);
+        if let Some(sys) = system {
+            body["system"] = sys;
         }
         if let Some(temp) = temperature {
             body["temperature"] = serde_json::json!(temp);
         }
         if !tools.is_empty() {
-            body["tools"] = serde_json::json!(Self::convert_tools(tools));
+            body["tools"] = self.formatted_tools_for_request(tools);
         }
         GenericProvider::merge_extra_body_fields(&mut body, extra_body);
         Self::strip_unsupported_anthropic_controls(&mut body, effective_model);
@@ -1896,10 +2045,7 @@ impl LlmProvider for AnthropicProvider {
 
             let effective_model = model.as_deref().unwrap_or(&provider.model);
             let api_key = provider.effective_api_key();
-            let (system_text, anthropic_messages) = AnthropicProvider::convert_messages(
-                &messages,
-                Some(provider.base_url.as_str()),
-            );
+            let (system, anthropic_messages) = provider.converted_messages_for_request(&messages);
             let resolved_max_tokens =
                 AnthropicProvider::resolve_messages_max_tokens(max_tokens, effective_model);
 
@@ -1910,14 +2056,14 @@ impl LlmProvider for AnthropicProvider {
                 "stream": true,
             });
 
-            if let Some(ref sys) = system_text {
-                body["system"] = serde_json::json!(sys);
+            if let Some(sys) = system {
+                body["system"] = sys;
             }
             if let Some(temp) = temperature {
                 body["temperature"] = serde_json::json!(temp);
             }
             if !tools.is_empty() {
-                body["tools"] = serde_json::json!(AnthropicProvider::convert_tools(&tools));
+                body["tools"] = provider.formatted_tools_for_request(&tools);
             }
             GenericProvider::merge_extra_body_fields(&mut body, extra_body.as_ref());
             AnthropicProvider::strip_unsupported_anthropic_controls(&mut body, effective_model);
@@ -2213,6 +2359,13 @@ impl OpenRouterProvider {
     pub fn with_credential_pool(self, pool: Arc<CredentialPool>) -> Self {
         Self {
             inner: self.inner.with_credential_pool(pool),
+            ..self
+        }
+    }
+
+    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+        Self {
+            inner: self.inner.with_serialize_cache(cache),
             ..self
         }
     }
@@ -3587,7 +3740,10 @@ mod tests {
             Message::assistant("Hi there!"),
         ];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages, None);
-        assert_eq!(system.as_deref(), Some("You are helpful"));
+        assert_eq!(
+            system.as_ref().and_then(|v| v.as_str()),
+            Some("You are helpful")
+        );
         assert_eq!(msgs.len(), 2); // user + assistant, system extracted
         assert_eq!(msgs[0]["role"], "user");
         assert_eq!(msgs[1]["role"], "assistant");
@@ -3630,7 +3786,7 @@ mod tests {
             Message::tool_result("tc_1", "file contents here"),
         ];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages, None);
-        assert_eq!(system.as_deref(), Some("System"));
+        assert_eq!(system.as_ref().and_then(|v| v.as_str()), Some("System"));
         assert_eq!(msgs.len(), 3); // user, assistant with tool_use, user with tool_result
                                    // Assistant message should have tool_use block
         let assistant_content = msgs[1]["content"].as_array().unwrap();

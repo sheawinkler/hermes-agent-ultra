@@ -5697,7 +5697,18 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                         match app.handle_input(&input).await {
                                             Ok(_) => {
                                                 state.finish_processing_cycle("✔ completed in");
-                                                state.status_message.clear();
+                                                if let Some(prefill) =
+                                                    app.take_pending_input_prefill()
+                                                {
+                                                    state.input = prefill;
+                                                    state.cursor_position =
+                                                        state.input.chars().count();
+                                                    state.status_message =
+                                                        "Prompt restored for editing. Press Enter to send."
+                                                            .to_string();
+                                                } else {
+                                                    state.status_message.clear();
+                                                }
                                             }
                                             Err(e) => {
                                                 state.finish_processing_cycle("✖ failed after");

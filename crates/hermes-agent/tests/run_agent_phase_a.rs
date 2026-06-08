@@ -1,4 +1,4 @@
-//! Phase A `run_agent.py` contract tests (see `python_alignment` module docs).
+//! Phase A `run_agent.py` contract tests (see `message_sanitization` module docs).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

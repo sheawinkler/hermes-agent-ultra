@@ -25,10 +25,11 @@ pub mod streaming;
 
 // Re-export key types for convenience
 pub use config::{
-    AgentLoopBehaviorConfig, ApprovalConfig, CheapModelRouteConfig, GatewayConfig,
-    LlmProviderConfig, McpServerEntry, ProfileConfig, PromptCachingConfig, ProxyConfig,
-    SecurityConfig, SessionsMaintenanceConfig, SkillsSettings, SmartModelRoutingConfig,
-    TerminalBackendType, TerminalConfig, ToolsSettings,
+    normalize_service_tier, AgentLoopBehaviorConfig, ApprovalConfig, CheapModelRouteConfig,
+    DisplayConfig, GatewayConfig, LlmProviderConfig, McpServerEntry, PlatformDisplayConfig,
+    ProfileConfig, PromptCachingConfig, ProxyConfig, QuickCommandConfig, SecurityConfig,
+    SessionsMaintenanceConfig, SkillsSettings, SmartModelRoutingConfig, TerminalBackendType,
+    TerminalConfig, ToolsSettings,
 };
 pub use dep_check::{RuntimeDep, is_available as dep_is_available};
 pub use interest::InterestConfig;
@@ -42,8 +43,10 @@ pub use voice::{
 };
 pub use loader::{
     apply_user_config_patch, atomic_json_write, atomic_json_write_pretty, atomic_write_bytes,
-    atomic_yaml_write, load_config, load_user_config_file, save_config_yaml, set_user_config_value,
-    user_config_field_display, validate_config, ConfigError, ConfigSetResult,
+    atomic_yaml_write, load_config, load_prefill_messages, load_prefill_messages_file,
+    load_user_config_file, resolve_prefill_messages_file, save_config_yaml,
+    set_user_config_value, user_config_field_display, validate_config, ConfigError,
+    ConfigSetResult,
 };
 pub use managed_gateway::{
     build_vendor_gateway_url, coerce_modal_mode, env_var_enabled, get_tool_gateway_scheme,

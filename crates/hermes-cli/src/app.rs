@@ -295,6 +295,8 @@ pub struct App {
     pub pending_image_hint: Option<String>,
     /// Optional durable objective for the current interactive session.
     pub session_objective: Option<String>,
+    /// User text staged back into the composer by commands such as `/undo`.
+    pending_input_prefill: Option<String>,
     /// One-shot quorum arm state set by `/quorum run`.
     pub quorum_armed_once: bool,
     /// Animated companion pet settings.
@@ -314,6 +316,7 @@ impl std::fmt::Debug for App {
             .field("pending_theme", &self.pending_theme)
             .field("pending_image_hint", &self.pending_image_hint)
             .field("session_objective", &self.session_objective)
+            .field("pending_input_prefill", &self.pending_input_prefill)
             .field("quorum_armed_once", &self.quorum_armed_once)
             .field("pet_settings", &self.pet_settings)
             .finish_non_exhaustive()
@@ -343,6 +346,7 @@ impl Clone for App {
             pending_theme: self.pending_theme.clone(),
             pending_image_hint: self.pending_image_hint.clone(),
             session_objective: self.session_objective.clone(),
+            pending_input_prefill: self.pending_input_prefill.clone(),
             quorum_armed_once: self.quorum_armed_once,
             pet_settings: self.pet_settings.clone(),
         }
@@ -2126,6 +2130,7 @@ impl App {
             pending_theme: None,
             pending_image_hint: None,
             session_objective: None,
+            pending_input_prefill: None,
             quorum_armed_once: false,
             pet_settings: load_pet_settings(),
         };
@@ -2197,6 +2202,11 @@ impl App {
     /// Drain any queued skin/theme change request.
     pub fn take_pending_theme_change(&mut self) -> Option<String> {
         self.pending_theme.take()
+    }
+
+    /// Drain composer prefill staged by `/undo` or `/rewind`.
+    pub fn take_pending_input_prefill(&mut self) -> Option<String> {
+        self.pending_input_prefill.take()
     }
 
     /// Retrieve current companion pet settings.
@@ -2439,18 +2449,55 @@ impl App {
         Ok(())
     }
 
-    /// Undo the last exchange (remove the last user message and its response).
-    pub fn undo_last(&mut self) {
-        // Find the last user message
-        if let Some(idx) = self
+    /// Undo one or more user turns, returning the text staged for editing.
+    pub fn undo_last(&mut self) -> Option<String> {
+        self.undo_last_n(1)
+    }
+
+    pub fn undo_last_n(&mut self, user_turns: usize) -> Option<String> {
+        let user_indices: Vec<usize> = self
             .messages
             .iter()
-            .rposition(|m| m.role == hermes_core::MessageRole::User)
-        {
-            // Remove everything from the last user message onward
-            self.messages.truncate(idx);
-            self.prune_ui_after_current_messages();
+            .enumerate()
+            .filter_map(|(idx, msg)| (msg.role == hermes_core::MessageRole::User).then_some(idx))
+            .collect();
+        if user_indices.is_empty() {
+            return None;
         }
+        let count = user_turns.max(1);
+        let target_pos = user_indices.len().saturating_sub(count);
+        let target_idx = user_indices[target_pos];
+        let prefill = self.messages[target_idx]
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .to_string();
+
+        match SessionPersistence::new(&self.state_root)
+            .rewind_active_user_turns(&self.session_id, count)
+        {
+            Ok(Some(outcome)) => tracing::debug!(
+                "Soft-rewound session {} at message {} (inactive={}, active={})",
+                self.session_id,
+                outcome.target_message_id,
+                outcome.inactive_count,
+                outcome.active_message_count
+            ),
+            Ok(None) => tracing::debug!(
+                "No persisted session row available for undo in session {}",
+                self.session_id
+            ),
+            Err(err) => tracing::debug!("Failed to soft-rewind persisted session: {}", err),
+        }
+
+        self.messages.truncate(target_idx);
+        self.prune_ui_after_current_messages();
+        if prefill.trim().is_empty() {
+            self.pending_input_prefill = None;
+        } else {
+            self.pending_input_prefill = Some(prefill.clone());
+        }
+        Some(prefill)
     }
 
     /// Switch the active model, rebuilding the provider and agent loop.
@@ -2474,6 +2521,18 @@ impl App {
             self.state_root.clone(),
         ));
         self.agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
+
+        match SessionPersistence::new(&self.state_root)
+            .update_session_model(&self.session_id, &self.current_model)
+        {
+            Ok(true) => tracing::debug!(
+                "Persisted model switch for session {} to {}",
+                self.session_id,
+                self.current_model
+            ),
+            Ok(false) => {}
+            Err(err) => tracing::debug!("Failed to persist model switch to session DB: {}", err),
+        }
 
         tracing::info!("Switched model to: {}", provider_model);
     }
@@ -3813,9 +3872,94 @@ mod tests {
             pending_theme: None,
             pending_image_hint: None,
             session_objective: None,
+            pending_input_prefill: None,
             quorum_armed_once: false,
             pet_settings: PetSettings::default(),
         }
+    }
+
+    fn build_minimal_test_app_with_state_root(state_root: PathBuf) -> App {
+        let mut app = build_minimal_test_app();
+        app.state_root = state_root;
+        app
+    }
+
+    #[test]
+    fn test_switch_model_updates_existing_session_db_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());
+        let persistence = SessionPersistence::new(tmp.path());
+        persistence
+            .persist_session(
+                &app.session_id,
+                &[hermes_core::Message::user("hello")],
+                &mut hermes_agent::session_persistence::SessionFlushCursor::new(),
+                Some("openai:gpt-4o"),
+                Some("cli"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        app.switch_model("anthropic:claude-sonnet-4-6");
+
+        assert_eq!(
+            persistence.get_session_model(&app.session_id).unwrap(),
+            Some("anthropic:claude-sonnet-4-6".to_string())
+        );
+    }
+
+    #[test]
+    fn test_undo_last_n_soft_rewinds_and_sets_prefill() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());
+        app.messages = vec![
+            hermes_core::Message::system("sys"),
+            hermes_core::Message::user("question 1"),
+            hermes_core::Message::assistant("answer 1"),
+            hermes_core::Message::user("question 2"),
+            hermes_core::Message::assistant("answer 2"),
+            hermes_core::Message::user("question 3"),
+            hermes_core::Message::assistant("answer 3"),
+        ];
+        let persistence = SessionPersistence::new(tmp.path());
+        persistence
+            .persist_session(
+                &app.session_id,
+                &app.messages,
+                &mut hermes_agent::session_persistence::SessionFlushCursor::new(),
+                None,
+                Some("cli"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        let prefill = app.undo_last_n(2).expect("undo");
+
+        assert_eq!(prefill, "question 2");
+        assert_eq!(
+            app.take_pending_input_prefill().as_deref(),
+            Some("question 2")
+        );
+        assert_eq!(
+            app.messages
+                .iter()
+                .filter_map(|m| m.content.as_deref())
+                .collect::<Vec<_>>(),
+            vec!["sys", "question 1", "answer 1"]
+        );
+        assert_eq!(persistence.load_session(&app.session_id).unwrap().len(), 3);
+        let recent = persistence
+            .list_recent_user_messages(&app.session_id, 5)
+            .unwrap();
+        assert_eq!(
+            recent
+                .iter()
+                .filter_map(|row| row.content.as_deref())
+                .collect::<Vec<_>>(),
+            vec!["question 1"]
+        );
     }
 
     #[test]
@@ -5257,6 +5401,11 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
             api_mode_str,
             model,
         );
+    let max_delegate_depth = config
+        .delegation
+        .max_spawn_depth
+        .map(|depth| depth.max(1))
+        .unwrap_or_else(|| AgentConfig::default().max_delegate_depth);
 
     AgentConfig {
         max_turns: config.max_turns,
@@ -5289,6 +5438,10 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                         oauth_token_url: cfg.oauth_token_url.clone(),
                         oauth_client_id: cfg.oauth_client_id.clone(),
                         request_timeout_seconds: cfg.request_timeout_seconds,
+                        api_mode: cfg
+                            .api_mode
+                            .as_deref()
+                            .and_then(parse_runtime_provider_api_mode),
                     },
                 )
             })
@@ -5320,6 +5473,36 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         use_prompt_caching,
         use_native_cache_layout,
         web_research: config.agent.web_research.clone(),
+        max_delegate_depth,
+        delegation_model: config
+            .delegation
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_provider: config
+            .delegation
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_base_url: config
+            .delegation
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_api_key: config
+            .delegation
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        prefill_messages: hermes_config::load_prefill_messages(config),
         ..AgentConfig::default()
     }
 }
@@ -5552,6 +5735,16 @@ fn default_mouse_enabled() -> bool {
 
 fn pet_settings_path() -> PathBuf {
     hermes_home_dir().join("pet.json")
+}
+
+fn parse_runtime_provider_api_mode(value: &str) -> Option<hermes_agent::agent_loop::ApiMode> {
+    match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "chat_completions" => Some(hermes_agent::agent_loop::ApiMode::ChatCompletions),
+        "anthropic_messages" => Some(hermes_agent::agent_loop::ApiMode::AnthropicMessages),
+        "codex_responses" => Some(hermes_agent::agent_loop::ApiMode::CodexResponses),
+        "bedrock_converse" => Some(hermes_agent::agent_loop::ApiMode::BedrockConverse),
+        _ => None,
+    }
 }
 
 fn parse_bool_env(value: &str) -> Option<bool> {

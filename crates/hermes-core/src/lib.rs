@@ -5,6 +5,7 @@
 
 pub mod auth_gate;
 pub mod build_info;
+pub mod credits;
 pub mod errors;
 pub mod inbound;
 pub mod providers;

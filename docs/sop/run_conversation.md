@@ -43,7 +43,7 @@ cargo test -p hermes-agent --test run_conversation_hooks --test run_conversation
 cargo clippy -p hermes-agent -- -D warnings
 ```
 
-## Phase A 契约映射（`python_alignment.rs`）
+## Phase A 契约映射（`message_sanitization.rs`）
 
 | # | 场景 | 决策 | 契约测试 | Divergence id |
 |---|------|------|----------|---------------|
@@ -68,4 +68,4 @@ cargo test -p hermes-agent --test alignment_contracts --test run_agent_phase_a -
 ## 参考
 
 - [`crates/hermes-agent/src/conversation_loop.rs`](../../crates/hermes-agent/src/conversation_loop.rs)
-- [`crates/hermes-agent/src/python_alignment.rs`](../../crates/hermes-agent/src/python_alignment.rs) Phase A 列表
+- [`crates/hermes-agent/src/message_sanitization.rs`](../../crates/hermes-agent/src/message_sanitization.rs) Phase A 列表

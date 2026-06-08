@@ -73,6 +73,8 @@ fn base_weights() -> HashMap<String, f64> {
     w.insert("browser".into(), 0.3);
     w.insert("vision".into(), 0.5);
     w.insert("image_gen".into(), 0.2);
+    w.insert("video_gen".into(), 0.2);
+    w.insert("spotify".into(), 0.1);
     w.insert("skills".into(), 0.7);
     w.insert("memory".into(), 0.6);
     w.insert("session_search".into(), 0.4);
@@ -100,6 +102,7 @@ fn make_default() -> ToolsetDistribution {
 fn make_image_gen() -> ToolsetDistribution {
     let mut w = base_weights();
     w.insert("image_gen".into(), 1.0);
+    w.insert("video_gen".into(), 0.8);
     w.insert("vision".into(), 0.9);
     w.insert("terminal".into(), 0.3);
     ToolsetDistribution {
@@ -166,6 +169,8 @@ fn make_safe() -> ToolsetDistribution {
     w.insert("todo".into(), 0.8);
     w.insert("clarify".into(), 1.0);
     w.insert("code_execution".into(), 0.0);
+    w.insert("video_gen".into(), 0.0);
+    w.insert("spotify".into(), 0.0);
     ToolsetDistribution {
         name: "safe".into(),
         description: "No terminal or code execution — read-only tools only".into(),
@@ -181,6 +186,7 @@ fn make_balanced() -> ToolsetDistribution {
         "file",
         "browser",
         "vision",
+        "video_gen",
         "skills",
         "memory",
         "todo",
@@ -233,6 +239,7 @@ fn make_terminal_web() -> ToolsetDistribution {
 fn make_creative() -> ToolsetDistribution {
     let mut w = base_weights();
     w.insert("image_gen".into(), 1.0);
+    w.insert("video_gen".into(), 0.9);
     w.insert("tts".into(), 0.8);
     w.insert("voice_mode".into(), 0.7);
     w.insert("vision".into(), 0.9);

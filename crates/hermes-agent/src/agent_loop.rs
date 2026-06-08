@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -248,6 +249,9 @@ pub struct RuntimeProviderConfig {
     /// Per-provider HTTP request timeout in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_timeout_seconds: Option<f64>,
+    /// Optional provider-specific wire protocol override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_mode: Option<ApiMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -618,6 +622,30 @@ pub struct AgentConfig {
     #[serde(default = "default_max_concurrent_delegates")]
     pub max_concurrent_delegates: u32,
 
+    /// Maximum sub-agent spawn depth. Values below 1 are normalized to 1.
+    #[serde(default = "default_max_delegate_depth")]
+    pub max_delegate_depth: u32,
+
+    /// Optional config-level model override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_model: Option<String>,
+
+    /// Optional config-level provider override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_provider: Option<String>,
+
+    /// Optional config-level base URL override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_base_url: Option<String>,
+
+    /// Optional config-level API key override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_api_key: Option<String>,
+
+    /// Ephemeral messages prepended each turn (visible to model, not persisted).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefill_messages: Vec<Message>,
+
     /// Flush memories every N turns.
     #[serde(default = "default_memory_flush_interval")]
     pub memory_flush_interval: u32,
@@ -901,6 +929,22 @@ fn default_max_concurrent_delegates() -> u32 {
     1
 }
 
+fn default_max_delegate_depth() -> u32 {
+    4
+}
+
+fn normalize_delegate_depth(value: u32) -> u32 {
+    value.max(1)
+}
+
+fn parse_delegate_depth(raw: &str) -> Option<u32> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed.parse().ok().map(normalize_delegate_depth)
+}
+
 fn delegation_spawning_paused() -> bool {
     std::env::var("HERMES_DELEGATION_PAUSED")
         .ok()
@@ -1043,6 +1087,12 @@ impl Default for AgentConfig {
             temperature: None,
             max_tokens: None,
             max_concurrent_delegates: default_max_concurrent_delegates(),
+            max_delegate_depth: default_max_delegate_depth(),
+            delegation_model: None,
+            delegation_provider: None,
+            delegation_base_url: None,
+            delegation_api_key: None,
+            prefill_messages: Vec::new(),
             memory_flush_interval: default_memory_flush_interval(),
             session_id: None,
             gateway_session_key: None,
@@ -2310,6 +2360,8 @@ pub struct AgentLoop {
     /// Per-turn cache of assembled API messages (LLM retry fast path).
     turn_api_messages_cache:
         Mutex<Option<(crate::api_messages::ApiMessagesCacheKey, Arc<[Message]>)>>,
+    /// Per-turn cache for OpenAI-compat provider message/tool JSON serialization.
+    provider_serialize_cache: Arc<crate::provider_serialize_cache::ProviderSerializeCache>,
     /// Python `_disable_streaming` — set after "stream not supported" for the rest of the session.
     disable_streaming: Arc<AtomicBool>,
     /// Lazy `CodexAppServerSession` (Python `agent._codex_session`).
@@ -2426,6 +2478,7 @@ impl AgentLoop {
         &self,
         ctx: &ContextManager,
         persist_user_idx: Option<usize>,
+        prefill_range: Option<Range<usize>>,
     ) -> Vec<Message> {
         let mut msgs = ctx.get_messages().to_vec();
         if let (Some(idx), Some(override_text)) = (
@@ -2436,6 +2489,11 @@ impl AgentLoop {
                 if msg.role == MessageRole::User {
                     msg.content = Some(override_text.to_string());
                 }
+            }
+        }
+        if let Some(range) = prefill_range {
+            if range.start <= range.end && range.end <= msgs.len() {
+                msgs.drain(range);
             }
         }
         msgs
@@ -2450,6 +2508,7 @@ impl AgentLoop {
         session_cost_usd: f64,
         session_started_hooks_fired: bool,
         persist_user_idx: Option<usize>,
+        prefill_range: Option<Range<usize>>,
         api_calls: u32,
     ) -> AgentResult {
         self.pending_steer.clear();
@@ -2463,6 +2522,7 @@ impl AgentLoop {
         self.seal_loop_result(
             ctx,
             persist_user_idx,
+            prefill_range,
             LoopExit {
                 turn_exit_reason: "interrupted_by_user",
                 api_calls,
@@ -2540,6 +2600,7 @@ impl AgentLoop {
         &self,
         ctx: &ContextManager,
         persist_user_idx: Option<usize>,
+        prefill_range: Option<Range<usize>>,
         exit: LoopExit<'_>,
         total_turns: u32,
         tool_errors: &[hermes_core::ToolErrorRecord],
@@ -2548,7 +2609,7 @@ impl AgentLoop {
         session_started_hooks_fired: bool,
     ) -> AgentResult {
         self.finalize_agent_result(AgentResult {
-            messages: self.messages_for_persisted_result(ctx, persist_user_idx),
+            messages: self.messages_for_persisted_result(ctx, persist_user_idx, prefill_range),
             finished_naturally: exit.finished_naturally,
             total_turns,
             tool_errors: tool_errors.to_vec(),
@@ -2760,6 +2821,61 @@ impl AgentLoop {
         )
     }
 
+    fn runtime_provider_api_mode(&self, provider: &str) -> Option<ApiMode> {
+        let provider = provider.trim();
+        if provider.is_empty() {
+            return None;
+        }
+        let config = self.config();
+        let lookup = |key: &str| config.runtime_providers.get(key).and_then(|cfg| cfg.api_mode.clone());
+        if let Some(mode) = lookup(provider) {
+            return Some(mode);
+        }
+
+        let lower = provider.to_ascii_lowercase();
+        if let Some(mode) = lookup(lower.as_str()) {
+            return Some(mode);
+        }
+
+        let canonical = hermes_core::providers::canonical_provider_id(provider);
+        if let Some(mode) = lookup(canonical.as_str()) {
+            return Some(mode);
+        }
+
+        if let Some(profile) = crate::provider_profiles::canonical_provider_profile_id(provider) {
+            if let Some(mode) = lookup(profile) {
+                return Some(mode);
+            }
+        }
+
+        config
+            .runtime_providers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(provider))
+            .and_then(|(_, cfg)| cfg.api_mode.clone())
+    }
+
+    pub(crate) fn build_delegation_runtime_provider(
+        &self,
+        provider: &str,
+        model_name: &str,
+        route_base_url: Option<&str>,
+        explicit_api_key: Option<&str>,
+    ) -> Result<Arc<dyn LlmProvider>, AgentError> {
+        let api_mode = self
+            .runtime_provider_api_mode(provider)
+            .or_else(|| route_base_url.and_then(detect_api_mode_for_url));
+        self.build_runtime_provider(
+            provider,
+            model_name,
+            route_base_url,
+            None,
+            explicit_api_key,
+            api_mode.as_ref(),
+            self.primary_credential_pool.as_ref(),
+        )
+    }
+
     /// Effective provider for API calls: rebuild from active runtime when fallback is active.
     pub(crate) fn effective_llm_provider(&self) -> Arc<dyn LlmProvider> {
         let fallback_active = self
@@ -2899,6 +3015,9 @@ impl AgentLoop {
             context_compressor,
             shared_session_persistence: std::sync::OnceLock::new(),
             turn_api_messages_cache: Mutex::new(None),
+            provider_serialize_cache: Arc::new(
+                crate::provider_serialize_cache::ProviderSerializeCache::new(),
+            ),
             disable_streaming: Arc::new(AtomicBool::new(false)),
             codex_app_server_session: Arc::new(Mutex::new(None)),
             last_nous_rate_limit_headers: Arc::new(Mutex::new(None)),
@@ -2933,13 +3052,14 @@ impl AgentLoop {
         if let Ok(mut guard) = self.turn_api_messages_cache.lock() {
             *guard = None;
         }
+        self.provider_serialize_cache.invalidate();
     }
 
     fn runtime_generic_provider(
         &self,
         provider: crate::provider::GenericProvider,
     ) -> crate::provider::GenericProvider {
-        provider
+        provider.with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
     }
 
     fn api_messages_cache_key(
@@ -3211,6 +3331,9 @@ impl AgentLoop {
             context_compressor,
             shared_session_persistence: std::sync::OnceLock::new(),
             turn_api_messages_cache: Mutex::new(None),
+            provider_serialize_cache: Arc::new(
+                crate::provider_serialize_cache::ProviderSerializeCache::new(),
+            ),
             disable_streaming: Arc::new(AtomicBool::new(false)),
             codex_app_server_session: Arc::new(Mutex::new(None)),
             last_nous_rate_limit_headers: Arc::new(Mutex::new(None)),
@@ -5177,6 +5300,7 @@ impl AgentLoop {
                 if matches!(mode, ApiMode::CodexResponses) {
                     let mut p = CodexProvider::new(&api_key)
                         .with_model(model_name)
+                        .with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
                         .with_optional_request_timeout_seconds(request_timeout_seconds);
                     if let Some(ref url) = base_url {
                         p = p.with_base_url(url.clone());
@@ -5188,6 +5312,7 @@ impl AgentLoop {
                 } else {
                     let mut p = OpenAiProvider::new(&api_key)
                         .with_model(model_name)
+                        .with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
                         .with_optional_request_timeout_seconds(request_timeout_seconds);
                     if let Some(url) = base_url {
                         p = p.with_base_url(url);
@@ -5201,6 +5326,7 @@ impl AgentLoop {
             "anthropic" => {
                 let mut p = AnthropicProvider::new(&api_key)
                     .with_model(model_name)
+                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
                     .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
@@ -5213,6 +5339,7 @@ impl AgentLoop {
             "openrouter" => {
                 let mut p = OpenRouterProvider::new(&api_key)
                     .with_model(model_name)
+                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
                     .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
@@ -5225,6 +5352,7 @@ impl AgentLoop {
             "qwen" | "qwen-oauth" => {
                 let mut p = QwenProvider::new(&api_key)
                     .with_model(model_name)
+                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
                     .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
@@ -5234,6 +5362,7 @@ impl AgentLoop {
             "kimi" | "moonshot" => {
                 let mut p = KimiProvider::new(&api_key)
                     .with_model(model_name)
+                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
                     .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
@@ -5243,6 +5372,7 @@ impl AgentLoop {
             "minimax" => {
                 let mut p = MiniMaxProvider::new(&api_key)
                     .with_model(model_name)
+                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
                     .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
@@ -5261,6 +5391,7 @@ impl AgentLoop {
             "nous" => {
                 let mut p = NousProvider::new(&api_key)
                     .with_model(model_name)
+                    .with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
                     .with_optional_request_timeout_seconds(request_timeout_seconds);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
@@ -5273,6 +5404,7 @@ impl AgentLoop {
                     &api_key,
                 )
                 .with_model(model_name)
+                .with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
                 .with_optional_request_timeout_seconds(request_timeout_seconds);
                 Arc::new(p)
             }
@@ -5289,6 +5421,7 @@ impl AgentLoop {
                 let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
                 let mut g = self.runtime_generic_provider(
                     GenericProvider::new(url, &api_key, model_name)
+                        .with_serialize_cache(Arc::clone(&self.provider_serialize_cache))
                         .with_optional_request_timeout_seconds(request_timeout_seconds)
                         .with_provider_profile(provider),
                 );
@@ -6982,9 +7115,8 @@ impl AgentLoop {
     pub(crate) fn resolve_max_delegate_depth(&self) -> u32 {
         std::env::var("HERMES_MAX_DELEGATE_DEPTH")
             .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(4)
+            .and_then(|v| parse_delegate_depth(&v))
+            .unwrap_or_else(|| normalize_delegate_depth(self.config().max_delegate_depth))
     }
 
     /// Cap concurrent delegate_task calls based on config.

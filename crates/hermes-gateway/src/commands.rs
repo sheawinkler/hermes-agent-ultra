@@ -50,8 +50,11 @@ pub enum GatewayCommandResult {
     BtwTask { prompt: String },
     /// Toggle reasoning display.
     ToggleReasoning(String),
-    /// Switch to fast model.
-    SwitchFast(String),
+    /// Switch gateway turns into or out of priority processing.
+    SwitchFast {
+        service_tier: Option<String>,
+        reply: String,
+    },
     /// Retry the last message.
     Retry,
     /// Undo the last exchange.
@@ -60,6 +63,11 @@ pub enum GatewayCommandResult {
     ApproveUser { user_id: String },
     /// Deny and revoke a user from DM access.
     DenyUser { user_id: String },
+    /// Resolve a pending gateway command approval.
+    ResolveCommandApproval {
+        choice: hermes_tools::approval::ApprovalChoice,
+        resolve_all: bool,
+    },
     /// Reload MCP server registry/state.
     ReloadMcp,
     /// Switch active provider.
@@ -434,6 +442,48 @@ pub fn parse_batch_commands(text: &str) -> Vec<BatchedCommand> {
     }
 }
 
+fn parse_fast_service_tier(args: &str) -> Result<Option<String>, String> {
+    let value = args.trim();
+    if value.is_empty() {
+        return Ok(Some("priority".to_string()));
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "fast" | "priority" => Ok(Some("priority".to_string())),
+        "off" | "normal" | "standard" | "default" | "none" => Ok(None),
+        _ => Err("Usage: /fast [fast|off]".to_string()),
+    }
+}
+
+pub fn canonical_command_name(raw: &str) -> Option<String> {
+    let token = raw
+        .trim()
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()?;
+    let token = token.split('@').next().unwrap_or(token).trim();
+    if token.is_empty() {
+        return None;
+    }
+    Some(token.to_ascii_lowercase().replace('-', "_"))
+}
+
+pub fn is_registered_command_name(raw: &str) -> bool {
+    let Some(name) = canonical_command_name(raw) else {
+        return false;
+    };
+    all_commands().into_iter().any(|info| {
+        canonical_command_name(info.name).as_deref() == Some(name.as_str())
+            || info
+                .aliases
+                .iter()
+                .any(|alias| canonical_command_name(alias).as_deref() == Some(name.as_str()))
+    })
+}
+
+pub fn should_bypass_active_session(raw: Option<&str>) -> bool {
+    raw.is_some_and(is_registered_command_name)
+}
+
 /// Parse and dispatch a gateway slash command.
 pub fn handle_command(input: &str) -> GatewayCommandResult {
     let trimmed = input.trim();
@@ -473,8 +523,32 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         "/retry" => GatewayCommandResult::Retry,
         "/undo" => GatewayCommandResult::Undo,
         "/approve" => {
-            if args.is_empty() {
-                GatewayCommandResult::Reply("Usage: /approve <user_id>".to_string())
+            let words = args.split_whitespace().collect::<Vec<_>>();
+            if words.is_empty() {
+                GatewayCommandResult::ResolveCommandApproval {
+                    choice: hermes_tools::approval::ApprovalChoice::Once,
+                    resolve_all: false,
+                }
+            } else if words.as_slice() == ["all"] {
+                GatewayCommandResult::ResolveCommandApproval {
+                    choice: hermes_tools::approval::ApprovalChoice::Once,
+                    resolve_all: true,
+                }
+            } else if words.as_slice() == ["all", "session"] {
+                GatewayCommandResult::ResolveCommandApproval {
+                    choice: hermes_tools::approval::ApprovalChoice::Session,
+                    resolve_all: true,
+                }
+            } else if words.as_slice() == ["session"] {
+                GatewayCommandResult::ResolveCommandApproval {
+                    choice: hermes_tools::approval::ApprovalChoice::Session,
+                    resolve_all: false,
+                }
+            } else if words.as_slice() == ["always"] {
+                GatewayCommandResult::ResolveCommandApproval {
+                    choice: hermes_tools::approval::ApprovalChoice::Always,
+                    resolve_all: false,
+                }
             } else {
                 GatewayCommandResult::ApproveUser {
                     user_id: args.clone(),
@@ -482,8 +556,17 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
             }
         }
         "/deny" => {
-            if args.is_empty() {
-                GatewayCommandResult::Reply("Usage: /deny <user_id>".to_string())
+            let words = args.split_whitespace().collect::<Vec<_>>();
+            if words.is_empty() {
+                GatewayCommandResult::ResolveCommandApproval {
+                    choice: hermes_tools::approval::ApprovalChoice::Deny,
+                    resolve_all: false,
+                }
+            } else if words.as_slice() == ["all"] {
+                GatewayCommandResult::ResolveCommandApproval {
+                    choice: hermes_tools::approval::ApprovalChoice::Deny,
+                    resolve_all: true,
+                }
             } else {
                 GatewayCommandResult::DenyUser {
                     user_id: args.clone(),
@@ -516,7 +599,17 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         "/reasoning" | "/think" => {
             GatewayCommandResult::ToggleReasoning("🧠 Reasoning display toggled.".to_string())
         }
-        "/fast" => GatewayCommandResult::SwitchFast("⚡ Switched to fast model.".to_string()),
+        "/fast" => match parse_fast_service_tier(&args) {
+            Ok(Some(service_tier)) => GatewayCommandResult::SwitchFast {
+                service_tier: Some(service_tier),
+                reply: "⚡ Priority processing enabled for this gateway session.".to_string(),
+            },
+            Ok(None) => GatewayCommandResult::SwitchFast {
+                service_tier: None,
+                reply: "⚡ Priority processing disabled for this gateway session.".to_string(),
+            },
+            Err(msg) => GatewayCommandResult::Reply(msg),
+        },
         "/verbose" => GatewayCommandResult::ToggleVerbose("📝 Verbose mode toggled.".to_string()),
         "/yolo" => GatewayCommandResult::ToggleYolo(
             "🤠 YOLO mode toggled. Auto-approving all actions.".to_string(),
@@ -713,6 +806,28 @@ mod tests {
     }
 
     #[test]
+    fn test_fast_service_tier() {
+        match handle_command("/fast") {
+            GatewayCommandResult::SwitchFast { service_tier, .. } => {
+                assert_eq!(service_tier.as_deref(), Some("priority"));
+            }
+            other => panic!("Expected SwitchFast for /fast, got {:?}", other),
+        }
+
+        match handle_command("/fast off") {
+            GatewayCommandResult::SwitchFast { service_tier, .. } => {
+                assert!(service_tier.is_none());
+            }
+            other => panic!("Expected SwitchFast disable for /fast off, got {:?}", other),
+        }
+
+        match handle_command("/fast turbo") {
+            GatewayCommandResult::Reply(text) => assert!(text.contains("Usage")),
+            other => panic!("Expected usage reply for invalid /fast, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_unknown_command() {
         match handle_command("/xyz123") {
             GatewayCommandResult::Unknown(_) => {}
@@ -769,6 +884,40 @@ mod tests {
         match handle_command("/deny bob") {
             GatewayCommandResult::DenyUser { user_id } => assert_eq!(user_id, "bob"),
             other => panic!("Expected DenyUser, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_command_approval_resolution_commands() {
+        match handle_command("/approve") {
+            GatewayCommandResult::ResolveCommandApproval {
+                choice,
+                resolve_all,
+            } => {
+                assert_eq!(choice, hermes_tools::approval::ApprovalChoice::Once);
+                assert!(!resolve_all);
+            }
+            other => panic!("Expected ResolveCommandApproval, got {:?}", other),
+        }
+        match handle_command("/approve all session") {
+            GatewayCommandResult::ResolveCommandApproval {
+                choice,
+                resolve_all,
+            } => {
+                assert_eq!(choice, hermes_tools::approval::ApprovalChoice::Session);
+                assert!(resolve_all);
+            }
+            other => panic!("Expected ResolveCommandApproval, got {:?}", other),
+        }
+        match handle_command("/deny all") {
+            GatewayCommandResult::ResolveCommandApproval {
+                choice,
+                resolve_all,
+            } => {
+                assert_eq!(choice, hermes_tools::approval::ApprovalChoice::Deny);
+                assert!(resolve_all);
+            }
+            other => panic!("Expected ResolveCommandApproval, got {:?}", other),
         }
     }
 

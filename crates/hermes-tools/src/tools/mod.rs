@@ -32,6 +32,7 @@ pub mod patch_parser;
 pub mod process_registry;
 pub mod schema_sanitizer;
 pub mod session_search;
+pub mod spotify;
 pub mod skill_commands;
 pub mod skill_utils;
 pub mod skills;

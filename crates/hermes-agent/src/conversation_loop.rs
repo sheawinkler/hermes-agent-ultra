@@ -672,6 +672,14 @@ impl AgentLoop {
             session_started_hooks_fired = true;
         }
 
+        let prefill_start = ctx.get_messages().len();
+        for msg in &self.config().prefill_messages {
+            ctx.add_message(msg.clone());
+        }
+        let prefill_end = ctx.get_messages().len();
+        let prefill_range =
+            (prefill_end > prefill_start).then_some(prefill_start..prefill_end);
+
         // Add initial messages
         for msg in messages {
             ctx.add_message(msg);
@@ -841,6 +849,7 @@ impl AgentLoop {
                     session_cost_usd,
                     session_started_hooks_fired,
                     persist_user_idx,
+                    prefill_range.clone(),
                     api_call_count,
                 ));
             }
@@ -873,6 +882,7 @@ impl AgentLoop {
                     return Ok(self.seal_loop_result(
                         &ctx,
                         persist_user_idx,
+                        prefill_range.clone(),
                         LoopExit {
                             turn_exit_reason: "max_iterations_reached",
                             api_calls: api_call_count,
@@ -981,6 +991,7 @@ impl AgentLoop {
                 return Ok(self.seal_loop_result(
                     &ctx,
                     persist_user_idx,
+                    prefill_range.clone(),
                     LoopExit {
                         turn_exit_reason: "ollama_runtime_context_too_small",
                         api_calls: api_call_count,
@@ -1061,6 +1072,7 @@ impl AgentLoop {
                         session_cost_usd,
                         session_started_hooks_fired,
                         persist_user_idx,
+                        prefill_range.clone(),
                         api_call_count,
                     ));
                 }
@@ -1104,6 +1116,7 @@ impl AgentLoop {
                                 session_cost_usd,
                                 session_started_hooks_fired,
                                 persist_user_idx,
+                                prefill_range.clone(),
                                 api_call_count,
                             ));
                         }
@@ -1139,6 +1152,7 @@ impl AgentLoop {
                                 session_cost_usd,
                                 session_started_hooks_fired,
                                 persist_user_idx,
+                                prefill_range.clone(),
                                 api_call_count,
                             ));
                         }
@@ -1306,6 +1320,7 @@ impl AgentLoop {
                     return Ok(self.seal_loop_result(
                         &ctx,
                         persist_user_idx,
+                        prefill_range.clone(),
                         LoopExit {
                             turn_exit_reason: "max_iterations_reached",
                             api_calls: api_call_count,
@@ -1640,6 +1655,7 @@ impl AgentLoop {
                 return Ok(self.seal_loop_result(
                     &ctx,
                     persist_user_idx,
+                    prefill_range.clone(),
                     LoopExit {
                         turn_exit_reason: "text_response",
                         api_calls: api_call_count,
@@ -1753,6 +1769,7 @@ impl AgentLoop {
                     return Ok(self.seal_loop_result(
                         &ctx,
                         persist_user_idx,
+                        prefill_range.clone(),
                         LoopExit {
                             turn_exit_reason: "invalid_tool_calls",
                             api_calls: api_call_count,
@@ -1916,6 +1933,7 @@ impl AgentLoop {
                     session_cost_usd,
                     session_started_hooks_fired,
                     persist_user_idx,
+                    prefill_range.clone(),
                     api_call_count,
                 ));
             }
@@ -1943,6 +1961,7 @@ impl AgentLoop {
                         return Ok(self.seal_loop_result(
                             &ctx,
                             persist_user_idx,
+                            prefill_range.clone(),
                             LoopExit {
                                 turn_exit_reason: "guardrail_halt",
                                 api_calls: api_call_count,
@@ -2231,6 +2250,7 @@ impl AgentLoop {
                     self.seal_loop_result(
                         &ctx,
                         persist_user_idx,
+                        prefill_range.clone(),
                         LoopExit {
                             turn_exit_reason: "tool_loop_guard",
                             api_calls: api_call_count,

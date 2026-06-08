@@ -1,5 +1,7 @@
-﻿//! 灏?Python Hermes 浣跨敤鐨?**鍚屽悕** 骞冲彴鐜鍙橀噺鍐欏叆 [`GatewayConfig::platforms`]锛?//! 涓?`gateway/platforms/weixin.py`銆乣dingtalk.py` 涓?`os.getenv(...)` 鐨勯敭涓€鑷淬€?//!
-//! 鍦?[`crate::loader::apply_env_overrides`] 鏈熬璋冪敤锛屼紭鍏堢骇楂樹簬 YAML锛堜笌鐜版湁 env 瑕嗙洊閾句竴鑷达級銆?
+﻿//! 将 Python Hermes 使用的 **同名** 平台环境变量写入 [`GatewayConfig::platforms`]，
+//! 与 `gateway/platforms/weixin.py`、`dingtalk.py` 中 `os.getenv(...)` 的键一致。
+//!
+//! 在 [`crate::loader::apply_env_overrides`] 末尾调用，优先级高于 YAML（与现有 env 覆盖链一致）。
 use serde_json::{json, Value};
 
 use crate::config::GatewayConfig;

@@ -17,6 +17,7 @@ use hermes_core::{
 };
 
 use crate::credential_pool::CredentialPool;
+use crate::provider_serialize_cache::ProviderSerializeCache;
 use crate::rate_limit::RateLimitTracker;
 use crate::usage_parse::usage_stats_from_raw;
 
@@ -51,6 +52,7 @@ pub struct CodexProvider {
     request_timeout: Option<Duration>,
     pub rate_limiter: Option<Arc<RateLimitTracker>>,
     pub credential_pool: Option<Arc<CredentialPool>>,
+    serialize_cache: Option<Arc<ProviderSerializeCache>>,
 }
 
 impl CodexProvider {
@@ -64,6 +66,7 @@ impl CodexProvider {
             request_timeout,
             rate_limiter: None,
             credential_pool: None,
+            serialize_cache: None,
         }
     }
 
@@ -99,6 +102,11 @@ impl CodexProvider {
 
     pub fn with_credential_pool(mut self, pool: Arc<CredentialPool>) -> Self {
         self.credential_pool = Some(pool);
+        self
+    }
+
+    pub fn with_serialize_cache(mut self, cache: Arc<ProviderSerializeCache>) -> Self {
+        self.serialize_cache = Some(cache);
         self
     }
 

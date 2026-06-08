@@ -92,6 +92,139 @@ struct GatewayArgs {
     deep: bool,
 }
 
+#[derive(Parser, Debug, Clone)]
+#[command(name = "setup", about = "Run the interactive setup wizard")]
+struct SetupArgs {
+    #[arg(long)]
+    portal: bool,
+}
+
+pub fn parse_setup(args: &[OsString]) -> Result<CliCommand, clap::Error> {
+    parse_subcommand::<SetupArgs, _>(args, |a| CliCommand::Setup { portal: a.portal })
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(name = "portal", about = "Nous Portal OAuth setup and status")]
+struct PortalArgs {
+    action: Option<String>,
+}
+
+pub fn parse_portal(args: &[OsString]) -> Result<CliCommand, clap::Error> {
+    parse_subcommand::<PortalArgs, _>(args, |a| CliCommand::Portal { action: a.action })
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(name = "systems", about = "Inspect implemented system surfaces")]
+struct SystemsArgs {
+    action: Option<String>,
+    topic: Option<String>,
+    #[arg(long)]
+    json: bool,
+    #[arg(long)]
+    output: Option<String>,
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+    #[arg(long, default_value_t = 9127)]
+    port: u16,
+    #[arg(long)]
+    once: bool,
+}
+
+pub fn parse_systems(args: &[OsString]) -> Result<CliCommand, clap::Error> {
+    parse_subcommand::<SystemsArgs, _>(args, |a| CliCommand::Systems {
+        action: a.action,
+        topic: a.topic,
+        json: a.json,
+        output: a.output,
+        host: a.host,
+        port: a.port,
+        once: a.once,
+    })
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(name = "kanban", about = "Manage the local Kanban board")]
+struct KanbanArgs {
+    #[arg(
+        value_name = "ARGS",
+        trailing_var_arg = true,
+        allow_hyphen_values = true
+    )]
+    args: Vec<String>,
+}
+
+pub fn parse_kanban(args: &[OsString]) -> Result<CliCommand, clap::Error> {
+    parse_subcommand::<KanbanArgs, _>(args, |a| CliCommand::Kanban { args: a.args })
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(name = "teams-pipeline", about = "Microsoft Teams meeting summary pipeline")]
+struct TeamsPipelineArgs {
+    action: Option<String>,
+    id: Option<String>,
+    #[arg(long, default_value_t = 20)]
+    limit: usize,
+    #[arg(long)]
+    status: Option<String>,
+    #[arg(long)]
+    store_path: Option<String>,
+    #[arg(long)]
+    meeting_id: Option<String>,
+    #[arg(long)]
+    join_web_url: Option<String>,
+    #[arg(long)]
+    tenant_id: Option<String>,
+    #[arg(long)]
+    call_record_id: Option<String>,
+    #[arg(long)]
+    resource: Option<String>,
+    #[arg(long)]
+    notification_url: Option<String>,
+    #[arg(long)]
+    change_type: Option<String>,
+    #[arg(long)]
+    expiration: Option<String>,
+    #[arg(long)]
+    client_state: Option<String>,
+    #[arg(long)]
+    lifecycle_notification_url: Option<String>,
+    #[arg(long, default_value = "v1_2")]
+    latest_supported_tls_version: String,
+    #[arg(long)]
+    force_refresh: bool,
+    #[arg(long, default_value_t = 24)]
+    renew_within_hours: u32,
+    #[arg(long, default_value_t = 24)]
+    extend_hours: u32,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+pub fn parse_teams_pipeline(args: &[OsString]) -> Result<CliCommand, clap::Error> {
+    parse_subcommand::<TeamsPipelineArgs, _>(args, |a| CliCommand::TeamsPipeline {
+        action: a.action,
+        id: a.id,
+        limit: a.limit,
+        status: a.status,
+        store_path: a.store_path,
+        meeting_id: a.meeting_id,
+        join_web_url: a.join_web_url,
+        tenant_id: a.tenant_id,
+        call_record_id: a.call_record_id,
+        resource: a.resource,
+        notification_url: a.notification_url,
+        change_type: a.change_type,
+        expiration: a.expiration,
+        client_state: a.client_state,
+        lifecycle_notification_url: a.lifecycle_notification_url,
+        latest_supported_tls_version: a.latest_supported_tls_version,
+        force_refresh: a.force_refresh,
+        renew_within_hours: a.renew_within_hours,
+        extend_hours: a.extend_hours,
+        dry_run: a.dry_run,
+    })
+}
+
 pub fn parse_gateway(args: &[OsString]) -> Result<CliCommand, clap::Error> {
     parse_subcommand::<GatewayArgs, _>(args, |a| CliCommand::Gateway {
         action: a.action,
@@ -933,6 +1066,11 @@ pub fn all_subcommand_commands() -> Vec<clap::Command> {
         ModelArgs,
         ToolsArgs,
         ConfigArgs,
+        SetupArgs,
+        PortalArgs,
+        SystemsArgs,
+        KanbanArgs,
+        TeamsPipelineArgs,
         GatewayArgs,
         DoctorArgs,
         UpdateArgs,

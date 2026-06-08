@@ -9,10 +9,13 @@
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde_json::Value;
+use std::sync::Arc;
 
 use hermes_core::{AgentError, LlmProvider, LlmResponse, Message, StreamChunk, ToolSchema};
 
 use crate::provider::GenericProvider;
+use crate::provider_profiles;
+use crate::provider_serialize_cache::ProviderSerializeCache;
 
 fn openrouter_compatible_extra_body(extra_body: Option<&Value>) -> Option<Value> {
     let Some(Value::Object(map)) = extra_body else {
@@ -83,6 +86,12 @@ impl QwenProvider {
             inner: self.inner.with_optional_request_timeout_seconds(seconds),
         }
     }
+
+    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+        Self {
+            inner: self.inner.with_serialize_cache(cache),
+        }
+    }
 }
 
 #[async_trait]
@@ -125,10 +134,10 @@ impl LlmProvider for QwenProvider {
 // KimiProvider — Moonshot AI (月之暗面)
 // ---------------------------------------------------------------------------
 
-/// Moonshot AI (Kimi) provider.
+/// Moonshot AI / Kimi provider.
 ///
-/// Default base URL: `https://api.moonshot.cn/v1`
-/// Default model: `moonshot-v1-8k`
+/// Default base URL: `https://api.moonshot.ai/v1`
+/// Default model: `kimi-k2-turbo-preview`
 #[derive(Debug, Clone)]
 pub struct KimiProvider {
     inner: GenericProvider,
@@ -137,8 +146,12 @@ pub struct KimiProvider {
 impl KimiProvider {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            inner: GenericProvider::new("https://api.moonshot.cn/v1", api_key, "moonshot-v1-8k")
-                .with_provider_profile("kimi-coding"),
+            inner: GenericProvider::new(
+                provider_profiles::KIMI_LEGACY_BASE_URL,
+                api_key,
+                "kimi-k2-turbo-preview",
+            )
+            .with_provider_profile("kimi-coding"),
         }
     }
 
@@ -157,6 +170,12 @@ impl KimiProvider {
     pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
         Self {
             inner: self.inner.with_optional_request_timeout_seconds(seconds),
+        }
+    }
+
+    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+        Self {
+            inner: self.inner.with_serialize_cache(cache),
         }
     }
 }
@@ -232,6 +251,12 @@ impl MiniMaxProvider {
     pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
         Self {
             inner: self.inner.with_optional_request_timeout_seconds(seconds),
+        }
+    }
+
+    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+        Self {
+            inner: self.inner.with_serialize_cache(cache),
         }
     }
 }
@@ -312,6 +337,12 @@ impl NousProvider {
     pub fn with_optional_request_timeout_seconds(self, seconds: Option<f64>) -> Self {
         Self {
             inner: self.inner.with_optional_request_timeout_seconds(seconds),
+        }
+    }
+
+    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+        Self {
+            inner: self.inner.with_serialize_cache(cache),
         }
     }
 }
@@ -397,6 +428,12 @@ impl CopilotProvider {
             inner: self.inner.with_optional_request_timeout_seconds(seconds),
         }
     }
+
+    pub fn with_serialize_cache(self, cache: Arc<ProviderSerializeCache>) -> Self {
+        Self {
+            inner: self.inner.with_serialize_cache(cache),
+        }
+    }
 }
 
 #[async_trait]
@@ -463,8 +500,8 @@ mod tests {
     #[test]
     fn kimi_provider_defaults() {
         let p = KimiProvider::new("test-key");
-        assert_eq!(p.inner.base_url, "https://api.moonshot.cn/v1");
-        assert_eq!(p.inner.model, "moonshot-v1-8k");
+        assert_eq!(p.inner.base_url, provider_profiles::KIMI_LEGACY_BASE_URL);
+        assert_eq!(p.inner.model, "kimi-k2-turbo-preview");
     }
 
     #[test]

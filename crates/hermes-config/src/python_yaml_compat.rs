@@ -1,8 +1,9 @@
 ﻿//! Normalize Python Hermes `config.yaml` into shapes `GatewayConfig` can deserialize.
 //!
-//! Python 鐗堝父鐢細宓屽 `model:`銆乣toolsets:`銆乣agent.max_turns`銆乣session_reset`銆乣providers`銆?//! 鏍圭骇 `telegram` / `discord` / `weixin` 绛夊钩鍙板潡锛堣€岄潪 `platforms:` 涓嬶級绛夛紱
-//! Rust 瀛楁鑳界洿鎺ュ榻愮殑淇濈暀锛屽叾浣欏湪褰掍竴鍖栧眰鏄犲皠锛涘钩鍙颁笓鏈夐敭缁?[`crate::platform::PlatformConfig`]
-//! 鐨?`#[serde(flatten)] extra` 淇濈暀銆?
+//! Python 版常用：嵌套 `model:`、`toolsets:`、`agent.max_turns`、`session_reset`、`providers`、
+//! 根级 `telegram` / `discord` / `weixin` 等平台块（而非 `platforms:` 下）等；
+//! Rust 字段能直接对齐的保留，其余在归一化层映射；平台专有键经 [`crate::platform::PlatformConfig`]
+//! 的 `#[serde(flatten)] extra` 保留。
 use serde_yaml::{Mapping, Value};
 use std::collections::HashSet;
 

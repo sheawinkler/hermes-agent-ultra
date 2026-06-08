@@ -165,6 +165,7 @@ impl AgentLoop {
         self.seal_loop_result(
             &ctx,
             None,
+            None,
             LoopExit {
                 turn_exit_reason: exit_reason,
                 api_calls: if completed || partial { 1 } else { 0 },
@@ -199,6 +200,7 @@ impl AgentLoop {
         }
         self.seal_loop_result(
             &ctx,
+            None,
             None,
             LoopExit {
                 turn_exit_reason: reason,

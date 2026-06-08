@@ -142,7 +142,10 @@ pub fn run_all_active_fixtures(fixtures_root: &Path) -> Result<(), ParityError> 
 }
 
 fn collect_json_fixtures(dir: &Path, out: &mut Vec<std::path::PathBuf>) -> Result<(), ParityError> {
-    if dir.file_name().and_then(|n| n.to_str()) == Some("pending") {
+    if matches!(
+        dir.file_name().and_then(|n| n.to_str()),
+        Some("pending") | Some("meeting_notes")
+    ) {
         return Ok(());
     }
     for entry in std::fs::read_dir(dir).map_err(ParityError::Io)? {

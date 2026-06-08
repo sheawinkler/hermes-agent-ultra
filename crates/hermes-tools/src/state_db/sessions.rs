@@ -143,6 +143,10 @@ pub fn message_insert_sql(conn: &Connection) -> Result<String, StateDbError> {
         columns.push("created_at");
         placeholders.push("datetime('now')");
     }
+    if table_has_column(conn, "messages", "active")? {
+        columns.push("active");
+        placeholders.push("1");
+    }
     Ok(format!(
         "INSERT INTO messages ({}) VALUES ({})",
         columns.join(", "),

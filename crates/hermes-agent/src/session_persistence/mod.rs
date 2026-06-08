@@ -3,7 +3,9 @@
 //! Keeps the existing `SessionPersistence` public API while aligning schema,
 //! FTS, WAL fallback, and SessionDB query semantics with upstream Python.
 
+mod maintenance;
 mod queries;
+mod rewind;
 mod schema;
 mod search;
 mod telegram;
@@ -22,6 +24,7 @@ pub use queries::{
     AnchoredViewResult, MessagesAroundResult, SessionRecord, StoredMessageRow,
     decode_content_preview,
 };
+pub use rewind::{RewindOutcome, UserMessageRef};
 pub use search::{SearchMessageMatch, sanitize_fts5_query};
 pub use schema::SCHEMA_VERSION;
 pub use wal::{format_session_db_unavailable, get_last_init_error, set_last_init_error};
@@ -229,11 +232,34 @@ impl SessionPersistence {
         Ok(())
     }
 
+    pub fn fts_index_count(&self) -> Result<u32, AgentError> {
+        let conn = self.conn_arc()?;
+        let guard = conn
+            .lock()
+            .map_err(|_| AgentError::Io("state db lock poisoned".into()))?;
+        maintenance::fts_index_count(&guard)
+    }
+
+    pub fn optimize_fts(&self) -> Result<u32, AgentError> {
+        let conn = self.conn_arc()?;
+        let guard = conn
+            .lock()
+            .map_err(|_| AgentError::Io("state db lock poisoned".into()))?;
+        maintenance::optimize_fts_on_conn(&guard)
+    }
+
+    pub fn truncate_wal_checkpoint(&self) -> Result<(), AgentError> {
+        maintenance::truncate_wal_checkpoint(&self.conn_arc()?)
+    }
+
     pub fn vacuum(&self) -> Result<(), AgentError> {
         let conn = self.conn_arc()?;
         let guard = conn
             .lock()
             .map_err(|_| AgentError::Io("state db lock poisoned".into()))?;
+        if let Err(err) = maintenance::optimize_fts_on_conn(&guard) {
+            tracing::warn!("FTS optimize before VACUUM failed: {}", err);
+        }
         guard
             .execute_batch("VACUUM")
             .map_err(|e| AgentError::Io(format!("VACUUM failed: {e}")))?;
@@ -327,8 +353,44 @@ impl SessionPersistence {
         }
         if let Err(e) = self.set_meta("last_auto_prune", &now.to_string()) {
             result.error = Some(e.to_string());
+            return result;
+        }
+        if let Err(e) = self.truncate_wal_checkpoint() {
+            tracing::warn!("state.db WAL checkpoint failed: {}", e);
         }
         result
+    }
+
+    pub fn update_session_model(&self, session_id: &str, model: &str) -> Result<bool, AgentError> {
+        queries::update_session_model(&self.conn_arc()?, session_id, model)
+    }
+
+    pub fn get_session_model(&self, session_id: &str) -> Result<Option<String>, AgentError> {
+        queries::get_session_model(&self.conn_arc()?, session_id)
+    }
+
+    pub fn rewind_active_user_turns(
+        &self,
+        session_id: &str,
+        user_turns_back: usize,
+    ) -> Result<Option<RewindOutcome>, AgentError> {
+        rewind::rewind_active_user_turns(&self.conn_arc()?, session_id, user_turns_back)
+    }
+
+    pub fn list_recent_user_messages(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<UserMessageRef>, AgentError> {
+        rewind::list_recent_user_messages(&self.conn_arc()?, session_id, limit)
+    }
+
+    pub fn restore_rewound_since(
+        &self,
+        session_id: &str,
+        since_message_id: i64,
+    ) -> Result<u64, AgentError> {
+        rewind::restore_rewound_since(&self.conn_arc()?, session_id, since_message_id)
     }
 
     pub fn persist_session(
@@ -408,11 +470,13 @@ impl SessionPersistence {
         let conn = self.conn_arc()?;
         let sid = session_id.to_string();
         write::execute_write(&conn, move |c| {
-            c.execute(
-                "DELETE FROM messages WHERE session_id = ?1",
-                rusqlite::params![sid],
-            )
-            .map_err(|e| AgentError::Io(format!("replace clear: {e}")))?;
+            let sql = if schema::table_has_column_pub(c, "messages", "active") {
+                "DELETE FROM messages WHERE session_id = ?1 AND active = 1"
+            } else {
+                "DELETE FROM messages WHERE session_id = ?1"
+            };
+            c.execute(sql, rusqlite::params![sid])
+                .map_err(|e| AgentError::Io(format!("replace clear: {e}")))?;
             Ok(())
         })?;
         queries::append_messages(&conn, session_id, messages)?;
@@ -1037,5 +1101,144 @@ mod tests {
         let c1 = sp.shared_connection().unwrap();
         let c2 = sp.shared_connection().unwrap();
         assert!(Arc::ptr_eq(&c1, &c2));
+    }
+
+    #[test]
+    fn update_session_model_only_updates_existing_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        assert!(!sp
+            .update_session_model("missing-session", "openai:gpt-4o")
+            .unwrap());
+        let mut cursor = SessionFlushCursor::new();
+        sp.persist_session(
+            "existing-session",
+            &[Message::user("hello")],
+            &mut cursor,
+            Some("openai:gpt-4o"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(sp
+            .update_session_model("existing-session", "anthropic:claude-sonnet")
+            .unwrap());
+        assert_eq!(
+            sp.get_session_model("existing-session").unwrap().as_deref(),
+            Some("anthropic:claude-sonnet")
+        );
+    }
+
+    #[test]
+    fn rewind_soft_deletes_user_turns_and_loads_only_active_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let messages = vec![
+            Message::system("sys"),
+            Message::user("question 1"),
+            Message::assistant("answer 1"),
+            Message::user("question 2"),
+            Message::assistant("answer 2"),
+            Message::user("question 3"),
+            Message::assistant("answer 3"),
+        ];
+        let mut cursor = SessionFlushCursor::new();
+        sp.replace_session_messages("rewind-n", &messages, &mut cursor)
+            .unwrap();
+        let recent = sp.list_recent_user_messages("rewind-n", 2).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].content.as_deref(), Some("question 3"));
+        assert_eq!(recent[1].content.as_deref(), Some("question 2"));
+
+        let outcome = sp.rewind_active_user_turns("rewind-n", 2).unwrap().unwrap();
+        assert_eq!(outcome.target_content.as_deref(), Some("question 2"));
+        assert_eq!(outcome.inactive_count, 4);
+        assert_eq!(outcome.active_message_count, 3);
+        assert_eq!(outcome.rewind_count, 1);
+
+        let loaded = sp.load_session("rewind-n").unwrap();
+        assert_eq!(
+            loaded
+                .iter()
+                .filter_map(|m| m.content.as_deref())
+                .collect::<Vec<_>>(),
+            vec!["sys", "question 1", "answer 1"]
+        );
+
+        let conn = Connection::open(sp.db_path()).unwrap();
+        let inactive: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id='rewind-n' AND active=0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(inactive, 4);
+
+        assert_eq!(
+            sp.restore_rewound_since("rewind-n", outcome.target_message_id)
+                .unwrap(),
+            4
+        );
+        assert_eq!(sp.load_session("rewind-n").unwrap().len(), messages.len());
+    }
+
+    #[test]
+    fn replace_session_messages_preserves_inactive_rewind_audit_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let mut cursor = SessionFlushCursor::new();
+        sp.replace_session_messages(
+            "audit-preserve",
+            &[
+                Message::user("rewind me"),
+                Message::assistant("gone"),
+            ],
+            &mut cursor,
+        )
+        .unwrap();
+        sp.rewind_active_user_turns("audit-preserve", 1)
+            .unwrap()
+            .unwrap();
+        sp.replace_session_messages(
+            "audit-preserve",
+            &[Message::user("keep"), Message::assistant("replacement")],
+            &mut cursor,
+        )
+        .unwrap();
+
+        let conn = Connection::open(sp.db_path()).unwrap();
+        let inactive: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id='audit-preserve' AND active=0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(inactive, 2);
+        let loaded = sp.load_session("audit-preserve").unwrap();
+        assert_eq!(loaded.len(), 2);
+    }
+
+    #[test]
+    fn optimize_fts_returns_existing_index_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session(
+            "opt-count",
+            &[Message::user("hello optimized world")],
+            &mut SessionFlushCursor::new(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let conn = Connection::open(sp.db_path()).unwrap();
+        let expected = sp.fts_index_count().unwrap();
+        assert_eq!(sp.optimize_fts().unwrap(), expected);
+        assert!(expected >= 1);
+        let _ = conn;
     }
 }

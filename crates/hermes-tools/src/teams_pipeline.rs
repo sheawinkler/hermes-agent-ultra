@@ -1377,7 +1377,7 @@ impl TeamsTranscriber for TranscriptionToolTeamsTranscriber {
         let recording_path = run_dir.join(safe_file_name(&recording_name));
         tokio::fs::write(&recording_path, bytes).await?;
         let audio_path = prepare_audio_path(&recording_path, config.ffmpeg_extract_audio).await?;
-        let handler = crate::tools::transcription::TranscriptionHandler;
+        let handler = crate::tools::transcription::TranscriptionHandler::new();
         let response = handler
             .execute(json!({ "audio_path": audio_path.to_string_lossy() }))
             .await?;

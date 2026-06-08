@@ -63,6 +63,7 @@ fn platform_name_for_target(target: &DeliverTarget) -> Option<&'static str> {
         DeliverTarget::Weixin => Some("weixin"),
         DeliverTarget::BlueBubbles => Some("bluebubbles"),
         DeliverTarget::Sms => Some("sms"),
+        DeliverTarget::Ntfy => Some("ntfy"),
         DeliverTarget::Origin | DeliverTarget::Local | DeliverTarget::HomeAssistant => None,
     }
 }

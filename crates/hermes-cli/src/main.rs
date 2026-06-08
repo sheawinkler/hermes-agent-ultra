@@ -76,6 +76,7 @@ use hermes_gateway::platforms::feishu::{FeishuAdapter, FeishuConfig};
 use hermes_gateway::platforms::homeassistant::{HomeAssistantAdapter, HomeAssistantConfig};
 use hermes_gateway::platforms::matrix::{MatrixAdapter, MatrixConfig};
 use hermes_gateway::platforms::mattermost::{MattermostAdapter, MattermostConfig};
+use hermes_gateway::platforms::ntfy::{NtfyAdapter, NtfyConfig};
 use hermes_gateway::platforms::qqbot::{QqBotAdapter, QqBotConfig};
 use hermes_gateway::platforms::signal::{SignalAdapter, SignalConfig};
 use hermes_gateway::platforms::slack::{SlackAdapter, SlackConfig};
@@ -581,7 +582,14 @@ async fn run(cli: Cli) {
             )
             .await
         }
-        CliCommand::Setup => run_setup(cli).await,
+        CliCommand::Setup { portal } => {
+            if portal {
+                run_portal(cli, Some("setup".to_string())).await
+            } else {
+                run_setup(cli).await
+            }
+        }
+        CliCommand::Portal { action } => run_portal(cli, action).await,
         CliCommand::Doctor {
             deep,
             self_heal,
@@ -612,6 +620,77 @@ async fn run(cli: Cli) {
             json,
         } => run_incident_pack(cli, snapshot, output, json).await,
         CliCommand::Status => run_status(cli).await,
+        CliCommand::Kanban { args } => run_kanban(args),
+        CliCommand::Systems {
+            action,
+            topic,
+            json,
+            output,
+            host,
+            port,
+            once,
+        } => {
+            hermes_cli::systems::handle_cli_systems(hermes_cli::systems::SystemsCliOptions {
+                config_dir: cli.config_dir.clone(),
+                action,
+                topic,
+                json_only: json,
+                output,
+                host,
+                port,
+                once,
+            })
+            .await
+        }
+        CliCommand::TeamsPipeline {
+            action,
+            id,
+            limit,
+            status,
+            store_path,
+            meeting_id,
+            join_web_url,
+            tenant_id,
+            call_record_id,
+            resource,
+            notification_url,
+            change_type,
+            expiration,
+            client_state,
+            lifecycle_notification_url,
+            latest_supported_tls_version,
+            force_refresh,
+            renew_within_hours,
+            extend_hours,
+            dry_run,
+        } => {
+            hermes_cli::teams_pipeline_cli::handle_cli_teams_pipeline(
+                hermes_cli::teams_pipeline_cli::TeamsPipelineCliOptions {
+                    config_dir: cli.config_dir.clone(),
+                    action,
+                    id,
+                    limit,
+                    status,
+                    store_path,
+                    meeting_id,
+                    join_web_url,
+                    tenant_id,
+                    call_record_id,
+                    resource,
+                    notification_url,
+                    change_type,
+                    expiration,
+                    client_state,
+                    lifecycle_notification_url,
+                    latest_supported_tls_version,
+                    force_refresh,
+                    renew_within_hours,
+                    extend_hours,
+                    dry_run,
+                },
+            )
+            .await
+        }
         CliCommand::Dashboard {
             host,
             port,
@@ -2952,6 +3031,10 @@ async fn run_gateway(
             // Build gateway runtime and context-aware message handler.
             let runtime_gateway_config = RuntimeGatewayConfig {
                 streaming_enabled: config.streaming.enabled,
+                service_tier: config.agent.normalized_service_tier(),
+                display: config.display.clone(),
+                quick_commands: config.quick_commands.clone(),
+                kanban_dispatch_in_gateway: config.kanban.dispatch_in_gateway,
                 ..RuntimeGatewayConfig::default()
             };
             let session_manager = Arc::new(gateway_session_manager_with_persistence(&config));
@@ -4085,6 +4168,22 @@ fn build_agent_for_gateway_context(
             agent_config.provider = Some(provider);
         }
     }
+    if let Some(service_tier) = ctx.service_tier.clone() {
+        let mut extra = match agent_config.extra_body.take() {
+            Some(serde_json::Value::Object(map)) => map,
+            Some(other) => {
+                let mut map = serde_json::Map::new();
+                map.insert("extra_body".to_string(), other);
+                map
+            }
+            None => serde_json::Map::new(),
+        };
+        extra.insert(
+            "service_tier".to_string(),
+            serde_json::Value::String(service_tier),
+        );
+        agent_config.extra_body = Some(serde_json::Value::Object(extra));
+    }
     // Use the rotatable session_id (UUID after /new, session_key before).
     // This mirrors Python: each session_id UUID is independent in SQLite so
     // post-reset turns never see pre-reset history.
@@ -4141,11 +4240,12 @@ fn gateway_agent_signature(config: &hermes_config::GatewayConfig, ctx: &GatewayR
         ctx.session_key.as_str()
     };
     let material = format!(
-        "{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}",
         effective_model,
         ctx.platform,
         ctx.provider.as_deref().unwrap_or(""),
         ctx.personality.as_deref().unwrap_or(""),
+        ctx.service_tier.as_deref().unwrap_or(""),
         effective_session_id,
         home,
         ctx.user_id,
@@ -5199,6 +5299,25 @@ async fn register_gateway_adapters(
                     }
                     Err(e) => println!("HomeAssistant enabled but failed to initialize: {}", e),
                 }
+            }
+        }
+    }
+
+    if let Some(platform_cfg) = config.platforms.get("ntfy") {
+        if platform_cfg.enabled {
+            let ntfy_cfg = NtfyConfig::from_platform_config(platform_cfg);
+            match NtfyAdapter::new(ntfy_cfg) {
+                Ok(adapter) => {
+                    let adapter = Arc::new(adapter);
+                    let (tx, rx) = mpsc::channel::<GatewayIncomingMessage>(512);
+                    adapter.set_inbound_sender(tx).await;
+                    gateway.register_adapter("ntfy", adapter).await;
+                    let gw_clone = gateway.clone();
+                    sidecar_tasks.push(tokio::spawn(async move {
+                        run_gateway_incoming_loop(gw_clone, rx, "ntfy").await;
+                    }));
+                }
+                Err(e) => println!("ntfy enabled but failed to initialize: {}", e),
             }
         }
     }
@@ -8549,6 +8668,7 @@ fn parse_deliver_config(raw: &str) -> Option<hermes_cron::DeliverConfig> {
         "bluebubbles" | "imessage" => hermes_cron::DeliverTarget::BlueBubbles,
         "sms" => hermes_cron::DeliverTarget::Sms,
         "homeassistant" | "ha" => hermes_cron::DeliverTarget::HomeAssistant,
+        "ntfy" => hermes_cron::DeliverTarget::Ntfy,
         _ => return None,
     };
     let platform = chat_id.map(|s| {
@@ -9949,6 +10069,61 @@ fn maybe_import_legacy_env(
 }
 
 /// Handle `hermes setup`.
+fn run_kanban(args: Vec<String>) -> Result<(), AgentError> {
+    let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    println!("{}", hermes_cli::commands::run_kanban_command(&arg_refs)?);
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PortalActionKind {
+    Setup,
+    Info,
+}
+
+fn portal_action_kind(action: Option<&str>) -> Result<PortalActionKind, AgentError> {
+    match action.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("setup" | "login" | "auth") => Ok(PortalActionKind::Setup),
+        Some("info" | "status" | "check") => Ok(PortalActionKind::Info),
+        Some(other) => Err(AgentError::Config(format!(
+            "Unknown portal action '{other}'. Use `hermes portal` for setup or `hermes portal info` for status."
+        ))),
+    }
+}
+
+async fn run_portal(cli: Cli, action: Option<String>) -> Result<(), AgentError> {
+    match portal_action_kind(action.as_deref())? {
+        PortalActionKind::Setup => {
+            println!("Nous Portal setup ({DEFAULT_NOUS_PORTAL_URL})");
+            run_auth(
+                cli,
+                Some("setup".to_string()),
+                Some("nous".to_string()),
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+        }
+        PortalActionKind::Info => {
+            println!("Nous Portal info ({DEFAULT_NOUS_PORTAL_URL})");
+            run_auth(
+                cli,
+                Some("status".to_string()),
+                Some("nous".to_string()),
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+        }
+    }
+}
+
 async fn run_setup(cli: Cli) -> Result<(), AgentError> {
     use std::io::{self, BufRead, Write};
 

@@ -2,7 +2,7 @@
 //!
 //! Defines the full set of ACP JSON-RPC methods, request/response types,
 //! capability declarations, content blocks, and session update structures.
-
+//! Mirrors the Python `acp.schema` module.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

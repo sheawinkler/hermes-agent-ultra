@@ -695,12 +695,14 @@ pub fn get_messages_around(
         return Ok(MessagesAroundResult::default());
     }
 
+    let active_filter = messages_active_filter(&guard);
+    let before_sql = format!(
+        "SELECT * FROM messages
+         WHERE session_id = ?1 AND id <= ?2{active_filter}
+         ORDER BY id DESC LIMIT ?3"
+    );
     let mut before_stmt = guard
-        .prepare(
-            "SELECT * FROM messages
-             WHERE session_id = ?1 AND id <= ?2
-             ORDER BY id DESC LIMIT ?3",
-        )
+        .prepare(&before_sql)
         .map_err(|e| AgentError::Io(format!("get_messages_around before: {e}")))?;
     let before_rows: Vec<StoredMessageRow> = before_stmt
         .query_map(params![session_id, around_message_id, window + 1], row_to_stored_message)
@@ -708,12 +710,13 @@ pub fn get_messages_around(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| AgentError::Io(format!("get_messages_around before read: {e}")))?;
 
+    let after_sql = format!(
+        "SELECT * FROM messages
+         WHERE session_id = ?1 AND id > ?2{active_filter}
+         ORDER BY id ASC LIMIT ?3"
+    );
     let mut after_stmt = guard
-        .prepare(
-            "SELECT * FROM messages
-             WHERE session_id = ?1 AND id > ?2
-             ORDER BY id ASC LIMIT ?3",
-        )
+        .prepare(&after_sql)
         .map_err(|e| AgentError::Io(format!("get_messages_around after: {e}")))?;
     let after_rows: Vec<StoredMessageRow> = after_stmt
         .query_map(params![session_id, around_message_id, window], row_to_stored_message)
@@ -857,6 +860,72 @@ pub fn row_to_message(row: &Row<'_>) -> rusqlite::Result<Message> {
     })
 }
 
+fn messages_active_filter(conn: &Connection) -> &'static str {
+    if crate::session_persistence::schema::table_has_column_pub(conn, "messages", "active") {
+        " AND active = 1"
+    } else {
+        ""
+    }
+}
+
+pub fn update_session_model(
+    conn: &Arc<std::sync::Mutex<Connection>>,
+    session_id: &str,
+    model: &str,
+) -> Result<bool, AgentError> {
+    let model = model.trim();
+    if session_id.trim().is_empty() || model.is_empty() {
+        return Ok(false);
+    }
+    let guard = conn
+        .lock()
+        .map_err(|_| AgentError::Io("state db lock poisoned".into()))?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let changed = if crate::session_persistence::schema::table_has_column_pub(
+        &guard,
+        "sessions",
+        "updated_at",
+    ) {
+        guard.execute(
+            "UPDATE sessions SET model = ?1, updated_at = ?2 WHERE id = ?3",
+            params![model, now, session_id],
+        )
+    } else {
+        guard.execute(
+            "UPDATE sessions SET model = ?1 WHERE id = ?2",
+            params![model, session_id],
+        )
+    }
+    .map_err(|e| AgentError::Io(format!("Failed to update session model: {e}")))?;
+    Ok(changed > 0)
+}
+
+pub fn get_session_model(
+    conn: &Arc<std::sync::Mutex<Connection>>,
+    session_id: &str,
+) -> Result<Option<String>, AgentError> {
+    if session_id.trim().is_empty() {
+        return Ok(None);
+    }
+    let guard = conn
+        .lock()
+        .map_err(|_| AgentError::Io("state db lock poisoned".into()))?;
+    match guard.query_row(
+        "SELECT model FROM sessions WHERE id = ?1",
+        params![session_id],
+        |r| r.get::<_, Option<String>>(0),
+    ) {
+        Ok(model) => Ok(model.filter(|value| !value.trim().is_empty())),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+            if message.contains("no such table") =>
+        {
+            Ok(None)
+        }
+        Err(e) => Err(AgentError::Io(format!("Failed to read session model: {e}"))),
+    }
+}
+
 pub fn load_messages(
     conn: &Arc<std::sync::Mutex<Connection>>,
     session_id: &str,
@@ -864,13 +933,15 @@ pub fn load_messages(
     let guard = conn
         .lock()
         .map_err(|_| AgentError::Io("state db lock poisoned".into()))?;
+    let active_filter = messages_active_filter(&guard);
+    let sql = format!(
+        "SELECT role, content, tool_call_id, tool_calls, reasoning_content, tool_name
+         FROM messages
+         WHERE session_id = ?1{active_filter}
+         ORDER BY timestamp ASC, id ASC"
+    );
     let mut stmt = guard
-        .prepare(
-            "SELECT role, content, tool_call_id, tool_calls, reasoning_content, tool_name
-             FROM messages
-             WHERE session_id = ?1
-             ORDER BY timestamp ASC, id ASC",
-        )
+        .prepare(&sql)
         .map_err(|e| AgentError::Io(format!("load_messages prepare: {e}")))?;
     stmt.query_map(params![session_id], row_to_message)
         .map_err(|e| AgentError::Io(format!("load_messages query: {e}")))?

@@ -35,6 +35,10 @@ pub struct GatewayConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
 
+    /// JSON file of ephemeral messages prepended to each turn (not persisted).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefill_messages_file: Option<String>,
+
     /// List of enabled tool names. Defaults to all core tools.
     #[serde(default = "default_tools")]
     pub tools: Vec<String>,
@@ -123,6 +127,8 @@ pub struct GatewayConfig {
     /// round-trips.
     #[serde(default, skip_serializing_if = "is_json_null")]
     pub tts: serde_json::Value,
+    #[serde(default, skip_serializing_if = "is_json_null")]
+    pub stt: serde_json::Value,
 
     /// Optional HTTP/SOCKS proxy settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -184,6 +190,7 @@ impl Default for GatewayConfig {
             personality: None,
             max_turns: default_max_turns(),
             system_prompt: None,
+            prefill_messages_file: None,
             tools: default_tools(),
             budget: BudgetConfig::default(),
             tool_output: ToolOutputConfig::default(),
@@ -204,6 +211,7 @@ impl Default for GatewayConfig {
             quick_commands: BTreeMap::new(),
             kanban: KanbanConfig::default(),
             tts: serde_json::Value::Null,
+            stt: serde_json::Value::Null,
             proxy: None,
             approval: ApprovalConfig::default(),
             security: SecurityConfig::default(),
@@ -226,6 +234,19 @@ pub struct DelegationConfig {
     /// Maximum sub-agent spawn depth. Values below 1 are floored by runtime consumers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_spawn_depth: Option<u32>,
+    /// Optional model override for child agents. When set without a provider,
+    /// children keep the parent's provider/credentials and only switch model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Optional provider override for child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Optional direct endpoint override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Optional direct API key override for delegated child agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -747,6 +768,9 @@ pub struct AgentLoopBehaviorConfig {
         alias = "apiMaxRetries"
     )]
     pub api_max_retries: Option<u32>,
+    /// Legacy location for `prefill_messages_file`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefill_messages_file: Option<String>,
 }
 
 fn default_agent_memory_nudge_interval() -> u32 {
@@ -805,6 +829,7 @@ impl Default for AgentLoopBehaviorConfig {
             web_research: crate::web_research::WebResearchConfig::default(),
             service_tier: None,
             api_max_retries: None,
+            prefill_messages_file: None,
         }
     }
 }
@@ -941,6 +966,71 @@ fn default_tools() -> Vec<String> {
     ]
 }
 
+fn deserialize_provider_model_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct ProviderModelListVisitor;
+
+    impl<'de> Visitor<'de> for ProviderModelListVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter
+                .write_str("a string, comma-separated string, list of strings, or map of model ids")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            Ok(value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(ToString::to_string)
+                .collect())
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            self.visit_str(&value)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some(value) = seq.next_element::<String>()? {
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    values.push(trimmed.to_string());
+                }
+            }
+            Ok(values)
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some((key, _ignored)) = map.next_entry::<String, serde::de::IgnoredAny>()? {
+                let trimmed = key.trim();
+                if !trimmed.is_empty() {
+                    values.push(trimmed.to_string());
+                }
+            }
+            Ok(values)
+        }
+    }
+
+    deserializer.deserialize_any(ProviderModelListVisitor)
+}
+
 // ---------------------------------------------------------------------------
 // LlmProviderConfig
 // ---------------------------------------------------------------------------
@@ -975,6 +1065,22 @@ pub struct LlmProviderConfig {
     /// Default model to use for this provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+
+    /// Explicit model allowlist for custom/named providers.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_provider_model_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub models: Vec<String>,
+
+    /// Whether model pickers should live-probe `/models` for this provider.
+    #[serde(
+        default = "default_true",
+        deserialize_with = "deserialize_boolish",
+        skip_serializing_if = "is_true"
+    )]
+    pub discover_models: bool,
 
     /// Explicit provider wire protocol, e.g. `chat_completions` or `codex_responses`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1021,6 +1127,8 @@ impl Default for LlmProviderConfig {
             command: None,
             args: Vec::new(),
             model: None,
+            models: Vec::new(),
+            discover_models: true,
             api_mode: None,
             max_tokens: None,
             temperature: None,

@@ -7,6 +7,30 @@
 use serde_json::{Map, Value};
 
 pub const NOUS_PRODUCT_TAG: &str = "product=hermes-agent";
+pub const NOUS_CLIENT_TAG_PREFIX: &str = "client=hermes-client-v";
+pub const KIMI_CODE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
+pub const KIMI_LEGACY_BASE_URL: &str = "https://api.moonshot.ai/v1";
+pub const KIMI_CN_BASE_URL: &str = "https://api.moonshot.cn/v1";
+pub const KIMI_CODE_USER_AGENT: &str = "KimiCLI/1.0";
+
+pub fn is_kimi_code_base_url(base_url: &str) -> bool {
+    base_url
+        .trim()
+        .to_ascii_lowercase()
+        .contains("api.kimi.com")
+}
+
+pub fn kimi_base_url_for_api_key(api_key: &str, legacy_default: &str) -> &'static str {
+    if api_key.trim().starts_with("sk-kimi-") {
+        KIMI_CODE_BASE_URL
+    } else if legacy_default.trim().is_empty() {
+        KIMI_LEGACY_BASE_URL
+    } else if legacy_default.trim() == KIMI_CN_BASE_URL {
+        KIMI_CN_BASE_URL
+    } else {
+        KIMI_LEGACY_BASE_URL
+    }
+}
 
 pub fn canonical_provider_profile_id(provider: &str) -> Option<&'static str> {
     let normalized = provider.trim().to_ascii_lowercase();
@@ -18,7 +42,9 @@ pub fn canonical_provider_profile_id(provider: &str) -> Option<&'static str> {
         "kimi" | "moonshot" | "moonshot-ai" | "kimi-coding" => Some("kimi-coding"),
         "kimi-coding-cn" | "kimi-cn" | "moonshot-cn" => Some("kimi-coding-cn"),
         "openrouter" | "or" => Some("openrouter"),
-        "nous" | "nous-portal" => Some("nous"),
+        "nous" | "nous-portal" | "nous-api" | "nous_api" | "nousapi" | "nous-portal-api" => {
+            Some("nous")
+        }
         "qwen" | "qwen-oauth" | "qwen-portal" | "qwen-cli" => Some("qwen-oauth"),
         "xiaomi" | "mimo" | "xiaomi-mimo" => Some("xiaomi"),
         "custom" | "ollama" | "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane"
@@ -64,8 +90,8 @@ pub fn profile_auth_type(profile: &str) -> Option<&'static str> {
 pub fn profile_base_url(profile: &str) -> Option<&'static str> {
     match canonical_provider_profile_id(profile)? {
         "nvidia" => Some("https://integrate.api.nvidia.com/v1"),
-        "kimi-coding" => Some("https://api.moonshot.ai/v1"),
-        "kimi-coding-cn" => Some("https://api.moonshot.cn/v1"),
+        "kimi-coding" => Some(KIMI_CODE_BASE_URL),
+        "kimi-coding-cn" => Some(KIMI_CN_BASE_URL),
         "openrouter" => Some("https://openrouter.ai/api/v1"),
         "nous" => Some("https://inference-api.nousresearch.com/v1"),
         "qwen-oauth" => Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
@@ -74,8 +100,15 @@ pub fn profile_base_url(profile: &str) -> Option<&'static str> {
     }
 }
 
+pub fn hermes_client_tag() -> String {
+    format!("{NOUS_CLIENT_TAG_PREFIX}{}", env!("CARGO_PKG_VERSION"))
+}
+
 pub fn nous_portal_tags() -> Value {
-    Value::Array(vec![Value::String(NOUS_PRODUCT_TAG.to_string())])
+    Value::Array(vec![
+        Value::String(NOUS_PRODUCT_TAG.to_string()),
+        Value::String(hermes_client_tag()),
+    ])
 }
 
 pub fn local_control_key_for_profile(profile: Option<&str>, key: &str) -> bool {
@@ -382,6 +415,28 @@ mod tests {
         assert!(profile_base_url("mimo").unwrap().contains("xiaomimimo.com"));
         assert!(supports_vision("xiaomi"));
         assert!(!supports_vision("kimi"));
+        assert_eq!(profile_base_url("kimi-coding"), Some(KIMI_CODE_BASE_URL));
+        assert!(is_kimi_code_base_url(KIMI_CODE_BASE_URL));
+        assert_eq!(
+            kimi_base_url_for_api_key("sk-kimi-test", KIMI_LEGACY_BASE_URL),
+            KIMI_CODE_BASE_URL
+        );
+        assert_eq!(
+            kimi_base_url_for_api_key("sk-legacy-test", KIMI_LEGACY_BASE_URL),
+            KIMI_LEGACY_BASE_URL
+        );
+    }
+
+    #[test]
+    fn nous_portal_tags_include_product_and_versioned_client() {
+        assert_eq!(
+            hermes_client_tag(),
+            format!("{NOUS_CLIENT_TAG_PREFIX}{}", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            nous_portal_tags(),
+            serde_json::json!([NOUS_PRODUCT_TAG, hermes_client_tag()])
+        );
     }
 
     #[test]

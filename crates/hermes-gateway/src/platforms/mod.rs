@@ -20,6 +20,8 @@ pub mod whatsapp_cloud;
 
 #[cfg(feature = "signal")]
 pub mod signal;
+#[cfg(feature = "signal")]
+pub mod signal_rate_limit;
 
 #[cfg(feature = "matrix")]
 pub mod matrix;
@@ -56,6 +58,9 @@ pub mod sms;
 
 #[cfg(feature = "homeassistant")]
 pub mod homeassistant;
+
+#[cfg(feature = "ntfy")]
+pub mod ntfy;
 
 #[cfg(feature = "api-server")]
 pub mod api_server;

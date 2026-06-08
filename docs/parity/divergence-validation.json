@@ -220,7 +220,7 @@
       "matched_files": 2,
       "matched_sample": [
         "crates/hermes-agent/src/api_bridge.rs",
-        "crates/hermes-agent/src/python_alignment.rs"
+        "crates/hermes-agent/src/message_sanitization.rs"
       ],
       "overdue": false,
       "owner": "sheawinkler",

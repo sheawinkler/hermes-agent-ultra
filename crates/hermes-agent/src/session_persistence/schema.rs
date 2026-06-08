@@ -183,6 +183,7 @@ const SESSIONS_COLUMNS: &[(&str, &str)] = &[
     ("handoff_state", "TEXT"),
     ("handoff_platform", "TEXT"),
     ("handoff_error", "TEXT"),
+    ("rewind_count", "INTEGER NOT NULL DEFAULT 0"),
 ];
 
 const MESSAGES_COLUMNS: &[(&str, &str)] = &[
@@ -198,6 +199,7 @@ const MESSAGES_COLUMNS: &[(&str, &str)] = &[
     ("platform_message_id", "TEXT"),
     ("observed", "INTEGER DEFAULT 0"),
     ("created_at", "TEXT"),
+    ("active", "INTEGER NOT NULL DEFAULT 1"),
 ];
 
 fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, AgentError> {
@@ -470,7 +472,18 @@ fn ensure_core_indexes(conn: &Connection) -> Result<(), AgentError> {
         )
         .map_err(|e| AgentError::Io(format!("platform_message_id index: {e}")))?;
     }
+    if table_has_column(conn, "messages", "active")? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_messages_session_active
+             ON messages(session_id, active, id)",
+        )
+        .map_err(|e| AgentError::Io(format!("active message index: {e}")))?;
+    }
     Ok(())
+}
+
+pub(crate) fn table_has_column_pub(conn: &Connection, table: &str, column: &str) -> bool {
+    table_has_column(conn, table, column).unwrap_or(false)
 }
 
 /// Initialize or migrate the database schema to Python `hermes_state` parity.

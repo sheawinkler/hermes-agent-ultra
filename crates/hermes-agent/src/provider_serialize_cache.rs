@@ -14,6 +14,8 @@ struct MessagesCacheKey {
     count: usize,
     content_hash: u64,
     strict: bool,
+    model_hash: u64,
+    profile_hash: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,21 +67,40 @@ impl ProviderSerializeCache {
         }
     }
 
-    pub fn sanitized_openai_messages(&self, messages: &[Message], strict: bool) -> Value {
-        let key = messages_cache_key(messages, strict);
+    pub fn sanitized_openai_messages(
+        &self,
+        messages: &[Message],
+        strict: bool,
+        effective_model: &str,
+        profile: Option<&str>,
+        extra_body: Option<&Value>,
+    ) -> Value {
+        let key = messages_cache_key(messages, strict, effective_model, profile);
         if let Ok(mut guard) = self.messages.lock() {
             if let Some((cached_key, arc)) = guard.as_ref() {
                 if *cached_key == key {
                     return Arc::clone(arc).as_ref().clone();
                 }
             }
-            let value = GenericProvider::sanitize_messages_for_strict_api(messages, strict);
+            let value = GenericProvider::sanitize_messages_for_api(
+                messages,
+                strict,
+                effective_model,
+                profile,
+                extra_body,
+            );
             let arc = Arc::new(value);
             let out = arc.as_ref().clone();
             *guard = Some((key, arc));
             return out;
         }
-        GenericProvider::sanitize_messages_for_strict_api(messages, strict)
+        GenericProvider::sanitize_messages_for_api(
+            messages,
+            strict,
+            effective_model,
+            profile,
+            extra_body,
+        )
     }
 
     pub fn formatted_openai_tools(&self, tools: &[ToolSchema]) -> Value {
@@ -146,7 +167,7 @@ impl ProviderSerializeCache {
 }
 
 pub(crate) fn anthropic_messages_cache_key(messages: &[Message], base_url: &str) -> AnthropicMessagesCacheKey {
-    let content = messages_cache_key(messages, false);
+    let content = messages_cache_key(messages, false, "", None);
     AnthropicMessagesCacheKey {
         count: content.count,
         content_hash: content.content_hash,
@@ -164,9 +185,18 @@ pub(crate) fn hash_str(s: &str) -> u64 {
     h.finish()
 }
 
-fn messages_cache_key(messages: &[Message], strict: bool) -> MessagesCacheKey {
+fn messages_cache_key(
+    messages: &[Message],
+    strict: bool,
+    effective_model: &str,
+    profile: Option<&str>,
+) -> MessagesCacheKey {
     let mut hasher = DefaultHasher::new();
     strict.hash(&mut hasher);
+    effective_model.hash(&mut hasher);
+    if let Some(profile) = profile {
+        profile.hash(&mut hasher);
+    }
     messages.len().hash(&mut hasher);
     for msg in messages {
         hash_message(msg, &mut hasher);
@@ -175,6 +205,8 @@ fn messages_cache_key(messages: &[Message], strict: bool) -> MessagesCacheKey {
         count: messages.len(),
         content_hash: hasher.finish(),
         strict,
+        model_hash: hash_str(effective_model),
+        profile_hash: profile.map(hash_str).unwrap_or(0),
     }
 }
 
@@ -266,8 +298,8 @@ mod tests {
                 }],
             ),
         ];
-        let a = cache.sanitized_openai_messages(&messages, true);
-        let b = cache.sanitized_openai_messages(&messages, true);
+        let a = cache.sanitized_openai_messages(&messages, true, "gpt-4o", None, None);
+        let b = cache.sanitized_openai_messages(&messages, true, "gpt-4o", None, None);
         assert_eq!(a, b);
     }
 

@@ -227,7 +227,31 @@ pub enum ShallowCommand {
         #[arg(trailing_var_arg = true, hide = true, allow_hyphen_values = true)]
         _rest: Vec<String>,
     },
-    Setup,
+    #[command(disable_help_flag = true)]
+    Setup {
+        #[arg(trailing_var_arg = true, hide = true, allow_hyphen_values = true)]
+        _rest: Vec<String>,
+    },
+    #[command(disable_help_flag = true)]
+    Portal {
+        #[arg(trailing_var_arg = true, hide = true, allow_hyphen_values = true)]
+        _rest: Vec<String>,
+    },
+    #[command(disable_help_flag = true)]
+    Systems {
+        #[arg(trailing_var_arg = true, hide = true, allow_hyphen_values = true)]
+        _rest: Vec<String>,
+    },
+    #[command(disable_help_flag = true)]
+    Kanban {
+        #[arg(trailing_var_arg = true, hide = true, allow_hyphen_values = true)]
+        _rest: Vec<String>,
+    },
+    #[command(name = "teams-pipeline", disable_help_flag = true)]
+    TeamsPipeline {
+        #[arg(trailing_var_arg = true, hide = true, allow_hyphen_values = true)]
+        _rest: Vec<String>,
+    },
     Status,
     Version,
     #[command(external_subcommand)]

@@ -12,6 +12,7 @@
 //! - Platform-specific adapters behind feature flags
 
 pub mod adapter;
+pub mod agent_cache;
 pub mod attachment_inference;
 pub mod background;
 pub mod channel_directory;
@@ -32,6 +33,7 @@ pub mod pairing_store;
 pub mod platform_requirements;
 pub mod platforms;
 pub mod session;
+pub mod session_control;
 pub mod ssrf;
 pub mod sticker_cache;
 pub mod stream;
@@ -52,6 +54,15 @@ pub use hermes_core::types::Message;
 // Re-export gateway orchestrator and runtime context
 pub use gateway::{
     DmAccessMode, Gateway, GatewayRuntimeContext, SessionTeardownContext, SessionTeardownHandler,
+};
+
+pub use agent_cache::{
+    agent_config_signature, extract_cache_busting_config, AgentConfigSignatureInput,
+    GatewayAgentCache,
+};
+pub use session_control::{
+    build_session_key, BusyInputMode, BusyMessageDecision, BusySessionCoordinator, MessageEvent,
+    MessageType, ProcessingOutcome, SessionSource,
 };
 
 // Re-export session management
@@ -139,6 +150,9 @@ pub use platforms::sms::SmsAdapter;
 
 #[cfg(feature = "homeassistant")]
 pub use platforms::homeassistant::HomeAssistantAdapter;
+
+#[cfg(feature = "ntfy")]
+pub use platforms::ntfy::NtfyAdapter;
 
 #[cfg(feature = "api-server")]
 pub use platforms::api_server::ApiServerAdapter;

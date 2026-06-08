@@ -37,7 +37,7 @@
       "id": "unknown_model_fallback",
       "op": "get_model_context_length",
       "input": { "model": "totally-unknown-model-xyz" },
-      "expected": 128000
+      "expected": 256000
     },
     {
       "id": "claude_supports_vision",

@@ -84,7 +84,7 @@ impl Default for AcpConfig {
 
 /// Start the ACP server from CLI context.
 pub async fn start_acp_server(config: AcpConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let session_manager = Arc::new(SessionManager::new());
+    let session_manager = Arc::new(SessionManager::new_with_default_persistence());
     let event_sink = Arc::new(EventSink::default());
     let permission_store = Arc::new(PermissionStore::new());
 

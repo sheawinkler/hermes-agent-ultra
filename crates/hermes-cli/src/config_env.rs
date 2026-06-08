@@ -73,7 +73,7 @@ pub fn hydrate_env_from_config(config: &GatewayConfig) -> usize {
         }
 
         for (extra_key, extra_val) in &platform_cfg.extra {
-            if let Some(value) = scalarish_json_to_string(extra_val) {
+            if let Some(value) = platform_extra_json_to_env_string(extra_key, extra_val) {
                 let key = normalize_env_component(extra_key);
                 applied += set_if_absent_owned(format!("{}_{}", scoped_prefix, key), value.clone());
                 applied += set_if_absent_owned(format!("{}_{}", platform_prefix, key), value);
@@ -143,6 +143,20 @@ fn normalize_env_component(raw: &str) -> String {
         }
     }
     out.trim_matches('_').to_string()
+}
+
+fn platform_extra_json_to_env_string(key: &str, value: &Value) -> Option<String> {
+    if key == "reply_to_mode" {
+        return match value {
+            Value::String(s) => {
+                let normalized = s.trim().to_ascii_lowercase();
+                matches!(normalized.as_str(), "off" | "first" | "all").then_some(normalized)
+            }
+            Value::Bool(b) => Some(if *b { "true" } else { "false" }.to_string()),
+            _ => None,
+        };
+    }
+    scalarish_json_to_string(value)
 }
 
 fn scalarish_json_to_string(value: &Value) -> Option<String> {

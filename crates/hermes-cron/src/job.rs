@@ -72,6 +72,7 @@ pub enum DeliverTarget {
     BlueBubbles,
     Sms,
     HomeAssistant,
+    Ntfy,
 }
 
 impl DeliverTarget {
@@ -95,6 +96,7 @@ impl DeliverTarget {
             DeliverTarget::BlueBubbles => "bluebubbles",
             DeliverTarget::Sms => "sms",
             DeliverTarget::HomeAssistant => "homeassistant",
+            DeliverTarget::Ntfy => "ntfy",
         }
     }
 }
@@ -119,6 +121,7 @@ pub fn deliver_target_from_str(value: &str) -> Option<DeliverTarget> {
         "bluebubbles" | "imessage" => Some(DeliverTarget::BlueBubbles),
         "sms" => Some(DeliverTarget::Sms),
         "homeassistant" | "ha" => Some(DeliverTarget::HomeAssistant),
+        "ntfy" => Some(DeliverTarget::Ntfy),
         _ => None,
     }
 }

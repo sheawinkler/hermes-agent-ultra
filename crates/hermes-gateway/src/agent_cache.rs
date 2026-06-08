@@ -50,7 +50,11 @@ fn fingerprint_secret(raw: &str) -> Value {
     hasher.update(raw.as_bytes());
     serde_json::json!({
         "len": raw.chars().count(),
-        "sha256": format!("{:x}", hasher.finalize()),
+        "sha256": hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
     })
 }
 
@@ -103,7 +107,11 @@ pub fn agent_config_signature(input: &AgentConfigSignatureInput) -> String {
     let encoded = serde_json::to_vec(&payload).unwrap_or_default();
     let mut hasher = Sha256::new();
     hasher.update(encoded);
-    format!("{:x}", hasher.finalize())
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()
 }
 
 fn object_subkey<'a>(config: &'a Value, section: &str, key: &str) -> Option<&'a Value> {

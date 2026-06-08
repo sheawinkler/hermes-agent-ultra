@@ -251,14 +251,8 @@ impl NtfyAdapter {
             .filter(|v| !v.is_empty())
             .unwrap_or(inner.config.topic.as_str())
             .to_string();
-        let incoming = IncomingMessage {
-            platform: "ntfy".to_string(),
-            chat_id: topic.clone(),
-            user_id: topic,
-            text,
-            message_id: Some(message_id),
-            is_dm: true,
-        };
+        let mut incoming = IncomingMessage::new("ntfy", topic.clone(), topic, text, true);
+        incoming.message_id = Some(message_id);
         if let Some(tx) = inner.inbound_tx.read().await.as_ref() {
             tx.send(incoming)
                 .await

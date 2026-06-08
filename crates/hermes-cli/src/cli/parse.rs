@@ -33,7 +33,7 @@ impl Cli {
         let command = match globals.command {
             None => None,
             Some(ShallowCommand::Hermes) => Some(CliCommand::Hermes),
-            Some(ShallowCommand::Setup) => Some(CliCommand::Setup),
+            Some(ShallowCommand::Setup { .. }) => Some(commands::parse_setup(&args)?),
             Some(ShallowCommand::Status) => Some(CliCommand::Status),
             Some(ShallowCommand::Version) => Some(CliCommand::Version),
             Some(ShallowCommand::PluginExternal(parts)) => Some(CliCommand::PluginExternal(parts)),
@@ -74,6 +74,10 @@ fn parse_shallow_command(
         ShallowCommand::RouteHealth { .. } => commands::parse_route_health(args),
         ShallowCommand::RouteAutotune { .. } => commands::parse_route_autotune(args),
         ShallowCommand::IncidentPack { .. } => commands::parse_incident_pack(args),
+        ShallowCommand::Portal { .. } => commands::parse_portal(args),
+        ShallowCommand::Systems { .. } => commands::parse_systems(args),
+        ShallowCommand::Kanban { .. } => commands::parse_kanban(args),
+        ShallowCommand::TeamsPipeline { .. } => commands::parse_teams_pipeline(args),
         ShallowCommand::Dashboard { .. } => commands::parse_dashboard(args),
         ShallowCommand::Debug { .. } => commands::parse_debug(args),
         ShallowCommand::Logs { .. } => commands::parse_logs(args),
@@ -106,7 +110,7 @@ fn parse_shallow_command(
         ShallowCommand::Uninstall { .. } => commands::parse_uninstall(args),
         ShallowCommand::Lumio { .. } => commands::parse_lumio(args),
         ShallowCommand::Hermes
-        | ShallowCommand::Setup
+        | ShallowCommand::Setup { .. }
         | ShallowCommand::Status
         | ShallowCommand::Version
         | ShallowCommand::PluginExternal(_) => unreachable!("handled in first pass"),

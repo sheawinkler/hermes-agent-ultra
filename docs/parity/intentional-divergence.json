@@ -167,7 +167,7 @@
       "rationale": "Equivalent Codex task completion is covered by provider routing and codex_ack continuation tests; duplicating Python's parallel turn entry adds maintenance without changing default UX.",
       "path_prefixes": [
         "crates/hermes-agent/src/api_bridge.rs",
-        "crates/hermes-agent/src/python_alignment.rs"
+        "crates/hermes-agent/src/message_sanitization.rs"
       ]
     },
     {

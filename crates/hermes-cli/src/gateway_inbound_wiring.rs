@@ -57,9 +57,14 @@ pub async fn wire_gateway_inbound_vision(
     } else {
         serde_json::from_value(config.tts.clone()).ok()
     };
+    let stt_cfg: Option<hermes_config::voice::SttConfig> = if config.stt.is_null() {
+        None
+    } else {
+        serde_json::from_value(config.stt.clone()).ok()
+    };
     let voice_tools = VoiceMediaToolConfig {
         tts: tts_cfg.clone(),
-        stt: None,
+        stt: stt_cfg.clone(),
     };
     register_agent_builtin_tools_with_voice(
         tool_registry,
@@ -72,7 +77,7 @@ pub async fn wire_gateway_inbound_vision(
     let preparer = Arc::new(AgentInboundPreparer::new(auxiliary));
     gateway.set_inbound_preparer(preparer).await;
 
-    let (voice_cfg, stt_enabled) = voice_config_from_app(tts_cfg.as_ref(), None);
+    let (voice_cfg, stt_enabled) = voice_config_from_app(tts_cfg.as_ref(), stt_cfg.as_ref());
     let stt_config = hermes_config::voice::SttConfig::default();
     let manager = Arc::new(VoiceManager::with_stt_config(voice_cfg, stt_config));
     gateway.set_voice_runtime(manager, stt_enabled).await;

@@ -569,7 +569,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, interest.enabled|extract_mode|max_topics|llm_on_session_end|per_turn_buffer|per_turn_persist|promote_min_evidence|promote_min_confidence|min_turn_chars, kanban.dispatch_in_gateway, agent.api_max_retries, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, insights.contribution.enabled|endpoint|upload_interests|upload_skills|on_session_end|skill_min_age_hours|redacted_body|installation_token|auth_token, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, interest.enabled|extract_mode|max_topics|llm_on_session_end|per_turn_buffer|per_turn_persist|promote_min_evidence|promote_min_confidence|min_turn_chars, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, insights.contribution.enabled|endpoint|upload_interests|upload_skills|on_session_end|skill_min_age_hours|redacted_body|installation_token|auth_token, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn parse_bool_config_value(value: &str, field: &str) -> Result<bool, ConfigError> {
     let normalized = value.trim().to_ascii_lowercase();
@@ -670,6 +670,9 @@ fn apply_user_config_patch_flat(
         }
         "system_prompt" => {
             config.system_prompt = Some(value.to_string());
+        }
+        "prefill_messages_file" => {
+            config.prefill_messages_file = Some(value.to_string());
         }
         other => {
             return Err(ConfigError::NotFound(format!(
@@ -790,6 +793,25 @@ fn apply_user_config_patch_dotted(
             config.agent.api_max_retries = Some(value.parse().map_err(|_| {
                 ConfigError::ValidationError(format!(
                     "agent.api_max_retries must be a non-negative integer: {value}"
+                ))
+            })?);
+        }
+        ["delegation", "model"] => {
+            config.delegation.model = Some(value.to_string());
+        }
+        ["delegation", "provider"] => {
+            config.delegation.provider = Some(value.to_string());
+        }
+        ["delegation", "base_url"] => {
+            config.delegation.base_url = Some(value.to_string());
+        }
+        ["delegation", "api_key"] => {
+            config.delegation.api_key = Some(value.to_string());
+        }
+        ["delegation", "max_spawn_depth"] => {
+            config.delegation.max_spawn_depth = Some(value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "delegation.max_spawn_depth must be a non-negative integer: {value}"
                 ))
             })?);
         }
@@ -1027,6 +1049,12 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "(not set)".to_string()),
+            "prefill_messages_file" => config
+                .prefill_messages_file
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "(not set)".to_string()),
             other => {
                 return Err(ConfigError::NotFound(format!(
                     "unknown config key: {} (supported: {})",
@@ -1079,6 +1107,39 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
         ["sessions", "vacuum_after_prune"] => Ok(config.sessions.vacuum_after_prune.to_string()),
         ["sessions", "min_interval_hours"] => Ok(config.sessions.min_interval_hours.to_string()),
         ["kanban", "dispatch_in_gateway"] => Ok(config.kanban.dispatch_in_gateway.to_string()),
+        ["delegation", "model"] => Ok(config
+            .delegation
+            .model
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["delegation", "provider"] => Ok(config
+            .delegation
+            .provider
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["delegation", "base_url"] => Ok(config
+            .delegation
+            .base_url
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["delegation", "api_key"] => Ok(config
+            .delegation
+            .api_key
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(mask_secret)
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["delegation", "max_spawn_depth"] => Ok(config
+            .delegation
+            .max_spawn_depth
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
         ["agent", "api_max_retries"] | ["agent", "apiMaxRetries"] => Ok(config
             .agent
             .api_max_retries
@@ -1969,6 +2030,9 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
     if let Ok(v) = std::env::var("HERMES_SYSTEM_PROMPT") {
         config.system_prompt = Some(v);
     }
+    if let Some(v) = env_var_nonempty("HERMES_PREFILL_MESSAGES_FILE") {
+        config.prefill_messages_file = Some(v);
+    }
     if let Ok(v) = std::env::var("HERMES_INSIGHTS_ENDPOINT") {
         let trimmed = v.trim();
         if !trimmed.is_empty() {
@@ -2157,6 +2221,106 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
 ///
 /// Checks:
 /// - max_turns > 0
+/// Resolve the prefill JSON file using upstream-compatible precedence.
+pub fn resolve_prefill_messages_file(config: &GatewayConfig) -> Option<String> {
+    env_var_nonempty("HERMES_PREFILL_MESSAGES_FILE")
+        .or_else(|| trimmed_optional(config.prefill_messages_file.as_deref()))
+        .or_else(|| trimmed_optional(config.agent.prefill_messages_file.as_deref()))
+}
+
+/// Resolve a configured prefill JSON path, mapping relative paths under HERMES_HOME.
+pub fn resolve_prefill_messages_path(config: &GatewayConfig) -> Option<PathBuf> {
+    let path = expand_home_path(&resolve_prefill_messages_file(config)?);
+    if path.is_absolute() {
+        return Some(path);
+    }
+    let home = config
+        .home_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(paths::hermes_home);
+    Some(home.join(path))
+}
+
+/// Load configured ephemeral prefill messages.
+pub fn load_prefill_messages(config: &GatewayConfig) -> Vec<hermes_core::Message> {
+    let Some(path) = resolve_prefill_messages_path(config) else {
+        return Vec::new();
+    };
+    load_prefill_messages_file(&path)
+}
+
+pub fn load_prefill_messages_file(path: &Path) -> Vec<hermes_core::Message> {
+    if !path.exists() {
+        tracing::warn!("Prefill messages file not found: {}", path.display());
+        return Vec::new();
+    }
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to load prefill messages from {}: {}",
+                path.display(),
+                err
+            );
+            return Vec::new();
+        }
+    };
+    let value = match serde_json::from_str::<serde_json::Value>(&contents) {
+        Ok(value) => value,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to parse prefill messages from {}: {}",
+                path.display(),
+                err
+            );
+            return Vec::new();
+        }
+    };
+    if !value.is_array() {
+        tracing::warn!(
+            "Prefill messages file must contain a JSON array: {}",
+            path.display()
+        );
+        return Vec::new();
+    }
+    match serde_json::from_value::<Vec<hermes_core::Message>>(value) {
+        Ok(messages) => messages,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to parse prefill messages from {}: {}",
+                path.display(),
+                err
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn trimmed_optional(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn expand_home_path(raw: &str) -> PathBuf {
+    let trimmed = raw.trim();
+    if trimmed == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home);
+        }
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(trimmed)
+}
+
 /// - SessionResetPolicy::Daily at_hour in 0..=23
 /// - All LLM providers with an api_key set have a non-empty value
 /// - Terminal timeout > 0
@@ -2197,6 +2361,14 @@ pub fn validate_config(config: &GatewayConfig) -> Result<(), ConfigError> {
                     "llm_providers.{name}.request_timeout_seconds must be a positive finite number"
                 )));
             }
+        }
+    }
+
+    if let Some(api_key) = &config.delegation.api_key {
+        if api_key.trim().is_empty() {
+            return Err(ConfigError::ValidationError(
+                "delegation.api_key must not be empty".into(),
+            ));
         }
     }
 

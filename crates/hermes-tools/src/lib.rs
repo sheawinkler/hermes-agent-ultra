@@ -21,6 +21,8 @@ pub mod kanban_failure;
 pub mod task_cleanup;
 pub mod media_extract;
 pub mod register_builtins;
+pub mod teams_pipeline;
+pub mod terminal_requirements;
 pub mod state_db;
 pub mod registry;
 pub mod rtk_filter;
@@ -100,6 +102,9 @@ pub use tools::mixture_of_agents::MixtureOfAgentsHandler;
 pub use tools::osv_check::OsvCheckHandler;
 pub use tools::process_registry::ProcessRegistryHandler;
 pub use tools::session_search::{SessionSearchBackend, SessionSearchHandler};
+pub use tools::spotify::{
+    SpotifyApiRequest, SpotifyBackend, SpotifyHandler, SpotifyHttpMethod, SpotifyTool,
+};
 pub use tools::skill_commands;
 pub use tools::skill_utils;
 pub use tools::skills::{SkillManageHandler, SkillViewHandler, SkillsListHandler};
@@ -110,7 +115,10 @@ pub use tools::transcription::TranscriptionHandler;
 pub use tools::tts::{TextToSpeechHandler, TtsBackend};
 pub use tools::tts_premium::TtsPremiumHandler;
 pub use tools::url_safety::UrlSafetyHandler;
-pub use tools::video::{VideoAnalyzeHandler, VideoBackend};
+pub use tools::video::{
+    VideoAnalyzeHandler, VideoBackend, VideoGenerateBackend, VideoGenerateHandler,
+    VideoGenerateRequest,
+};
 pub use tools::vision::{VisionAnalyzeHandler, VisionBackend};
 pub use tools::voice_mode::VoiceModeHandler;
 pub use tools::web::{WebExtractBackend, WebExtractHandler, WebSearchBackend, WebSearchHandler};
@@ -127,6 +135,10 @@ pub use backends::image_gen::FalImageGenBackend;
 pub use backends::memory::FileMemoryBackend;
 pub use backends::messaging::SignalMessagingBackend;
 pub use backends::session_search::SqliteSessionSearchBackend;
+pub use backends::spotify::{SpotifyRuntimeCredentials, SpotifyWebApiBackend};
+pub use backends::video_gen::{
+    FalVideoGenBackend, VideoGenBackend, XaiVideoCredentials, XaiVideoGenBackend,
+};
 pub use state_db::{
     StateDb, StateDbError, TokenCountUpdate, decode_content_preview, sanitize_fts5_query,
     SearchMessageMatch,
@@ -137,6 +149,19 @@ pub use backends::video::VisionFrameSamplingVideoBackend;
 pub use backends::web::{
     DdgsSearchBackend, ExaSearchBackend, FallbackSearchBackend, FirecrawlExtractBackend,
     SimpleExtractBackend, TavilySearchBackend, search_backend_from_env_or_fallback,
+};
+
+pub use teams_pipeline::{
+    build_summary_prompt, collect_call_metrics, collect_participants,
+    default_change_type_for_resource, expected_client_state, extract_meeting_id_from_resource,
+    heuristic_summary, maintain_graph_subscriptions, parse_summary_json, render_summary_markdown,
+    resolve_teams_pipeline_store_path, select_preferred_transcript, sync_graph_subscription_record,
+    GraphSubscription, HeuristicTeamsSummarizer, MeetingArtifact, MicrosoftGraphClient,
+    MicrosoftGraphTeamsBackend, MicrosoftGraphTokenProvider, SummaryParts, TeamsGraphBackend,
+    TeamsMeetingPipeline, TeamsMeetingPipelineJob, TeamsMeetingRef, TeamsMeetingSummaryPayload,
+    TeamsPipelineConfig, TeamsPipelineError, TeamsPipelineResult, TeamsPipelineStore,
+    TeamsSinkKind, TeamsSinkWriter, TeamsSummarizer, TeamsTranscriber,
+    TranscriptionToolTeamsTranscriber, DEFAULT_TEAMS_PIPELINE_STORE_FILENAME,
 };
 
 // Re-export builtin registration helper

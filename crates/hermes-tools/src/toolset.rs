@@ -44,6 +44,18 @@ pub const TOOLSET_BROWSER: &[&str] = &[
 pub const TOOLSET_VISION: &[&str] = &["vision_analyze", "video_analyze"];
 /// Image generation tools.
 pub const TOOLSET_IMAGE_GEN: &[&str] = &["image_generate"];
+/// Video generation tools.
+pub const TOOLSET_VIDEO_GEN: &[&str] = &["video_generate"];
+/// Spotify Web API tools.
+pub const TOOLSET_SPOTIFY: &[&str] = &[
+    "spotify_playback",
+    "spotify_devices",
+    "spotify_queue",
+    "spotify_search",
+    "spotify_playlists",
+    "spotify_albums",
+    "spotify_library",
+];
 /// Skills management tools.
 pub const TOOLSET_SKILLS: &[&str] = &["skills_list", "skill_view", "skill_manage"];
 /// Persistent memory tools.
@@ -189,6 +201,14 @@ impl ToolsetManager {
             TOOLSET_IMAGE_GEN.iter().map(|s| s.to_string()).collect(),
         ));
         self.register(Toolset::new(
+            "video_gen",
+            TOOLSET_VIDEO_GEN.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "spotify",
+            TOOLSET_SPOTIFY.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
             "skills",
             TOOLSET_SKILLS.iter().map(|s| s.to_string()).collect(),
         ));
@@ -277,6 +297,8 @@ impl ToolsetManager {
                 "browser",
                 "vision",
                 "image_gen",
+                "video_gen",
+                "spotify",
                 "skills",
                 "memory",
                 "session_search",
@@ -345,6 +367,27 @@ impl ToolsetManager {
         self.register(Toolset::with_includes(
             "hermes-wecom",
             vec!["hermes-cli"].into_iter().map(String::from).collect(),
+        ));
+        self.register(Toolset::with_includes(
+            "hermes-api-server",
+            vec![
+                "web",
+                "terminal",
+                "file",
+                "browser",
+                "vision",
+                "image_gen",
+                "memory",
+                "session_search",
+                "todo",
+                "code_execution",
+                "delegation",
+                "cronjob",
+                "homeassistant",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
         ));
     }
 

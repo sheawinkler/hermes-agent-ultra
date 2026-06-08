@@ -28,7 +28,37 @@ pub fn default_platform_toolsets() -> HashMap<String, Vec<String>> {
     map.insert("feishu".to_string(), vec!["hermes-feishu".to_string()]);
     map.insert("weixin".to_string(), vec!["hermes-weixin".to_string()]);
     map.insert("wecom".to_string(), vec!["hermes-wecom".to_string()]);
+    map.insert(
+        "api_server".to_string(),
+        vec!["hermes-api-server".to_string()],
+    );
     map
+}
+
+fn canonical_toolset_token(token: &str) -> String {
+    let token = token.trim().to_ascii_lowercase();
+    match token.as_str() {
+        "image-gen" | "imagegen" => "image_gen".to_string(),
+        "video-gen" | "videogen" => "video_gen".to_string(),
+        "code-execution" | "code" => "code_execution".to_string(),
+        "session-search" => "session_search".to_string(),
+        "home-assistant" | "home_assistant" | "ha" => "homeassistant".to_string(),
+        "mixture-of-agents" | "mixture-of-agent" | "mixture" | "moa" => {
+            "mixture_of_agents".to_string()
+        }
+        "browser-use" | "browser_use" => "browser".to_string(),
+        "voice-mode" | "voice_mode" => "voice".to_string(),
+        "hermes_cli" => "hermes-cli".to_string(),
+        "hermes_api_server" => "hermes-api-server".to_string(),
+        "hermes_telegram" => "hermes-telegram".to_string(),
+        "hermes_discord" => "hermes-discord".to_string(),
+        "hermes_whatsapp" => "hermes-whatsapp".to_string(),
+        "hermes_slack" => "hermes-slack".to_string(),
+        "hermes_feishu" => "hermes-feishu".to_string(),
+        "hermes_weixin" => "hermes-weixin".to_string(),
+        "hermes_wecom" => "hermes-wecom".to_string(),
+        _ => token,
+    }
 }
 
 /// Optional system hint when entry platform differs from available exec backends.
@@ -78,27 +108,37 @@ pub fn resolve_platform_tool_names(
 
     let mut names: HashSet<String> = HashSet::new();
     for token in requested {
-        let trimmed = token.trim();
-        if trimmed.is_empty() {
+        let original = token.trim();
+        if original.is_empty() {
             continue;
         }
-        if registry.get_tool(trimmed).is_some() {
-            names.insert(trimmed.to_string());
-            continue;
-        }
-        match manager.resolve_toolset(trimmed) {
-            Ok(resolved) => {
+        let canonical = canonical_toolset_token(original);
+        let candidates = if canonical == original {
+            vec![canonical.as_str()]
+        } else {
+            vec![canonical.as_str(), original]
+        };
+        let mut matched = false;
+        for candidate in candidates {
+            if let Ok(resolved) = manager.resolve_toolset(candidate) {
                 for name in resolved {
                     names.insert(name);
                 }
+                matched = true;
+                break;
             }
-            Err(_) => {
-                tracing::warn!(
-                    "Unknown platform toolset/token '{}' for platform '{}'",
-                    trimmed,
-                    platform
-                );
+            if registry.get_tool(candidate).is_some() {
+                names.insert(candidate.to_string());
+                matched = true;
+                break;
             }
+        }
+        if !matched {
+            tracing::warn!(
+                "Unknown platform toolset/token '{}' for platform '{}'",
+                original,
+                platform
+            );
         }
     }
 

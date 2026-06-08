@@ -15,17 +15,39 @@ fn read_json(path: &str) -> Value {
         .unwrap_or_else(|e| panic!("failed parsing {}: {}", full.display(), e))
 }
 
+fn rust_source_candidates(file: &str) -> Vec<PathBuf> {
+    let root = repo_root();
+    let mut paths = vec![root.join(file)];
+    if file == "crates/hermes-cli/src/cli.rs" {
+        paths.push(root.join("crates/hermes-cli/src/cli/tests.rs"));
+        if let Ok(entries) = std::fs::read_dir(root.join("crates/hermes-cli/src/cli")) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                    paths.push(path);
+                }
+            }
+        }
+    }
+    paths
+}
+
 fn rust_test_exists(file: &str, name: &str) -> bool {
-    let full = repo_root().join(file);
-    let source = std::fs::read_to_string(&full)
-        .unwrap_or_else(|e| panic!("failed reading referenced Rust file {}: {}", file, e));
     let needle = format!("fn {name}");
-    let Some(index) = source.find(&needle) else {
-        return false;
-    };
-    let start = index.saturating_sub(400);
-    let prefix = &source[start..index];
-    prefix.contains("#[test]") || prefix.contains("#[tokio::test]")
+    for full in rust_source_candidates(file) {
+        let Ok(source) = std::fs::read_to_string(&full) else {
+            continue;
+        };
+        let Some(index) = source.find(&needle) else {
+            continue;
+        };
+        let start = index.saturating_sub(400);
+        let prefix = &source[start..index];
+        if prefix.contains("#[test]") || prefix.contains("#[tokio::test]") {
+            return true;
+        }
+    }
+    false
 }
 
 #[test]

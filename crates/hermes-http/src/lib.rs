@@ -150,8 +150,10 @@ impl HttpServerState {
         run_sessions_db_auto_maintenance(&config);
         let runtime_gateway_config = RuntimeGatewayConfig {
             streaming_enabled: config.streaming.enabled,
-            display: config.display.clone(),
             service_tier: config.agent.normalized_service_tier(),
+            display: config.display.clone(),
+            quick_commands: config.quick_commands.clone(),
+            kanban_dispatch_in_gateway: config.kanban.dispatch_in_gateway,
             ..RuntimeGatewayConfig::default()
         };
         let session_manager = Arc::new(gateway_session_manager_with_persistence(&config));
@@ -828,6 +830,11 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         .ok()
         .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
         .unwrap_or(false);
+    let max_delegate_depth = config
+        .delegation
+        .max_spawn_depth
+        .map(|depth| depth.max(1))
+        .unwrap_or_else(|| hermes_agent::agent_loop::AgentConfig::default().max_delegate_depth);
     AgentConfig {
         max_turns: config.max_turns,
         budget: config.budget.clone(),
@@ -881,6 +888,36 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         code_index_max_symbols: config.agent.code_index_max_symbols,
         lsp_context_enabled: config.agent.lsp_context_enabled,
         lsp_context_max_chars: config.agent.lsp_context_max_chars,
+        max_delegate_depth,
+        delegation_model: config
+            .delegation
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_provider: config
+            .delegation
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_base_url: config
+            .delegation
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        delegation_api_key: config
+            .delegation
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        prefill_messages: hermes_config::load_prefill_messages(config),
         ..AgentConfig::default()
     }
 }

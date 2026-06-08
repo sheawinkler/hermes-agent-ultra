@@ -1,4 +1,6 @@
-//! Full ACP request handler that implements the ACP protocol methods.
+//! Full ACP request handler — implements all ACP protocol methods.
+//!
+//! Mirrors the Python `acp_adapter/server.py` HermesACPAgent class.
 
 use std::collections::HashMap;
 use std::fs::File;

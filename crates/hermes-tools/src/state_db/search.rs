@@ -6,6 +6,7 @@ use regex::Regex;
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 
+use super::columns::table_has_column;
 use super::content::decode_content_preview;
 use super::error::StateDbError;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -243,6 +244,12 @@ pub fn search_messages(
     Ok(matches)
 }
 
+fn append_active_message_filter(conn: &Connection, where_clauses: &mut Vec<String>) {
+    if table_has_column(conn, "messages", "active").unwrap_or(false) {
+        where_clauses.push("m.active = 1".to_string());
+    }
+}
+
 fn append_source_filters(
     where_clauses: &mut Vec<String>,
     params_vec: &mut Vec<rusqlite::types::Value>,
@@ -296,6 +303,7 @@ fn search_fts_main(
         role_filter,
         "s",
     );
+    append_active_message_filter(conn, &mut where_clauses);
     params_vec.push((limit as i64).into());
     params_vec.push((offset as i64).into());
     let sql = format!(
@@ -361,6 +369,7 @@ fn search_cjk(
             role_filter,
             "s",
         );
+        append_active_message_filter(conn, &mut tri_where);
         tri_params.push((limit as i64).into());
         tri_params.push((offset as i64).into());
         let tri_sql = format!(
@@ -438,6 +447,7 @@ fn search_cjk_like(
         role_filter,
         "s",
     );
+    append_active_message_filter(conn, &mut like_where);
     like_params.push((limit as i64).into());
     like_params.push((offset as i64).into());
 
