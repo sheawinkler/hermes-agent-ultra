@@ -8,6 +8,7 @@ description = "MCP (Model Context Protocol) integration for Hermes Agent"
 
 [dependencies]
 hermes-core = { workspace = true }
+hermes-config = { workspace = true }
 hermes-tools = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

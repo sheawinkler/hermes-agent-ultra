@@ -194,10 +194,9 @@ impl SkillOrchestrator {
         }
     }
 
-    /// Create an orchestrator using the default `~/.hermes/skills/` directory.
+    /// Create an orchestrator using the default skills directory.
     pub fn default_dir() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        Self::new(home.join(".hermes").join("skills"))
+        Self::new(hermes_config::skills_dir())
     }
 
     /// Scan the skills directory and build the command mapping.

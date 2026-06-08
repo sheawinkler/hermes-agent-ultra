@@ -67,12 +67,9 @@ impl FileTodoBackend {
         Self { file_path, items: Mutex::new(items) }
     }
 
-    /// Create a backend using the default `~/.hermes/todos.json` path.
+    /// Create a backend using the default `<hermes_home>/todos.json` path.
     pub fn default_path() -> Self {
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_else(|_| ".".to_string());
-        let path = std::path::Path::new(&home).join(".hermes").join("todos.json");
+        let path = hermes_config::hermes_home().join("todos.json");
         Self::new(path)
     }
 

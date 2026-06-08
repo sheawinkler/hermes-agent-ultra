@@ -257,14 +257,16 @@ fn env_truthy(name: &str) -> bool {
 ///
 /// If `home_dir` is provided it overrides the `HERMES_HOME` env var.
 pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError> {
-    // Load .env before anything else so env overrides see those values.
-    load_dotenv();
+    // Migrate legacy home names and ensure the effective directory exists.
+    let effective_home_path = crate::migrate::ensure_migrated_hermes_home(home_dir);
+    let effective_home = effective_home_path.to_string_lossy().into_owned();
+    // SAFETY: startup path — align process env with migrated home before dotenv.
+    unsafe {
+        std::env::set_var("HERMES_HOME", &effective_home);
+    }
 
-    // Determine effective hermes home
-    let effective_home = home_dir
-        .map(|s| s.to_string())
-        .or_else(|| std::env::var("HERMES_HOME").ok())
-        .unwrap_or_else(|| paths::hermes_home().to_string_lossy().to_string());
+    // Load .env after migration so we read from the canonical home.
+    load_dotenv();
 
     let config_yaml_path = Path::new(&effective_home).join("config.yaml");
     let cli_config_yaml_path = Path::new(&effective_home).join("cli-config.yaml");

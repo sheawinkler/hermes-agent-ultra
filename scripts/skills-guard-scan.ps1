@@ -1,6 +1,6 @@
-# Scan ~/.hermes/skills for SkillGuard violations (CI / local audit).
+# Scan ~/.hermes-agent-ultra/skills for SkillGuard violations (CI / local audit).
 param(
-    [string]$SkillsDir = "$env:USERPROFILE\.hermes\skills",
+    [string]$SkillsDir = "$env:USERPROFILE\.hermes-agent-ultra\skills",
     [string]$Mode = "strict"
 )
 

@@ -10,8 +10,8 @@
 
 脚本会：
 
-1. 将 `HERMES_HOME` 设为 `%LOCALAPPDATA%\hermes`（你的 Discord 配置在这里）
-2. 将日志写入 `%LOCALAPPDATA%\hermes\logs\hermes.log`
+1. 将 `HERMES_HOME` 设为 `%LOCALAPPDATA%\hermes-agent-ultra`（若仅有旧的 `\hermes` 目录则自动复制迁移）
+2. 将日志写入 `%LOCALAPPDATA%\hermes-agent-ultra\logs\hermes.log`
 3. 启动前结束冲突的 Python `hermes gateway` 进程
 4. 运行 `hermes-agent-ultra.exe -C <HERMES_HOME> gateway run`
 
@@ -33,7 +33,7 @@
 另开一个终端：
 
 ```powershell
-Get-Content "$env:LOCALAPPDATA\hermes\logs\hermes.log" -Wait -Tail 30 |
+Get-Content "$env:LOCALAPPDATA\hermes-agent-ultra\logs\hermes.log" -Wait -Tail 30 |
   Select-String "Discord|inbound|Failed to route"
 ```
 
@@ -41,17 +41,17 @@ Get-Content "$env:LOCALAPPDATA\hermes\logs\hermes.log" -Wait -Tail 30 |
 
 ## 可选：永久设置 HERMES_HOME
 
-若希望所有 `hermes` 命令默认读 `%LOCALAPPDATA%\hermes`：
+若希望所有 `hermes` 命令默认读 `%LOCALAPPDATA%\hermes-agent-ultra`：
 
 ```powershell
 [Environment]::SetEnvironmentVariable(
   'HERMES_HOME',
-  "$env:LOCALAPPDATA\hermes",
+  "$env:LOCALAPPDATA\hermes-agent-ultra",
   'User'
 )
 ```
 
-设置后需重新打开终端。
+设置后需重新打开终端。旧的 `%LOCALAPPDATA%\hermes` 目录会保留作备份。
 
 ## 未改动的配置
 

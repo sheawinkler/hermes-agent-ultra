@@ -201,7 +201,10 @@ impl ToolHandler for SkillViewHandler {
 fn default_skill_roots() -> Vec<PathBuf> {
     let mut roots = vec![hermes_config::skills_dir()];
     if let Some(home) = user_home_dir() {
-        roots.push(home.join(".hermes").join("skills"));
+        let legacy = home.join(hermes_config::LEGACY_HOME_DIR).join("skills");
+        if legacy.exists() {
+            roots.push(legacy);
+        }
     }
     roots.sort();
     roots.dedup();
@@ -580,7 +583,7 @@ impl SkillManageHandler {
         self.skill_roots
             .first()
             .cloned()
-            .unwrap_or_else(|| PathBuf::from(".hermes/skills"))
+            .unwrap_or_else(|| hermes_config::skills_dir())
     }
 }
 
@@ -984,7 +987,7 @@ impl ToolHandler for SkillManageHandler {
             "skill_manage",
             "Manage skills (create, edit, patch, delete, write_file, remove_file). \
              Skills are procedural memory — reusable approaches for recurring task types. \
-             New skills are created in ~/.hermes/skills/; existing skills can be modified wherever they live.",
+             New skills are created in ~/.hermes-agent-ultra/skills/; existing skills can be modified wherever they live.",
             JsonSchema::object(props, vec!["action".into(), "name".into()]),
         )
     }

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Scan ~/.hermes/skills for SkillGuard violations (CI / local audit).
+# Scan ~/.hermes-agent-ultra/skills for SkillGuard violations (CI / local audit).
 set -euo pipefail
 
-SKILLS_DIR="${1:-${HOME}/.hermes/skills}"
+SKILLS_DIR="${1:-${HOME}/.hermes-agent-ultra/skills}"
 MODE="${HERMES_SKILL_GUARD_MODE:-strict}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 

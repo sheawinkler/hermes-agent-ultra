@@ -584,8 +584,8 @@ pub fn load_interest_snapshot(
     let home = hermes_home
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var("HERMES_HOME").ok().map(std::path::PathBuf::from))
-        .or_else(|| dirs::home_dir().map(|h| h.join(".hermes-agent-ultra")))
-        .unwrap_or_else(|| std::path::PathBuf::from(".hermes-agent-ultra"));
+        .or_else(|| Some(hermes_config::hermes_home()))
+        .unwrap_or_else(hermes_config::hermes_home);
     let db_path = home.join("interest.db");
     let store = InterestStore::open(&db_path, config.clone()).ok()?;
     store.render_snapshot_block()

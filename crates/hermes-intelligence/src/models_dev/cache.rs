@@ -14,18 +14,8 @@ use serde_json::Value;
 use tracing::debug;
 
 /// Default disk cache path: `<HERMES_HOME>/models_dev_cache.json`.
-///
-/// Resolution order:
-/// 1. `$HERMES_HOME` env var
-/// 2. `<dirs::home_dir>/.hermes`
-/// 3. `./.hermes` as a last-resort fallback
 pub fn default_cache_path() -> PathBuf {
-    let home = std::env::var("HERMES_HOME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|d| d.join(".hermes")))
-        .unwrap_or_else(|| PathBuf::from(".hermes"));
-    home.join("models_dev_cache.json")
+    hermes_config::hermes_home().join("models_dev_cache.json")
 }
 
 /// Load a registry snapshot from disk; returns `None` on any failure.

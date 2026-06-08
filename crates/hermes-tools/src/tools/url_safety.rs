@@ -544,10 +544,7 @@ impl UrlSafetyHandler {
 impl Default for UrlSafetyHandler {
     fn default() -> Self {
         // Try to load from default path
-        let policy_path = dirs_home()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".hermes")
-            .join("website_policy.yaml");
+        let policy_path = hermes_config::hermes_home().join("website_policy.yaml");
 
         let policy = if policy_path.exists() {
             WebsitePolicy::from_file(policy_path)
@@ -594,16 +591,10 @@ impl ToolHandler for UrlSafetyHandler {
             "url_safety",
             "Check whether a URL is safe to access based on the website policy engine. \
              Evaluates domain whitelist/blacklist, path patterns, and regex rules. \
-             Policy is loaded from ~/.hermes/website_policy.yaml with hot-reload support.",
+             Policy is loaded from <hermes_home>/website_policy.yaml with hot-reload support.",
             JsonSchema::object(props, vec!["url".into()]),
         )
     }
-}
-
-fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
 }
 
 // ---------------------------------------------------------------------------

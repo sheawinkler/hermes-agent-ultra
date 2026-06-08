@@ -4,8 +4,8 @@
   Start (or stop) Hermes Agent Ultra gateway on Windows with stable paths and logging.
 
 .DESCRIPTION
-  - Uses %LOCALAPPDATA%\hermes as HERMES_HOME (Discord/Telegram config lives here).
-  - Writes logs to %LOCALAPPDATA%\hermes\logs\hermes.log
+  - Uses %LOCALAPPDATA%\hermes-agent-ultra as HERMES_HOME (migrates from legacy \hermes if needed).
+  - Writes logs to %LOCALAPPDATA%\hermes-agent-ultra\logs\hermes.log
   - Stops conflicting Python `hermes gateway` processes before start.
   - Does NOT change streaming or other config — only process/env setup.
 
@@ -22,11 +22,26 @@
 param(
     [switch] $Stop,
     [switch] $VerboseLog,
-    [string] $HermesHome = $(Join-Path $env:LOCALAPPDATA 'hermes'),
+    [string] $HermesHome = $(Join-Path $env:LOCALAPPDATA 'hermes-agent-ultra'),
     [string] $Binary = ''
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Ensure-MigratedHermesHome {
+    param([string] $TargetHome)
+    $legacyHome = Join-Path $env:LOCALAPPDATA 'hermes'
+    if (Test-Path -LiteralPath $TargetHome) {
+        return $TargetHome
+    }
+    if (Test-Path -LiteralPath $legacyHome) {
+        Write-Host "迁移 Hermes 数据: $legacyHome -> $TargetHome"
+        Copy-Item -LiteralPath $legacyHome -Destination $TargetHome -Recurse -Force
+        return $TargetHome
+    }
+    New-Item -ItemType Directory -Force -Path $TargetHome | Out-Null
+    return $TargetHome
+}
 
 function Resolve-HermesUltraBinary {
     param([string] $Override)
@@ -90,6 +105,7 @@ function Stop-ConflictingGateways {
 }
 
 $exe = Resolve-HermesUltraBinary -Override $Binary
+$HermesHome = Ensure-MigratedHermesHome -TargetHome $HermesHome
 $logDir = Join-Path $HermesHome 'logs'
 $logFile = Join-Path $logDir 'hermes.log'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null

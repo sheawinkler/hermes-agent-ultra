@@ -63,7 +63,7 @@ def resolve_config_path() -> Path:
 
     Resolution order:
       1. $HERMES_HOME/honcho.json      (profile-local, if it exists)
-      2. ~/.hermes/honcho.json          (default profile — shared host blocks live here)
+      2. ~/.hermes-agent-ultra/honcho.json          (default profile — shared host blocks live here)
       3. ~/.honcho/config.json          (global, cross-app interop)
 
     Returns the global path if none exist (for first-time setup writes).
@@ -73,9 +73,12 @@ def resolve_config_path() -> Path:
         return local_path
 
     # Default profile's config — host blocks accumulate here via setup/clone
-    default_path = Path.home() / ".hermes" / "honcho.json"
-    if default_path != local_path and default_path.exists():
-        return default_path
+    for default_path in (
+        Path.home() / ".hermes-agent-ultra" / "honcho.json",
+        Path.home() / ".hermes" / "honcho.json",
+    ):
+        if default_path != local_path and default_path.exists():
+            return default_path
 
     return resolve_global_config_path()
 

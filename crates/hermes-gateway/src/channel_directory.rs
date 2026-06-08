@@ -367,11 +367,7 @@ impl ChannelDirectory {
 }
 
 fn default_persist_path() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".hermes").join("channel_directory.json")
+    hermes_config::hermes_home().join("channel_directory.json")
 }
 
 // ---------------------------------------------------------------------------

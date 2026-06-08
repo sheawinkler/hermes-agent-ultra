@@ -71,11 +71,9 @@ impl FileSkillStore {
         Self { skills_dir }
     }
 
-    /// Return the default skills directory: `~/.hermes/skills/`.
+    /// Return the default skills directory.
     pub fn default_dir() -> PathBuf {
-        directories::ProjectDirs::from("com", "hermes", "hermes")
-            .map(|dirs| dirs.data_dir().join("skills"))
-            .unwrap_or_else(|| PathBuf::from(".hermes/skills"))
+        hermes_config::skills_dir()
     }
 
     /// Validate a skill path segment (`name` / `category`) to prevent path traversal.

@@ -168,9 +168,8 @@ fn hook_context_spill_dir(agent: &AgentLoop) -> PathBuf {
         .hermes_home
         .as_deref()
         .map(PathBuf::from)
-        .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
-        .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
-        .unwrap_or_else(|| PathBuf::from(".hermes"));
+        .or_else(|| Some(hermes_config::hermes_home()))
+        .unwrap_or_else(hermes_config::hermes_home);
     hermes_home.join("hooks").join("spills")
 }
 

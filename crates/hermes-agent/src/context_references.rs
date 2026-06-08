@@ -590,12 +590,7 @@ fn ensure_reference_path_allowed(path: &Path) -> Result<(), String> {
     let home = canonicalize_or_normalize(
         &home_dir().ok_or_else(|| "home directory is unavailable".to_string())?,
     );
-    let hermes_home = canonicalize_or_normalize(
-        &std::env::var("HERMES_HOME")
-            .ok()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".hermes")),
-    );
+    let hermes_home = canonicalize_or_normalize(&hermes_config::hermes_home());
 
     let mut blocked_exact: Vec<PathBuf> = SENSITIVE_HOME_FILES
         .iter()
@@ -840,10 +835,13 @@ mod tests {
         let _home_guard = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
         let _hermes_guard = EnvGuard::set(
             "HERMES_HOME",
-            td.path().join(".hermes").to_string_lossy().as_ref(),
+            td.path()
+                .join(".hermes-agent-ultra")
+                .to_string_lossy()
+                .as_ref(),
         );
 
-        let hermes_env = td.path().join(".hermes/.env");
+        let hermes_env = td.path().join(".hermes-agent-ultra/.env");
         std::fs::create_dir_all(hermes_env.parent().unwrap()).unwrap();
         std::fs::write(&hermes_env, "API_KEY=secret\n").unwrap();
 
@@ -852,7 +850,7 @@ mod tests {
         std::fs::write(&ssh_key, "PRIVATE-KEY\n").unwrap();
 
         let result = preprocess_context_references_async(
-            "read @file:.hermes/.env and @file:.ssh/id_rsa",
+            "read @file:.hermes-agent-ultra/.env and @file:.ssh/id_rsa",
             td.path(),
             100_000,
             Some(td.path()),

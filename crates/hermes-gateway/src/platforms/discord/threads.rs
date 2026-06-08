@@ -78,9 +78,7 @@ impl ThreadParticipationTracker {
 }
 
 fn hermes_home_path() -> PathBuf {
-    std::env::var("HERMES_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(".hermes"))
+    hermes_config::hermes_home()
 }
 
 fn load_ids(path: &PathBuf) -> Result<HashSet<String>, GatewayError> {

@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
 SCHEDULE="${1:-17 */6 * * *}"
-LOG_FILE="${LOG_FILE:-$HOME/.hermes/logs/upstream-sync.log}"
+LOG_FILE="${LOG_FILE:-$HOME/.hermes-agent-ultra/logs/upstream-sync.log}"
 MARKER="# hermes-upstream-sync"
 CRON_SYNC_SCRIPT="${REPO_ROOT}/scripts/cron-upstream-sync.sh"
 SYNC_STRATEGY="${SYNC_STRATEGY:-merge}"

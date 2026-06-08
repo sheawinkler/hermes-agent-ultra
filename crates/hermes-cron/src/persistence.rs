@@ -1,9 +1,9 @@
 //! Job persistence layer for the cron scheduler.
 //!
 //! Provides a trait for persisting cron jobs and a file-based implementation
-//! that stores jobs as JSON files in `~/.hermes/cron/`.
+//! that stores jobs as JSON files under the Hermes cron data directory.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{collections::HashSet, ffi::OsStr};
 
 use async_trait::async_trait;
@@ -75,9 +75,9 @@ impl FileJobPersistence {
     /// Create a new file persistence instance using the default data directory.
     ///
     /// The default location is determined by the `directories` crate:
-    /// - macOS: `~/Library/Application Support/hermes/cron/`
-    /// - Linux: `~/.local/share/hermes/cron/`
-    /// - Windows: `C:\Users\{User}\AppData\Roaming\hermes\cron\`
+    /// - macOS: `~/Library/Application Support/hermes-agent-ultra/cron/`
+    /// - Linux: `~/.local/share/hermes-agent-ultra/cron/`
+    /// - Windows: `C:\Users\{User}\AppData\Roaming\hermes-agent-ultra\cron\`
     pub fn new() -> Self {
         Self {
             data_dir: default_data_dir(),
@@ -258,14 +258,51 @@ impl JobPersistence for FileJobPersistence {
 
 /// Return the user's data directory for Hermes.
 ///
-/// On macOS: ~/Library/Application Support/hermes
-/// On Linux: ~/.local/share/hermes
-/// On Windows: C:\Users\{User}\AppData\Roaming\hermes
+/// On macOS: ~/Library/Application Support/hermes-agent-ultra
+/// On Linux: ~/.local/share/hermes-agent-ultra
+/// On Windows: C:\Users\{User}\AppData\Roaming\hermes-agent-ultra
 fn default_data_dir() -> PathBuf {
-    directories::ProjectDirs::from("", "hermes", "hermes")
+    let new_cron = project_cron_dir("hermes-agent-ultra");
+    let legacy_cron = project_cron_dir("hermes");
+    if !new_cron.exists() && legacy_cron.exists() {
+        if let Err(err) = copy_cron_tree(&legacy_cron, &new_cron) {
+            tracing::warn!(
+                "Failed to migrate cron data {} -> {}: {err}",
+                legacy_cron.display(),
+                new_cron.display()
+            );
+            return legacy_cron;
+        }
+        tracing::info!(
+            "Migrated cron data: {} -> {}",
+            legacy_cron.display(),
+            new_cron.display()
+        );
+    }
+    new_cron
+}
+
+fn project_cron_dir(qualifier: &str) -> PathBuf {
+    directories::ProjectDirs::from("", qualifier, qualifier)
         .map(|p| p.data_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."))
         .join("cron")
+}
+
+fn copy_cron_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_cron_tree(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

@@ -21621,7 +21621,7 @@ fn discover_plugin_surface(include_entrypoints: bool) -> Vec<PluginSurfaceEntry>
 
     if hermes_config::env_var_enabled("HERMES_ENABLE_PROJECT_PLUGINS") {
         if let Ok(cwd) = std::env::current_dir() {
-            let project_root = cwd.join(".hermes").join("plugins");
+            let project_root = hermes_config::project_hermes_dir(&cwd).join("plugins");
             rows.extend(scan_plugin_manifest_root(
                 &project_root,
                 PluginSurfaceSource::Project,
@@ -21770,7 +21770,7 @@ fn run_plugins_interactive_toggle() -> Result<(), AgentError> {
         if let Ok(cwd) = std::env::current_dir() {
             println!(
                 "  - project: {}",
-                cwd.join(".hermes").join("plugins").display()
+                hermes_config::project_hermes_dir(&cwd).join("plugins").display()
             );
         }
     } else {
@@ -23273,11 +23273,11 @@ pub async fn handle_cli_contribute(
                                 "  Note: server dedupes by content_hash; rows were not updated."
                             );
                             println!(
-                                "  Inspect local payload: ~/.hermes/insights/last_batch.json"
+                                "  Inspect local payload: ~/.hermes-agent-ultra/insights/last_batch.json"
                             );
                         } else {
                             println!(
-                                "  Upload payload saved: ~/.hermes/insights/last_batch.json"
+                                "  Upload payload saved: ~/.hermes-agent-ultra/insights/last_batch.json"
                             );
                         }
                     }

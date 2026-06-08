@@ -326,20 +326,7 @@ fn normalize_profile_name(raw: &str) -> Option<String> {
 }
 
 fn default_hermes_home() -> PathBuf {
-    std::env::var("HERMES_HOME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".hermes"))
-        })
-        .or_else(|| {
-            std::env::var("USERPROFILE")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".hermes"))
-        })
-        .unwrap_or_else(|| PathBuf::from(".hermes"))
+    hermes_config::hermes_home()
 }
 
 fn yaml_get<'a>(value: &'a YamlValue, key: &str) -> Option<&'a YamlValue> {

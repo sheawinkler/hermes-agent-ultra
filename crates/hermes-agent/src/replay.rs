@@ -69,13 +69,8 @@ impl ReplayRecorder {
             .hermes_home
             .as_deref()
             .map(PathBuf::from)
-            .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
-            .or_else(|| {
-                std::env::var("HOME")
-                    .ok()
-                    .map(|home| PathBuf::from(home).join(".hermes-agent-ultra"))
-            })
-            .unwrap_or_else(|| PathBuf::from(".hermes-agent-ultra"));
+            .or_else(|| Some(hermes_config::hermes_home()))
+            .unwrap_or_else(hermes_config::hermes_home);
         let dir = root.join("logs").join("replay");
         if std::fs::create_dir_all(&dir).is_err() {
             return Self {

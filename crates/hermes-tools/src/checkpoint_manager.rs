@@ -48,7 +48,7 @@ impl CheckpointManager {
             .or_else(|| Some(hermes_config::paths::hermes_home()));
         let store_root = home
             .map(|h| h.join("checkpoints").join("store"))
-            .unwrap_or_else(|| PathBuf::from(".hermes/checkpoints/store"));
+            .unwrap_or_else(|| hermes_config::hermes_home().join("checkpoints").join("store"));
         let default_workdir = normalize_path(workdir.as_ref());
         Self {
             enabled,

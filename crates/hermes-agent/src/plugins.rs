@@ -526,7 +526,7 @@ impl PluginManager {
     /// Discover plugins with explicit source controls.
     ///
     /// - Always scans user plugins at `<hermes_dir>/plugins`.
-    /// - Optionally scans project plugins at `<cwd>/.hermes/plugins` when
+    /// - Optionally scans project plugins at `<cwd>/.hermes-agent-ultra/plugins` when
     ///   `enable_project_plugins` is true.
     pub fn discover_plugins_with_options(
         hermes_dir: &Path,
@@ -543,7 +543,8 @@ impl PluginManager {
 
         if enable_project_plugins {
             if let Some(workdir) = cwd {
-                let project_plugins_dir = workdir.join(".hermes").join("plugins");
+                let project_plugins_dir =
+                    hermes_config::project_hermes_dir(workdir).join("plugins");
                 scan_plugin_root(
                     &project_plugins_dir,
                     PluginDiscoverySource::Project,
@@ -1049,9 +1050,7 @@ dependencies:
         )
         .unwrap();
 
-        let project_plugin = cwd
-            .path()
-            .join(".hermes")
+        let project_plugin = hermes_config::project_hermes_dir(cwd.path())
             .join("plugins")
             .join("project_bundle");
         std::fs::create_dir_all(&project_plugin).unwrap();
@@ -1086,9 +1085,7 @@ dependencies:
         )
         .unwrap();
 
-        let project_plugin = cwd
-            .path()
-            .join(".hermes")
+        let project_plugin = hermes_config::project_hermes_dir(cwd.path())
             .join("plugins")
             .join("project_bundle");
         std::fs::create_dir_all(&project_plugin).unwrap();

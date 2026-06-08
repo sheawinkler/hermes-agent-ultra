@@ -89,18 +89,7 @@ pub(crate) fn default_route_learning_home(config: &AgentConfig) -> PathBuf {
         .hermes_home
         .as_deref()
         .map(PathBuf::from)
-        .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
-        .or_else(|| {
-            std::env::var("HERMES_AGENT_ULTRA_HOME")
-                .ok()
-                .map(PathBuf::from)
-        })
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|home| PathBuf::from(home).join(".hermes-agent-ultra"))
-        })
-        .unwrap_or_else(|| PathBuf::from(".hermes-agent-ultra"))
+        .unwrap_or_else(hermes_config::hermes_home)
 }
 
 pub(crate) fn route_learning_state_path(config: &AgentConfig) -> PathBuf {

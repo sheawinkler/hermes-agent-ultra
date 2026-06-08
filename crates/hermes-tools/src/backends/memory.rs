@@ -1,4 +1,4 @@
-//! Real memory backend: read/write MEMORY.md and USER.md in ~/.hermes/
+//! Real memory backend: read/write MEMORY.md and USER.md in the Hermes home directory.
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -11,16 +11,15 @@ const ENTRY_DELIMITER: &str = "\n§\n";
 const MEMORY_CHAR_LIMIT: usize = 2200;
 const USER_CHAR_LIMIT: usize = 1375;
 
-/// Real memory backend that stores entries in ~/.hermes/memories/MEMORY.md and USER.md.
+/// Real memory backend that stores entries in `<hermes_home>/memories/MEMORY.md` and USER.md.
 pub struct FileMemoryBackend {
     hermes_dir: std::path::PathBuf,
 }
 
 impl FileMemoryBackend {
     pub fn new() -> Self {
-        let home = dirs_home().unwrap_or_else(|| std::path::PathBuf::from("."));
         Self {
-            hermes_dir: home.join(".hermes").join("memories"),
+            hermes_dir: hermes_config::hermes_home().join("memories"),
         }
     }
 
@@ -43,7 +42,7 @@ impl FileMemoryBackend {
         tokio::fs::create_dir_all(&self.hermes_dir)
             .await
             .map_err(|e| {
-                ToolError::ExecutionFailed(format!("Failed to create ~/.hermes/memories: {}", e))
+                ToolError::ExecutionFailed(format!("Failed to create memories dir: {}", e))
             })
     }
 
@@ -127,10 +126,6 @@ impl Default for FileMemoryBackend {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn dirs_home() -> Option<std::path::PathBuf> {
-    std::env::var("HOME").ok().map(std::path::PathBuf::from)
 }
 
 #[async_trait]

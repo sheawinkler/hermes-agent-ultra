@@ -44,7 +44,7 @@ else
   INSTALL_DIR=""
   INSTALL_DIR_EXPLICIT=false
 fi
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes-agent-ultra}"
 CANONICAL_BIN_NAME="${CANONICAL_BIN_NAME:-hermes-agent-ultra}"
 PRIMARY_BIN_NAME="${PRIMARY_BIN_NAME:-hermes-ultra}"
 LEGACY_BIN_NAME="${LEGACY_BIN_NAME:-hermes}"
@@ -81,7 +81,7 @@ Environment variables:
   REPO                   GitHub repo slug (default: sheawinkler/hermes-agent-ultra)
   HERMES_INSTALL_DIR     Destination bin directory (explicit override)
   INSTALL_DIR            Destination bin directory (legacy alias, overridden by HERMES_INSTALL_DIR)
-  HERMES_HOME            Hermes config dir for SOUL.md bootstrap (default: $HOME/.hermes)
+  HERMES_HOME            Hermes config dir for SOUL.md bootstrap (default: $HOME/.hermes-agent-ultra)
   CANONICAL_BIN_NAME     Installed binary name (default: hermes-agent-ultra)
   PRIMARY_BIN_NAME       Primary user-facing command symlink (default: hermes-ultra)
   INSTALL_LEGACY_ALIAS   Also install the legacy hermes alias (default: false)

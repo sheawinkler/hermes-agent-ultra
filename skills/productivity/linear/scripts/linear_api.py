@@ -62,7 +62,7 @@ def _get_key() -> str:
         sys.stderr.write(
             "ERROR: LINEAR_API_KEY not set.\n"
             "Create one at https://linear.app/settings/api and export it,\n"
-            "or add `LINEAR_API_KEY=lin_api_...` to ~/.hermes/.env\n"
+            "or add `LINEAR_API_KEY=lin_api_...` to ~/.hermes-agent-ultra/.env\n"
         )
         sys.exit(2)
     return key

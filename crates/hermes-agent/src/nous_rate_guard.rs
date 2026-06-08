@@ -30,11 +30,7 @@ fn state_path(hermes_home: Option<&str>) -> PathBuf {
                 .filter(|s| !s.trim().is_empty())
                 .map(PathBuf::from)
         })
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".hermes")
-        });
+        .unwrap_or_else(hermes_config::hermes_home);
     base.join(STATE_SUBDIR).join(STATE_FILENAME)
 }
 

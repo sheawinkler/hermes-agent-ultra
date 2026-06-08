@@ -13,6 +13,7 @@ pub mod insights;
 pub mod interest;
 pub mod voice;
 pub mod loader;
+pub mod migrate;
 pub mod managed_gateway;
 pub mod merge;
 pub mod paths;
@@ -57,11 +58,17 @@ pub use managed_gateway::{
     DEFAULT_TOOL_GATEWAY_DOMAIN,
 };
 pub use merge::{deep_merge, merge_configs};
+pub use migrate::{
+    ensure_migrated_hermes_home, legacy_hermes_home_candidates, project_hermes_dir,
+};
 pub use paths::{
-    cli_config_path, config_path, cron_dir, env_path, expand_tilde, gateway_json_path,
-    gateway_pid_path, gateway_pid_path_in, hermes_home, interest_db_path, interest_db_path_in,
-    memory_path, resolve_agent_path, resolve_outbound_media_path, session_temp_dir, sessions_dir,
-    skills_dir, state_db_path, state_db_path_in, state_dir, user_path,
+    cli_config_path, config_path, cron_dir, default_home_without_migration, env_path, expand_tilde,
+    gateway_json_path, gateway_pid_path, gateway_pid_path_in, hermes_home, interest_db_path,
+    interest_db_path_in, legacy_home_basename, memory_path, primary_home_basename,
+    resolve_agent_path, resolve_outbound_media_path, session_temp_dir, sessions_dir, skills_dir,
+    state_db_path, state_db_path_in, state_dir, user_home_dir, user_path, LEGACY_HOME_DIR,
+    LEGACY_PROJECT_HOME_DIR, LOCALAPPDATA_SUBDIR_LEGACY, LOCALAPPDATA_SUBDIR_NEW,
+    PRIMARY_HOME_DIR, PROJECT_HOME_DIR,
 };
 pub use platform::{extra_string, platform_token_or_extra, PlatformConfig, UnauthorizedDmBehavior};
 pub use session::{DailyReset, IdleReset, SessionConfig, SessionResetPolicy, SessionType};

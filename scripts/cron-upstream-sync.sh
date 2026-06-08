@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-LOCK_FILE="${LOCK_FILE:-$HOME/.hermes/locks/upstream-sync.lock}"
+LOCK_FILE="${LOCK_FILE:-$HOME/.hermes-agent-ultra/locks/upstream-sync.lock}"
 LOG_TAG="[cron-upstream-sync]"
 SYNC_STRATEGY="${SYNC_STRATEGY:-merge}"
 REPORT_DIR="${REPORT_DIR:-${REPO_ROOT}/.sync-reports}"

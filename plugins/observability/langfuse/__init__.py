@@ -8,7 +8,7 @@ observability/langfuse``, or by checking the box in the interactive
 ``hermes plugins`` UI). At runtime the plugin also requires the
 ``langfuse`` SDK and credentials; if either is missing the hooks are inert.
 
-Required env vars (set in ~/.hermes/.env):
+Required env vars (set via ``hermes tools`` or ~/.hermes-agent-ultra/.env):
   HERMES_LANGFUSE_PUBLIC_KEY  - Langfuse project public key (pk-lf-...)
   HERMES_LANGFUSE_SECRET_KEY  - Langfuse project secret key (sk-lf-...)
   HERMES_LANGFUSE_BASE_URL    - Langfuse server URL (default: https://cloud.langfuse.com)

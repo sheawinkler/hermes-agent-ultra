@@ -207,19 +207,7 @@ fn sandbox_cwd(profile: McpSandboxProfile) -> Option<PathBuf> {
 }
 
 fn hermes_home_dir() -> PathBuf {
-    if let Ok(path) = std::env::var("HERMES_HOME") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        let trimmed = home.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed).join(".hermes-agent-ultra");
-        }
-    }
-    PathBuf::from(".hermes-agent-ultra")
+    hermes_config::hermes_home()
 }
 
 async fn mcp_stderr_log_file() -> Option<tokio::fs::File> {

@@ -575,8 +575,14 @@ fn hermes_auth_store_discovery_paths() -> Vec<PathBuf> {
     }
     candidates.push(auth_json_path());
     if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join(".hermes").join("auth.json"));
-        candidates.push(home.join(".hermes-agent-ultra").join("auth.json"));
+        candidates.push(
+            home.join(hermes_config::LEGACY_HOME_DIR)
+                .join("auth.json"),
+        );
+        candidates.push(
+            home.join(hermes_config::PRIMARY_HOME_DIR)
+                .join("auth.json"),
+        );
     }
     existing_unique_paths(candidates)
 }
@@ -723,7 +729,10 @@ fn anthropic_oauth_discovery_paths() -> Vec<PathBuf> {
     }
     if let Some(home) = dirs::home_dir() {
         candidates.push(home.join(".claude").join(".credentials.json"));
-        candidates.push(home.join(".hermes").join(".anthropic_oauth.json"));
+        candidates.push(
+            home.join(hermes_config::LEGACY_HOME_DIR)
+                .join(".anthropic_oauth.json"),
+        );
     }
     existing_unique_paths(candidates)
 }
@@ -870,7 +879,10 @@ fn nous_oauth_discovery_paths() -> Vec<PathBuf> {
         }
     }
     if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join(".hermes").join(".nous_oauth.json"));
+        candidates.push(
+            home.join(hermes_config::LEGACY_HOME_DIR)
+                .join(".nous_oauth.json"),
+        );
     }
     existing_unique_paths(candidates)
 }

@@ -800,10 +800,9 @@ fn register_builtin_tools_impl(
     );
 }
 
-/// Return the Hermes data directory (`~/.hermes/`), creating it if needed.
+/// Return the Hermes data directory, creating it if needed.
 fn hermes_data_dir() -> PathBuf {
-    let home = dirs_home().unwrap_or_else(|| PathBuf::from("."));
-    let dir = home.join(".hermes");
+    let dir = hermes_config::hermes_home();
     let _ = std::fs::create_dir_all(&dir);
     dir
 }

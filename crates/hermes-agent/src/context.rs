@@ -339,21 +339,18 @@ const BUILTIN_PERSONALITY_DESCRIPTIONS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Load the SOUL.md personality file from `~/.hermes/SOUL.md`.
+/// Load the SOUL.md personality file from `$HERMES_HOME/SOUL.md`.
 ///
 /// Returns `None` if the file doesn't exist or can't be read.
 pub fn load_soul_md() -> Option<String> {
-    let home = dirs::home_dir()?;
-    let soul_path = home.join(".hermes").join("SOUL.md");
+    let soul_path = hermes_config::hermes_home().join("SOUL.md");
     load_soul_md_from(&soul_path)
 }
 
 fn resolve_hermes_home(hermes_home_override: Option<&str>) -> PathBuf {
     hermes_home_override
         .map(PathBuf::from)
-        .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
-        .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
-        .unwrap_or_else(|| PathBuf::from(".hermes"))
+        .unwrap_or_else(hermes_config::hermes_home)
 }
 
 fn builtin_personality(name: &str) -> Option<&'static str> {
@@ -393,7 +390,7 @@ pub fn builtin_personality_descriptions() -> &'static [(&'static str, &'static s
 /// Resolve a named personality by checking user files first, then built-ins.
 ///
 /// Resolution order:
-/// 1) `<hermes_home>/personalities/<name>.md` (or `$HERMES_HOME`, then `~/.hermes`)
+/// 1) `<hermes_home>/personalities/<name>.md` (or `$HERMES_HOME`, then default home)
 /// 2) built-in personas (see [`builtin_personality_names`])
 pub fn resolve_personality(name: &str, hermes_home_override: Option<&str>) -> Option<String> {
     let trimmed = name.trim();
@@ -418,7 +415,7 @@ pub fn load_soul_md_from(path: &Path) -> Option<String> {
     }
 }
 
-/// Load a named personality from `~/.hermes/personalities/<name>.md`.
+/// Load a named personality from `<hermes_home>/personalities/<name>.md`.
 pub fn switch_personality(name: &str) -> Option<String> {
     resolve_personality(name, None)
 }
@@ -427,7 +424,7 @@ pub fn switch_personality(name: &str) -> Option<String> {
 // Context files
 // ---------------------------------------------------------------------------
 
-/// Load context files from `~/.hermes/context/` directory.
+/// Load context files from `<hermes_home>/context/` directory.
 ///
 /// Returns concatenated content of all `.md` and `.txt` files found.
 pub fn load_context_files(hermes_home: &Path) -> String {
@@ -517,11 +514,7 @@ fn render_memory_block(target: &str, entries: &[String]) -> Option<String> {
 pub fn load_builtin_memory_snapshot(
     hermes_home_override: Option<&str>,
 ) -> (Option<String>, Option<String>) {
-    let base = hermes_home_override
-        .map(PathBuf::from)
-        .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
-        .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
-        .unwrap_or_else(|| PathBuf::from(".hermes"));
+    let base = resolve_hermes_home(hermes_home_override);
     let memory_dir = base.join("memories");
     let memory_path = memory_dir.join("MEMORY.md");
     let user_path = memory_dir.join("USER.md");

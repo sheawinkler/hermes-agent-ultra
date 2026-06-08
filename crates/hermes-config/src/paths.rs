@@ -6,8 +6,18 @@ use std::path::{Path, PathBuf};
 // hermes_home
 // ---------------------------------------------------------------------------
 
-const DEFAULT_HOME_DIR: &str = ".hermes";
-const LEGACY_HOME_DIR: &str = ".hermes";
+/// Primary Hermes home directory name under the user profile.
+pub const PRIMARY_HOME_DIR: &str = ".hermes-agent-ultra";
+/// Legacy Hermes home directory name (pre-ultra branding).
+pub const LEGACY_HOME_DIR: &str = ".hermes";
+/// Project-local Hermes directory name in the working tree.
+pub const PROJECT_HOME_DIR: &str = ".hermes-agent-ultra";
+/// Legacy project-local directory name.
+pub const LEGACY_PROJECT_HOME_DIR: &str = ".hermes";
+/// Windows `%LOCALAPPDATA%` subdirectory for Hermes Ultra data.
+pub const LOCALAPPDATA_SUBDIR_NEW: &str = "hermes-agent-ultra";
+/// Legacy Windows `%LOCALAPPDATA%` subdirectory.
+pub const LOCALAPPDATA_SUBDIR_LEGACY: &str = "hermes";
 
 /// Return the hermes home directory.
 ///
@@ -24,8 +34,13 @@ pub fn hermes_home() -> PathBuf {
         return home;
     }
 
+    default_home_without_migration()
+}
+
+/// Resolve the default home without copying legacy data (read-only).
+pub fn default_home_without_migration() -> PathBuf {
     let home_dir = user_home_dir();
-    let primary = home_dir.join(DEFAULT_HOME_DIR);
+    let primary = home_dir.join(PRIMARY_HOME_DIR);
     let legacy = home_dir.join(LEGACY_HOME_DIR);
     if primary.exists() || !legacy.exists() {
         primary
@@ -34,7 +49,17 @@ pub fn hermes_home() -> PathBuf {
     }
 }
 
-fn env_var_path(var: &str) -> Option<PathBuf> {
+/// Basename for the primary Hermes home directory (`.hermes-agent-ultra` or `hermes-agent-ultra`).
+pub fn primary_home_basename() -> &'static str {
+    PRIMARY_HOME_DIR.trim_start_matches('.')
+}
+
+/// Basename for the legacy Hermes home directory (`.hermes` or `hermes`).
+pub fn legacy_home_basename() -> &'static str {
+    LEGACY_HOME_DIR.trim_start_matches('.')
+}
+
+pub(crate) fn env_var_path(var: &str) -> Option<PathBuf> {
     std::env::var(var)
         .ok()
         .map(|s| s.trim().to_string())
@@ -43,7 +68,7 @@ fn env_var_path(var: &str) -> Option<PathBuf> {
 }
 
 /// Best-effort home directory resolution.
-fn user_home_dir() -> PathBuf {
+pub fn user_home_dir() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home)
     } else if let Ok(home) = std::env::var("USERPROFILE") {

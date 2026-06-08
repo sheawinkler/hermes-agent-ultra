@@ -81,9 +81,9 @@ pub fn find_openclaw_dir(explicit_source: Option<&Path>) -> Option<PathBuf> {
     None
 }
 
-/// Get the hermes home directory (`~/.hermes`).
+/// Get the hermes home directory.
 pub fn get_hermes_home() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".hermes"))
+    Some(hermes_config::hermes_home())
 }
 
 /// Run the OpenClaw → Hermes migration.
