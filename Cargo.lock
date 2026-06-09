@@ -2300,6 +2300,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "hermes-acp-server"
+version = "0.16.0"
+dependencies = [
+ "async-trait",
+ "dirs",
+ "futures",
+ "hermes-acp",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "hermes-agent"
 version = "0.16.0"
 dependencies = [
@@ -2398,6 +2416,7 @@ dependencies = [
  "flate2",
  "futures",
  "hermes-acp",
+ "hermes-acp-server",
  "hermes-agent",
  "hermes-auth",
  "hermes-config",

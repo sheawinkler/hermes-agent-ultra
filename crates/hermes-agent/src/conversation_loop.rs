@@ -528,7 +528,7 @@ impl AgentLoop {
 
     /// Run the autonomous loop with non-streaming LLM transport.
     ///
-    /// Same core loop as [`Self::run_stream`] with `on_chunk: None` (Python `_use_streaming = False`).
+    /// Non-streaming variant; see [`Self::run_with_message_prelude`] for the shared core.
     pub async fn run(
         &self,
         messages: Vec<Message>,

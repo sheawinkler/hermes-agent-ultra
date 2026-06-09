@@ -26,4 +26,8 @@ log
 # Generated PR infographics live in PR bodies, not in-tree.
 infographic/
 
+# Build artifacts
+dist/
+*.zip
+
 .local-wip-backup/

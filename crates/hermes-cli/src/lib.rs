@@ -11,6 +11,7 @@
 //! - Theme/skin engine (9.8)
 
 pub mod alpha_runtime;
+pub mod acp_command;
 pub mod app;
 pub mod auth;
 pub mod banner;
