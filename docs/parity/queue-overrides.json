@@ -2602,7 +2602,7 @@
     },
     "fce58cbe2e02": {
       "disposition": "ported",
-      "notes": "Anthropic financial-services skills are represented as an optional finance bundle under optional-skills/finance, including dcf-model, comps-analysis, lbo-model, merger-model, pptx-author, excel-author, and stocks."
+      "notes": "Anthropic financial-services skills are represented under optional-skills/finance; stale local root stocks wrapper was backed up and removed while upstream stocks/dcf skill files were synced."
     },
     "5fa493a2ca6a": {
       "disposition": "ported",
@@ -2630,7 +2630,7 @@
     },
     "2ea957fc41f4": {
       "disposition": "ported",
-      "notes": "Stocks is located under optional-skills/finance/stocks/SKILL.md with finance scripts under optional-skills/finance/scripts, matching the relocated optional finance layout."
+      "notes": "Stocks is located under optional-skills/finance/stocks/SKILL.md with its script under optional-skills/finance/stocks/scripts/stocks_client.py; stale root finance script copy was backed up and removed."
     },
     "ef98e3f9e60b": {
       "disposition": "superseded",
@@ -2665,8 +2665,8 @@
       "notes": "Rust bundled skill scanners prune dependency/cache directories such as node_modules and __pycache__ in crates/hermes-skills/src/sync.rs and guard logic."
     },
     "a36221ed9174": {
-      "disposition": "superseded",
-      "notes": "Container supervision documentation and doctor-skill docs are superseded by local Docker/runtime parity policy and Rust skills governance; no additional Rust runtime delta is required from this docs-only upstream change."
+      "disposition": "ported",
+      "notes": "The current upstream s6 container supervision skill was adopted at optional-skills/devops/hermes-s6-container-supervision/SKILL.md; generated website/docs changes remain covered by Rust skills governance."
     },
     "2520c9ad68af": {
       "disposition": "ported",
@@ -2682,11 +2682,111 @@
     },
     "38d3c49aaf2e": {
       "disposition": "ported",
-      "notes": "Bundled skill-set cleanup, platforms, and environment/relevance gates are represented by local SKILL.md frontmatter plus Rust platform-filtered dynamic skill loading."
+      "notes": "Current upstream skill catalog cleanup was adopted where it affects source SKILL.md trees, including optional Baoyu article illustrator and platform/environment frontmatter; generated website docs remain covered by Rust catalog governance."
     },
     "7c00ffd92c41": {
       "disposition": "ported",
       "notes": "Google Workspace setup fallback behavior is represented in skills/productivity/google-workspace/scripts/setup.py, including virtualenv/pip diagnostics and uv-compatible setup guidance."
+    },
+    "87c6edc1d04f": {
+      "disposition": "ported",
+      "notes": "Google Workspace setup.py and gws_bridge.py were synced from upstream source truth and now pass explicit urlopen timeouts for OAuth/live-check network calls."
+    },
+    "aa1e2edd35a8": {
+      "disposition": "ported",
+      "notes": "Upstream EVM multi-chain optional skill was adopted at optional-skills/blockchain/evm with SKILL.md plus evm_client.py covering the 8-chain read-only command surface."
+    },
+    "e3fc0814996d": {
+      "disposition": "ported",
+      "notes": "Upstream blockchain/base merge was adopted by adding optional-skills/blockchain/evm and removing the stale local optional-skills/blockchain/base copy after backup."
+    },
+    "66c70966cd2a": {
+      "disposition": "ported",
+      "notes": "The current upstream optional-skills/blockchain/evm/SKILL.md was adopted, including the tightened modern-format frontmatter and Hermes runtime guidance."
+    },
+    "c9b32a654cd1": {
+      "disposition": "ported",
+      "notes": "Darwinian-evolver was adopted from upstream at optional-skills/research/darwinian-evolver with SKILL.md, helper scripts, and template assets."
+    },
+    "0a2ee71cccbf": {
+      "disposition": "ported",
+      "notes": "Darwinian-evolver show_snapshot.py was adopted from upstream and requires the explicit --i-trust-this-file gate before pickle.loads executes."
+    },
+    "559c6ad94aee": {
+      "disposition": "ported",
+      "notes": "Pinggy tunnel optional skill was adopted from upstream at optional-skills/devops/pinggy-tunnel/SKILL.md."
+    },
+    "5f91b1a48b06": {
+      "disposition": "ported",
+      "notes": "OSINT investigation optional skill was adopted from upstream under optional-skills/research/osint-investigation with source references, scripts, and templates."
+    },
+    "680189b5def4": {
+      "disposition": "ported",
+      "notes": "Baoyu article illustrator was adopted from upstream at optional-skills/creative/baoyu-article-illustrator with SKILL.md, prompts, palettes, styles, and workflow references."
+    },
+    "4bd297094af2": {
+      "disposition": "ported",
+      "notes": "The Hermes-adapted Baoyu article illustrator PORT_NOTES and skill/reference updates were adopted from the current upstream optional skill tree."
+    },
+    "a93de60b6819": {
+      "disposition": "ported",
+      "notes": "Baoyu article illustrator was adopted from current upstream after its Hermes tool-capability alignment, including the prompt and workflow updates."
+    },
+    "3d258097db55": {
+      "disposition": "ported",
+      "notes": "Baoyu article illustrator current upstream optional skill includes tightened description and platforms frontmatter; generated website docs remain superseded by Rust catalog governance."
+    },
+    "1579a6f4a974": {
+      "disposition": "ported",
+      "notes": "xurl SKILL.md was synced from upstream and now documents Docker HOME credential placement for Hermes tool subprocesses."
+    },
+    "5671461c0c58": {
+      "disposition": "ported",
+      "notes": "Code-wiki optional skill was adopted from upstream at optional-skills/software-development/code-wiki with SKILL.md and documentation templates."
+    },
+    "386f245d9d25": {
+      "disposition": "ported",
+      "notes": "OpenHands optional skill was adopted from upstream at optional-skills/autonomous-ai-agents/openhands/SKILL.md."
+    },
+    "263e008d6beb": {
+      "disposition": "ported",
+      "notes": "Web-pentest optional skill was adopted from upstream at optional-skills/security/web-pentest with scope, technique references, scripts, and report templates."
+    },
+    "10cd4138cc66": {
+      "disposition": "ported",
+      "notes": "Grok optional skill was adopted from upstream at optional-skills/autonomous-ai-agents/grok/SKILL.md."
+    },
+    "99ddba94edee": {
+      "disposition": "ported",
+      "notes": "The current upstream Grok skill was adopted in its optional catalog placement with modern Hermes frontmatter and guidance."
+    },
+    "1bba5f27ab0c": {
+      "disposition": "ported",
+      "notes": "Antigravity CLI operator skill was adopted from upstream at optional-skills/autonomous-ai-agents/antigravity-cli with reference docs."
+    },
+    "632a7088a32a": {
+      "disposition": "ported",
+      "notes": "Antigravity CLI optional skill was adopted with Hermes-tool framing and tightened frontmatter from upstream."
+    },
+    "78d7fa1b5c07": {
+      "disposition": "ported",
+      "notes": "Antigravity CLI was adopted in the upstream autonomous-ai-agents optional category, matching the final refactor location."
+    },
+    "ace4b722dc2b": {
+      "disposition": "ported",
+      "notes": "Simplify-code skill was adopted from upstream at skills/software-development/simplify-code/SKILL.md for the parallel three-reviewer cleanup workflow."
+    },
+    "cea87d913904": {
+      "disposition": "superseded",
+      "notes": "Upstream website skills-hub source aggregation is superseded by approved rust-cli-tui-primary-ux-surface and rust-skills-catalog-governance divergences; actual SKILL.md source trees are tracked by Rust loaders and parity queue overrides."
+    },
+    "a1eaad2fc0bf": {
+      "disposition": "superseded",
+      "notes": "Upstream website skills-page lazy catalog fetch is a generated website UX concern, superseded by approved website divergence while Rust skill catalog loading remains native."
+    },
+    "5e9d7a766107": {
+      "disposition": "superseded",
+      "notes": "Upstream skills-hub degenerate-index fix applies to website catalog generation; this Rust fork tracks skill source trees directly and treats website skills pages as approved divergence."
     }
   },
   "subject_patterns": [
