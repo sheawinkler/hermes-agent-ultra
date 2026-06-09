@@ -24,6 +24,7 @@ pub mod conversation_loop;
 pub mod copilot_acp;
 pub mod credential_pool;
 pub mod credential_pool_recovery;
+mod error_classifier;
 pub mod fallback;
 pub mod file_mutation_tracker;
 pub mod honcho_provider;
@@ -35,16 +36,14 @@ pub mod memory_manager;
 pub mod memory_plugins;
 pub mod message_sanitization;
 pub mod model_normalize;
-pub mod transports;
-mod error_classifier;
 pub mod nous_rate_guard;
 pub mod oauth;
 pub mod plugins;
 mod prompt_builder;
 pub mod prompt_caching;
 pub mod provider;
-mod provider_serialize_cache;
 pub mod provider_profiles;
+mod provider_serialize_cache;
 pub mod providers_extra;
 pub mod rate_limit;
 pub mod reasoning;
@@ -64,15 +63,17 @@ mod system_prompt;
 pub mod tool_call_args;
 pub mod tool_executor;
 pub mod tool_guardrails;
+pub mod tool_registry;
 pub mod tools_wiring;
+pub mod transports;
 mod turn_finalize_hooks;
 pub mod usage_parse;
 pub mod user_interest;
-pub mod work_session;
 pub mod vision_adapter;
 pub mod vision_message_prepare;
 pub mod web_research;
 mod web_tool_budget;
+pub mod work_session;
 
 // Re-export primary agent types
 pub use agent_loop::{
@@ -104,9 +105,9 @@ pub use api_message_oracle::{
     assert_dual_run_eq, assert_messages_oracle_eq, canonical_messages_json,
 };
 pub use auxiliary_builder::{
+    AuxiliaryBuildParams, AuxiliaryMainRuntime, AuxiliaryWiringSummary,
     auxiliary_config_from_gateway, build_auxiliary_client,
     build_auxiliary_client_with_main_runtime, build_default_auxiliary_client,
-    AuxiliaryBuildParams, AuxiliaryMainRuntime, AuxiliaryWiringSummary,
 };
 pub use bedrock::BedrockProvider;
 pub use inbound_prepare::AgentInboundPreparer;
@@ -136,18 +137,19 @@ pub use reasoning::parse_reasoning;
 // Re-export interrupt controller
 pub use interrupt::InterruptController;
 pub use steer::{
-    format_steer_marker, is_formatted_steer_marker, PendingSteer, STEER_CHANNEL_NOTE,
-    STEER_GUIDANCE_MARKER, STEER_MARKER_CLOSE, STEER_MARKER_OPEN,
+    PendingSteer, STEER_CHANNEL_NOTE, STEER_GUIDANCE_MARKER, STEER_MARKER_CLOSE, STEER_MARKER_OPEN,
+    format_steer_marker, is_formatted_steer_marker,
 };
 
 // Re-export memory manager
 pub use memory_manager::{
-    build_memory_context_block, sanitize_context, MemoryManager, MemoryProviderPlugin,
-    StreamingContextScrubber,
+    MemoryManager, MemoryProviderPlugin, StreamingContextScrubber, build_memory_context_block,
+    sanitize_context,
 };
 pub use user_interest::{
-    extract_signals_from_text, filter_persistable_signals, ExtractOptions, InterestMemoryPlugin,
-    InterestStore, InterestTopic, is_rejected_poi_topic, load_interest_snapshot, TopicStatus,
+    ExtractOptions, InterestMemoryPlugin, InterestStore, InterestTopic, TopicStatus,
+    extract_signals_from_text, filter_persistable_signals, is_rejected_poi_topic,
+    load_interest_snapshot,
 };
 
 // Re-export plugin system
@@ -177,9 +179,9 @@ pub use subdirectory_hints::{SubdirectoryHintTracker, generate_project_hints};
 
 // Python `agent/agent_runtime_helpers.py` parity
 pub use agent_runtime_helpers::{
-    TOOL_CALL_ARGUMENTS_CORRUPTION_MARKER, VALID_API_ROLES,
-    convert_to_trajectory_format, drop_thinking_only_and_merge_users, dump_api_request_debug,
-    extract_api_error_context, extract_reasoning_from_message_content, is_thinking_only_assistant,
+    TOOL_CALL_ARGUMENTS_CORRUPTION_MARKER, VALID_API_ROLES, convert_to_trajectory_format,
+    drop_thinking_only_and_merge_users, dump_api_request_debug, extract_api_error_context,
+    extract_reasoning_from_message_content, is_thinking_only_assistant,
     looks_like_codex_intermediate_ack, needs_thinking_reasoning_pad, normalize_tool_call_arguments,
     prepare_live_history_for_api, prepare_wire_messages_for_api, recover_with_credential_pool,
     repair_message_sequence, repair_tool_name, sanitize_api_messages, sanitize_tool_call_arguments,
@@ -191,10 +193,9 @@ pub use message_sanitization::{
     CODEX_CONTINUE_USER_MESSAGE, PARTIAL_STREAM_STUB_ID, budget_pressure_text,
     build_partial_stream_stub_response, continuation_prompt_for_response,
     format_partial_stream_tool_call_warning, get_continuation_prompt, has_natural_response_ending,
-    inject_budget_pressure_into_last_tool_result,
-    partial_stream_dropped_tool_names, sanitize_surrogates, should_treat_stop_as_truncated,
-    strip_budget_warnings_from_messages, strip_system_messages_from_history,
-    strip_think_blocks_for_ack,
+    inject_budget_pressure_into_last_tool_result, partial_stream_dropped_tool_names,
+    sanitize_surrogates, should_treat_stop_as_truncated, strip_budget_warnings_from_messages,
+    strip_system_messages_from_history, strip_think_blocks_for_ack,
 };
 
 // Re-export sub-agent orchestrator
