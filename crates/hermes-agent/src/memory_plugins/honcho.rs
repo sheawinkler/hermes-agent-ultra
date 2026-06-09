@@ -25,6 +25,7 @@ use crate::memory_plugins::config_io;
 
 const HOST: &str = "hermes";
 const DEFAULT_BASE_URL: &str = "https://api.honcho.dev";
+const DEFAULT_TIMEOUT_SECS: f64 = 30.0;
 const PEER_ID_HASH_ESCALATION_LENGTHS: &[usize] = &[8, 12, 16, 24, 32, 64];
 
 // ---------------------------------------------------------------------------
@@ -123,7 +124,7 @@ impl HonchoConfig {
         let timeout_secs = std::env::var("HONCHO_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse::<f64>().ok())
-            .unwrap_or(12.0)
+            .unwrap_or(DEFAULT_TIMEOUT_SECS)
             .clamp(1.0, 60.0);
         let mut endpoints = HashMap::new();
         for (key, env) in [
@@ -163,8 +164,10 @@ impl HonchoConfig {
         let host = active_host();
         config.workspace_id = host.clone();
         config.ai_peer = host.clone();
-        let config_path = Self::config_path(hermes_home);
-        if let Ok(content) = std::fs::read_to_string(&config_path) {
+        for config_path in honcho_config_load_paths(hermes_home) {
+            let Ok(content) = std::fs::read_to_string(&config_path) else {
+                continue;
+            };
             if let Ok(raw) = serde_json::from_str::<Value>(&content) {
                 Self::apply_config_value(&mut config, &raw);
                 if let Some(host_block) = honcho_host_block(&raw, &host) {
@@ -173,7 +176,7 @@ impl HonchoConfig {
                 }
             }
         }
-        config.base_url = strip_honcho_base_url_version(&config.base_url);
+        config.base_url = normalize_honcho_base_url(&config.base_url);
         if config.base_url.is_empty() {
             config.base_url = DEFAULT_BASE_URL.to_string();
         }
@@ -336,11 +339,42 @@ fn honcho_host_block<'a>(raw: &'a Value, host: &str) -> Option<&'a Value> {
     legacy_profile_host_key(host).and_then(|legacy| hosts.get(&legacy))
 }
 
+fn honcho_config_load_paths(hermes_home: &str) -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".honcho").join("config.json"));
+        paths.push(home.join(".hermes").join("honcho.json"));
+    }
+    paths.push(HonchoConfig::config_path(hermes_home));
+
+    let mut deduped = Vec::new();
+    for path in paths {
+        if !deduped.iter().any(|existing| existing == &path) {
+            deduped.push(path);
+        }
+    }
+    deduped
+}
+
 fn value_has_nonempty_api_key(raw: &Value) -> bool {
     raw.get("apiKey")
         .or_else(|| raw.get("api_key"))
         .and_then(Value::as_str)
         .is_some_and(|key| !key.trim().is_empty())
+}
+
+fn normalize_honcho_base_url(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return strip_honcho_base_url_version(trimmed);
+    }
+    if trimmed.contains("://") {
+        return String::new();
+    }
+    strip_honcho_base_url_version(&format!("https://{trimmed}"))
 }
 
 fn strip_honcho_base_url_version(raw: &str) -> String {
@@ -755,6 +789,14 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                             .or_else(|| v.get("result"))
                             .and_then(|c| c.as_array())
                         {
+                            if card.is_empty() {
+                                return json!({
+                                    "result": card,
+                                    "count": 0,
+                                    "hint": honcho_empty_profile_hint(&peer)
+                                })
+                                .to_string();
+                            }
                             return json!({"result": card, "count": card.len()}).to_string();
                         }
                         json!({"result": v}).to_string()
@@ -885,6 +927,22 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         }
     }
 
+    fn on_session_switch(&self, new_session_id: &str, parent_session_id: &str, reset: bool) {
+        let new_session_id = new_session_id.trim();
+        if new_session_id.is_empty() {
+            return;
+        }
+        *self.session_key.lock().unwrap() = new_session_id.to_string();
+        *self.turn_count.lock().unwrap() = 0;
+        *self.prefetch_result.lock().unwrap() = String::new();
+        tracing::debug!(
+            "Honcho session switch: new_session={} parent={} reset={}",
+            new_session_id,
+            parent_session_id,
+            reset
+        );
+    }
+
     fn on_memory_write(&self, action: &str, target: &str, content: &str) {
         if action != "add" || target != "user" || content.trim().is_empty() {
             return;
@@ -918,7 +976,7 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         Some(json!([
             {"key": "api_key", "description": "Honcho API key", "secret": true, "env_var": "HONCHO_API_KEY", "url": "https://app.honcho.dev"},
             {"key": "baseUrl", "description": "Honcho base URL (for self-hosted)"},
-            {"key": "timeout", "description": "HTTP timeout seconds", "default": 12},
+            {"key": "timeout", "description": "HTTP timeout seconds", "default": DEFAULT_TIMEOUT_SECS},
             {"key": "pinUserPeer", "description": "Pin gateway runtime users to peerName", "default": false},
             {"key": "userPeerAliases", "description": "Runtime user ID to Honcho peer ID map"},
             {"key": "runtimePeerPrefix", "description": "Prefix for unknown gateway runtime user peers", "default": ""},
@@ -1032,6 +1090,14 @@ fn generated_runtime_peer_id(config: &HonchoConfig, prefix: &str, runtime_id: &s
         return format!("{sanitized_peer_id}-{hex}");
     }
     sanitized_peer_id
+}
+
+fn honcho_empty_profile_hint(peer: &str) -> String {
+    let peer = peer.trim();
+    let label = if peer.is_empty() { "this peer" } else { peer };
+    format!(
+        "Honcho returned an empty profile card for {label}. Use honcho_search for raw context, honcho_context for a synthesized answer, or honcho_conclude to save a durable user fact."
+    )
 }
 
 #[cfg(test)]
@@ -1217,7 +1283,7 @@ mod tests {
             pin_user_peer: false,
             user_peer_aliases: HashMap::new(),
             runtime_peer_prefix: String::new(),
-            timeout_secs: 12.0,
+            timeout_secs: DEFAULT_TIMEOUT_SECS,
             endpoints: HashMap::new(),
             host_had_explicit_api_key: false,
         }
@@ -1268,6 +1334,31 @@ mod tests {
         assert_eq!(cfg.ai_peer, "coder-ai");
         assert_eq!(cfg.peer_name.as_deref(), Some("operator"));
         assert!(cfg.host_had_explicit_api_key);
+    }
+
+    #[test]
+    fn test_honcho_config_loads_global_fallback_and_normalizes_base_url() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let hermes_home = tmp.path().join("profile-home");
+        let global_dir = tmp.path().join(".honcho");
+        std::fs::create_dir_all(&global_dir).expect("mkdir global");
+        let _home = EnvGuard::set("HOME", tmp.path());
+        let _hermes_home = EnvGuard::set("HERMES_HOME", &hermes_home);
+        let _profile = EnvGuard::remove("HERMES_PROFILE");
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+        std::fs::write(
+            global_dir.join("config.json"),
+            r#"{"baseUrl":"honcho.example.com/v1","enabled":true,"timeout":45}"#,
+        )
+        .expect("write global config");
+
+        let cfg = HonchoConfig::from_config_file(&hermes_home.to_string_lossy());
+
+        assert_eq!(cfg.base_url, "https://honcho.example.com");
+        assert_eq!(cfg.timeout_secs, 45.0);
+        assert!(cfg.enabled);
     }
 
     #[test]
@@ -1367,6 +1458,15 @@ mod tests {
             HonchoMemoryPlugin::extract_peer(&config, &json!({"peer": "ai"})),
             "hermes"
         );
+    }
+
+    #[test]
+    fn test_honcho_empty_profile_hint_points_to_memory_actions() {
+        let hint = honcho_empty_profile_hint("user-peer");
+        assert!(hint.contains("user-peer"));
+        assert!(hint.contains("honcho_search"));
+        assert!(hint.contains("honcho_context"));
+        assert!(hint.contains("honcho_conclude"));
     }
 
     #[test]

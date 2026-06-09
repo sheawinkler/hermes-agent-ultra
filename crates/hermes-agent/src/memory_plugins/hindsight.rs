@@ -13,8 +13,9 @@
 //!   - `HINDSIGHT_MODE` (default: "cloud")
 //!   - `$HERMES_HOME/hindsight/config.json` overrides
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::blocking::Client;
@@ -27,8 +28,10 @@ const DEFAULT_API_URL: &str = "https://api.hindsight.vectorize.io";
 const DEFAULT_LOCAL_URL: &str = "http://localhost:8888";
 const DEFAULT_RECALL_TYPE: &str = "observation";
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
+const MIN_VERSION_FOR_UPDATE_MODE_APPEND: &str = "0.5.0";
 const VALID_BUDGETS: &[&str] = &["low", "mid", "high"];
 static DOCUMENT_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+static APPEND_CAPABILITY_CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -261,6 +264,7 @@ pub struct HindsightPlugin {
     prefetch_result: Arc<Mutex<String>>,
     turn_counter: Mutex<u32>,
     session_turns: Mutex<Vec<String>>,
+    retain_batch_counter: Mutex<u64>,
 }
 
 impl HindsightPlugin {
@@ -272,6 +276,7 @@ impl HindsightPlugin {
             prefetch_result: Arc::new(Mutex::new(String::new())),
             turn_counter: Mutex::new(0),
             session_turns: Mutex::new(Vec::new()),
+            retain_batch_counter: Mutex::new(0),
         }
     }
 
@@ -282,6 +287,38 @@ impl HindsightPlugin {
             .as_ref()
             .map(|c| c.memory_mode.clone())
             .unwrap_or_else(|| "hybrid".to_string())
+    }
+
+    fn next_retain_document_id(&self) -> String {
+        let document_id = self.document_id.lock().unwrap().clone();
+        let mut counter = self.retain_batch_counter.lock().unwrap();
+        *counter = counter.saturating_add(1);
+        format!("{}-batch-{}", document_id, *counter)
+    }
+
+    fn take_pending_turns(&self) -> Vec<String> {
+        let mut turns = self.session_turns.lock().unwrap();
+        if turns.is_empty() {
+            Vec::new()
+        } else {
+            std::mem::take(&mut *turns)
+        }
+    }
+
+    fn flush_pending_turns(&self, reason: &'static str) {
+        let cfg = match self.config.lock().unwrap().clone() {
+            Some(c) => c,
+            None => return,
+        };
+        let turns = self.take_pending_turns();
+        if turns.is_empty() {
+            return;
+        }
+        let sid = self.session_id.lock().unwrap().clone();
+        let fallback_document_id = self.next_retain_document_id();
+        std::thread::spawn(move || {
+            retain_hindsight_turns(&cfg, &sid, &fallback_document_id, &turns, reason);
+        });
     }
 }
 
@@ -353,6 +390,7 @@ impl MemoryProviderPlugin for HindsightPlugin {
         *self.session_id.lock().unwrap() = session_id.to_string();
         *self.document_id.lock().unwrap() = scoped_document_id(session_id);
         *self.turn_counter.lock().unwrap() = 0;
+        *self.retain_batch_counter.lock().unwrap() = 0;
         self.session_turns.lock().unwrap().clear();
         *self.config.lock().unwrap() = Some(config);
     }
@@ -494,64 +532,26 @@ impl MemoryProviderPlugin for HindsightPlugin {
             return;
         }
 
+        let now = chrono::Utc::now().to_rfc3339();
+        let turn = hindsight_turn_payload(user_content, assistant_content, &now);
+        self.session_turns.lock().unwrap().push(turn);
+
         let mut counter = self.turn_counter.lock().unwrap();
         *counter += 1;
         if *counter % config.retain_every_n_turns != 0 {
             return;
         }
 
-        let now = chrono::Utc::now().to_rfc3339();
-        let turn = hindsight_turn_payload(user_content, assistant_content, &now);
-
-        self.session_turns.lock().unwrap().push(turn);
-
         let cfg = config.clone();
         let sid = session_id.to_string();
-        let document_id = self.document_id.lock().unwrap().clone();
-        let content = {
-            let mut turns = self.session_turns.lock().unwrap();
-            let joined = turns.join(",");
-            turns.clear();
-            format!("[{}]", joined)
-        };
+        let fallback_document_id = self.next_retain_document_id();
+        let turns = self.take_pending_turns();
+        if turns.is_empty() {
+            return;
+        }
 
         std::thread::spawn(move || {
-            let client = match Client::builder()
-                .timeout(Duration::from_secs(cfg.timeout_secs))
-                .build()
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::debug!("Hindsight sync client: {}", e);
-                    return;
-                }
-            };
-            let base = cfg.api_url.trim_end_matches('/').to_string();
-            let bank = urlencode_path(&cfg.bank_id);
-            let url = format!("{}/v1/default/banks/{}/memories", base, bank);
-            let body = hindsight_sync_turn_body(
-                &content,
-                &cfg.retain_context,
-                cfg.retain_async,
-                nonempty_str(&document_id),
-            );
-            let mut req = client.post(&url).json(&body);
-            if !cfg.api_key.is_empty() {
-                req = req.bearer_auth(&cfg.api_key);
-            }
-            match req.send() {
-                Ok(resp) if resp.status().is_success() => {
-                    tracing::debug!("Hindsight retain_batch ok for session {}", sid);
-                }
-                Ok(resp) => {
-                    tracing::debug!(
-                        "Hindsight retain_batch HTTP {} for session {}",
-                        resp.status(),
-                        sid
-                    );
-                }
-                Err(e) => tracing::debug!("Hindsight retain_batch error: {}", e),
-            }
+            retain_hindsight_turns(&cfg, &sid, &fallback_document_id, &turns, "sync_turn");
         });
     }
 
@@ -640,10 +640,32 @@ impl MemoryProviderPlugin for HindsightPlugin {
     }
 
     fn on_session_end(&self, _messages: &[Value]) {
+        self.flush_pending_turns("session_end");
         tracing::debug!("Hindsight session end");
     }
 
+    fn on_session_switch(&self, new_session_id: &str, parent_session_id: &str, reset: bool) {
+        let new_session_id = new_session_id.trim();
+        if new_session_id.is_empty() {
+            return;
+        }
+        self.flush_pending_turns("session_switch");
+        *self.prefetch_result.lock().unwrap() = String::new();
+        *self.session_id.lock().unwrap() = new_session_id.to_string();
+        *self.document_id.lock().unwrap() = scoped_document_id(new_session_id);
+        *self.turn_counter.lock().unwrap() = 0;
+        *self.retain_batch_counter.lock().unwrap() = 0;
+        self.session_turns.lock().unwrap().clear();
+        tracing::debug!(
+            "Hindsight session switch: new_session={} parent={} reset={}",
+            new_session_id,
+            parent_session_id,
+            reset
+        );
+    }
+
     fn shutdown(&self) {
+        self.flush_pending_turns("shutdown");
         tracing::debug!("Hindsight memory plugin shutdown");
     }
 
@@ -821,15 +843,166 @@ fn hindsight_sync_turn_body(
     context: &str,
     async_mode: bool,
     document_id: Option<&str>,
+    update_mode: Option<&str>,
 ) -> Value {
+    let mut item = json!({"content": content, "context": context});
+    if let Some(update_mode) = update_mode {
+        item["update_mode"] = json!(update_mode);
+    }
     let mut body = json!({
-        "items": [{"content": content, "context": context}],
+        "items": [item],
         "async": async_mode,
     });
     if let Some(document_id) = document_id {
         body["document_id"] = json!(document_id);
     }
     body
+}
+
+fn retain_hindsight_turns(
+    cfg: &HindsightConfig,
+    session_id: &str,
+    fallback_document_id: &str,
+    turns: &[String],
+    reason: &str,
+) {
+    if turns.is_empty() {
+        return;
+    }
+    let client = match Client::builder()
+        .timeout(Duration::from_secs(cfg.timeout_secs))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::debug!("Hindsight sync client: {}", e);
+            return;
+        }
+    };
+    let base = cfg.api_url.trim_end_matches('/').to_string();
+    let bank = urlencode_path(&cfg.bank_id);
+    let (document_id, update_mode) = hindsight_retain_target(
+        &client,
+        &base,
+        &cfg.api_key,
+        session_id,
+        fallback_document_id,
+    );
+    let content = format!("[{}]", turns.join(","));
+    let url = format!("{}/v1/default/banks/{}/memories", base, bank);
+    let body = hindsight_sync_turn_body(
+        &content,
+        &cfg.retain_context,
+        cfg.retain_async,
+        nonempty_str(&document_id),
+        update_mode,
+    );
+    let mut req = client.post(&url).json(&body);
+    if !cfg.api_key.is_empty() {
+        req = req.bearer_auth(&cfg.api_key);
+    }
+    match req.send() {
+        Ok(resp) if resp.status().is_success() => {
+            tracing::debug!(
+                "Hindsight retain_batch ok for session {} (reason={}, turns={}, update_mode={:?})",
+                session_id,
+                reason,
+                turns.len(),
+                update_mode
+            );
+        }
+        Ok(resp) => {
+            tracing::debug!(
+                "Hindsight retain_batch HTTP {} for session {} (reason={})",
+                resp.status(),
+                session_id,
+                reason
+            );
+        }
+        Err(e) => tracing::debug!("Hindsight retain_batch error (reason={}): {}", reason, e),
+    }
+}
+
+fn hindsight_retain_target(
+    client: &Client,
+    base: &str,
+    api_key: &str,
+    session_id: &str,
+    fallback_document_id: &str,
+) -> (String, Option<&'static str>) {
+    let stable_session = session_id.trim();
+    if !stable_session.is_empty() && hindsight_api_supports_append(client, base, api_key) {
+        (stable_session.to_string(), Some("append"))
+    } else {
+        (fallback_document_id.to_string(), None)
+    }
+}
+
+fn hindsight_api_supports_append(client: &Client, base: &str, api_key: &str) -> bool {
+    let base = base.trim_end_matches('/').to_string();
+    if base.is_empty() {
+        return false;
+    }
+    let cache = APPEND_CAPABILITY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(cached) = cache.lock().unwrap().get(&base).copied() {
+        return cached;
+    }
+
+    let url = format!("{}/version", base);
+    let mut req = client.get(&url);
+    if !api_key.is_empty() {
+        req = req.bearer_auth(api_key);
+    }
+    let version = req
+        .send()
+        .ok()
+        .filter(|resp| resp.status().is_success())
+        .and_then(|resp| resp.json::<Value>().ok())
+        .and_then(|value| {
+            value
+                .get("version")
+                .or_else(|| value.get("api_version"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        });
+    let supported =
+        hindsight_version_meets_minimum(version.as_deref(), MIN_VERSION_FOR_UPDATE_MODE_APPEND);
+    cache.lock().unwrap().insert(base.clone(), supported);
+    if !supported {
+        tracing::warn!(
+            "Hindsight API at {} does not report {}+ append support; using unique batch document ids",
+            base,
+            MIN_VERSION_FOR_UPDATE_MODE_APPEND
+        );
+    }
+    supported
+}
+
+fn hindsight_version_meets_minimum(actual: Option<&str>, required: &str) -> bool {
+    let Some(actual) = actual.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let Some(actual_parts) = parse_semver_core(actual) else {
+        return false;
+    };
+    let Some(required_parts) = parse_semver_core(required) else {
+        return false;
+    };
+    actual_parts >= required_parts
+}
+
+fn parse_semver_core(raw: &str) -> Option<[u64; 3]> {
+    let core = raw
+        .trim()
+        .trim_start_matches('v')
+        .split(['-', '+'])
+        .next()
+        .unwrap_or("");
+    let mut parts = [0_u64; 3];
+    for (idx, piece) in core.split('.').take(3).enumerate() {
+        parts[idx] = piece.parse::<u64>().ok()?;
+    }
+    Some(parts)
 }
 
 struct HindsightRecallRequest<'a> {
@@ -1239,11 +1412,113 @@ mod tests {
         assert_eq!(parsed[1]["content"], "Zażółć gęślą jaźń");
 
         let content = format!("[{}]", turn);
-        let body = hindsight_sync_turn_body(&content, "conversation", false, Some("session-1-doc"));
+        let body = hindsight_sync_turn_body(
+            &content,
+            "conversation",
+            false,
+            Some("session-1-doc"),
+            Some("append"),
+        );
         assert_eq!(body["async"], false);
         assert_eq!(body["document_id"], "session-1-doc");
+        assert_eq!(body["items"][0]["update_mode"], "append");
         assert_eq!(body["items"][0]["content"], content);
         assert_eq!(body["items"][0]["context"], "conversation");
+    }
+
+    #[test]
+    fn test_hindsight_version_probe_semver_gate() {
+        assert!(hindsight_version_meets_minimum(Some("0.5.0"), "0.5.0"));
+        assert!(hindsight_version_meets_minimum(Some("v0.5.6"), "0.5.0"));
+        assert!(hindsight_version_meets_minimum(
+            Some("0.6.0+local"),
+            "0.5.0"
+        ));
+        assert!(!hindsight_version_meets_minimum(Some("0.4.99"), "0.5.0"));
+        assert!(!hindsight_version_meets_minimum(
+            Some("not-a-version"),
+            "0.5.0"
+        ));
+        assert!(!hindsight_version_meets_minimum(None, "0.5.0"));
+    }
+
+    #[test]
+    fn test_sync_turn_buffers_until_retain_threshold_then_drains() {
+        let plugin = HindsightPlugin::new();
+        *plugin.config.lock().unwrap() = Some(HindsightConfig {
+            api_key: "test".into(),
+            api_url: DEFAULT_API_URL.into(),
+            bank_id: "hermes".into(),
+            bank_id_template: String::new(),
+            budget: "mid".into(),
+            mode: "cloud".into(),
+            memory_mode: "hybrid".into(),
+            prefetch_method: "recall".into(),
+            auto_retain: true,
+            auto_recall: true,
+            retain_every_n_turns: 3,
+            retain_context: "conversation".into(),
+            recall_max_tokens: 4096,
+            recall_max_input_chars: 800,
+            recall_types: default_recall_types(),
+            recall_prompt_preamble: String::new(),
+            bank_mission: String::new(),
+            retain_async: true,
+            timeout_secs: DEFAULT_TIMEOUT_SECS,
+        });
+
+        plugin.sync_turn("u1", "a1", "session-1");
+        assert_eq!(plugin.session_turns.lock().unwrap().len(), 1);
+        plugin.sync_turn("u2", "a2", "session-1");
+        assert_eq!(plugin.session_turns.lock().unwrap().len(), 2);
+        plugin.sync_turn("u3", "a3", "session-1");
+        assert!(plugin.session_turns.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_session_switch_flushes_pending_turns_and_clears_prefetch() {
+        let plugin = HindsightPlugin::new();
+        *plugin.config.lock().unwrap() = Some(HindsightConfig {
+            api_key: "test".into(),
+            api_url: DEFAULT_API_URL.into(),
+            bank_id: "hermes".into(),
+            bank_id_template: String::new(),
+            budget: "mid".into(),
+            mode: "cloud".into(),
+            memory_mode: "hybrid".into(),
+            prefetch_method: "recall".into(),
+            auto_retain: true,
+            auto_recall: true,
+            retain_every_n_turns: 10,
+            retain_context: "conversation".into(),
+            recall_max_tokens: 4096,
+            recall_max_input_chars: 800,
+            recall_types: default_recall_types(),
+            recall_prompt_preamble: String::new(),
+            bank_mission: String::new(),
+            retain_async: true,
+            timeout_secs: DEFAULT_TIMEOUT_SECS,
+        });
+        *plugin.session_id.lock().unwrap() = "old-session".into();
+        *plugin.document_id.lock().unwrap() = "old-doc".into();
+        *plugin.prefetch_result.lock().unwrap() = "stale context".into();
+        plugin
+            .session_turns
+            .lock()
+            .unwrap()
+            .push(hindsight_turn_payload("u", "a", "2026-06-08T00:00:00Z"));
+
+        plugin.on_session_switch("new-session", "old-session", false);
+
+        assert!(plugin.session_turns.lock().unwrap().is_empty());
+        assert_eq!(*plugin.session_id.lock().unwrap(), "new-session");
+        assert!(plugin
+            .document_id
+            .lock()
+            .unwrap()
+            .starts_with("new-session-"));
+        assert!(plugin.prefetch_result.lock().unwrap().is_empty());
+        assert_eq!(*plugin.turn_counter.lock().unwrap(), 0);
     }
 
     #[test]

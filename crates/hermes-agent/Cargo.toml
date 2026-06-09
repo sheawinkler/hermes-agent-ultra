@@ -36,6 +36,7 @@ syn = { version = "2", features = ["full"] }
 sha2 = "0.10"
 hex = "0.4"
 hmac = "0.12"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 proptest = { workspace = true }

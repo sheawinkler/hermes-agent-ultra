@@ -2125,7 +2125,9 @@ impl App {
         let tool_schemas =
             crate::platform_toolsets::resolve_platform_tool_schemas(&config, "cli", &tool_registry);
 
-        let agent_config = build_agent_config(&config, &current_model);
+        let session_id = Uuid::new_v4().to_string();
+        let mut agent_config = build_agent_config(&config, &current_model);
+        agent_config.session_id = Some(session_id.clone());
         let provider = build_provider(&config, &current_model);
 
         let agent_inner = hermes_agent::attach_discovered_memory(AgentLoop::new(
@@ -2156,7 +2158,7 @@ impl App {
             tool_schemas,
             messages: Vec::new(),
             ui_messages: Vec::new(),
-            session_id: Uuid::new_v4().to_string(),
+            session_id,
             running: true,
             current_model,
             last_usage: None,
@@ -2380,6 +2382,7 @@ impl App {
         let old_session_id = self.session_id.clone();
         self.invoke_session_lifecycle_hook(HookType::OnSessionFinalize, &old_session_id);
         self.session_id = Uuid::new_v4().to_string();
+        self.notify_memory_session_switch(&self.session_id, &old_session_id, false);
         self.messages.clear();
         self.ui_messages.clear();
         self.last_usage = None;
@@ -2391,12 +2394,14 @@ impl App {
         self.history_index = 0;
         self.ensure_session_stub_snapshot();
         self.invoke_session_lifecycle_hook(HookType::OnSessionReset, &self.session_id);
+        self.rebuild_agent_for_active_session();
     }
 
     /// Reset the current session (clear messages but keep session ID).
     pub fn reset_session(&mut self) {
         let session_id = self.session_id.clone();
         self.invoke_session_lifecycle_hook(HookType::OnSessionFinalize, &session_id);
+        self.notify_memory_session_switch(&session_id, "", true);
         self.messages.clear();
         self.ui_messages.clear();
         self.last_usage = None;
@@ -2422,6 +2427,22 @@ impl App {
             "platform": "cli",
         });
         let _ = plugin_manager.invoke_hook(hook, &context);
+    }
+
+    fn notify_memory_session_switch(
+        &self,
+        new_session_id: &str,
+        parent_session_id: &str,
+        reset: bool,
+    ) {
+        let Some(memory_manager) = self.agent.memory_manager.as_ref() else {
+            return;
+        };
+        let Ok(memory_manager) = memory_manager.lock() else {
+            tracing::warn!("Memory manager lock poisoned during session switch");
+            return;
+        };
+        memory_manager.on_session_switch(new_session_id, parent_session_id, reset);
     }
 
     /// Set or clear a durable session objective.
@@ -2533,21 +2554,7 @@ impl App {
         self.current_model = provider_model.to_string();
         sync_runtime_model_env(&self.config, &self.current_model);
 
-        let provider = build_provider(&self.config, &self.current_model);
-        let agent_config = build_agent_config(&self.config, &self.current_model);
-        let agent_tool_registry = Arc::new(bridge_tool_registry(&self.tool_registry));
-
-        let agent_inner = hermes_agent::attach_discovered_memory(AgentLoop::new(
-            agent_config,
-            agent_tool_registry,
-            provider,
-        ))
-        .with_callbacks(Self::stream_callbacks(self.stream_handle_shared.clone()));
-        let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
-            &agent_inner,
-            self.state_root.clone(),
-        ));
-        self.agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
+        self.rebuild_agent_for_active_session();
 
         match SessionPersistence::new(&self.state_root)
             .update_session_model(&self.session_id, &self.current_model)
@@ -2562,6 +2569,25 @@ impl App {
         }
 
         tracing::info!("Switched model to: {}", provider_model);
+    }
+
+    fn rebuild_agent_for_active_session(&mut self) {
+        let provider = build_provider(&self.config, &self.current_model);
+        let mut agent_config = build_agent_config(&self.config, &self.current_model);
+        agent_config.session_id = Some(self.session_id.clone());
+        let agent_tool_registry = Arc::new(bridge_tool_registry(&self.tool_registry));
+
+        let agent_inner = hermes_agent::attach_discovered_memory(AgentLoop::new(
+            agent_config,
+            agent_tool_registry,
+            provider,
+        ))
+        .with_callbacks(Self::stream_callbacks(self.stream_handle_shared.clone()));
+        let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
+            &agent_inner,
+            self.state_root.clone(),
+        ));
+        self.agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
     }
 
     /// Switch the active personality.
@@ -3918,7 +3944,9 @@ mod tests {
         let config = Arc::new(GatewayConfig::default());
         let tool_registry = Arc::new(ToolRegistry::new());
         let agent_tool_registry = Arc::new(bridge_tool_registry(&tool_registry));
-        let agent_config = build_agent_config(config.as_ref(), "openai:gpt-4o");
+        let session_id = "test-session".to_string();
+        let mut agent_config = build_agent_config(config.as_ref(), "openai:gpt-4o");
+        agent_config.session_id = Some(session_id.clone());
         let provider: Arc<dyn LlmProvider> = Arc::new(NoBackendProvider {
             model: "openai:gpt-4o".to_string(),
         });
@@ -3942,7 +3970,7 @@ mod tests {
             tool_schemas: Vec::new(),
             messages: Vec::new(),
             ui_messages: Vec::new(),
-            session_id: "test-session".to_string(),
+            session_id,
             running: true,
             current_model: "openai:gpt-4o".to_string(),
             last_usage: None,
@@ -3998,6 +4026,10 @@ mod tests {
         assert_eq!(
             persistence.get_session_model(&app.session_id).unwrap(),
             Some("anthropic:claude-sonnet-4-6".to_string())
+        );
+        assert_eq!(
+            app.agent.config.session_id.as_deref(),
+            Some(app.session_id.as_str())
         );
 
         for (key, value) in saved_env {
@@ -4172,6 +4204,10 @@ mod tests {
         assert_eq!(events[1].0, "on_session_reset");
         assert_eq!(events[1].1, app.session_id);
         assert_ne!(events[0].1, events[1].1);
+        assert_eq!(
+            app.agent.config.session_id.as_deref(),
+            Some(app.session_id.as_str())
+        );
     }
 
     #[test]
@@ -4192,6 +4228,7 @@ mod tests {
             ]
         );
         assert_eq!(app.session_id, "test-session");
+        assert_eq!(app.agent.config.session_id.as_deref(), Some("test-session"));
     }
 
     #[test]
