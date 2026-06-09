@@ -23,11 +23,20 @@ NOTES_BY_SHA_PREFIX = {
         "temporary file, fsyncs it, and rename-replaces the destination. "
         "Other upstream yaml/flock Python surfaces are absent from the Rust runtime."
     ),
+    "0e0d704f2d": (
+        "ported in Rust via `crates/hermes-environments/src/ssh.rs` and "
+        "`crates/hermes-tools/src/tools/terminal.rs` (this tranche): SSH subprocess "
+        "invocations explicitly detach stdin, and terminal commands on non-local "
+        "backends preserve `TERMINAL_CWD` as the remote workdir without local host "
+        "path validation. Focused terminal tests cover remote cwd fallback plus "
+        "task/explicit workdir precedence."
+    ),
 }
 
 DISPOSITION_BY_SHA_PREFIX = {
     "5af672c753": "superseded",
     "62573f44cf": "ported",
+    "0e0d704f2d": "ported",
 }
 
 

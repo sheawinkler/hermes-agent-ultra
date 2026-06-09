@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-05-29T20:36:33.902963+00:00",
+  "generated_at_utc": "2026-06-09T17:45:05.761044+00:00",
   "scope": {
     "labels": {
       "20": "GPAR-01 tests+CI parity",
@@ -16,56 +16,54 @@
   },
   "summary": {
     "by_disposition": {
-      "mirrored": 68,
-      "pending": 1,
-      "ported": 12,
-      "superseded": 2867
+      "mirrored": 63,
+      "ported": 213,
+      "superseded": 3329
     },
-    "pass": false,
-    "total_commits": 2948,
-    "total_pending": 1
+    "pass": true,
+    "total_commits": 3605,
+    "total_pending": 0
   },
   "ticket_breakdown": {
     "20": {
       "by_disposition": {
         "mirrored": 14,
-        "pending": 1,
-        "ported": 3,
-        "superseded": 1772
+        "ported": 88,
+        "superseded": 2182
       },
       "label": "GPAR-01 tests+CI parity",
-      "pending": 1,
-      "total": 1790
+      "pending": 0,
+      "total": 2284
     },
     "21": {
       "by_disposition": {
-        "mirrored": 30,
-        "ported": 2,
-        "superseded": 77
+        "mirrored": 26,
+        "ported": 60,
+        "superseded": 29
       },
       "label": "GPAR-02 skills parity",
       "pending": 0,
-      "total": 109
+      "total": 115
     },
     "22": {
       "by_disposition": {
         "mirrored": 21,
-        "ported": 6,
-        "superseded": 689
+        "ported": 29,
+        "superseded": 770
       },
       "label": "GPAR-03 UX parity",
       "pending": 0,
-      "total": 716
+      "total": 820
     },
     "23": {
       "by_disposition": {
-        "mirrored": 3,
-        "ported": 1,
-        "superseded": 329
+        "mirrored": 2,
+        "ported": 36,
+        "superseded": 348
       },
       "label": "GPAR-04 gateway/plugin-memory parity",
       "pending": 0,
-      "total": 333
+      "total": 386
     }
   }
 }
