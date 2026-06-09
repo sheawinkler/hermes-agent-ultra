@@ -21334,9 +21334,7 @@ fn apply_cli_chat_runtime_env(provider_model: &str) {
         let provider = provider.trim();
         if !provider.is_empty() {
             std::env::set_var("HERMES_INFERENCE_PROVIDER", provider);
-            if std::env::var_os("HERMES_TUI_PROVIDER").is_some() {
-                std::env::set_var("HERMES_TUI_PROVIDER", provider);
-            }
+            std::env::set_var("HERMES_TUI_PROVIDER", provider);
         }
     }
 }
@@ -30622,6 +30620,35 @@ install_command: "uv pip install -r requirements.txt"
         assert_eq!(
             std::env::var("HERMES_TUI_PROVIDER").ok().as_deref(),
             Some("nous")
+        );
+
+        for key in keys {
+            std::env::remove_var(key);
+        }
+    }
+
+    #[test]
+    fn apply_cli_chat_runtime_env_sets_tui_provider_when_absent() {
+        let _lock = env_test_lock();
+        let keys = [
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "HERMES_TUI_PROVIDER",
+        ];
+        for key in keys {
+            std::env::remove_var(key);
+        }
+
+        apply_cli_chat_runtime_env("custom-xuanji:deepseek-v4-pro");
+
+        assert_eq!(
+            std::env::var("HERMES_TUI_PROVIDER").ok().as_deref(),
+            Some("custom-xuanji")
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_PROVIDER").ok().as_deref(),
+            Some("custom-xuanji")
         );
 
         for key in keys {
