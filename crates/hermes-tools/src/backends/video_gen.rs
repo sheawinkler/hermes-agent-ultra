@@ -1243,9 +1243,13 @@ mod tests {
             ];
             let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
             for k in keys {
-                std::env::remove_var(k);
+                unsafe {
+                    std::env::remove_var(k);
+                }
             }
-            std::env::set_var("HERMES_HOME", tmp.path());
+            unsafe {
+                std::env::set_var("HERMES_HOME", tmp.path());
+            }
             Self {
                 _tmp: tmp,
                 original,
@@ -1258,8 +1262,8 @@ mod tests {
         fn drop(&mut self) {
             for (key, value) in &self.original {
                 match value {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
+                    Some(value) => unsafe { std::env::set_var(key, value) },
+                    None => unsafe { std::env::remove_var(key) },
                 }
             }
         }
@@ -1284,10 +1288,14 @@ mod tests {
     #[test]
     fn resolve_family_prefers_explicit_then_env_then_default() {
         let _env = EnvScope::new();
-        std::env::set_var("FAL_VIDEO_MODEL", "veo3.1");
+        unsafe {
+            std::env::set_var("FAL_VIDEO_MODEL", "veo3.1");
+        }
         assert_eq!(resolve_family(Some("seedance-2.0")).id, "seedance-2.0");
         assert_eq!(resolve_family(None).id, "veo3.1");
-        std::env::set_var("FAL_VIDEO_MODEL", "not-real");
+        unsafe {
+            std::env::set_var("FAL_VIDEO_MODEL", "not-real");
+        }
         assert_eq!(resolve_family(None).id, DEFAULT_FAL_VIDEO_MODEL);
     }
 
@@ -1377,16 +1385,20 @@ mod tests {
     #[test]
     fn from_env_or_managed_prefers_direct_and_supports_managed() {
         let _env = EnvScope::new();
-        std::env::set_var("FAL_KEY", "direct-key");
+        unsafe {
+            std::env::set_var("FAL_KEY", "direct-key");
+        }
         assert_eq!(
             FalVideoGenBackend::from_env_or_managed()
                 .unwrap()
                 .transport_label(),
             "direct"
         );
-        std::env::remove_var("FAL_KEY");
-        std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
-        std::env::set_var("TOOL_GATEWAY_USER_TOKEN", "nous-token");
+        unsafe {
+            std::env::remove_var("FAL_KEY");
+            std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+            std::env::set_var("TOOL_GATEWAY_USER_TOKEN", "nous-token");
+        }
         assert_eq!(
             FalVideoGenBackend::from_env_or_managed()
                 .unwrap()
@@ -1498,15 +1510,19 @@ mod tests {
     #[test]
     fn xai_credentials_resolve_from_env_and_auth_store() {
         let _env = EnvScope::new();
-        std::env::set_var("XAI_API_KEY", "env-xai-key");
-        std::env::set_var("XAI_BASE_URL", "https://xai.env.test/v1/");
+        unsafe {
+            std::env::set_var("XAI_API_KEY", "env-xai-key");
+            std::env::set_var("XAI_BASE_URL", "https://xai.env.test/v1/");
+        }
         let credentials = resolve_xai_video_credentials().unwrap();
         assert_eq!(credentials.api_key, "env-xai-key");
         assert_eq!(credentials.base_url, "https://xai.env.test/v1");
         assert_eq!(credentials.source, "env");
 
-        std::env::remove_var("XAI_API_KEY");
-        std::env::remove_var("XAI_BASE_URL");
+        unsafe {
+            std::env::remove_var("XAI_API_KEY");
+            std::env::remove_var("XAI_BASE_URL");
+        }
         let path = hermes_config::paths::auth_json_path();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
@@ -1532,13 +1548,17 @@ mod tests {
     #[test]
     fn video_gen_backend_selection_requires_explicit_xai_choice() {
         let _env = EnvScope::new();
-        std::env::set_var("XAI_API_KEY", "xai-key");
+        unsafe {
+            std::env::set_var("XAI_API_KEY", "xai-key");
+        }
         assert_eq!(
             VideoGenBackend::from_env_or_managed().provider_label(),
             "fal"
         );
 
-        std::env::set_var("HERMES_VIDEO_GEN_BACKEND", "xai");
+        unsafe {
+            std::env::set_var("HERMES_VIDEO_GEN_BACKEND", "xai");
+        }
         let selected = VideoGenBackend::from_env_or_managed();
         assert_eq!(selected.provider_label(), "xai");
         assert_eq!(

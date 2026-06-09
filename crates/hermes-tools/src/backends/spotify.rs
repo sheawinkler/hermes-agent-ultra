@@ -349,9 +349,13 @@ mod tests {
                 .map(|key| (*key, std::env::var(key).ok()))
                 .collect();
             for key in keys {
-                std::env::remove_var(key);
+                unsafe {
+                    std::env::remove_var(key);
+                }
             }
-            std::env::set_var("HERMES_HOME", tmp.path());
+            unsafe {
+                std::env::set_var("HERMES_HOME", tmp.path());
+            }
             Self {
                 _tmp: tmp,
                 original,
@@ -364,8 +368,8 @@ mod tests {
         fn drop(&mut self) {
             for (key, value) in &self.original {
                 match value {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
+                    Some(value) => unsafe { std::env::set_var(key, value) },
+                    None => unsafe { std::env::remove_var(key) },
                 }
             }
         }
@@ -374,8 +378,10 @@ mod tests {
     #[test]
     fn resolves_credentials_from_env() {
         let _guard = EnvGuard::new();
-        std::env::set_var("HERMES_SPOTIFY_ACCESS_TOKEN", "env-token");
-        std::env::set_var("HERMES_SPOTIFY_API_BASE_URL", "https://spotify.test/v1/");
+        unsafe {
+            std::env::set_var("HERMES_SPOTIFY_ACCESS_TOKEN", "env-token");
+            std::env::set_var("HERMES_SPOTIFY_API_BASE_URL", "https://spotify.test/v1/");
+        }
 
         let backend = SpotifyWebApiBackend::from_env_or_auth_store().unwrap();
         let credentials = backend.credentials().unwrap();

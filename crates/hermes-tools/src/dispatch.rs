@@ -202,7 +202,9 @@ mod tests {
     fn dispatch_single_persists_oversized_result() {
         let _guard = STORAGE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_TOOL_RESULT_STORAGE_DIR", tmp.path());
+        unsafe {
+            std::env::set_var("HERMES_TOOL_RESULT_STORAGE_DIR", tmp.path());
+        }
 
         let registry = Arc::new(ToolRegistry::new());
         let handler = Arc::new(LargeHandler);
@@ -246,6 +248,8 @@ mod tests {
         assert!(persisted.contains("large-start-"));
         assert!(persisted.contains(&"x".repeat(5_000)));
 
-        std::env::remove_var("HERMES_TOOL_RESULT_STORAGE_DIR");
+        unsafe {
+            std::env::remove_var("HERMES_TOOL_RESULT_STORAGE_DIR");
+        }
     }
 }

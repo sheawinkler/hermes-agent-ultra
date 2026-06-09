@@ -398,7 +398,9 @@ mod tests {
     fn maybe_persist_writes_full_output_and_replaces_context() {
         let _guard = STORAGE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_TOOL_RESULT_STORAGE_DIR", tmp.path());
+        unsafe {
+            std::env::set_var("HERMES_TOOL_RESULT_STORAGE_DIR", tmp.path());
+        }
 
         let content = format!("DISTINCTIVE_START_MARKER{}", "x".repeat(60_000));
         let result = maybe_persist_tool_result(&content, "terminal", "tc_456", Some(30_000));
@@ -411,14 +413,18 @@ mod tests {
             content
         );
 
-        std::env::remove_var("HERMES_TOOL_RESULT_STORAGE_DIR");
+        unsafe {
+            std::env::remove_var("HERMES_TOOL_RESULT_STORAGE_DIR");
+        }
     }
 
     #[test]
     fn threshold_none_never_persists_and_zero_forces_persist() {
         let _guard = STORAGE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_TOOL_RESULT_STORAGE_DIR", tmp.path());
+        unsafe {
+            std::env::set_var("HERMES_TOOL_RESULT_STORAGE_DIR", tmp.path());
+        }
 
         let large = "x".repeat(60_000);
         assert_eq!(
@@ -434,14 +440,18 @@ mod tests {
             "even short content"
         );
 
-        std::env::remove_var("HERMES_TOOL_RESULT_STORAGE_DIR");
+        unsafe {
+            std::env::remove_var("HERMES_TOOL_RESULT_STORAGE_DIR");
+        }
     }
 
     #[test]
     fn enforce_turn_budget_spills_largest_first_and_skips_existing() {
         let _guard = STORAGE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_TOOL_RESULT_STORAGE_DIR", tmp.path());
+        unsafe {
+            std::env::set_var("HERMES_TOOL_RESULT_STORAGE_DIR", tmp.path());
+        }
 
         let mut results = vec![
             ToolResult::ok(
@@ -468,6 +478,8 @@ mod tests {
             "b".repeat(130_000)
         );
 
-        std::env::remove_var("HERMES_TOOL_RESULT_STORAGE_DIR");
+        unsafe {
+            std::env::remove_var("HERMES_TOOL_RESULT_STORAGE_DIR");
+        }
     }
 }
