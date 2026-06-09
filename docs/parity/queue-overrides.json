@@ -104,6 +104,166 @@
       "disposition": "ported",
       "notes": "Rust Hindsight supports bank_id_template with profile/workspace/platform/user/session placeholders, sanitization tests, schema exposure, and README coverage."
     },
+    "13683c0842f0": {
+      "disposition": "ported",
+      "notes": "Rust MemoryProviderPlugin now has an on_session_switch hook, MemoryManager broadcasts it to enabled providers, and the TUI calls it when sessions rotate or reset while preserving the active AgentConfig session_id."
+    },
+    "0565497dcc2f": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight drains buffered auto-retain turns through the same retain path during session end and shutdown, with pending-turn state reset after the drain."
+    },
+    "c38dac742b22": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight flushes buffered turns before adopting a new session_id, clears stale prefetch context, resets counters, and has regression coverage for session switch behavior."
+    },
+    "0a5ee01e487a": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight session-switch flushing routes through retain_hindsight_turns and the same document/update-mode targeting helper used by normal auto-retain batches."
+    },
+    "3082fa0829e0": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight probes /version once per API base for update_mode append support, accepts version/api_version response shapes, gates append on semver >= 0.5.0, and falls back to batch document IDs."
+    },
+    "09d66037f8f7": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight append retains send only the pending-turn delta and use the stable session document only when the API advertises append support."
+    },
+    "ea01bdcebe1f": {
+      "disposition": "superseded",
+      "notes": "The Python flush_memories API has no Rust runtime equivalent; Rust providers use lifecycle hooks, shutdown, and explicit retain/write paths instead."
+    },
+    "18beb69b4996": {
+      "disposition": "superseded",
+      "notes": "The embedded Hindsight async-client close fix is Python-only; Rust Hindsight does not start hindsight-embed and uses bounded reqwest clients for HTTP operations."
+    },
+    "0ba6471dd191": {
+      "disposition": "superseded",
+      "notes": "The embedded Hindsight idle-daemon recovery path is superseded by the Rust-only local_external/cloud HTTP modes; no embedded Python daemon is launched."
+    },
+    "96f0ddc6a946": {
+      "disposition": "superseded",
+      "notes": "Baking hindsight-client into Docker only applies to the upstream embedded Python runtime; the Rust runtime keeps Hindsight integration in native HTTP code."
+    },
+    "d03c6fcc45cf": {
+      "disposition": "ported",
+      "notes": "Rust Honcho supports opt-in pinUserPeer/pinPeerName identity mapping so gateway runtime users can resolve to stable configured peers across platforms."
+    },
+    "326c9daa695b": {
+      "disposition": "ported",
+      "notes": "Rust Honcho only treats pinUserPeer/pinPeerName as enabled when the JSON value is a strict boolean true, avoiding truthy-string or mock-style coercion."
+    },
+    "5d36871d923c": {
+      "disposition": "ported",
+      "notes": "Rust Honcho loads global fallback config from ~/.honcho/config.json and ~/.hermes/honcho.json before the active HERMES_HOME honcho.json path."
+    },
+    "d18618f48f18": {
+      "disposition": "ported",
+      "notes": "Rust Honcho respects HOME-anchored default profile fallback paths while still allowing the active HERMES_HOME profile to override them."
+    },
+    "82205276c1ae": {
+      "disposition": "ported",
+      "notes": "Rust Honcho defaults HTTP timeout_secs to 30 seconds and still clamps explicit HONCHO_TIMEOUT_SECS/config values to the supported range."
+    },
+    "02ab255a0d52": {
+      "disposition": "ported",
+      "notes": "Rust Honcho validates baseUrl schemes, strips trailing /vN API suffixes, keeps schemeless hosts as HTTPS, and rejects unsupported URL schemes."
+    },
+    "5883df5574de": {
+      "disposition": "ported",
+      "notes": "Rust Honcho preserves legacy schemeless baseUrl configs by normalizing them to HTTPS instead of dropping the configured host."
+    },
+    "894e0b935bb8": {
+      "disposition": "ported",
+      "notes": "Rust honcho_profile now explains an empty peer card and points users to honcho_search, honcho_context, or honcho_conclude for memory retrieval."
+    },
+    "bea2562fc4b3": {
+      "disposition": "ported",
+      "notes": "Rust Honcho numeric config parsing uses typed f64/usize accessors and bounded defaults instead of raw integer coercion."
+    },
+    "dad021745000": {
+      "disposition": "superseded",
+      "notes": "Python session-cache RLock fixes are superseded by Rust Honcho's Mutex-protected session_key, prefetch, and turn-count state with no shared Python SDK cache."
+    },
+    "5d349ea857d4": {
+      "disposition": "superseded",
+      "notes": "Python get_or_create cache locking is superseded by Rust Honcho's stateless HTTP session operations and Mutex-protected local session key."
+    },
+    "ec4cb16a29ec": {
+      "disposition": "superseded",
+      "notes": "Python peers/sessions cache read locking is superseded by Rust Honcho identity resolution from immutable config plus Mutex-protected plugin state."
+    },
+    "47d5177a7d61": {
+      "disposition": "superseded",
+      "notes": "Python lazy-singleton and Honcho TOCTOU fixes are superseded by Rust plugin instances and explicit Mutex state; no Python lazy singleton remains."
+    },
+    "cd276eef7805": {
+      "disposition": "superseded",
+      "notes": "The Python on_memory_write metadata ABC compatibility shim is not a Rust API surface; Rust memory writes use typed trait methods and provider tool handlers."
+    },
+    "2e3c6627ceac": {
+      "disposition": "ported",
+      "notes": "Rust Honcho includes runtime peer mapping with configured aliases, optional runtime prefixes, and deterministic collision-resistant peer IDs."
+    },
+    "30b391ab366e": {
+      "disposition": "ported",
+      "notes": "Rust Honcho avoids runtime peer collisions by hashing runtime IDs when generating prefixed peer names, with regression coverage."
+    },
+    "00e683020443": {
+      "disposition": "ported",
+      "notes": "Rust Honcho host-level identity mapping config overrides root mappings cleanly, including aiPeer and user peer alias inheritance behavior."
+    },
+    "3cf5e8225d88": {
+      "disposition": "ported",
+      "notes": "Rust Honcho accepts pinUserPeer as the backwards-compatible alias for pinPeerName while keeping strict boolean parsing."
+    },
+    "6feb2afd50cb": {
+      "disposition": "ported",
+      "notes": "Rust Honcho covers pinUserPeer/pinPeerName transition behavior through alias parsing, host-block config, and identity-resolution regression tests."
+    },
+    "1a8e67076a0b": {
+      "disposition": "ported",
+      "notes": "Rust Honcho covers pinUserPeer plus aiPeer edge cases in setup/config parsing and peer-resolution tests."
+    },
+    "7137cccbd134": {
+      "disposition": "ported",
+      "notes": "Rust OpenViking viking_add_resource uploads existing local files and directories through temp_upload and then creates resources with temp_file_id/source_name."
+    },
+    "187951ec6b88": {
+      "disposition": "ported",
+      "notes": "Rust OpenViking local-upload behavior is covered by tests for file URI handling, missing local path rejection, to/parent conflicts, directory zips, and symlink skips."
+    },
+    "2b6345cee302": {
+      "disposition": "ported",
+      "notes": "Rust OpenViking hardens local path uploads by detecting path-like missing sources, expanding ~, rejecting top-level symlinks, and preserving remote URL passthrough."
+    },
+    "6e250a55de50": {
+      "disposition": "ported",
+      "notes": "Rust OpenViking sends bearer Authorization for API-key auth and uses multipart upload headers without forcing JSON Content-Type."
+    },
+    "8fb3e2d63afb": {
+      "disposition": "ported",
+      "notes": "Rust OpenViking always sends configured account/user/agent tenant headers on JSON and multipart requests."
+    },
+    "63991bbd9751": {
+      "disposition": "ported",
+      "notes": "Rust OpenViking skips symlinks when zipping uploaded directories and rejects top-level symlink upload paths."
+    },
+    "2d587c56622f": {
+      "disposition": "ported",
+      "notes": "Rust OpenViking stores provider memory writes through content/write with generated viking:// memory URIs instead of session-message ingestion."
+    },
+    "d61785889678": {
+      "disposition": "ported",
+      "notes": "Rust OpenViking uses target/category-aware memory subdirectories and a shared URI builder instead of private attribute access."
+    },
+    "490b3e76b138": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight defaults recall_types to observation and sends the same configured type list through automatic recall and hindsight_recall tool calls."
+    },
+    "4df62d239e38": {
+      "disposition": "ported",
+      "notes": "Rust Hindsight applies recall_types narrowing to both context injection and explicit tool recall paths."
+    },
     "395dbcc873c8": {
       "disposition": "superseded",
       "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"

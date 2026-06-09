@@ -81,6 +81,10 @@ pub trait MemoryProviderPlugin: Send + Sync {
         let _ = messages;
     }
 
+    fn on_session_switch(&self, new_session_id: &str, parent_session_id: &str, reset: bool) {
+        let _ = (new_session_id, parent_session_id, reset);
+    }
+
     fn on_pre_compress(&self, messages: &[Value]) -> String {
         let _ = messages;
         String::new()
@@ -484,6 +488,17 @@ impl MemoryManager {
     pub fn on_session_end(&self, messages: &[Value]) {
         for provider in &self.providers {
             provider.on_session_end(messages);
+        }
+    }
+
+    /// Notify all providers that the active session id changed.
+    pub fn on_session_switch(&self, new_session_id: &str, parent_session_id: &str, reset: bool) {
+        let new_session_id = new_session_id.trim();
+        if new_session_id.is_empty() {
+            return;
+        }
+        for provider in &self.providers {
+            provider.on_session_switch(new_session_id, parent_session_id, reset);
         }
     }
 
@@ -1054,6 +1069,44 @@ mod tests {
 
         let result = mm.handle_tool_call("memory", &serde_json::json!({}));
         assert!(result.contains("memory"));
+    }
+
+    #[test]
+    fn test_session_switch_propagates_to_providers() {
+        struct SwitchProvider {
+            seen: Arc<std::sync::Mutex<Vec<(String, String, bool)>>>,
+        }
+
+        impl MemoryProviderPlugin for SwitchProvider {
+            fn name(&self) -> &str {
+                "switch"
+            }
+
+            fn on_session_switch(
+                &self,
+                new_session_id: &str,
+                parent_session_id: &str,
+                reset: bool,
+            ) {
+                self.seen.lock().unwrap().push((
+                    new_session_id.to_string(),
+                    parent_session_id.to_string(),
+                    reset,
+                ));
+            }
+        }
+
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut mm = MemoryManager::new();
+        mm.add_provider(Arc::new(SwitchProvider { seen: seen.clone() }));
+
+        mm.on_session_switch("", "old", false);
+        mm.on_session_switch("new-session", "old-session", true);
+
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![("new-session".to_string(), "old-session".to_string(), true)]
+        );
     }
 
     #[test]
