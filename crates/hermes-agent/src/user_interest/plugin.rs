@@ -89,7 +89,7 @@ impl MemoryProviderPlugin for InterestMemoryPlugin {
     fn get_config_schema(&self) -> Option<Value> {
         Some(serde_json::json!([
             {"key": "enabled", "description": "Enable local interest store", "default": true},
-            {"key": "extract_mode", "description": "rules | llm | hybrid", "default": "rules"},
+            {"key": "extract_mode", "description": "llm (default) | hybrid | rules", "default": "llm"},
             {"key": "per_turn_buffer", "description": "Buffer high-confidence signals per turn", "default": true},
             {"key": "per_turn_persist", "description": "Persist POI every user message (legacy)", "default": false},
             {"key": "max_topics", "description": "Max retained topics", "default": 40},

@@ -5,15 +5,14 @@ use std::sync::Mutex as StdMutex;
 use std::time::{Duration, Instant};
 
 use hermes_agent::{
-    build_auxiliary_client, register_agent_builtin_tools_with_voice, AgentInboundPreparer,
-    AuxiliaryBuildParams,
+    auxiliary_config_from_gateway, build_auxiliary_client,
+    register_agent_builtin_tools_with_voice, AgentInboundPreparer, AuxiliaryBuildParams,
 };
 use hermes_config::GatewayConfig;
 use hermes_core::{SkillProvider, TerminalBackend};
 use hermes_gateway::voice::VoiceManager;
 use hermes_gateway::voice_config::voice_config_from_app;
 use hermes_gateway::Gateway;
-use hermes_intelligence::auxiliary::AuxiliaryConfig;
 use hermes_tools::{ToolRegistry, VoiceMediaToolConfig};
 
 /// Parse `provider:model` from config (e.g. `custom:flowy/DeepSeek-V4-Flash`).
@@ -45,7 +44,7 @@ pub async fn wire_gateway_inbound_vision(
     let (primary_provider, primary_model) = split_configured_model(&configured);
 
     let (auxiliary, _summary) = build_auxiliary_client(AuxiliaryBuildParams {
-        config: AuxiliaryConfig::default(),
+        config: auxiliary_config_from_gateway(config),
         primary_provider: primary_provider.clone(),
         primary_model: primary_model.clone(),
         llm_providers: config.llm_providers.clone(),

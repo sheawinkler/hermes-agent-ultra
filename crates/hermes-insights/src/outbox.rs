@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use rusqlite::{params, Connection};
 
 use crate::types::ContributionEnvelope;
-use crate::types::{skill_pattern_id, ContributionType};
+use crate::types::{work_package_id, ContributionType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutboxStatus {
@@ -84,9 +84,9 @@ impl ContributionOutbox {
     }
 
     pub fn enqueue(&self, envelope: ContributionEnvelope) -> Result<bool, String> {
-        if envelope.kind == ContributionType::SkillPattern.as_str() {
-            if let Some(pid) = skill_pattern_id(&envelope.payload) {
-                self.drop_pending_skill_pattern(&pid)?;
+        if envelope.kind == ContributionType::DomainWorkPackage.as_str() {
+            if let Some(wid) = crate::types::work_package_id(&envelope.payload) {
+                self.drop_pending_work_package(&wid)?;
             }
         }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
@@ -110,14 +110,14 @@ impl ContributionOutbox {
         Ok(rows > 0)
     }
 
-    /// Delete pending/failed skill rows with the same `pattern_id` before re-enqueue.
-    fn drop_pending_skill_pattern(&self, pattern_id: &str) -> Result<(), String> {
+    /// Delete pending/failed work packages with the same `work_id` before re-enqueue.
+    fn drop_pending_work_package(&self, work_id: &str) -> Result<(), String> {
         let pending = self.list_pending(512)?;
         let ids: Vec<String> = pending
             .into_iter()
             .filter(|e| {
-                e.kind == ContributionType::SkillPattern.as_str()
-                    && skill_pattern_id(&e.envelope.payload).as_deref() == Some(pattern_id)
+                e.kind == ContributionType::DomainWorkPackage.as_str()
+                    && work_package_id(&e.envelope.payload).as_deref() == Some(work_id)
             })
             .map(|e| e.id)
             .collect();

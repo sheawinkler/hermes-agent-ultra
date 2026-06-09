@@ -1,5 +1,7 @@
 # Insights Contribution — 服务端实现规格（从零）
 
+> **⚠️ v3 迁移**：新客户端仅上传 `domain_work_package`。请优先实现 [SERVER_V3_DOMAIN_WORK_PACKAGE.md](./SERVER_V3_DOMAIN_WORK_PACKAGE.md)；下文 v2 内容供历史对照。
+
 > **客户端（Hermes Rust）**：已实现，见 [CLIENT_IMPLEMENTATION.md](./CLIENT_IMPLEMENTATION.md)。  
 > **服务端现状**：Go + MySQL 8 + 阿里云 OSS + Insights REST **已上线**；鉴权为 **必填** `Authorization: Bearer`。  
 > **本文档**：表结构、业务逻辑、接口契约（供联调与运营侧对照）。  

@@ -1,22 +1,22 @@
-//! REST API payload types (aligned with docs/insights/SERVER_IMPLEMENTATION.md).
+//! REST API payload types (v3 domain work package).
 
 use serde::{Deserialize, Serialize};
 
 /// Consent document version shown on `hermes contribute enable`.
-pub const INSIGHTS_CONSENT_VERSION: &str = "2026-05-29";
+pub const INSIGHTS_CONSENT_VERSION: &str = "2026-06-15";
+
+pub const DOMAIN_WORK_PACKAGE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContributionType {
-    InterestSnapshot,
-    SkillPattern,
+    DomainWorkPackage,
 }
 
 impl ContributionType {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::InterestSnapshot => "interest_snapshot",
-            Self::SkillPattern => "skill_pattern",
+            Self::DomainWorkPackage => "domain_work_package",
         }
     }
 }
@@ -37,30 +37,136 @@ pub struct ContributionBatch {
     pub contributions: Vec<ContributionEnvelope>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InterestTopicFingerprint {
-    /// Human-readable cohort key (`lang:rust`, `topic:beijing-dialect`). Never `interest:<hex>`.
-    pub topic_key: String,
-    /// Sanitized display label for ops UI (primary).
-    pub label_redacted: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary_redacted: Option<String>,
-    pub namespace: String,
-    pub weight_band: String,
-    pub evidence_band: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub taxonomy_hints: Vec<String>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProblemClass {
+    Operational,
+    Technical,
+    Compliance,
+    Creative,
+    Research,
+}
+
+impl ProblemClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Operational => "operational",
+            Self::Technical => "technical",
+            Self::Compliance => "compliance",
+            Self::Creative => "creative",
+            Self::Research => "research",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DifficultyBand {
+    Low,
+    Med,
+    High,
+}
+
+impl DifficultyBand {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Med => "med",
+            Self::High => "high",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InterestFingerprint {
-    pub topics: Vec<InterestTopicFingerprint>,
-    /// Co-occurring sanitized labels (not local ids).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub co_topics: Vec<String>,
-    pub collected_at: String,
+pub struct DomainPoiPayload {
+    pub domain_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taxonomy_code: Option<String>,
+    pub problem_class: String,
+    pub problem_statement_redacted: String,
+    pub difficulty_band: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolutionVerdict {
+    SolvedConfirmed,
+    SolvedInferred,
+    Partial,
+    Unresolved,
+    Failed,
+    Abandoned,
+    Indeterminate,
+}
+
+impl ResolutionVerdict {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SolvedConfirmed => "solved_confirmed",
+            Self::SolvedInferred => "solved_inferred",
+            Self::Partial => "partial",
+            Self::Unresolved => "unresolved",
+            Self::Failed => "failed",
+            Self::Abandoned => "abandoned",
+            Self::Indeterminate => "indeterminate",
+        }
+    }
+
+    pub fn is_reportable(self, exclude: &[String]) -> bool {
+        if self == Self::Indeterminate {
+            return false;
+        }
+        !exclude.iter().any(|v| v == self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceTier {
+    A,
+    B,
+    C,
+    D,
+}
+
+impl EvidenceTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::A => "A",
+            Self::B => "B",
+            Self::C => "C",
+            Self::D => "D",
+        }
+    }
+
+    pub fn meets_min(self, min: &str) -> bool {
+        let min = min.trim().to_ascii_uppercase();
+        let order = |t: Self| match t {
+            Self::A => 4,
+            Self::B => 3,
+            Self::C => 2,
+            Self::D => 1,
+        };
+        let min_tier = match min.as_str() {
+            "A" => Self::A,
+            "B" => Self::B,
+            "C" => Self::C,
+            _ => Self::D,
+        };
+        order(self) >= order(min_tier)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolutionPayload {
+    pub verdict: String,
+    pub confidence_band: String,
+    pub evidence_tier: String,
+    pub user_feedback_band: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective_check_band: Option<String>,
+    pub signal_codes: Vec<String>,
+    pub recovery_attempted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,22 +193,13 @@ pub enum SkillProvenance {
     UserCreated,
 }
 
-fn default_payload_schema_version() -> u32 {
-    3
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillPattern {
-    /// Bumps `content_hash` when upload schema changes (v3 adds templates/scripts/assets files).
-    #[serde(default = "default_payload_schema_version")]
-    pub payload_schema_version: u32,
-    /// Dedup fingerprint for server; ops UI should use `display_name` + text fields.
+pub struct WorkPackageSkillPayload {
     pub pattern_id: String,
-    /// Sanitized skill title from frontmatter (ops primary).
     pub display_name: String,
     pub name_slug: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
+    pub binding_role: String,
+    pub domain_keys: Vec<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description_redacted: String,
     pub structure: SkillStructure,
@@ -110,22 +207,35 @@ pub struct SkillPattern {
     pub trigger_hints: SkillTriggerHints,
     pub provenance: SkillProvenance,
     pub content_version: String,
-    /// Sanitized POI labels linked at upload time (not local topic ids).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub linked_interest_labels: Vec<String>,
-    /// Sanitized SKILL.md body (main sections; auxiliary files are in `references_redacted`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redacted_body: Option<String>,
-    /// Sanitized text files from skill `references/`, `templates/`, `scripts/`, `assets/`.
     #[serde(default)]
     pub references_redacted: Vec<SkillReferenceSnippet>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillReferenceSnippet {
-    /// e.g. `references/api-guide.md`, `scripts/search.py`, `templates/report.md`
     pub relative_path: String,
     pub content_redacted: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkMetricsPayload {
+    pub turn_band: String,
+    pub duration_band: String,
+    pub tool_failure_band: String,
+    pub skill_patch_count_band: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainWorkPackage {
+    pub schema_version: u32,
+    pub work_id: String,
+    pub session_id_hash: String,
+    pub domain_poi: DomainPoiPayload,
+    pub resolution: ResolutionPayload,
+    pub skill: WorkPackageSkillPayload,
+    pub work_metrics: WorkMetricsPayload,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -166,29 +276,59 @@ pub fn envelope_from_value(
     })
 }
 
-/// Drop duplicate `skill_pattern` rows in one batch (same `pattern_id`, keep last).
+/// Drop duplicate work packages in one batch (same `work_id`, keep last).
 pub fn dedupe_batch_contributions(contribs: Vec<ContributionEnvelope>) -> Vec<ContributionEnvelope> {
-    let mut skill_idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut out = Vec::with_capacity(contribs.len());
     for env in contribs {
-        if env.kind != ContributionType::SkillPattern.as_str() {
+        if env.kind != ContributionType::DomainWorkPackage.as_str() {
             out.push(env);
             continue;
         }
-        let Some(pid) = skill_pattern_id(&env.payload) else {
+        let Some(wid) = work_package_id(&env.payload) else {
             out.push(env);
             continue;
         };
-        if let Some(&idx) = skill_idx.get(&pid) {
-            out[idx] = env;
+        if let Some(&i) = idx.get(&wid) {
+            out[i] = env;
         } else {
-            skill_idx.insert(pid, out.len());
+            idx.insert(wid, out.len());
             out.push(env);
         }
     }
     out
 }
 
-pub fn skill_pattern_id(payload: &serde_json::Value) -> Option<String> {
-    payload.get("pattern_id")?.as_str().map(str::to_string)
+pub fn work_package_id(payload: &serde_json::Value) -> Option<String> {
+    payload.get("work_id")?.as_str().map(str::to_string)
+}
+
+pub fn validate_signal_codes(codes: &[String]) -> bool {
+    codes.iter().all(|c| ALLOWED_SIGNAL_CODES.contains(&c.as_str()))
+}
+
+pub const ALLOWED_SIGNAL_CODES: &[&str] = &[
+    "user_explicit_positive",
+    "user_explicit_negative",
+    "user_correction_loop",
+    "closure_without_followup",
+    "followup_same_poi_later",
+    "objective_test_pass",
+    "objective_test_fail",
+    "objective_not_applicable",
+    "skill_created_this_session",
+    "skill_patched_this_session",
+    "insufficient_turns",
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evidence_tier_ordering() {
+        assert!(EvidenceTier::A.meets_min("B"));
+        assert!(EvidenceTier::B.meets_min("B"));
+        assert!(!EvidenceTier::C.meets_min("B"));
+    }
 }

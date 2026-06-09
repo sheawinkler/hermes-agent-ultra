@@ -569,7 +569,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, interest.enabled|extract_mode|max_topics|llm_on_session_end|per_turn_buffer|per_turn_persist|promote_min_evidence|promote_min_confidence|min_turn_chars, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, insights.contribution.enabled|endpoint|upload_interests|upload_skills|on_session_end|skill_min_age_hours|redacted_body|installation_token|auth_token, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, interest.enabled|extract_mode|max_topics|llm_on_session_end|per_turn_buffer|per_turn_persist|promote_min_evidence|promote_min_confidence|min_turn_chars, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, insights.contribution.enabled|endpoint|upload_interests|upload_skills|on_session_end|skill_min_age_hours|min_evidence_tier|exclude_verdicts|require_skill_binding|min_work_turns|upload_skills_refresh|redacted_body|installation_token|auth_token, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn parse_bool_config_value(value: &str, field: &str) -> Result<bool, ConfigError> {
     let normalized = value.trim().to_ascii_lowercase();
@@ -995,6 +995,28 @@ fn apply_user_config_patch_dotted(
             config.insights.contribution.on_session_end =
                 parse_bool_config_value(value, "insights.contribution.on_session_end")?;
         }
+        ["insights", "contribution", "min_evidence_tier"] => {
+            config.insights.contribution.min_evidence_tier = value.trim().to_string();
+        }
+        ["insights", "contribution", "exclude_verdicts"] => {
+            config.insights.contribution.exclude_verdicts = value
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        ["insights", "contribution", "require_skill_binding"] => {
+            config.insights.contribution.require_skill_binding =
+                parse_bool_config_value(value, "insights.contribution.require_skill_binding")?;
+        }
+        ["insights", "contribution", "min_work_turns"] => {
+            config.insights.contribution.min_work_turns = value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "insights.contribution.min_work_turns must be a non-negative integer: {}",
+                    value
+                ))
+            })?;
+        }
         ["insights", "contribution", "skill_min_age_hours"] => {
             config.insights.contribution.skill_min_age_hours = value.parse().map_err(|_| {
                 ConfigError::ValidationError(format!(
@@ -1002,6 +1024,10 @@ fn apply_user_config_patch_dotted(
                     value
                 ))
             })?;
+        }
+        ["insights", "contribution", "upload_skills_refresh"] => {
+            config.insights.contribution.upload_skills_refresh =
+                parse_bool_config_value(value, "insights.contribution.upload_skills_refresh")?;
         }
         ["insights", "contribution", "redacted_body"] => {
             config.insights.contribution.redacted_body =
@@ -1296,6 +1322,21 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
         }
         ["insights", "contribution", "skill_min_age_hours"] => {
             Ok(config.insights.contribution.skill_min_age_hours.to_string())
+        }
+        ["insights", "contribution", "min_evidence_tier"] => {
+            Ok(config.insights.contribution.min_evidence_tier.clone())
+        }
+        ["insights", "contribution", "exclude_verdicts"] => {
+            Ok(config.insights.contribution.exclude_verdicts.join(","))
+        }
+        ["insights", "contribution", "require_skill_binding"] => {
+            Ok(config.insights.contribution.require_skill_binding.to_string())
+        }
+        ["insights", "contribution", "min_work_turns"] => {
+            Ok(config.insights.contribution.min_work_turns.to_string())
+        }
+        ["insights", "contribution", "upload_skills_refresh"] => {
+            Ok(config.insights.contribution.upload_skills_refresh.to_string())
         }
         ["insights", "contribution", "redacted_body"] => {
             Ok(config.insights.contribution.redacted_body.to_string())

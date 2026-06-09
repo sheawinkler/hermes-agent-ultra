@@ -68,9 +68,6 @@ pub fn spawn_session_end_ingest(
     }
     tokio::spawn(async move {
         let mut all_signals = buffered;
-        if config.uses_rules() {
-            all_signals.extend(extract_signals_from_messages(&messages));
-        }
         if config.session_end_llm_enabled() {
             if let Some(aux) = auxiliary.as_ref() {
                 let transcript = format_user_transcript(&messages);
@@ -87,6 +84,9 @@ pub fn spawn_session_end_ingest(
                     "interest: session_end_llm_enabled but no auxiliary client; skipping LLM extract"
                 );
             }
+        }
+        if config.uses_rules() {
+            all_signals.extend(extract_signals_from_messages(&messages));
         }
         let all_signals = filter_persistable_signals(filter_poi_signals(all_signals));
         if all_signals.is_empty() {
@@ -111,6 +111,11 @@ pub fn spawn_session_end_ingest(
             }
         }
     });
+}
+
+/// Concatenate user-role message text only (privacy: no assistant/tool content to LLM).
+pub fn format_user_transcript_for_llm(messages: &[Value]) -> String {
+    format_user_transcript(messages)
 }
 
 /// Concatenate user-role message text only (privacy: no assistant/tool content to LLM).

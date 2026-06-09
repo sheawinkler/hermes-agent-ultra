@@ -24,13 +24,18 @@ impl SessionPoiBuffer {
         if !should_extract_user_turn(trimmed, config.min_turn_chars) {
             return;
         }
-        let raw = extract_signals_from_text(
-            trimmed,
-            0.35,
-            ExtractOptions {
-                include_keywords: false,
-            },
-        );
+        // LLM mode: only buffer high-trust explicit declarations; semantic POI at session end.
+        let raw = if config.uses_llm() && !config.uses_rules() {
+            super::declared::extract_declared_interests(trimmed, 0.35)
+        } else {
+            extract_signals_from_text(
+                trimmed,
+                0.35,
+                ExtractOptions {
+                    include_keywords: false,
+                },
+            )
+        };
         let signals = filter_persistable_signals(filter_poi_signals(raw));
         for signal in signals {
             self.merge_signal(signal);
@@ -80,7 +85,8 @@ mod tests {
 
     #[test]
     fn buffer_dedupes_by_id() {
-        let config = InterestConfig::default();
+        let mut config = InterestConfig::default();
+        config.extract_mode = "hybrid".to_string();
         let mut buf = SessionPoiBuffer::default();
         buf.absorb_turn(
             "Continue the Rust parity port in crates/hermes-parity-tests",

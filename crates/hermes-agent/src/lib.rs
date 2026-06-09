@@ -68,6 +68,7 @@ pub mod tools_wiring;
 mod turn_finalize_hooks;
 pub mod usage_parse;
 pub mod user_interest;
+pub mod work_session;
 pub mod vision_adapter;
 pub mod vision_message_prepare;
 pub mod web_research;
@@ -103,9 +104,9 @@ pub use api_message_oracle::{
     assert_dual_run_eq, assert_messages_oracle_eq, canonical_messages_json,
 };
 pub use auxiliary_builder::{
-    build_auxiliary_client, build_auxiliary_client_with_main_runtime,
-    build_default_auxiliary_client, AuxiliaryBuildParams, AuxiliaryMainRuntime,
-    AuxiliaryWiringSummary,
+    auxiliary_config_from_gateway, build_auxiliary_client,
+    build_auxiliary_client_with_main_runtime, build_default_auxiliary_client,
+    AuxiliaryBuildParams, AuxiliaryMainRuntime, AuxiliaryWiringSummary,
 };
 pub use bedrock::BedrockProvider;
 pub use inbound_prepare::AgentInboundPreparer;

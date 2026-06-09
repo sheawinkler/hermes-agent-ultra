@@ -70,8 +70,8 @@ use crate::system_prompt::{
 };
 use crate::user_interest::{
     InterestStore, SessionPoiBuffer, ingest_user_message, is_poi_synthetic_user_text,
-    spawn_session_end_ingest,
 };
+use crate::work_session::{spawn_session_end_pipeline, touch_active_session};
 use hermes_intelligence::auxiliary::AuxiliaryClient;
 
 // ---------------------------------------------------------------------------
@@ -2427,14 +2427,46 @@ fn runtime_llm_providers_map(
         .collect()
 }
 
-pub(crate) fn build_auxiliary_arc_for_config(config: &AgentConfig) -> Arc<AuxiliaryClient> {
-    let (auxiliary, _) = build_auxiliary_client(AuxiliaryBuildParams {
-        config: AuxiliaryConfig::default(),
-        primary_provider: config.provider.clone(),
-        primary_model: Some(config.model.clone()),
+pub(crate) fn try_build_auxiliary_arc_for_config(
+    config: &AgentConfig,
+) -> Option<Arc<AuxiliaryClient>> {
+    let gateway_cfg = hermes_config::load_config(None).unwrap_or_default();
+    let aux_cfg = crate::auxiliary_builder::auxiliary_config_from_gateway(&gateway_cfg);
+    let (primary_provider, primary_model) =
+        crate::auxiliary_builder::auxiliary_primary_runtime_from_agent_config(config);
+    let (auxiliary, summary) = build_auxiliary_client(AuxiliaryBuildParams {
+        config: aux_cfg,
+        primary_provider,
+        primary_model,
         llm_providers: runtime_llm_providers_map(config),
     });
-    Arc::new(auxiliary)
+    if auxiliary.chain_len() == 0 {
+        tracing::warn!(
+            registered = ?summary.registered,
+            skipped = ?summary.skipped,
+            "interest: no auxiliary LLM provider available — set llm.<provider>.api_key in config.yaml, auxiliary.interest.* override, or OPENROUTER_API_KEY"
+        );
+        return None;
+    }
+    Some(Arc::new(auxiliary))
+}
+
+pub(crate) fn build_auxiliary_arc_for_config(config: &AgentConfig) -> Arc<AuxiliaryClient> {
+    try_build_auxiliary_arc_for_config(config).unwrap_or_else(|| {
+        let gateway_cfg = hermes_config::load_config(None).unwrap_or_default();
+        let aux_cfg = crate::auxiliary_builder::auxiliary_config_from_gateway(&gateway_cfg);
+        let (primary_provider, primary_model) =
+            crate::auxiliary_builder::auxiliary_primary_runtime_from_agent_config(config);
+        Arc::new(
+            build_auxiliary_client(AuxiliaryBuildParams {
+                config: aux_cfg,
+                primary_provider,
+                primary_model,
+                llm_providers: runtime_llm_providers_map(config),
+            })
+            .0,
+        )
+    })
 }
 
 fn build_context_compressor_for_config(
@@ -3721,7 +3753,7 @@ impl AgentLoop {
     }
 
     pub(crate) fn interest_sync_user_messages(&self, messages: &[Message]) {
-        if !self.config().interest.enabled || !self.config().interest.uses_rules() {
+        if !self.config().interest.enabled {
             return;
         }
         let interest_cfg = self.config().interest.clone();
@@ -3775,39 +3807,65 @@ impl AgentLoop {
     }
 
     fn interest_on_session_end(&self, messages: &[Message]) {
-        if !self.config().interest.enabled {
+        let interest_enabled = self.config().interest.enabled;
+        let insights_enabled = hermes_config::load_config(None)
+            .unwrap_or_default()
+            .insights
+            .contribution
+            .enabled;
+        if !interest_enabled && !insights_enabled {
             return;
         }
-        let Some(ref store) = self.interest_store else {
-            return;
+        let buffered = if interest_enabled {
+            self.interest_session_buffer
+                .lock()
+                .map(|mut b| b.drain())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
         };
-        let buffered = self
-            .interest_session_buffer
-            .lock()
-            .map(|mut b| b.drain())
-            .unwrap_or_default();
-        if let Ok(mut synced) = self.interest_synced_user_hashes.lock() {
-            synced.clear();
-        }
-        if let Ok(mut len) = self.interest_synced_message_len.lock() {
-            *len = 0;
+        if interest_enabled {
+            if let Ok(mut synced) = self.interest_synced_user_hashes.lock() {
+                synced.clear();
+            }
+            if let Ok(mut len) = self.interest_synced_message_len.lock() {
+                *len = 0;
+            }
         }
         let as_values: Vec<Value> = messages
             .iter()
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
         let interest_cfg = self.config().interest.clone();
+        let insights_cfg = hermes_config::load_config(None)
+            .unwrap_or_default()
+            .insights
+            .contribution;
+        let hermes_home = self
+            .config()
+            .hermes_home
+            .as_ref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(hermes_config::hermes_home);
+        let session_id = self
+            .config()
+            .session_id
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        touch_active_session(&hermes_home, &session_id);
         let auxiliary = if interest_cfg.session_end_llm_enabled() {
             tracing::warn!(
                 "interest: session-end LLM extraction is enabled; user-only messages may be sent to the auxiliary LLM provider"
             );
-            Some(build_auxiliary_arc_for_config(&self.config()))
+            try_build_auxiliary_arc_for_config(&self.config())
         } else {
             None
         };
-        spawn_session_end_ingest(
-            Arc::clone(store),
+        spawn_session_end_pipeline(
+            hermes_home,
             interest_cfg,
+            insights_cfg,
+            session_id,
             as_values,
             buffered,
             auxiliary,
@@ -10967,6 +11025,7 @@ mod tests {
                 args: Vec::new(),
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
 
@@ -11048,6 +11107,7 @@ mod tests {
                 args: Vec::new(),
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
         let config = AgentConfig {
@@ -11358,6 +11418,7 @@ mod tests {
                 ],
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
 
@@ -11435,6 +11496,7 @@ mod tests {
                 args: Vec::new(),
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
 
@@ -11524,6 +11586,7 @@ mod tests {
                 args: Vec::new(),
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
 
@@ -11604,6 +11667,7 @@ mod tests {
                 args: Vec::new(),
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
 
@@ -11695,6 +11759,7 @@ mod tests {
                 args: Vec::new(),
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
 
@@ -11801,6 +11866,7 @@ mod tests {
                 args: Vec::new(),
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
 
@@ -12229,6 +12295,7 @@ mod tests {
                 args: vec!["--acp".to_string(), "--stdio".to_string()],
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
 
@@ -12309,6 +12376,7 @@ mod tests {
                 args: vec!["--acp".to_string(), "--stdio".to_string()],
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
 
@@ -12770,6 +12838,7 @@ mod tests {
                 args: Vec::new(),
                 oauth_token_url: Some("https://cfg.example.com/token".to_string()),
                 oauth_client_id: Some("cfg-client".to_string()),
+                ..Default::default()
             },
         );
         // An unknown provider reachable only via config (env fallback is gated
@@ -12784,6 +12853,7 @@ mod tests {
                 args: Vec::new(),
                 oauth_token_url: Some("https://cfg.example.com/custom-token".to_string()),
                 oauth_client_id: Some("custom-client".to_string()),
+                ..Default::default()
             },
         );
 
@@ -12865,6 +12935,7 @@ mod tests {
                 args: Vec::new(),
                 oauth_token_url: None,
                 oauth_client_id: None,
+                ..Default::default()
             },
         );
 

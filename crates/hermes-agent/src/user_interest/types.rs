@@ -40,6 +40,7 @@ impl SignalSource {
                 "path" => Self::Path,
                 "keyword" => Self::Keyword,
                 "llm" => Self::Llm,
+                "domain" | "topic" => Self::Rules,
                 _ => Self::Rules,
             };
         }
@@ -64,7 +65,8 @@ impl SignalSource {
         match self {
             Self::Declared => true,
             Self::Lang | Self::Tech | Self::Llm => confidence >= promote_min_confidence,
-            Self::Path | Self::Keyword | Self::Rules => false,
+            Self::Rules => confidence >= promote_min_confidence.max(0.68),
+            Self::Path | Self::Keyword => false,
         }
     }
 }

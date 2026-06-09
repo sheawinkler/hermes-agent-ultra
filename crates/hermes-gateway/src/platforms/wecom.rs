@@ -2082,7 +2082,7 @@ impl PlatformAdapter for WeComAdapter {
     }
 
     fn supports_native_streaming(&self) -> bool {
-        false
+        true
     }
 
     async fn start_native_stream(

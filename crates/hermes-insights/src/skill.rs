@@ -10,8 +10,8 @@ use hermes_skills::read_hub_lock;
 
 use crate::sanitize::{contains_residual_pii, sanitize_text, slugify_name};
 use crate::types::{
-    SkillPattern, SkillProvenance, SkillReferenceSnippet, SkillStructure, SkillTriggerHints,
-    sha256_hex,
+    SkillProvenance, SkillReferenceSnippet, SkillStructure, SkillTriggerHints,
+    WorkPackageSkillPayload, sha256_hex,
 };
 
 static HEADING_RE: LazyLock<Regex> =
@@ -39,16 +39,28 @@ pub enum SkillChangeKind {
 pub struct SkillPatternOptions {
     pub include_body: bool,
     pub from_background_review: bool,
-    pub linked_interest_labels: Vec<String>,
+    pub domain_keys: Vec<String>,
+    pub binding_role: String,
     pub provenance: SkillProvenance,
 }
 
 impl SkillPatternOptions {
+    pub fn default_for_work_package() -> Self {
+        Self {
+            include_body: true,
+            from_background_review: false,
+            domain_keys: Vec::new(),
+            binding_role: "primary".to_string(),
+            provenance: SkillProvenance::AgentCreated,
+        }
+    }
+
     pub fn from_change_kind(kind: SkillChangeKind) -> Self {
         Self {
             include_body: true,
             from_background_review: false,
-            linked_interest_labels: Vec::new(),
+            domain_keys: Vec::new(),
+            binding_role: "primary".to_string(),
             provenance: match kind {
                 SkillChangeKind::Agent => SkillProvenance::AgentCreated,
                 SkillChangeKind::User => SkillProvenance::UserCreated,
@@ -58,11 +70,11 @@ impl SkillPatternOptions {
 }
 
 /// Returns None if skill is hub/bundled, guard-high, or fails sanitization.
-pub fn build_skill_pattern(
+pub fn build_work_package_skill(
     skill_dir: &Path,
     skills_root: &Path,
     options: &SkillPatternOptions,
-) -> Option<SkillPattern> {
+) -> Option<WorkPackageSkillPayload> {
     if is_hub_or_bundled_skill(skill_dir, skills_root) {
         return None;
     }
@@ -74,7 +86,7 @@ pub fn build_skill_pattern(
     if run_guard_high_severity(&content) {
         return None;
     }
-    let (name, category, description) = parse_frontmatter(&content);
+    let (name, _category, description) = parse_frontmatter(&content);
     let display_name = sanitize_text(&name);
     if display_name.is_empty() || contains_residual_pii(&display_name) {
         return None;
@@ -84,6 +96,11 @@ pub fn build_skill_pattern(
     if contains_residual_pii(&description_redacted) {
         return None;
     }
+    let domain_keys = if options.domain_keys.is_empty() {
+        vec![format!("topic:{name_slug}")]
+    } else {
+        options.domain_keys.clone()
+    };
     let body = body_for_contribution(&content);
     let references_redacted = collect_skill_auxiliary_files(skill_dir);
     let structure = extract_structure(&body);
@@ -107,12 +124,12 @@ pub fn build_skill_pattern(
     } else {
         None
     };
-    Some(SkillPattern {
-        payload_schema_version: 3,
+    Some(WorkPackageSkillPayload {
         pattern_id,
         display_name,
         name_slug: name_slug.clone(),
-        category,
+        binding_role: options.binding_role.clone(),
+        domain_keys,
         description_redacted,
         structure,
         tool_chain,
@@ -122,7 +139,6 @@ pub fn build_skill_pattern(
         },
         provenance: options.provenance,
         content_version,
-        linked_interest_labels: options.linked_interest_labels.clone(),
         redacted_body,
         references_redacted,
     })
@@ -146,13 +162,14 @@ pub fn find_skill_dir_by_slug(skills_root: &Path, name_slug: &str) -> Option<Pat
     found
 }
 
-/// Rebuild upload options from an existing outbox skill payload.
-pub fn skill_pattern_options_from_payload(
+/// Rebuild upload options from an existing outbox work-package skill payload.
+pub fn skill_options_from_work_package_payload(
     payload: &serde_json::Value,
     include_body: bool,
 ) -> SkillPatternOptions {
-    let linked_interest_labels = payload
-        .get("linked_interest_labels")
+    let domain_keys = payload
+        .get("domain_keys")
+        .or_else(|| payload.get("skill").and_then(|s| s.get("domain_keys")))
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
@@ -160,19 +177,31 @@ pub fn skill_pattern_options_from_payload(
                 .collect()
         })
         .unwrap_or_default();
-    let provenance = match payload.get("provenance").and_then(|v| v.as_str()) {
+    let binding_role = payload
+        .get("binding_role")
+        .or_else(|| payload.get("skill").and_then(|s| s.get("binding_role")))
+        .and_then(|v| v.as_str())
+        .unwrap_or("primary")
+        .to_string();
+    let provenance = match payload
+        .get("provenance")
+        .or_else(|| payload.get("skill").and_then(|s| s.get("provenance")))
+        .and_then(|v| v.as_str())
+    {
         Some("user_created") => SkillProvenance::UserCreated,
         _ => SkillProvenance::AgentCreated,
     };
     let from_background_review = payload
         .get("trigger_hints")
+        .or_else(|| payload.get("skill").and_then(|s| s.get("trigger_hints")))
         .and_then(|h| h.get("from_background_review"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     SkillPatternOptions {
         include_body,
         from_background_review,
-        linked_interest_labels,
+        domain_keys,
+        binding_role,
         provenance,
     }
 }
@@ -200,35 +229,6 @@ where
         }
         f(skill_dir);
     });
-}
-
-/// Walk skill dirs once per canonical path; `f` returns pattern for dedupe by `pattern_id`.
-pub fn walk_unique_skill_patterns<F>(
-    skills_root: &Path,
-    mut build: F,
-) -> Vec<SkillPattern>
-where
-    F: FnMut(&Path) -> Option<SkillPattern>,
-{
-    let mut seen_dirs: HashSet<PathBuf> = HashSet::new();
-    let mut seen_pattern: HashSet<String> = HashSet::new();
-    let mut out = Vec::new();
-    walk_skill_dirs(skills_root, &mut |skill_dir| {
-        let dir_key = skill_dir
-            .canonicalize()
-            .unwrap_or_else(|_| skill_dir.to_path_buf());
-        if !seen_dirs.insert(dir_key) {
-            return;
-        }
-        let Some(pattern) = build(skill_dir) else {
-            return;
-        };
-        if !seen_pattern.insert(pattern.pattern_id.clone()) {
-            return;
-        }
-        out.push(pattern);
-    });
-    out
 }
 
 fn collect_skill_auxiliary_files(skill_dir: &Path) -> Vec<SkillReferenceSnippet> {
@@ -335,6 +335,10 @@ fn run_guard_high_severity(content: &str) -> bool {
     findings
         .iter()
         .any(|f| f.severity.eq_ignore_ascii_case("high"))
+}
+
+pub fn parse_frontmatter_for_slug(content: &str) -> (String, Option<String>, String) {
+    parse_frontmatter(content)
 }
 
 fn parse_frontmatter(content: &str) -> (String, Option<String>, String) {
@@ -478,7 +482,7 @@ mod tests {
         )
         .unwrap();
         let opts = SkillPatternOptions::from_change_kind(SkillChangeKind::Agent);
-        let pattern = build_skill_pattern(&skill_dir, &skills_root, &opts).unwrap();
+        let pattern = build_work_package_skill(&skill_dir, &skills_root, &opts).unwrap();
         assert_eq!(pattern.display_name, "demo-skill");
         assert!(pattern.redacted_body.is_some());
     }
@@ -500,7 +504,7 @@ mod tests {
         )
         .unwrap();
         let opts = SkillPatternOptions::from_change_kind(SkillChangeKind::Agent);
-        let pattern = build_skill_pattern(&skill_dir, &skills_root, &opts).unwrap();
+        let pattern = build_work_package_skill(&skill_dir, &skills_root, &opts).unwrap();
         assert_eq!(pattern.references_redacted.len(), 1);
         assert_eq!(pattern.references_redacted[0].relative_path, "references/guide.md");
     }
@@ -534,7 +538,7 @@ mod tests {
         )
         .unwrap();
         let opts = SkillPatternOptions::from_change_kind(SkillChangeKind::Agent);
-        let pattern = build_skill_pattern(&skill_dir, &skills_root, &opts).unwrap();
+        let pattern = build_work_package_skill(&skill_dir, &skills_root, &opts).unwrap();
         assert_eq!(pattern.references_redacted.len(), 3);
         let paths: Vec<_> = pattern
             .references_redacted
@@ -564,7 +568,7 @@ mod tests {
         )
         .unwrap();
         let opts = SkillPatternOptions::from_change_kind(SkillChangeKind::Agent);
-        let pattern = build_skill_pattern(&skill_dir, &skills_root, &opts).unwrap();
+        let pattern = build_work_package_skill(&skill_dir, &skills_root, &opts).unwrap();
         assert_eq!(pattern.references_redacted.len(), 1);
         assert_eq!(pattern.references_redacted[0].relative_path, "assets/readme.txt");
     }
@@ -581,7 +585,7 @@ mod tests {
         )
         .unwrap();
         let opts = SkillPatternOptions::from_change_kind(SkillChangeKind::Agent);
-        let pattern = build_skill_pattern(&skill_dir, &skills_root, &opts).unwrap();
+        let pattern = build_work_package_skill(&skill_dir, &skills_root, &opts).unwrap();
         let value = serde_json::to_value(&pattern).unwrap();
         assert!(
             value.get("references_redacted").is_some(),
@@ -622,8 +626,14 @@ mod tests {
             .unwrap();
         }
         let opts = SkillPatternOptions::from_change_kind(SkillChangeKind::Agent);
-        let patterns = walk_unique_skill_patterns(&skills_root, |d| {
-            build_skill_pattern(d, &skills_root, &opts)
+        let mut seen = std::collections::HashSet::new();
+        let mut patterns = Vec::new();
+        walk_unique_skill_dirs(&skills_root, |d| {
+            if let Some(p) = build_work_package_skill(d, &skills_root, &opts) {
+                if seen.insert(p.pattern_id.clone()) {
+                    patterns.push(p);
+                }
+            }
         });
         assert_eq!(patterns.len(), 1);
     }

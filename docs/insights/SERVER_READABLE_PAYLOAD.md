@@ -1,5 +1,7 @@
 # Insights 服务端同步 — 可读 Payload（v2）
 
+> **⚠️ 已 superseded**：当前客户端见 [SERVER_V3_DOMAIN_WORK_PACKAGE.md](./SERVER_V3_DOMAIN_WORK_PACKAGE.md)（`domain_work_package` + resolution 标记）。
+
 > **触发原因**：客户端改为上传 **脱敏后的可读明文**（POI label/summary、Skill 标题与正文），**不再**上传 `interest:<hex>` 等仅客户端可解析的 id。  
 > **客户端契约版本**：`consent_version` 仍为 `2026-05-29`；payload **schema v2**（见下文）。  
 > **关联**：[SERVER_IMPLEMENTATION.md](./SERVER_IMPLEMENTATION.md) ingest 流程不变，**校验字段与 DB 冗余列需调整**。

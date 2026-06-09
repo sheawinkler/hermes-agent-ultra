@@ -29,7 +29,7 @@ pub struct InterestConfig {
     #[serde(default = "default_interest_char_budget_prefetch")]
     pub char_budget_prefetch: usize,
 
-    /// Extraction mode: `rules` (default), `llm`, or `hybrid`.
+    /// Extraction mode: `llm` (default, semantic session-end LLM), `hybrid` (LLM + rule supplement), or `rules` (legacy).
     #[serde(default = "default_interest_extract_mode")]
     pub extract_mode: String,
 
@@ -87,7 +87,7 @@ fn default_interest_char_budget_prefetch() -> usize {
 }
 
 fn default_interest_extract_mode() -> String {
-    "rules".to_string()
+    "llm".to_string()
 }
 
 fn default_interest_decay_half_life_days() -> f64 {
@@ -95,7 +95,7 @@ fn default_interest_decay_half_life_days() -> f64 {
 }
 
 fn default_interest_llm_on_session_end() -> bool {
-    false
+    true
 }
 
 fn default_interest_per_turn_buffer() -> bool {
@@ -176,22 +176,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_local_only() {
+    fn defaults_prefer_llm_semantic_extract() {
         let cfg = InterestConfig::default();
         assert!(cfg.enabled);
-        assert_eq!(cfg.extract_mode, "rules");
-        assert!(!cfg.llm_on_session_end);
-        assert!(!cfg.session_end_llm_enabled());
+        assert_eq!(cfg.extract_mode, "llm");
+        assert!(cfg.llm_on_session_end);
+        assert!(cfg.session_end_llm_enabled());
         assert!(cfg.per_turn_buffer);
         assert!(!cfg.per_turn_persist);
+        assert!(!cfg.uses_rules());
+        assert!(cfg.uses_llm());
     }
 
     #[test]
-    fn session_end_llm_requires_mode_and_opt_in() {
+    fn hybrid_enables_rules_supplement_and_llm() {
         let mut cfg = InterestConfig::default();
         cfg.extract_mode = "hybrid".to_string();
-        assert!(!cfg.session_end_llm_enabled());
-        cfg.llm_on_session_end = true;
+        assert!(cfg.uses_rules());
         assert!(cfg.session_end_llm_enabled());
+    }
+
+    #[test]
+    fn legacy_rules_mode_skips_llm_without_opt_in() {
+        let mut cfg = InterestConfig::default();
+        cfg.extract_mode = "rules".to_string();
+        cfg.llm_on_session_end = false;
+        assert!(cfg.uses_rules());
+        assert!(!cfg.session_end_llm_enabled());
     }
 }

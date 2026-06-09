@@ -22525,32 +22525,6 @@ fn hermes_home_from_config(config: &hermes_config::GatewayConfig) -> std::path::
         .unwrap_or_else(hermes_config::hermes_home)
 }
 
-fn load_interest_topic_inputs(
-    hermes_home: &std::path::Path,
-    interest_cfg: &hermes_config::InterestConfig,
-) -> Result<Vec<hermes_insights::InterestTopicInput>, hermes_core::AgentError> {
-    let db_path = hermes_home.join("interest.db");
-    if !db_path.exists() {
-        return Ok(Vec::new());
-    }
-    let store = hermes_agent::InterestStore::open(&db_path, interest_cfg.clone())
-        .map_err(|e| hermes_core::AgentError::Io(e))?;
-    let topics = store
-        .list_for_cli(false)
-        .map_err(|e| hermes_core::AgentError::Io(e))?;
-    Ok(topics
-        .into_iter()
-        .map(|t| hermes_insights::InterestTopicInput {
-            id: t.id,
-            label: t.label,
-            summary: t.summary,
-            weight: t.weight,
-            evidence_count: t.evidence_count,
-            tags: t.tags,
-        })
-        .collect())
-}
-
 /// Handle `hermes contribute [status|enable|disable|preview|flush|reset|revoke]`.
 pub async fn handle_cli_contribute(
     action: Option<String>,
@@ -22565,11 +22539,12 @@ pub async fn handle_cli_contribute(
 
     match action.as_deref().unwrap_or("status") {
         "status" | "list" => {
-            println!("Insights contribution (client → ops server)");
+            println!("Insights contribution (domain work packages → ops server)");
             println!("  Master enabled: {}", contribution.enabled);
-            println!("  Upload POI/interests: {}", contribution.upload_interests);
-            println!("  Upload skill patterns: {}", contribution.upload_skills);
             println!("  On session end: {}", contribution.on_session_end);
+            println!("  Min evidence tier: {}", contribution.min_evidence_tier);
+            println!("  Require skill binding: {}", contribution.require_skill_binding);
+            println!("  Min work turns: {}", contribution.min_work_turns);
             println!("  Redacted body: {}", contribution.redacted_body);
             println!(
                 "  Endpoint: {}",
@@ -22611,22 +22586,14 @@ pub async fn handle_cli_contribute(
             let cfg_path = hermes_config::config_path();
             let mut disk = hermes_config::load_user_config_file(&cfg_path)
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
-            if poi_only {
-                disk.insights.contribution.upload_interests = true;
-            } else if skills_only {
-                disk.insights.contribution.upload_skills = true;
-            } else {
-                disk.insights.contribution.enabled = true;
-                if !poi_only && !skills_only {
-                    disk.insights.contribution.upload_interests = true;
-                    disk.insights.contribution.upload_skills = true;
-                }
-            }
+            let _ = poi_only;
+            let _ = skills_only;
+            disk.insights.contribution.enabled = true;
             hermes_config::save_config_yaml(&cfg_path, &disk)
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
             println!("Insights contribution updated.");
             println!("  Consent version: {}", hermes_insights::INSIGHTS_CONSENT_VERSION);
-            println!("  Uploaded fields: topic_key, weight_band, skill pattern skeleton (not full conversations).");
+            println!("  Upload type: domain_work_package (POI + skill + resolution verdict).");
             println!("  Config: {}", cfg_path.display());
             if disk.insights.contribution.endpoint.trim().is_empty() {
                 println!("  Note: set endpoint via:");
@@ -22644,13 +22611,9 @@ pub async fn handle_cli_contribute(
             let cfg_path = hermes_config::config_path();
             let mut disk = hermes_config::load_user_config_file(&cfg_path)
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
-            if poi_only {
-                disk.insights.contribution.upload_interests = false;
-            } else if skills_only {
-                disk.insights.contribution.upload_skills = false;
-            } else {
-                disk.insights.contribution.enabled = false;
-            }
+            let _ = poi_only;
+            let _ = skills_only;
+            disk.insights.contribution.enabled = false;
             hermes_config::save_config_yaml(&cfg_path, &disk)
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
             println!("Insights contribution settings saved to {}", cfg_path.display());
@@ -22661,12 +22624,11 @@ pub async fn handle_cli_contribute(
                 contribution.clone(),
             )
             .map_err(|e| hermes_core::AgentError::Io(e))?;
-            let topics = load_interest_topic_inputs(&hermes_home, &config.interest)?;
-            let batch = svc.preview_batch(&topics);
+            let batch = svc.preview_batch_from_inputs(&[]);
             let json = serde_json::to_string_pretty(&batch)
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
             println!("{json}");
-            println!("\n(preview only — not written to outbox)");
+            println!("\n(preview — run a session with skill_manage + domain task to populate packages)");
         }
         "flush" | "upload" => {
             if contribution.endpoint.trim().is_empty() {
@@ -22680,11 +22642,9 @@ pub async fn handle_cli_contribute(
                 println!(" or: export HERMES_INSIGHTS_TOKEN=...");
                 return Ok(());
             }
-            let topics = load_interest_topic_inputs(&hermes_home, &config.interest)
-                .unwrap_or_default();
             let svc = hermes_insights::ContributionService::open(hermes_home, contribution)
                 .map_err(|e| hermes_core::AgentError::Io(e))?;
-            match svc.flush_with_topics(&topics).await {
+            match svc.flush().await {
                 Ok(result) => {
                     if result.skipped_no_endpoint {
                         println!("Upload skipped (no endpoint).");

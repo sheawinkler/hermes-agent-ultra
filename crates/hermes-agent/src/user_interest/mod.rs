@@ -6,6 +6,8 @@
 mod catalog;
 mod contextual;
 mod declared;
+mod domain_taxonomy;
+mod task_oriented;
 mod extract;
 mod ingest;
 mod llm;
@@ -19,11 +21,17 @@ mod types;
 
 pub use extract::{
     extract_signals_from_messages, extract_signals_from_text, filter_poi_signals,
-    is_rejected_poi_topic,
+    is_rejected_poi_topic, message_text_from_value,
 };
+pub use contextual::extract_contextual_interests;
+pub use declared::extract_declared_interests;
+pub use domain_taxonomy::{domain_taxonomy_prompt_block, DomainTaxon, DOMAIN_TAXONOMY};
+pub use task_oriented::has_task_or_domain_signal;
 pub use ingest::{
-    ingest_user_message, is_poi_synthetic_user_text, spawn_session_end_ingest,
+    format_user_transcript_for_llm, ingest_user_message, is_poi_synthetic_user_text,
+    spawn_session_end_ingest,
 };
+pub use llm::extract_signals_from_transcript_llm;
 pub use pipeline::{apply_signal_batch, PoiPipeline};
 pub use plugin::InterestMemoryPlugin;
 pub use session_buffer::SessionPoiBuffer;

@@ -213,11 +213,13 @@ mod tests {
         config.promote_min_confidence = 0.5;
         let store = InterestStore::open(&db, config.clone()).unwrap();
         let pipeline = PoiPipeline::new(&store, &config);
-        let tech = signal("tech:rust", "topic: rust", SignalSource::Rules, 0.8);
+        let tech = signal("tech:rust", "topic: rust", SignalSource::Rules, 0.48);
         pipeline.apply_batch(vec![tech.clone()]).unwrap();
         let topics = store.list_for_cli(true).unwrap();
         assert_eq!(topics[0].status, TopicStatus::Candidate);
-        let report = pipeline.apply_batch(vec![tech]).unwrap();
+        let mut second = tech;
+        second.confidence = 0.52;
+        let report = pipeline.apply_batch(vec![second]).unwrap();
         assert_eq!(report.reinforced, 1);
         assert_eq!(report.promoted, 1);
         let topics = store.list_for_cli(true).unwrap();

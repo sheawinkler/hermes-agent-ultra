@@ -169,6 +169,7 @@ pub fn extract_signals_from_text(
     let skip_keyword_pass = !declared.is_empty();
     out.extend(declared);
     out.extend(extract_contextual_interests(trimmed, weight_scale));
+    // Task/domain POI is inferred semantically at session-end via LLM — not keyword rules.
 
     for cap in PATH_RE.captures_iter(trimmed) {
         if let Some(path) = cap.get(1) {
@@ -323,7 +324,7 @@ pub fn parse_llm_topics_json(raw: &str) -> Vec<InterestSignal> {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.7)
             .clamp(0.1, 1.0);
-        let tags: Vec<String> = item
+        let mut tags: Vec<String> = item
             .get("tags")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -332,6 +333,19 @@ pub fn parse_llm_topics_json(raw: &str) -> Vec<InterestSignal> {
                     .collect()
             })
             .unwrap_or_default();
+        if let Some(domain_key) = item
+            .get("domain_key")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            if !tags.iter().any(|t| t == domain_key) {
+                tags.push(domain_key.to_string());
+            }
+            if !tags.iter().any(|t| t == "domain") {
+                tags.push("domain".to_string());
+            }
+        }
         let id = stable_topic_id("llm", label);
         if id.is_empty() || should_reject_signal_id(&id, label) {
             continue;
@@ -429,6 +443,22 @@ mod tests {
         let ids: HashSet<_> = signals.iter().map(|s| s.id.as_str()).collect();
         assert!(ids.iter().any(|id| id.starts_with("interest:")));
         assert!(ids.contains("tech:llm"));
+    }
+
+    #[test]
+    fn real_world_ashare_query_passes_turn_gate() {
+        use super::super::quality::should_extract_user_turn;
+        assert!(should_extract_user_turn(
+            "帮我看看当前时间上A股行情怎么样了？",
+            12,
+        ));
+    }
+
+    #[test]
+    fn real_world_finance_constraints_passes_turn_gate() {
+        use super::super::quality::should_extract_user_turn;
+        let text = "这30万是我的全部积蓄；投资期5年；要稳健点；没有稳定的收入来源；短期无大额支出计划；对股票有一定的了解";
+        assert!(should_extract_user_turn(text, 12));
     }
 
     #[test]

@@ -579,6 +579,7 @@ mod tests {
                     usage: None,
                     model: "recording".into(),
                     finish_reason: Some("stop".into()),
+                    ..Default::default()
                 })
             }
 

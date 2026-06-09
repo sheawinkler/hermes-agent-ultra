@@ -1647,7 +1647,7 @@ mod tests {
         let mut compressor = ContextCompressor::new(cfg, aux);
 
         let _ = compressor
-            .compress(messages_with_handoff(old_summary), Some(150))
+            .compress(messages_with_handoff(old_summary), Some(150), None)
             .await;
 
         let prompt = provider.last_prompt().expect("summary prompt");
@@ -1674,7 +1674,7 @@ mod tests {
         compressor.previous_summary = Some(old_summary.to_string());
 
         let _ = compressor
-            .compress(messages_with_handoff(old_summary), Some(150))
+            .compress(messages_with_handoff(old_summary), Some(150), None)
             .await;
 
         let prompt = provider.last_prompt().expect("summary prompt");
@@ -1699,7 +1699,7 @@ mod tests {
         let mut compressor = ContextCompressor::new(cfg, aux);
 
         let _ = compressor
-            .compress(messages_with_handoff(old_summary), Some(150))
+            .compress(messages_with_handoff(old_summary), Some(150), None)
             .await;
 
         let prompt = provider.last_prompt().expect("summary prompt");
