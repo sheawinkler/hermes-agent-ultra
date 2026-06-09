@@ -2467,6 +2467,226 @@
     "c1927d2342a7": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "692ae6dd073b": {
+      "disposition": "superseded",
+      "notes": "Documentation-only upstream README skill table/test-runner update is superseded by local Rust parity docs and repo-native verification scripts; no Rust runtime behavior changes."
+    },
+    "d42b6a2eddc7": {
+      "disposition": "superseded",
+      "notes": "Upstream AGENTS.md plugin/skill documentation refresh is superseded by local AGENTS.md Rust parity rules plus docs/parity compatibility policy and skills governance."
+    },
+    "983bbe2d40f7": {
+      "disposition": "ported",
+      "notes": "Local skills catalog already includes the Google DESIGN.md skill at skills/creative/design-md/SKILL.md and optional-skills/creative/design-md/SKILL.md with SKILL.md frontmatter, templates, and platform metadata."
+    },
+    "0f6eabb89073": {
+      "disposition": "superseded",
+      "notes": "Dedicated website pages for bundled/optional skills are superseded by rust-skills-catalog-governance: the Rust CLI, skill hub, and docs/parity surfaces expose catalog state without mirroring upstream website generation."
+    },
+    "e5d41f05d47e": {
+      "disposition": "ported",
+      "notes": "Spotify skill catalog coverage exists at skills/media/spotify/SKILL.md with cross-platform frontmatter, while Spotify tool surfacing remains gated through the Rust tool/catalog setup paths."
+    },
+    "c34d3f480778": {
+      "disposition": "ported",
+      "notes": "Google Workspace helper parity is present in skills/productivity/google-workspace/scripts/_hermes_home.py, shared by setup.py, gws_bridge.py, and google_api.py for HERMES_HOME resolution."
+    },
+    "13038dc747aa": {
+      "disposition": "ported",
+      "notes": "Google Workspace setup parity is represented by skills/productivity/google-workspace/scripts/setup.py with Python 3.9-compatible syntax and local dependency handling documented in the skill body."
+    },
+    "93977675135a": {
+      "disposition": "superseded",
+      "notes": "The upstream empty feeds category cleanup is superseded by the local curated Rust skills catalog; no empty feeds SKILL.md category is present in skills or optional-skills."
+    },
+    "4cdb6962ca3f": {
+      "disposition": "ported",
+      "notes": "Hermes Agent skill-authoring guidance is bundled locally at skills/software-development/hermes-agent-skill-authoring/SKILL.md with frontmatter, authoring conventions, and validator-oriented structure."
+    },
+    "0cd98499bb1e": {
+      "disposition": "ported",
+      "notes": "Debugging Hermes TUI commands is bundled locally at skills/software-development/debugging-hermes-tui-commands/SKILL.md and participates in the Rust SKILL.md loader."
+    },
+    "7e3c8a31f0f3": {
+      "disposition": "ported",
+      "notes": "Airtable skill parity is present at skills/productivity/airtable/SKILL.md with Hermes-specific usage guidance and cookbook coverage."
+    },
+    "898ccfd66706": {
+      "disposition": "ported",
+      "notes": "Google OAuth redirect scope parsing is implemented in skills/productivity/google-workspace/scripts/setup.py by extracting the scope query parameter from the pasted callback URL and storing granted scopes."
+    },
+    "235bfb192b91": {
+      "disposition": "superseded",
+      "notes": "URL-install documentation is superseded by the Rust CLI skills install/search implementation in crates/hermes-cli/src/commands.rs plus local docs/parity skill governance."
+    },
+    "e3921e7ca4a6": {
+      "disposition": "ported",
+      "notes": "Bundled skill descriptions are kept in SKILL.md frontmatter across the local Rust catalog and exposed through Rust skill scanners; the upstream compression-only docs delta has no separate runtime change."
+    },
+    "9f1b1977bca3": {
+      "disposition": "ported",
+      "notes": "Trigger and usage details live in the local SKILL.md bodies loaded by Rust skill scanners, preserving content without relying on upstream generated catalog pages."
+    },
+    "730347e38f9a": {
+      "disposition": "ported",
+      "notes": "TouchDesigner MCP expansion is present at skills/creative/touchdesigner-mcp with GLSL, post-FX, audio-reactive, geometry, and MCP reference material."
+    },
+    "853ed609a1a4": {
+      "disposition": "ported",
+      "notes": "TouchDesigner MCP is bundled in the local skills tree at skills/creative/touchdesigner-mcp/SKILL.md and is discoverable by the Rust bundled skill scanner."
+    },
+    "aea72c09362b": {
+      "disposition": "ported",
+      "notes": "Spike and sketch skills are bundled locally at skills/software-development/spike/SKILL.md and skills/creative/sketch/SKILL.md with reference material adapted for Hermes usage."
+    },
+    "b81638d749c6": {
+      "disposition": "ported",
+      "notes": "ComfyUI parity is bundled at skills/creative/comfyui/SKILL.md using official comfy-cli lifecycle guidance plus direct REST/WebSocket execution rather than third-party runtime dependencies."
+    },
+    "d7d1503595b3": {
+      "disposition": "ported",
+      "notes": "ComfyUI onboarding coverage is in skills/creative/comfyui/SKILL.md and references, including local/cloud install paths, docs links, launch, workflow execution, and troubleshooting."
+    },
+    "9d7ece362df2": {
+      "disposition": "ported",
+      "notes": "ComfyUI hardware gating is present in skills/creative/comfyui/scripts/hardware_check.py and the skill workflow asks for local/cloud routing based on the verdict."
+    },
+    "ffe1d660a0e4": {
+      "disposition": "ported",
+      "notes": "ComfyUI local-vs-cloud selection is encoded in the skill flow before hardware-sensitive local setup, matching the upstream decision-order fix."
+    },
+    "4899bd99c0b7": {
+      "disposition": "ported",
+      "notes": "ComfyUI is a built-in local bundled skill at skills/creative/comfyui/SKILL.md and is discovered through the Rust bundled skill scanner."
+    },
+    "a7780fe05f43": {
+      "disposition": "ported",
+      "notes": "ComfyUI bug-fix coverage is represented by the local skill scripts, tests, workflows, cloud/local guidance, and expanded references under skills/creative/comfyui."
+    },
+    "51b44b6e3fa1": {
+      "disposition": "ported",
+      "notes": "ComfyUI node/registry guidance is represented by the corrected local SKILL.md and reference materials under skills/creative/comfyui, without importing upstream Python runtime."
+    },
+    "f7dfd4ae3664": {
+      "disposition": "superseded",
+      "notes": "The temporary upstream built-in here.now placement is superseded by the final local optional skill catalog placement at optional-skills/productivity/here-now/SKILL.md."
+    },
+    "21cc9c8d329f": {
+      "disposition": "ported",
+      "notes": "The here.now bundle exists locally at optional-skills/productivity/here-now/SKILL.md with publishing and drive-handoff guidance."
+    },
+    "7cbe943d2dc1": {
+      "disposition": "ported",
+      "notes": "here.now is represented as an optional local skill at optional-skills/productivity/here-now/SKILL.md, matching the final upstream catalog placement."
+    },
+    "511add724987": {
+      "disposition": "ported",
+      "notes": "The video orchestrator optional skill is present at optional-skills/creative/kanban-video-orchestrator/SKILL.md with assets, scripts, and monitoring references."
+    },
+    "a919269eb5c5": {
+      "disposition": "ported",
+      "notes": "Himalaya email skill documentation includes the v1.2.0 folder.aliases syntax in skills/email/himalaya/SKILL.md and reference material."
+    },
+    "81cd67829191": {
+      "disposition": "ported",
+      "notes": "Google Workspace SKILL.md frontmatter declares required_credential_files for google_token.json and google_client_secret.json."
+    },
+    "0dc677f0718b": {
+      "disposition": "ported",
+      "notes": "Hermes-agent durable systems and slash-command guidance is represented in skills/autonomous-ai-agents/hermes-agent/SKILL.md under the local Rust skill catalog."
+    },
+    "15be493055eb": {
+      "disposition": "ported",
+      "notes": "Obsidian file workflow coverage is present at skills/note-taking/obsidian/SKILL.md under the local skills catalog."
+    },
+    "fce58cbe2e02": {
+      "disposition": "ported",
+      "notes": "Anthropic financial-services skills are represented as an optional finance bundle under optional-skills/finance, including dcf-model, comps-analysis, lbo-model, merger-model, pptx-author, excel-author, and stocks."
+    },
+    "5fa493a2ca6a": {
+      "disposition": "ported",
+      "notes": "Google Workspace setup.py implements --check-live and disabled_client/invalid_client diagnostics for real API auth validation."
+    },
+    "e43d2fe5205e": {
+      "disposition": "ported",
+      "notes": "Google Workspace drive write operations plus Docs/Sheets create/append are implemented in skills/productivity/google-workspace/scripts/google_api.py and documented in the SKILL.md examples."
+    },
+    "ea8e608821b1": {
+      "disposition": "ported",
+      "notes": "Watchers optional skill exists at optional-skills/devops/watchers/SKILL.md with RSS, HTTP JSON, and GitHub polling scripts."
+    },
+    "729a659a3c8a": {
+      "disposition": "ported",
+      "notes": "Teams meeting pipeline skill asset is present at skills/productivity/teams-meeting-pipeline/SKILL.md, backed by the Rust teams_pipeline runtime."
+    },
+    "b18b17f9c9de": {
+      "disposition": "ported",
+      "notes": "Rust dynamic skill command loading filters SKILL.md frontmatter by platform in crates/hermes-tools/src/tools/skill_commands.rs, and local skills declare platforms frontmatter."
+    },
+    "db22efbe88bd": {
+      "disposition": "ported",
+      "notes": "Optional and bundled local skills declare platforms frontmatter and Rust skill loading honors platform aliases/filters during command discovery."
+    },
+    "2ea957fc41f4": {
+      "disposition": "ported",
+      "notes": "Stocks is located under optional-skills/finance/stocks/SKILL.md with finance scripts under optional-skills/finance/scripts, matching the relocated optional finance layout."
+    },
+    "ef98e3f9e60b": {
+      "disposition": "superseded",
+      "notes": "In-tree memory-plugin PR policy docs are superseded by local Rust skill standards, plugin governance, and the approved rust-skills-catalog-governance divergence."
+    },
+    "b08f53a75893": {
+      "disposition": "ported",
+      "notes": "ComfyUI template/workflow integrity material is present under skills/creative/comfyui references, tests, and workflows alongside the bundled skill."
+    },
+    "42070ecefb9e": {
+      "disposition": "ported",
+      "notes": "Notion Developer Platform guidance is represented at skills/productivity/notion/SKILL.md with pages, databases, blocks, and search API workflows."
+    },
+    "374785ee2613": {
+      "disposition": "ported",
+      "notes": "Kanban dispatcher defaults and failure-limit guidance are represented by the local kanban skills and Rust kanban command surface."
+    },
+    "3a7ed7be0810": {
+      "disposition": "superseded",
+      "notes": "Python wheel packaging for bundled skills is not a Rust runtime surface; local Rust packaging seeds skills from the repository skills and optional-skills trees through hermes-skills sync logic."
+    },
+    "b65dfbb4530a": {
+      "disposition": "ported",
+      "notes": "Kanban lane skills are bundled locally at skills/devops/kanban-orchestrator/SKILL.md and skills/devops/kanban-worker/SKILL.md."
+    },
+    "b5c1fe78aa48": {
+      "disposition": "ported",
+      "notes": "Skill bundle aliases are implemented in the Rust CLI via /bundles and skill-bundles discovery in crates/hermes-cli/src/commands.rs, allowing /<slug> to load multiple skills."
+    },
+    "3fde8c153da1": {
+      "disposition": "ported",
+      "notes": "Rust bundled skill scanners prune dependency/cache directories such as node_modules and __pycache__ in crates/hermes-skills/src/sync.rs and guard logic."
+    },
+    "a36221ed9174": {
+      "disposition": "superseded",
+      "notes": "Container supervision documentation and doctor-skill docs are superseded by local Docker/runtime parity policy and Rust skills governance; no additional Rust runtime delta is required from this docs-only upstream change."
+    },
+    "2520c9ad68af": {
+      "disposition": "ported",
+      "notes": "Apple Reminders skill documentation is present at skills/apple/apple-reminders/SKILL.md with macOS platform metadata and alarm/command guidance."
+    },
+    "3625dbb8442c": {
+      "disposition": "ported",
+      "notes": "Security redaction guidance is covered by the local Rust approval/credential guard surface plus skill catalog security standards, rather than vendoring upstream-only docs."
+    },
+    "51a2c07016b2": {
+      "disposition": "ported",
+      "notes": "X Article ingestion guidance is represented in skills/social-media/xurl/SKILL.md within the local skills catalog."
+    },
+    "38d3c49aaf2e": {
+      "disposition": "ported",
+      "notes": "Bundled skill-set cleanup, platforms, and environment/relevance gates are represented by local SKILL.md frontmatter plus Rust platform-filtered dynamic skill loading."
+    },
+    "7c00ffd92c41": {
+      "disposition": "ported",
+      "notes": "Google Workspace setup fallback behavior is represented in skills/productivity/google-workspace/scripts/setup.py, including virtualenv/pip diagnostics and uv-compatible setup guidance."
     }
   },
   "subject_patterns": [
