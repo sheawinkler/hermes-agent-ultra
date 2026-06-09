@@ -29,6 +29,19 @@ fn scalar_to_string(v: &Value) -> Option<String> {
     }
 }
 
+fn drop_null_top_level_values(map: &mut Mapping) {
+    let null_keys: Vec<Value> = map
+        .iter()
+        .filter_map(|(k, v)| matches!(v, Value::Null).then_some(k.clone()))
+        .collect();
+    for key in null_keys {
+        if let Some(name) = key.as_str() {
+            tracing::warn!("Ignoring null top-level config key `{name}`; using default");
+        }
+        map.remove(&key);
+    }
+}
+
 fn normalized_base_url(value: &Value) -> Option<String> {
     value
         .as_str()
@@ -540,6 +553,7 @@ fn lift_root_platform_blocks(map: &mut Mapping) {
 
 /// Apply in-place transforms so Python-style Hermes YAML deserializes into [`crate::config::GatewayConfig`].
 pub(crate) fn normalize_config_yaml_root(map: &mut Mapping) {
+    drop_null_top_level_values(map);
     // Order matters: model before merge_providers (may touch llm_providers)
     normalize_model_block(map);
     merge_custom_providers_into_llm(map);
@@ -660,6 +674,42 @@ toolsets:
         normalize_config_yaml_root(m);
         let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
         assert_eq!(cfg.tools, vec!["hermes-cli", "web"]);
+    }
+
+    #[test]
+    fn null_top_level_config_values_fall_back_to_defaults() {
+        let raw = r#"
+model: null
+personality: null
+max_turns: null
+tools: null
+platforms: null
+platform_toolsets: null
+llm_providers: null
+display: null
+terminal: null
+web: null
+sessions: null
+agent: null
+personalities: null
+"#;
+        let mut root: Value = serde_yaml::from_str(raw).unwrap();
+        let Value::Mapping(ref mut m) = root else {
+            panic!();
+        };
+        normalize_config_yaml_root(m);
+        assert!(!m.contains_key(&key("personalities")));
+        let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+        let default = crate::config::GatewayConfig::default();
+        assert_eq!(cfg.model, default.model);
+        assert_eq!(cfg.personality, default.personality);
+        assert_eq!(cfg.max_turns, default.max_turns);
+        assert_eq!(cfg.tools, default.tools);
+        assert_eq!(cfg.display, default.display);
+        assert_eq!(cfg.terminal, default.terminal);
+        assert_eq!(cfg.web, default.web);
+        assert_eq!(cfg.sessions, default.sessions);
+        assert_eq!(cfg.agent, default.agent);
     }
 
     #[test]

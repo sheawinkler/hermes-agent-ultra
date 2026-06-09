@@ -76,6 +76,36 @@ pub fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> 
     result
 }
 
+#[cfg(unix)]
+fn config_chmod_enabled() -> bool {
+    let env_opt_out = ["HERMES_SKIP_CHMOD", "HERMES_CONTAINER"]
+        .iter()
+        .any(|key| std::env::var(key).is_ok_and(|value| !value.trim().is_empty()));
+    !env_opt_out && !Path::new("/.dockerenv").exists()
+}
+
+#[cfg(unix)]
+fn secure_config_file(path: &Path) -> Result<(), ConfigError> {
+    if !config_chmod_enabled() {
+        return Ok(());
+    }
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = std::fs::metadata(path)
+        .map_err(io_to_config_error)?
+        .permissions();
+    if permissions.mode() & 0o777 != 0o600 {
+        permissions.set_mode(0o600);
+        std::fs::set_permissions(path, permissions).map_err(io_to_config_error)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn secure_config_file(_path: &Path) -> Result<(), ConfigError> {
+    Ok(())
+}
+
 /// Crash-safe JSON write compatible with upstream `utils.atomic_json_write`.
 pub fn atomic_json_write(path: &Path, value: &serde_json::Value) -> Result<(), ConfigError> {
     let bytes = serde_json::to_vec(value).map_err(json_to_config_error)?;
@@ -1233,6 +1263,7 @@ pub fn save_config_yaml(path: &Path, config: &GatewayConfig) -> Result<(), Confi
     to_save.home_dir = None;
     let yaml = serde_yaml::to_string(&to_save).map_err(yaml_to_config_error)?;
     atomic_write_bytes(path, yaml.as_bytes())?;
+    secure_config_file(path)?;
     Ok(())
 }
 
@@ -1308,6 +1339,7 @@ pub fn set_user_config_value(
         set_yaml_path(&mut root, &split_config_key(key), scalar_yaml_value(value))?;
         validate_user_config_value(&root)?;
         atomic_yaml_write(&config_path, &root, None)?;
+        secure_config_file(&config_path)?;
         result.config_path = Some(config_path);
         result.config_key = Some(key.to_string());
     }
@@ -2565,6 +2597,46 @@ llm_providers:
     }
 
     #[test]
+    fn load_from_yaml_tolerates_null_top_level_sections() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(
+            &path,
+            r#"
+model: null
+personality: null
+tools: null
+platforms: null
+platform_toolsets: null
+llm_providers: null
+display: null
+terminal: null
+web: null
+sessions: null
+agent: null
+personalities: null
+"#,
+        )
+        .unwrap();
+
+        let cfg = load_from_yaml(&path).unwrap();
+        let default = GatewayConfig::default();
+        assert_eq!(cfg.model, default.model);
+        assert_eq!(cfg.personality, default.personality);
+        assert_eq!(cfg.tools, default.tools);
+        assert_eq!(cfg.platforms, default.platforms);
+        assert_eq!(cfg.platform_toolsets, default.platform_toolsets);
+        assert_eq!(cfg.llm_providers, default.llm_providers);
+        assert_eq!(cfg.display, default.display);
+        assert_eq!(cfg.terminal, default.terminal);
+        assert_eq!(cfg.web, default.web);
+        assert_eq!(cfg.sessions, default.sessions);
+        assert_eq!(cfg.agent, default.agent);
+    }
+
+    #[test]
     fn set_user_config_value_routes_secret_keys_to_env() {
         use tempfile::tempdir;
 
@@ -2924,6 +2996,43 @@ custom_providers:
         let loaded = load_user_config_file(&path).unwrap();
         assert_eq!(loaded.model.as_deref(), Some("openai:gpt-4o-mini"));
         assert_eq!(loaded.max_turns, 15);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_config_yaml_writes_owner_only_file_when_chmod_enabled() {
+        if !config_chmod_enabled() {
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        save_config_yaml(&path, &GatewayConfig::default()).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn set_user_config_value_writes_owner_only_config_when_chmod_enabled() {
+        if !config_chmod_enabled() {
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        set_user_config_value(dir.path(), "max_turns", "42").unwrap();
+
+        let mode = std::fs::metadata(dir.path().join("config.yaml"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     #[test]

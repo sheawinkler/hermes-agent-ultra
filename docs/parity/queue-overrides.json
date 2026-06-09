@@ -264,6 +264,26 @@
       "disposition": "ported",
       "notes": "Rust Hindsight applies recall_types narrowing to both context injection and explicit tool recall paths."
     },
+    "b24d239ce177": {
+      "disposition": "ported",
+      "notes": "Rust config.yaml writes now preserve atomic replacement and tighten Unix permissions to owner-only 0600, with container/HERMES_SKIP_CHMOD opt-outs and save/config-set regression coverage."
+    },
+    "fd9b692d330f": {
+      "disposition": "ported",
+      "notes": "Rust config loading now tolerates null top-level config.yaml keys by dropping them before serde deserialization so defaults are used instead of failing startup."
+    },
+    "bfa60234c8bb": {
+      "disposition": "ported",
+      "notes": "Rust config normalization emits a warning for null top-level config.yaml keys while continuing with defaults."
+    },
+    "e3940f980799": {
+      "disposition": "ported",
+      "notes": "Rust config normalization drops a null personalities block before deserialization, preventing stale Python-style personality overlay config from breaking TUI startup."
+    },
+    "53fc10fc9a8b": {
+      "disposition": "ported",
+      "notes": "Rust default personality remains neutral: config defaults to no persona and the explicit default marker resolves to the base Hermes identity without adding a built-in personality overlay."
+    },
     "395dbcc873c8": {
       "disposition": "superseded",
       "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"
