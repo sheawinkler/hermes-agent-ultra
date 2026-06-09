@@ -23,6 +23,22 @@ fn foreground_max_timeout_secs() -> u64 {
         .unwrap_or(DEFAULT_FOREGROUND_MAX_TIMEOUT_SECS)
 }
 
+fn non_local_terminal_cwd_from_env() -> Option<String> {
+    std::env::var("TERMINAL_ENV")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty() && value != "local")?;
+    std::env::var("TERMINAL_CWD")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| {
+            !value.is_empty()
+                && value != "."
+                && !value.eq_ignore_ascii_case("auto")
+                && !value.eq_ignore_ascii_case("cwd")
+        })
+}
+
 fn has_unquoted_trailing_background_operator(command: &str) -> bool {
     let mut idx = command.len();
     while idx > 0 {
@@ -218,7 +234,13 @@ impl ToolHandler for TerminalHandler {
                     .and_then(|task_id| self.task_cwd(task_id))
             })
             .flatten();
-        let workdir = explicit_workdir.or(task_workdir.as_deref());
+        let env_workdir = explicit_workdir
+            .is_none()
+            .then(non_local_terminal_cwd_from_env)
+            .flatten();
+        let workdir = explicit_workdir
+            .or(task_workdir.as_deref())
+            .or(env_workdir.as_deref());
 
         let pty = params.get("pty").and_then(|v| v.as_bool()).unwrap_or(false);
         let stdin_data = params.get("stdin_data").and_then(|v| v.as_str());
@@ -935,6 +957,8 @@ mod tests {
     #[test]
     fn test_terminal_handler_uses_registered_task_cwd_when_workdir_omitted() {
         let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _terminal_env = EnvGuard::set("TERMINAL_ENV", "ssh");
+        let _terminal_cwd = EnvGuard::set("TERMINAL_CWD", "/remote/env");
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
@@ -951,6 +975,42 @@ mod tests {
 
         let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(calls.as_slice(), [Some("/workspace/acp".to_string())]);
+    }
+
+    #[test]
+    fn terminal_handler_uses_non_local_terminal_cwd_without_host_validation() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _terminal_env = EnvGuard::set("TERMINAL_ENV", "ssh");
+        let _terminal_cwd = EnvGuard::set("TERMINAL_CWD", "/remote/worktree");
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
+
+        block_on(handler.execute(json!({"command": "pwd"}))).unwrap();
+
+        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(calls.as_slice(), [Some("/remote/worktree".to_string())]);
+    }
+
+    #[test]
+    fn terminal_handler_does_not_apply_terminal_cwd_for_local_backend() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _terminal_env = EnvGuard::set("TERMINAL_ENV", "local");
+        let _terminal_cwd = EnvGuard::set("TERMINAL_CWD", "/host/worktree");
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
+
+        block_on(handler.execute(json!({"command": "pwd"}))).unwrap();
+
+        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(calls.as_slice(), [None]);
     }
 
     #[test]
@@ -983,6 +1043,8 @@ mod tests {
     #[test]
     fn test_terminal_handler_explicit_workdir_wins_over_task_cwd() {
         let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _terminal_env = EnvGuard::set("TERMINAL_ENV", "ssh");
+        let _terminal_cwd = EnvGuard::set("TERMINAL_CWD", "/remote/worktree");
         let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
         let _session = EnvGuard::remove("HERMES_SESSION_KEY");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");

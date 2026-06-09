@@ -1,6 +1,7 @@
 //! SSH terminal backend – executes commands on a remote host via SSH.
 
 use async_trait::async_trait;
+use std::process::Stdio;
 use tokio::process::Command as TokioCommand;
 
 use hermes_core::{AgentError, CommandOutput, TerminalBackend};
@@ -80,6 +81,12 @@ impl SshBackend {
             s
         }
     }
+
+    fn ssh_command(&self, args: &[String]) -> TokioCommand {
+        let mut command = TokioCommand::new("ssh");
+        command.args(args).stdin(Stdio::null());
+        command
+    }
 }
 
 #[async_trait]
@@ -117,8 +124,8 @@ impl TerminalBackend for SshBackend {
         }
 
         let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
-            let output = TokioCommand::new("ssh")
-                .args(&ssh_args)
+            let output = self
+                .ssh_command(&ssh_args)
                 .output()
                 .await
                 .map_err(|e| AgentError::Io(format!("Failed to execute SSH command: {}", e)))?;
@@ -151,31 +158,29 @@ impl TerminalBackend for SshBackend {
         limit: Option<u64>,
     ) -> Result<String, AgentError> {
         // Build a remote command to read the file with offset/limit
-        let mut remote_cmd = String::new();
-
-        if offset.is_some() || limit.is_some() {
+        let remote_cmd = if offset.is_some() || limit.is_some() {
             let start = offset.unwrap_or(0) + 1; // sed is 1-indexed
             if let Some(lim) = limit {
-                remote_cmd = format!(
+                format!(
                     "sed -n '{},{}p' {}",
                     start,
                     start + lim - 1,
                     shlex_quote_local(path)
-                );
+                )
             } else {
-                remote_cmd = format!("sed -n '{},\\$p' {}", start, shlex_quote_local(path));
+                format!("sed -n '{},\\$p' {}", start, shlex_quote_local(path))
             }
         } else {
-            remote_cmd = format!("cat {}", shlex_quote_local(path));
-        }
+            format!("cat {}", shlex_quote_local(path))
+        };
 
         let mut ssh_args = self.build_ssh_args();
         ssh_args.push(remote_cmd);
 
         let timeout_secs = self.default_timeout;
         let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
-            let output = TokioCommand::new("ssh")
-                .args(&ssh_args)
+            let output = self
+                .ssh_command(&ssh_args)
                 .output()
                 .await
                 .map_err(|e| AgentError::Io(format!("Failed to read file via SSH: {}", e)))?;
@@ -214,13 +219,9 @@ impl TerminalBackend for SshBackend {
             let mut ssh_args = self.build_ssh_args();
             ssh_args.push(mkdir_cmd);
 
-            let mkdir_output = TokioCommand::new("ssh")
-                .args(&ssh_args)
-                .output()
-                .await
-                .map_err(|e| {
-                    AgentError::Io(format!("Failed to create parent dir via SSH: {}", e))
-                })?;
+            let mkdir_output = self.ssh_command(&ssh_args).output().await.map_err(|e| {
+                AgentError::Io(format!("Failed to create parent dir via SSH: {}", e))
+            })?;
 
             if !mkdir_output.status.success() {
                 let stderr = String::from_utf8_lossy(&mkdir_output.stderr);
@@ -242,8 +243,8 @@ impl TerminalBackend for SshBackend {
         let mut ssh_args = self.build_ssh_args();
         ssh_args.push(write_cmd);
 
-        let output = TokioCommand::new("ssh")
-            .args(&ssh_args)
+        let output = self
+            .ssh_command(&ssh_args)
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to write file via SSH: {}", e)))?;
@@ -264,8 +265,8 @@ impl TerminalBackend for SshBackend {
         let mut ssh_args = self.build_ssh_args();
         ssh_args.push(test_cmd);
 
-        let output = TokioCommand::new("ssh")
-            .args(&ssh_args)
+        let output = self
+            .ssh_command(&ssh_args)
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to check file via SSH: {}", e)))?;
