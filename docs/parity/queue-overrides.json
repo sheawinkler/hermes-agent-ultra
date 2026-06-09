@@ -1659,6 +1659,814 @@
     "3c0d0dba49f9": {
       "disposition": "ported",
       "notes": "Updated RL tools and configuration management are covered by Rust TrainingConfig editing, TrainingStatus serde, TrainingMetrics progression, RunManager lifecycle, registered rl_training toolset membership, and focused hermes-intelligence/hermes-tools tests."
+    },
+    "51c68d4ab1a9": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "3ef97a61b9f1": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "77bb64813cb9": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "fa4ebaa8b58b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "79f7e7a1e9d8": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "0bc616ecf9f1": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "7fbe9b79ab1d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "359f2be12e6c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "85b65e29f09b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "134643a2fa80": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "a2b8e430e851": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5e55b35cc8fb": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "de8bdf529d64": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "135c65093a0a": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5b71f7dd7249": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "423923095781": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "23c0578bd75d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "0c29cfd1a614": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "31c40c72c03c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ac76bbe21f8a": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "dd5e97bd7fe0": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "3be9fb73173e": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "d963ad56c19e": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ea4fe1563119": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "746618217950": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "115671ae6b2c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "1daecfa4b0cb": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "46e513ef5185": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "21e172b94ae8": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "d704df2d6e47": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "afec339e967f": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "b6945ce772b3": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e67ab2e042d3": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9bdf01852ac1": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "06aa140fa195": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e5472da58470": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "84eb5f1f891b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e618cbee4418": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "55a76ec6695d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e0a999aa8a22": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "6a2909fe5a07": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "d0ea4caf7fc3": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "188e52db9180": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "a23728dfcc50": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "28f1590b7acd": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "c77c470d2762": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "49f1b9e4b44f": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5fca754ee335": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "f45d7dee7d25": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "3aa24e261936": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "c930a49ce9b7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "1dca7c6207f0": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "a1cda2410b30": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "c711146ad4cd": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "93228d529996": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "1b89715e153f": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "0caa23788f60": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5c0a1fec0c14": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "1927ff217e6b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "7ea37cd08236": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "8a19884bf399": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5a22cd427dd6": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "f66a929a6b78": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "58eb473baa81": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "35a750eedd7b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "712bf4d8e429": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "8c0f15478de9": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "1e1ab31ad6c8": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "fb0250ef63c8": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "d6e2c940e9d1": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "0776d1b19cb3": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "75adf7d603b1": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "2b762c53640f": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "f15d2cb5e424": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "41ede963041f": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "947f305f84c5": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "75e29f97ee39": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e68fc4def2ba": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "40420a619b58": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ac9de2e80c01": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "311e80809f50": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ded620b7114d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "88bdb6b07451": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "fd88d527af37": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e026fd88cdbb": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "fd68ae63315a": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9e02b18828a2": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "aecdc75bb001": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "3a5e36cfa50a": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5bb7156949f4": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "38acced6873d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "bc9e33d66b12": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "86643d84e99e": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9cbc37e25b64": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9d07927a23ee": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "bf590c81d0bc": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "385a508e43cb": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "bd12b3c2321b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "928f1ac0e187": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "0175be3aa76c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "b1b0f4b66854": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "b6206020d383": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e003c53b06d8": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "f583c6ebd5bd": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "6feb40e70282": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "acce1a2452f8": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "1eeb7da2e6e5": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "d29caf382868": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "cfbc47d8937c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "48d8d80771e2": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "dfd6bcf1ff9c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "a40e20e1368d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "2c98dc0a9613": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9dbd3c57d700": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ea44011d152e": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9cc47b20cb3f": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "10c78bf625ff": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "500cf537b7d0": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "bcb024ad48bc": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ab706a3346d0": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "439f53cab8e0": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ca8c78e588b7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ca1fb32c2619": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "3045d54547f7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "b8234e75996e": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "be2c64be0275": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "8e629b9f386d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "da9425bf9b08": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "aa52cd3b574e": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "7cceead27373": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5d4c93afe476": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e8c837c921e0": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5e2b83a8ada8": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "258984fcb906": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "021ea2a21b18": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "182092c5fdd5": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "74c8f51e95e4": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "06ecc5535c47": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e9b8dd236c79": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "628f9040df43": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "3e2d758816b7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "abbf05024131": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "146e77684b71": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "471a5fc5c93e": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ccaa5165a006": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "de0469e02b14": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "b2bd31c724c1": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "f033b7dbfbe8": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "f993d76874e8": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "66adeef11a71": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "1238d08e0c90": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "d165933c560c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "1c0437dfc5bb": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5b43bf7d023c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "97524344adbd": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "bec07964beb8": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "fe2942a5aab7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "8720023e963b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5dee40fcc0a1": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "210f4e706a19": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "b55ac45264e9": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5a3092b60106": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ed81cfe3def7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "349a3f601c6c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "02aad08acf46": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9d72680ca34a": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "20fd0bde5d1a": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "16786f3bb392": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "f3af489ec2f7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "cadb74adad3c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e029b7597bdf": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "c50fb560ef04": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "628780b4f322": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "fa42ac094dca": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "d65b513f23d7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "b5a457c03303": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "53a2ac8f2dba": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "bddc5fd08734": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9d6992ee8a7b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ede4f5a4a30b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "3fc67b7333d7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "694adec6350f": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "d759c13c0963": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "039fbb41fc2d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "ed1e2533b73d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "64da518db413": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9c264555b018": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "56be1a63a33d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "cfaa46fcae63": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "47518bc9135d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9b2a64fa6a27": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "81647458c7a7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "cd030f5f4029": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "b000e05b117b": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "74239b494209": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "de80d28f3848": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "395ed918915c": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "9b1e0d6f70bb": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "6e7033bb4c79": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "09a6a2ddd71d": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e0f6a35ac659": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "c1927d2342a7": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
     }
   },
   "subject_patterns": [
