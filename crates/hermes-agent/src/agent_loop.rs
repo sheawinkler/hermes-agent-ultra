@@ -29,9 +29,10 @@ use hermes_core::{
     StreamChunk, ToolCall, ToolError, ToolResult, ToolSchema, UsageStats, separate_text_and_calls,
 };
 
+use crate::agent_runtime_helpers;
 use crate::api_bridge::CodexProvider;
 use crate::auxiliary_builder::{AuxiliaryBuildParams, build_auxiliary_client};
-use crate::bedrock::{resolve_bedrock_region, BedrockProvider};
+use crate::bedrock::{BedrockProvider, resolve_bedrock_region};
 use crate::code_index::CodeIndex;
 use crate::compression::{
     CompressorConfig, ContextCompressor, estimate_messages_tokens,
@@ -45,7 +46,6 @@ use crate::fallback::TurnFallbackState;
 use crate::interrupt::InterruptController;
 use crate::lsp_context::{LspContextConfig, build_lsp_context_note};
 use crate::memory_manager::MemoryManager;
-use crate::agent_runtime_helpers;
 use crate::message_sanitization::{
     build_partial_stream_stub_response, format_partial_stream_tool_call_warning,
     partial_stream_dropped_tool_names, partial_stream_tool_calls_in_flight, sanitize_surrogates,
@@ -2535,7 +2535,7 @@ impl AgentLoop {
         &self,
         ctx: &ContextManager,
         total_turns: u32,
-        tool_errors: &[hermes_core::ToolErrorRecord],
+        tool_errors: Vec<hermes_core::ToolErrorRecord>,
         accumulated_usage: Option<UsageStats>,
         session_cost_usd: f64,
         session_started_hooks_fired: bool,
@@ -2635,7 +2635,7 @@ impl AgentLoop {
         prefill_range: Option<Range<usize>>,
         exit: LoopExit<'_>,
         total_turns: u32,
-        tool_errors: &[hermes_core::ToolErrorRecord],
+        tool_errors: Vec<hermes_core::ToolErrorRecord>,
         accumulated_usage: Option<UsageStats>,
         session_cost_usd: f64,
         session_started_hooks_fired: bool,
@@ -2644,7 +2644,7 @@ impl AgentLoop {
             messages: self.messages_for_persisted_result(ctx, persist_user_idx, prefill_range),
             finished_naturally: exit.finished_naturally,
             total_turns,
-            tool_errors: tool_errors.to_vec(),
+            tool_errors,
             usage: accumulated_usage,
             interrupted: exit.interrupted,
             session_cost_usd: Some(session_cost_usd),
@@ -2859,7 +2859,12 @@ impl AgentLoop {
             return None;
         }
         let config = self.config();
-        let lookup = |key: &str| config.runtime_providers.get(key).and_then(|cfg| cfg.api_mode.clone());
+        let lookup = |key: &str| {
+            config
+                .runtime_providers
+                .get(key)
+                .and_then(|cfg| cfg.api_mode.clone())
+        };
         if let Some(mode) = lookup(provider) {
             return Some(mode);
         }
@@ -5440,11 +5445,13 @@ impl AgentLoop {
             "stepfun" => {
                 let url =
                     base_url.unwrap_or_else(|| "https://api.stepfun.ai/step_plan/v1".to_string());
-                Arc::new(self.runtime_generic_provider(
-                    GenericProvider::new(url, &api_key, model_name)
-                        .with_optional_request_timeout_seconds(request_timeout_seconds)
-                        .with_provider_profile(provider),
-                ))
+                Arc::new(
+                    self.runtime_generic_provider(
+                        GenericProvider::new(url, &api_key, model_name)
+                            .with_optional_request_timeout_seconds(request_timeout_seconds)
+                            .with_provider_profile(provider),
+                    ),
+                )
             }
             "nous" => {
                 let mut p = NousProvider::new(&api_key)
@@ -5972,7 +5979,9 @@ impl AgentLoop {
         let Some(content) = m.content.as_deref() else {
             return false;
         };
-        !agent_runtime_helpers::strip_think_blocks(content).trim().is_empty()
+        !agent_runtime_helpers::strip_think_blocks(content)
+            .trim()
+            .is_empty()
     }
 
     pub(crate) fn coerce_textual_tool_calls(mut m: Message) -> (Message, Vec<ToolCall>, bool) {

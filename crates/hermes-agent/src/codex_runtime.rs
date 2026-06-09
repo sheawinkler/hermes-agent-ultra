@@ -130,9 +130,7 @@ impl AgentLoop {
 
         if !turn.interrupted && turn.error.is_none() {
             if let Ok(mut c) = self.evolution_counters.lock() {
-                c.iters_since_skill = c
-                    .iters_since_skill
-                    .saturating_add(turn.tool_iterations);
+                c.iters_since_skill = c.iters_since_skill.saturating_add(turn.tool_iterations);
             }
         }
 
@@ -175,7 +173,7 @@ impl AgentLoop {
                 interrupted: turn.interrupted,
             },
             0,
-            &[],
+            Vec::new(),
             None,
             0.0,
             session_started_hooks_fired,
@@ -211,7 +209,7 @@ impl AgentLoop {
                 interrupted: false,
             },
             0,
-            &[],
+            Vec::new(),
             None,
             0.0,
             session_started_hooks_fired,

@@ -364,6 +364,7 @@ impl AgentLoop {
         self.persist_turn_session(&messages, &loop_result);
 
         loop_result.messages = messages;
+        loop_result.messages.shrink_to_fit();
         let loop_result = self.finalize_agent_result(loop_result);
         hermes_telemetry::record_agent_turn();
         crate::session_log::clear_session_context();
@@ -810,8 +811,8 @@ impl AgentLoop {
                 return Ok(self.graceful_interrupt_result(
                     &ctx,
                     total_turns,
-                    &tool_errors,
-                    accumulated_usage.clone(),
+                    std::mem::take(&mut tool_errors),
+                    accumulated_usage.take(),
                     session_cost_usd,
                     session_started_hooks_fired,
                     persist_user_idx,
@@ -858,8 +859,8 @@ impl AgentLoop {
                             interrupted: false,
                         },
                         total_turns,
-                        &tool_errors,
-                        accumulated_usage,
+                        std::mem::take(&mut tool_errors),
+                        accumulated_usage.take(),
                         session_cost_usd,
                         session_started_hooks_fired,
                     ));
@@ -967,8 +968,8 @@ impl AgentLoop {
                         interrupted: false,
                     },
                     total_turns,
-                    &tool_errors,
-                    accumulated_usage.clone(),
+                    std::mem::take(&mut tool_errors),
+                    accumulated_usage.take(),
                     session_cost_usd,
                     session_started_hooks_fired,
                 ));
@@ -1033,8 +1034,8 @@ impl AgentLoop {
                     return Ok(self.graceful_interrupt_result(
                         &ctx,
                         total_turns,
-                        &tool_errors,
-                        accumulated_usage.clone(),
+                        std::mem::take(&mut tool_errors),
+                        accumulated_usage.take(),
                         session_cost_usd,
                         session_started_hooks_fired,
                         persist_user_idx,
@@ -1064,7 +1065,7 @@ impl AgentLoop {
                         Ok(StreamCollectOutcome::Interrupted(partial)) => {
                             if let Some(ref u) = partial.usage {
                                 self.record_api_usage(u);
-                                accumulated_usage = Some(merge_usage(accumulated_usage.clone(), u));
+                                accumulated_usage = Some(merge_usage(accumulated_usage.take(), u));
                                 if let Some(cost) = estimate_usage_cost_usd(
                                     u,
                                     partial.model.as_str(),
@@ -1077,8 +1078,8 @@ impl AgentLoop {
                             return Ok(self.graceful_interrupt_result(
                                 &ctx,
                                 total_turns,
-                                &tool_errors,
-                                accumulated_usage.clone(),
+                                std::mem::take(&mut tool_errors),
+                                accumulated_usage.take(),
                                 session_cost_usd,
                                 session_started_hooks_fired,
                                 persist_user_idx,
@@ -1113,8 +1114,8 @@ impl AgentLoop {
                             return Ok(self.graceful_interrupt_result(
                                 &ctx,
                                 total_turns,
-                                &tool_errors,
-                                accumulated_usage.clone(),
+                                std::mem::take(&mut tool_errors),
+                                accumulated_usage.take(),
                                 session_cost_usd,
                                 session_started_hooks_fired,
                                 persist_user_idx,
@@ -1296,8 +1297,8 @@ impl AgentLoop {
                             interrupted: false,
                         },
                         total_turns,
-                        &tool_errors,
-                        accumulated_usage,
+                        std::mem::take(&mut tool_errors),
+                        accumulated_usage.take(),
                         session_cost_usd,
                         session_started_hooks_fired,
                     ));
@@ -1645,8 +1646,8 @@ impl AgentLoop {
                         interrupted: false,
                     },
                     total_turns,
-                    &tool_errors,
-                    accumulated_usage,
+                    std::mem::take(&mut tool_errors),
+                    accumulated_usage.take(),
                     session_cost_usd,
                     session_started_hooks_fired,
                 ));
@@ -1759,8 +1760,8 @@ impl AgentLoop {
                             interrupted: false,
                         },
                         total_turns,
-                        &tool_errors,
-                        accumulated_usage,
+                        std::mem::take(&mut tool_errors),
+                        accumulated_usage.take(),
                         session_cost_usd,
                         session_started_hooks_fired,
                     ));
@@ -1908,8 +1909,8 @@ impl AgentLoop {
                 return Ok(self.graceful_interrupt_result(
                     &ctx,
                     total_turns,
-                    &tool_errors,
-                    accumulated_usage.clone(),
+                    std::mem::take(&mut tool_errors),
+                    accumulated_usage.take(),
                     session_cost_usd,
                     session_started_hooks_fired,
                     persist_user_idx,
@@ -1951,8 +1952,8 @@ impl AgentLoop {
                                 interrupted: false,
                             },
                             total_turns,
-                            &tool_errors,
-                            accumulated_usage,
+                            std::mem::take(&mut tool_errors),
+                            accumulated_usage.take(),
                             session_cost_usd,
                             session_started_hooks_fired,
                         ));
@@ -2240,8 +2241,8 @@ impl AgentLoop {
                             interrupted: false,
                         },
                         total_turns,
-                        &tool_errors,
-                        accumulated_usage,
+                        std::mem::take(&mut tool_errors),
+                        accumulated_usage.take(),
                         session_cost_usd,
                         session_started_hooks_fired,
                     ),
