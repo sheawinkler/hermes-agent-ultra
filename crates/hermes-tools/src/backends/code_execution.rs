@@ -11,6 +11,7 @@ use tokio::process::Command as TokioCommand;
 use crate::code_execution_env::prepare_child_env;
 use crate::code_execution_ptc::{execute_python_ptc, ptc_enabled, PtcConfig};
 use crate::tools::code_execution::CodeExecutionBackend;
+use crate::tools::env_passthrough::is_env_passthrough;
 use crate::ToolRegistry;
 use hermes_core::ToolError;
 
@@ -81,7 +82,7 @@ async fn spawn_python(
         cmd.arg("-c").arg(code);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         let source_env: BTreeMap<String, String> = std::env::vars().collect();
-        let child_env = prepare_child_env(&source_env, |_| false, cfg!(windows));
+        let child_env = prepare_child_env(&source_env, is_env_passthrough, cfg!(windows));
         cmd.env_clear().envs(child_env);
 
         let spawn_result = cmd.spawn();

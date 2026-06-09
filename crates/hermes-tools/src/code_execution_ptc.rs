@@ -15,9 +15,10 @@ use tokio::process::Command as TokioCommand;
 use tracing::warn;
 
 use crate::code_execution_env::SANDBOX_ALLOWED_TOOLS;
-use crate::code_execution_stubs::{generate_hermes_tools_module, RpcTransport};
 use crate::code_execution_env::prepare_child_env;
+use crate::code_execution_stubs::{generate_hermes_tools_module, RpcTransport};
 use crate::dispatch;
+use crate::tools::env_passthrough::is_env_passthrough;
 use crate::ToolRegistry;
 use hermes_core::{FunctionCall, ToolCall, ToolError};
 
@@ -316,7 +317,7 @@ fn accept_unix_loop(
 
 fn build_child_env(endpoint: &str, sandbox_dir: &std::path::Path) -> BTreeMap<String, String> {
     let source: BTreeMap<String, String> = std::env::vars().collect();
-    let mut child = prepare_child_env(&source, |_| false, cfg!(windows));
+    let mut child = prepare_child_env(&source, is_env_passthrough, cfg!(windows));
     child.insert("HERMES_RPC_SOCKET".into(), endpoint.to_string());
     child.insert("PYTHONDONTWRITEBYTECODE".into(), "1".into());
     child.insert("PYTHONIOENCODING".into(), "utf-8".into());
