@@ -25,3 +25,5 @@ log
 
 # Generated PR infographics live in PR bodies, not in-tree.
 infographic/
+
+.local-wip-backup/
