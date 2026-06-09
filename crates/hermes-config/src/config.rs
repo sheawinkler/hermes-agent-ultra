@@ -181,6 +181,10 @@ pub struct GatewayConfig {
     /// IANA timezone for user-facing wall clock (e.g. `Asia/Shanghai`). Overridden by `HERMES_TIMEZONE`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
+
+    /// Curator background engine configuration.
+    #[serde(default)]
+    pub curator: CuratorConfig,
 }
 
 impl Default for GatewayConfig {
@@ -225,6 +229,66 @@ impl Default for GatewayConfig {
             prompt_caching: PromptCachingConfig::default(),
             home_dir: None,
             timezone: None,
+            curator: CuratorConfig::default(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CuratorConfig
+// ---------------------------------------------------------------------------
+
+/// Curator background engine settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CuratorConfig {
+    /// Whether the curator engine is enabled.
+    #[serde(default = "default_curator_enabled")]
+    pub enabled: bool,
+    /// Minimum interval (hours) between curator runs.
+    #[serde(default = "default_interval_hours")]
+    pub interval_hours: u64,
+    /// Minimum idle hours before a run is eligible.
+    #[serde(default = "default_min_idle_hours")]
+    pub min_idle_hours: u64,
+    /// Days of inactivity after which a skill is considered stale.
+    #[serde(default = "default_stale_after_days")]
+    pub stale_after_days: u64,
+    /// Days of inactivity after which a skill is archived.
+    #[serde(default = "default_archive_after_days")]
+    pub archive_after_days: u64,
+    /// Whether to prune unused builtin skills.
+    #[serde(default = "default_prune_builtins")]
+    pub prune_builtins: bool,
+}
+
+fn default_curator_enabled() -> bool {
+    true
+}
+fn default_interval_hours() -> u64 {
+    168
+}
+fn default_min_idle_hours() -> u64 {
+    2
+}
+fn default_stale_after_days() -> u64 {
+    30
+}
+fn default_archive_after_days() -> u64 {
+    90
+}
+fn default_prune_builtins() -> bool {
+    true
+}
+
+impl Default for CuratorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_curator_enabled(),
+            interval_hours: default_interval_hours(),
+            min_idle_hours: default_min_idle_hours(),
+            stale_after_days: default_stale_after_days(),
+            archive_after_days: default_archive_after_days(),
+            prune_builtins: default_prune_builtins(),
         }
     }
 }

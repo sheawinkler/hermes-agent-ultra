@@ -2246,7 +2246,209 @@ impl Gateway {
                 self.send_incoming_reply(incoming, &msg, None).await?;
                 Ok(true)
             }
+            GatewayCommandResult::CuratorStatus => {
+                let reply = Self::execute_curator_status();
+                self.send_incoming_reply(incoming, &reply, None).await?;
+                Ok(true)
+            }
+            GatewayCommandResult::CuratorRun { dry_run } => {
+                let reply = Self::execute_curator_run(dry_run);
+                self.send_incoming_reply(incoming, &reply, None).await?;
+                Ok(true)
+            }
+            GatewayCommandResult::CuratorPause => {
+                let reply = Self::execute_curator_pause_resume(true);
+                self.send_incoming_reply(incoming, &reply, None).await?;
+                Ok(true)
+            }
+            GatewayCommandResult::CuratorResume => {
+                let reply = Self::execute_curator_pause_resume(false);
+                self.send_incoming_reply(incoming, &reply, None).await?;
+                Ok(true)
+            }
+            GatewayCommandResult::CuratorPin { name } => {
+                let reply = Self::execute_curator_pin_unpin(&name, true);
+                self.send_incoming_reply(incoming, &reply, None).await?;
+                Ok(true)
+            }
+            GatewayCommandResult::CuratorUnpin { name } => {
+                let reply = Self::execute_curator_pin_unpin(&name, false);
+                self.send_incoming_reply(incoming, &reply, None).await?;
+                Ok(true)
+            }
+            GatewayCommandResult::CuratorArchive { name } => {
+                let reply = Self::execute_curator_archive(&name);
+                self.send_incoming_reply(incoming, &reply, None).await?;
+                Ok(true)
+            }
+            GatewayCommandResult::CuratorRestore { name } => {
+                let reply = Self::execute_curator_restore(&name);
+                self.send_incoming_reply(incoming, &reply, None).await?;
+                Ok(true)
+            }
+            GatewayCommandResult::CuratorListArchived => {
+                let reply = Self::execute_curator_list_archived();
+                self.send_incoming_reply(incoming, &reply, None).await?;
+                Ok(true)
+            }
             GatewayCommandResult::Noop => Ok(true),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Curator helper methods
+    // -----------------------------------------------------------------------
+
+    fn execute_curator_status() -> String {
+        let skills_dir = hermes_config::hermes_home().join("skills");
+        let state = hermes_skills::load_curator_state(&skills_dir);
+        let config = hermes_skills::CuratorConfig::default();
+        let report = hermes_skills::agent_created_report(&skills_dir);
+
+        let status = if state.paused {
+            "PAUSED"
+        } else if config.enabled {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        };
+
+        let mut lines = vec![format!("curator: {status}")];
+        lines.push(format!("  runs: {}", state.run_count));
+        if let Some(ref last) = state.last_run_at {
+            lines.push(format!("  last run: {last}"));
+        }
+        if let Some(ref summary) = state.last_run_summary {
+            lines.push(format!("  last summary: {summary}"));
+        }
+        lines.push(format!("  interval: every {}h", config.interval_hours));
+        lines.push(format!("  stale after: {}d", config.stale_after_days));
+        lines.push(format!("  archive after: {}d", config.archive_after_days));
+        lines.push(String::new());
+        lines.push(format!("agent-created skills: {} total", report.len()));
+
+        let active = report.iter().filter(|r| r.state == "active").count();
+        let stale = report.iter().filter(|r| r.state == "stale").count();
+        let archived = report.iter().filter(|r| r.state == "archived").count();
+        lines.push(format!("  active: {active}"));
+        lines.push(format!("  stale: {stale}"));
+        lines.push(format!("  archived: {archived}"));
+
+        lines.join("\n")
+    }
+
+    fn execute_curator_run(dry_run: bool) -> String {
+        let skills_dir = hermes_config::hermes_home().join("skills");
+        let config = hermes_skills::CuratorConfig::default();
+        let result = hermes_skills::apply_automatic_transitions(&skills_dir, &config);
+
+        let mut lines = vec![];
+        if dry_run {
+            lines.push("── curator dry-run ──".to_string());
+        } else {
+            lines.push("── curator run ──".to_string());
+        }
+        lines.push(format!("  checked: {}", result.checked));
+        lines.push(format!("  marked stale: {}", result.marked_stale));
+        lines.push(format!("  archived: {}", result.archived));
+        lines.push(format!("  reactivated: {}", result.reactivated));
+
+        if !dry_run {
+            let mut state = hermes_skills::load_curator_state(&skills_dir);
+            state.last_run_at = Some(chrono::Utc::now().to_rfc3339());
+            state.run_count += 1;
+            state.last_run_summary = Some(format!(
+                "auto: {} checked, {} stale, {} archived, {} reactivated",
+                result.checked, result.marked_stale, result.archived, result.reactivated
+            ));
+            let _ = hermes_skills::save_curator_state(&skills_dir, &state);
+            lines.push("State updated.".to_string());
+        }
+
+        lines.join("\n")
+    }
+
+    fn execute_curator_pause_resume(pause: bool) -> String {
+        let skills_dir = hermes_config::hermes_home().join("skills");
+        match hermes_skills::set_paused(&skills_dir, pause) {
+            Ok(()) => {
+                if pause {
+                    "✓ Curator paused.".to_string()
+                } else {
+                    "✓ Curator resumed.".to_string()
+                }
+            }
+            Err(e) => format!("Failed: {e}"),
+        }
+    }
+
+    fn execute_curator_pin_unpin(name: &str, pin: bool) -> String {
+        if name.is_empty() {
+            return if pin {
+                "Usage: /curator pin <skill-name>".to_string()
+            } else {
+                "Usage: /curator unpin <skill-name>".to_string()
+            };
+        }
+        let skills_dir = hermes_config::hermes_home().join("skills");
+        match hermes_skills::set_pinned(&skills_dir, name, pin) {
+            Ok(()) => {
+                if pin {
+                    format!("✓ {name} pinned.")
+                } else {
+                    format!("✓ {name} unpinned.")
+                }
+            }
+            Err(e) => format!("Failed: {e}"),
+        }
+    }
+
+    fn execute_curator_archive(name: &str) -> String {
+        if name.is_empty() {
+            return "Usage: /curator archive <skill-name>".to_string();
+        }
+        let skills_dir = hermes_config::hermes_home().join("skills");
+        match hermes_skills::archive_skill(&skills_dir, name) {
+            Ok((true, msg)) => format!("✓ {msg}"),
+            Ok((false, msg)) => format!("✗ {msg}"),
+            Err(e) => format!("Failed: {e}"),
+        }
+    }
+
+    fn execute_curator_restore(name: &str) -> String {
+        if name.is_empty() {
+            return "Usage: /curator restore <skill-name>".to_string();
+        }
+        let skills_dir = hermes_config::hermes_home().join("skills");
+        match hermes_skills::restore_skill(&skills_dir, name) {
+            Ok((true, msg)) => format!("✓ {msg}"),
+            Ok((false, msg)) => format!("✗ {msg}"),
+            Err(e) => format!("Failed: {e}"),
+        }
+    }
+
+    fn execute_curator_list_archived() -> String {
+        let skills_dir = hermes_config::hermes_home().join("skills");
+        let archive_dir = skills_dir.join(".archive");
+        let mut names = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&archive_dir) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    if let Some(name) = entry.file_name().to_str() {
+                        names.push(name.to_string());
+                    }
+                }
+            }
+        }
+        if names.is_empty() {
+            "No archived skills.".to_string()
+        } else {
+            names.sort();
+            format!(
+                "Archived skills ({}):\n{}",
+                names.len(),
+                names.iter().map(|n| format!("  • {n}")).collect::<Vec<_>>().join("\n")
+            )
         }
     }
 

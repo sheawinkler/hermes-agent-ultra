@@ -4,6 +4,8 @@
 //! Provides skill management, local file storage, hub client, security
 //! validation, and versioning.
 
+mod curator;
+mod curator_prompt;
 mod guard;
 mod hub;
 mod hub_lock;
@@ -56,3 +58,14 @@ pub use usage::{
     SkillUsageRecord, SkillUsageReportRow, STATE_ACTIVE, STATE_ARCHIVED, STATE_STALE,
 };
 pub use version::{compare_versions, compute_version, track_change, SkillChange, SkillVersion};
+pub use curator::{
+    CuratorConfig, CuratorError, CuratorReviewResult, CuratorRunRecord, CuratorState,
+    ToolCallRecord, TransitionResult, apply_automatic_transitions, build_curator_prompt,
+    is_paused, load_curator_state, maybe_run_curator, run_curator_review, save_curator_state,
+    set_paused, should_run_now,
+    ConsolidationEntry, PruningEntry, StructuredSummary, AbsorbedDeclaration,
+    ClassificationResult, CuratorRunReport, CuratorRunCounts,
+    parse_structured_summary, extract_absorbed_into_declarations,
+    classify_removed_skills, reconcile_classification, write_curator_report,
+};
+pub use curator_prompt::CURATOR_REVIEW_PROMPT;

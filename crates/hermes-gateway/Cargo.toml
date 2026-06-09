@@ -9,7 +9,7 @@ description = "Message gateway and platform adapters for Hermes Agent"
 [features]
 default = []
 telegram = []
-discord = ["dep:hermes-skills"]
+discord = []
 slack = []
 whatsapp = [
     "dep:wa-rs",
@@ -41,7 +41,7 @@ webhook = []
 hermes-core = { workspace = true }
 hermes-agent = { workspace = true }
 hermes-config = { workspace = true }
-hermes-skills = { workspace = true, optional = true }
+hermes-skills = { workspace = true }
 hermes-tools = { workspace = true }
 hermes-cron = { workspace = true }
 tokio = { workspace = true }

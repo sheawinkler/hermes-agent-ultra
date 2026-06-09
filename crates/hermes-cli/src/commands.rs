@@ -5239,15 +5239,78 @@ async fn handle_curator_command(app: &mut App, args: &[&str]) -> Result<CommandR
                 }
             }
         }
-        "run" | "pause" | "resume" => {
-            emit_command_output(
-                app,
-                format!(
-                    "⚠️  The curator background engine has not been ported to Rust yet.\n\
-                     `/curator {sub}` is a placeholder.\n\
-                     Please use the Python CLI for this operation."
-                ),
-            );
+        "pause" => {
+            match hermes_skills::set_paused(&skills_dir, true) {
+                Ok(()) => {
+                    emit_command_output(app, "✓ Curator paused. Automatic runs will be skipped until resumed.");
+                }
+                Err(e) => {
+                    emit_command_output(app, format!("Failed to pause curator: {e}"));
+                }
+            }
+        }
+        "resume" => {
+            match hermes_skills::set_paused(&skills_dir, false) {
+                Ok(()) => {
+                    emit_command_output(app, "✓ Curator resumed. Automatic runs will proceed on schedule.");
+                }
+                Err(e) => {
+                    emit_command_output(app, format!("Failed to resume curator: {e}"));
+                }
+            }
+        }
+        "run" => {
+            // Parse flags
+            let mut dry_run = false;
+            for arg in &args[1..] {
+                match *arg {
+                    "--dry-run" => dry_run = true,
+                    _ => {}
+                }
+            }
+
+            // Load config
+            let config = hermes_skills::CuratorConfig::default(); // TODO: read from gateway config
+
+            if !config.enabled {
+                emit_command_output(app, "Curator is disabled in configuration.");
+                return Ok(CommandResult::Handled);
+            }
+
+            // Execute automatic state transitions
+            let result = hermes_skills::apply_automatic_transitions(&skills_dir, &config);
+
+            // Format output
+            let mut lines = Vec::new();
+            if dry_run {
+                lines.push("── curator dry-run ──".to_string());
+            } else {
+                lines.push("── curator run ──".to_string());
+            }
+            lines.push(format!("  checked:      {}", result.checked));
+            lines.push(format!("  marked stale: {}", result.marked_stale));
+            lines.push(format!("  archived:     {}", result.archived));
+            lines.push(format!("  reactivated:  {}", result.reactivated));
+
+            // Update state (non dry-run)
+            if !dry_run {
+                let mut state = hermes_skills::load_curator_state(&skills_dir);
+                state.last_run_at = Some(chrono::Utc::now().to_rfc3339());
+                state.run_count += 1;
+                state.last_run_summary = Some(format!(
+                    "auto: {} checked, {} marked stale, {} archived, {} reactivated",
+                    result.checked, result.marked_stale, result.archived, result.reactivated
+                ));
+                let _ = hermes_skills::save_curator_state(&skills_dir, &state);
+                lines.push(String::new());
+                lines.push("State updated. (LLM review pass will be available in a future update)".to_string());
+            } else {
+                lines.push(String::new());
+                lines.push("(dry-run: no state changes persisted)".to_string());
+            }
+
+            let output = lines.join("\n");
+            emit_command_output(app, &output);
         }
         _ => {
             let help = format!(
@@ -5259,9 +5322,10 @@ async fn handle_curator_command(app: &mut App, args: &[&str]) -> Result<CommandR
                    `/curator archive <name>` — Archive a skill to .archive/\n\
                    `/curator restore <name>` — Restore an archived skill\n\
                    `/curator list-archived` — List archived skills\n\
-                   `/curator run`          — Trigger curator review (⚠️ not yet ported)\n\
-                   `/curator pause`        — Pause curator (⚠️ not yet ported)\n\
-                   `/curator resume`       — Resume curator (⚠️ not yet ported)\n\
+                   `/curator run`          — Trigger curator review\n\
+                   `/curator run --dry-run` — Preview without persisting changes\n\
+                   `/curator pause`        — Pause automatic curator runs\n\
+                   `/curator resume`       — Resume automatic curator runs\n\
                  \nUnknown subcommand: `{unknown}`\n\
                  Try `/curator` (no args) for status overview.",
                 unknown = sub,

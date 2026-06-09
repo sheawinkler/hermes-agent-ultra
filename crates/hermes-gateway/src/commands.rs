@@ -80,6 +80,24 @@ pub enum GatewayCommandResult {
     Rollback { steps: usize },
     /// Check for updates.
     CheckUpdate,
+    /// Curator status query.
+    CuratorStatus,
+    /// Curator run (automatic transitions).
+    CuratorRun { dry_run: bool },
+    /// Curator pause.
+    CuratorPause,
+    /// Curator resume.
+    CuratorResume,
+    /// Curator pin a skill.
+    CuratorPin { name: String },
+    /// Curator unpin a skill.
+    CuratorUnpin { name: String },
+    /// Curator archive a skill.
+    CuratorArchive { name: String },
+    /// Curator restore a skill.
+    CuratorRestore { name: String },
+    /// Curator list archived skills.
+    CuratorListArchived,
     /// Unknown command.
     Unknown(String),
     /// No-op (command handled internally).
@@ -272,6 +290,12 @@ pub fn all_commands() -> Vec<CommandInfo> {
             usage: "/insights",
         },
         CommandInfo {
+            name: "/curator",
+            aliases: &[],
+            description: "Manage the skill curator (status, run, pause, resume, pin, unpin, archive, restore)",
+            usage: "/curator [subcommand] [args]",
+        },
+        CommandInfo {
             name: "/help",
             aliases: &["/commands"],
             description: "Show this help message",
@@ -352,7 +376,7 @@ pub fn classify_batch_class(name: &str) -> BatchCommandClass {
 
         // ── ReadOnly ───────────────────────────────────────────────────────
         // Only commands whose behaviour is *always* read-only regardless of args.
-        "status" | "usage" | "insights" | "help" => BatchCommandClass::ReadOnly,
+        "status" | "usage" | "insights" | "help" | "curator" => BatchCommandClass::ReadOnly,
 
         // ── SessionMutation (everything else that the gateway handles) ─────
         "new" | "reset" | "model" | "personality" | "compress" | "verbose"
@@ -727,6 +751,40 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         "/insights" => GatewayCommandResult::ShowInsights(
             "📌 Conversation insights will be shown here.".to_string(),
         ),
+        "/curator" => {
+            let tokens: Vec<&str> = args.split_whitespace().collect();
+            let sub = tokens.first().copied().unwrap_or("status");
+            match sub {
+                "status" | "" => GatewayCommandResult::CuratorStatus,
+                "run" => {
+                    let dry_run = tokens.contains(&"--dry-run");
+                    GatewayCommandResult::CuratorRun { dry_run }
+                }
+                "pause" => GatewayCommandResult::CuratorPause,
+                "resume" => GatewayCommandResult::CuratorResume,
+                "pin" => {
+                    let name = tokens.get(1).unwrap_or(&"").to_string();
+                    GatewayCommandResult::CuratorPin { name }
+                }
+                "unpin" => {
+                    let name = tokens.get(1).unwrap_or(&"").to_string();
+                    GatewayCommandResult::CuratorUnpin { name }
+                }
+                "archive" => {
+                    let name = tokens.get(1).unwrap_or(&"").to_string();
+                    GatewayCommandResult::CuratorArchive { name }
+                }
+                "restore" => {
+                    let name = tokens.get(1).unwrap_or(&"").to_string();
+                    GatewayCommandResult::CuratorRestore { name }
+                }
+                "list-archived" => GatewayCommandResult::CuratorListArchived,
+                _ => GatewayCommandResult::Reply(format!(
+                    "Unknown curator subcommand: {}\n\nAvailable: status, run, pause, resume, pin, unpin, archive, restore, list-archived",
+                    sub
+                )),
+            }
+        }
         "/help" | "/commands" => {
             let mut help = String::from("📖 **Available Commands:**\n\n");
             for cmd_info in all_commands() {
