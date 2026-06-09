@@ -5580,6 +5580,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn telegram_topic_restore_reuses_session_switch_path() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr.clone(), dm_manager, GatewayConfig::default());
+        gw.register_adapter("telegram", adapter).await;
+
+        let target_key = session_mgr.compose_session_key("telegram", "208214988:111", "user1");
+        let current_key = session_mgr.compose_session_key("telegram", "208214988:222", "user1");
+        let sibling_key = session_mgr.compose_session_key("telegram", "208214988:333", "user1");
+
+        let _ = session_mgr
+            .get_or_create_session("telegram", "208214988:111", "user1")
+            .await;
+        session_mgr
+            .add_message(&target_key, Message::user("restored topic history"))
+            .await;
+        let _ = session_mgr
+            .get_or_create_session("telegram", "208214988:333", "user1")
+            .await;
+        session_mgr
+            .add_message(&sibling_key, Message::user("sibling history"))
+            .await;
+
+        gw.route_message(&IncomingMessage {
+            platform: "telegram".into(),
+            chat_id: "208214988:222".into(),
+            user_id: "user1".into(),
+            text: format!("/topic {}", target_key),
+            message_id: None,
+            is_dm: true,
+        })
+        .await
+        .expect("restore topic session");
+
+        let current_messages = session_mgr.get_messages(&current_key).await;
+        let sibling_messages = session_mgr.get_messages(&sibling_key).await;
+        assert_eq!(
+            current_messages
+                .iter()
+                .find(|message| message.role == MessageRole::User)
+                .and_then(|message| message.content.as_deref()),
+            Some("restored topic history")
+        );
+        assert_eq!(
+            sibling_messages
+                .iter()
+                .find(|message| message.role == MessageRole::User)
+                .and_then(|message| message.content.as_deref()),
+            Some("sibling history")
+        );
+        assert!(sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, text)| text.contains("Switched to session")));
+    }
+
+    #[tokio::test]
     async fn gateway_switch_session_clears_yolo_for_current_chat_context() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let adapter = Arc::new(TestAdapter {

@@ -205,6 +205,79 @@ pub fn build_tool_preview_from_value(
     Some(truncate_chars(&preview, max_len))
 }
 
+fn fenced_code_block(language: &str, body: &str) -> String {
+    let body = body.trim_end();
+    let fence = if body.contains("```") { "````" } else { "```" };
+    format!("{fence}{language}\n{body}\n{fence}")
+}
+
+pub fn platform_supports_markdown_code_blocks(platform: &str) -> bool {
+    matches!(
+        platform
+            .trim()
+            .to_ascii_lowercase()
+            .replace('-', "_")
+            .as_str(),
+        "telegram"
+            | "slack"
+            | "matrix"
+            | "whatsapp"
+            | "feishu"
+            | "weixin"
+            | "discord"
+            | "mattermost"
+    )
+}
+
+pub fn build_gateway_tool_progress_message(
+    platform: &str,
+    tool_name: &str,
+    args: &Value,
+    mode: &str,
+    max_len: usize,
+) -> Option<String> {
+    let mode = mode.trim().to_ascii_lowercase();
+    if matches!(mode.as_str(), "" | "off" | "none" | "false" | "0") {
+        return None;
+    }
+
+    let supports_code_blocks = platform_supports_markdown_code_blocks(platform);
+    if supports_code_blocks && tool_name == "terminal" {
+        if let Some(command) = args
+            .as_object()
+            .and_then(|map| map.get("command"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|command| !command.is_empty())
+        {
+            return Some(fenced_code_block("bash", command));
+        }
+    }
+
+    let emoji = tool_emoji(tool_name);
+    if mode == "verbose" {
+        let rendered_args = serde_json::to_string_pretty(args).unwrap_or_else(|_| args.to_string());
+        if supports_code_blocks && rendered_args.trim() != "null" {
+            return Some(format!(
+                "{emoji} {tool_name}:\n{}",
+                fenced_code_block("json", &rendered_args)
+            ));
+        }
+        let cap = max_len.max(40);
+        return Some(format!(
+            "{emoji} {tool_name}: {}",
+            truncate_chars(&rendered_args, cap)
+        ));
+    }
+
+    match build_tool_preview_from_value(tool_name, args, max_len.max(40)) {
+        Some(preview) if !preview.trim().is_empty() => {
+            Some(format!("{emoji} {tool_name}: {preview}"))
+        }
+        _ => Some(format!("{emoji} {tool_name}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,5 +353,49 @@ mod tests {
         assert_eq!(tool_emoji("video_generate"), "🎞️");
         assert_eq!(tool_emoji("spotify_playback"), "🎵");
         assert_eq!(tool_emoji("unknown"), "⚙️");
+    }
+
+    #[test]
+    fn gateway_tool_progress_uses_bash_blocks_for_terminal_on_markdown_platforms() {
+        let msg = build_gateway_tool_progress_message(
+            "telegram",
+            "terminal",
+            &json!({"command":"cargo test --workspace --quiet", "timeout": 120}),
+            "all",
+            10,
+        )
+        .unwrap();
+
+        assert_eq!(msg, "```bash\ncargo test --workspace --quiet\n```");
+    }
+
+    #[test]
+    fn gateway_tool_progress_keeps_plain_platforms_compact() {
+        let msg = build_gateway_tool_progress_message(
+            "sms",
+            "terminal",
+            &json!({"command":"cargo test --workspace --quiet"}),
+            "all",
+            24,
+        )
+        .unwrap();
+
+        assert!(msg.starts_with("💻 terminal: "));
+        assert!(!msg.contains("```bash"));
+    }
+
+    #[test]
+    fn gateway_tool_progress_falls_back_when_terminal_command_is_blank() {
+        let msg = build_gateway_tool_progress_message(
+            "telegram",
+            "terminal",
+            &json!({"command":"   "}),
+            "verbose",
+            80,
+        )
+        .unwrap();
+
+        assert!(msg.starts_with("💻 terminal:\n```json"));
+        assert!(msg.contains("\"command\""));
     }
 }
