@@ -5422,6 +5422,164 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn telegram_topic_chat_ids_are_independent_session_lanes() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr.clone(), dm_manager, GatewayConfig::default());
+        gw.register_adapter("telegram", adapter).await;
+        gw.set_message_handler(Arc::new(|messages| {
+            Box::pin(async move {
+                let user_turns = messages
+                    .iter()
+                    .filter(|message| message.role == MessageRole::User)
+                    .count();
+                Ok(format!("topic-turns={user_turns}"))
+            })
+        }))
+        .await;
+
+        for (chat_id, text) in [
+            ("208214988:111", "topic a first"),
+            ("208214988:222", "topic b first"),
+            ("208214988:111", "topic a second"),
+        ] {
+            gw.route_message(&IncomingMessage {
+                platform: "telegram".into(),
+                chat_id: chat_id.into(),
+                user_id: "user1".into(),
+                text: text.into(),
+                message_id: None,
+                is_dm: true,
+            })
+            .await
+            .expect("route telegram topic message");
+        }
+
+        let topic_a_key = session_mgr.compose_session_key("telegram", "208214988:111", "user1");
+        let topic_b_key = session_mgr.compose_session_key("telegram", "208214988:222", "user1");
+        let topic_a = session_mgr.get_messages(&topic_a_key).await;
+        let topic_b = session_mgr.get_messages(&topic_b_key).await;
+
+        assert_eq!(topic_a.len(), 4);
+        assert_eq!(topic_b.len(), 2);
+        assert_eq!(
+            topic_a
+                .iter()
+                .filter(|message| message.role == MessageRole::User)
+                .filter_map(|message| message.content.as_deref())
+                .collect::<Vec<_>>(),
+            vec!["topic a first", "topic a second"]
+        );
+        assert_eq!(
+            topic_b
+                .iter()
+                .filter(|message| message.role == MessageRole::User)
+                .filter_map(|message| message.content.as_deref())
+                .collect::<Vec<_>>(),
+            vec!["topic b first"]
+        );
+
+        let sent = sent.lock().expect("sent lock");
+        assert_eq!(
+            sent.iter()
+                .map(|(chat_id, text)| (chat_id.as_str(), text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("208214988:111", "topic-turns=1"),
+                ("208214988:222", "topic-turns=1"),
+                ("208214988:111", "topic-turns=2"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn telegram_topic_new_resets_only_current_topic_lane() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr.clone(), dm_manager, GatewayConfig::default());
+        gw.register_adapter("telegram", adapter).await;
+        gw.set_message_handler(Arc::new(|messages| {
+            Box::pin(async move {
+                let user_turns = messages
+                    .iter()
+                    .filter(|message| message.role == MessageRole::User)
+                    .count();
+                Ok(format!("topic-turns={user_turns}"))
+            })
+        }))
+        .await;
+
+        let topic_a = IncomingMessage {
+            platform: "telegram".into(),
+            chat_id: "208214988:111".into(),
+            user_id: "user1".into(),
+            text: "topic a before reset".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        let topic_b = IncomingMessage {
+            platform: "telegram".into(),
+            chat_id: "208214988:222".into(),
+            user_id: "user1".into(),
+            text: "topic b remains".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        gw.route_message(&topic_a).await.expect("route topic a");
+        gw.route_message(&topic_b).await.expect("route topic b");
+
+        gw.route_message(&IncomingMessage {
+            text: "/new".into(),
+            ..topic_a.clone()
+        })
+        .await
+        .expect("reset topic a");
+
+        let topic_a_key = session_mgr.compose_session_key("telegram", "208214988:111", "user1");
+        let topic_b_key = session_mgr.compose_session_key("telegram", "208214988:222", "user1");
+        assert!(session_mgr.get_messages(&topic_a_key).await.is_empty());
+        assert_eq!(session_mgr.get_messages(&topic_b_key).await.len(), 2);
+
+        gw.route_message(&IncomingMessage {
+            text: "topic a after reset".into(),
+            ..topic_a
+        })
+        .await
+        .expect("route topic a after reset");
+
+        let topic_a_messages = session_mgr.get_messages(&topic_a_key).await;
+        let topic_b_messages = session_mgr.get_messages(&topic_b_key).await;
+        assert_eq!(topic_a_messages.len(), 2);
+        assert_eq!(topic_b_messages.len(), 2);
+        assert_eq!(
+            topic_a_messages
+                .iter()
+                .find(|message| message.role == MessageRole::User)
+                .and_then(|message| message.content.as_deref()),
+            Some("topic a after reset")
+        );
+        assert_eq!(
+            topic_b_messages
+                .iter()
+                .find(|message| message.role == MessageRole::User)
+                .and_then(|message| message.content.as_deref()),
+            Some("topic b remains")
+        );
+    }
+
+    #[tokio::test]
     async fn gateway_switch_session_clears_yolo_for_current_chat_context() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let adapter = Arc::new(TestAdapter {

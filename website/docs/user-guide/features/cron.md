@@ -246,6 +246,11 @@ When scheduling jobs, you specify where the output goes:
 
 The agent's final response is automatically delivered. You do not need to call `send_message` in the cron prompt.
 
+Telegram forum/topic delivery supports a cron-specific override:
+`TELEGRAM_CRON_THREAD_ID`. When a cron job delivers to `telegram` or to an
+unthreaded Telegram chat id, Hermes uses that topic id for the cron result.
+Explicit `telegram:chat:thread` targets keep their explicit thread.
+
 ### Routing intent (`all`)
 
 `all` lets you ship one cron job to every messaging channel you have configured, without having to enumerate them by name. It is **resolved at fire time**, so a job created before you wired up Telegram will pick up Telegram on the next tick after you set `TELEGRAM_HOME_CHANNEL`.

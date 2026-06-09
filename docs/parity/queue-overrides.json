@@ -2787,6 +2787,26 @@
     "5e9d7a766107": {
       "disposition": "superseded",
       "notes": "Upstream skills-hub degenerate-index fix applies to website catalog generation; this Rust fork tracks skill source trees directly and treats website skills pages as approved divergence."
+    },
+    "d6615d8ec7d5": {
+      "disposition": "ported",
+      "notes": "Rust Telegram topic lanes are represented by adapter-level message_thread_id to composite chat_id routing plus Gateway session keys scoped by the encoded chat_id. Regression tests cover independent Telegram topic sessions, /new current-topic isolation, adapter topic send routing, topic binding recovery helpers, and config/env allowed_topics/ignored_threads hydration."
+    },
+    "ede47a54be04": {
+      "disposition": "ported",
+      "notes": "Rust gateway pins Telegram DM-topic routing to the active topic by preserving the encoded topic chat_id through route_message, runtime context, session keys, and outbound sends; telegram_topic_chat_ids_are_independent_session_lanes proves later turns in one topic do not drift to sibling topics."
+    },
+    "95a0955e19f8": {
+      "disposition": "ported",
+      "notes": "Rust /new resets only the current encoded Telegram topic session key and keeps sibling topic lanes intact; telegram_topic_new_resets_only_current_topic_lane proves the topic thread identity survives session reset/split."
+    },
+    "60f84c6c28bf": {
+      "disposition": "ported",
+      "notes": "Rust gateway keeps inbox-style Telegram operational chatter quiet by default via default_tool_progress_for_platform, while /verbose remains config-gated and cycles explicit progress modes; gateway_verbose_command_is_config_gated_and_cycles_tool_progress covers this behavior."
+    },
+    "a4fb0a3ac39f": {
+      "disposition": "ported",
+      "notes": "Rust cron delivery routing preserves explicit inline platform chat ids/--deliver-chat-id, carries DeliverConfig on CronCompletionEvent, and the gateway cron delivery loop sends successful or failed cron completions through registered adapters. Telegram cron deliveries resolve TELEGRAM_CRON_THREAD_ID at fire time for unthreaded/home targets while explicit telegram:chat:thread wins. Tests cover stored chat id preservation, home-channel fallback, explicit thread precedence, webhook serialization, and docs now document the env var."
     }
   },
   "subject_patterns": [
