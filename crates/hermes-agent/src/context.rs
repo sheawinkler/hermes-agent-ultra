@@ -1367,6 +1367,11 @@ mod tests {
     }
 
     #[test]
+    fn test_persona_default_is_neutral() {
+        assert!(resolve_personality("default", None).is_none());
+    }
+
+    #[test]
     fn test_persona_system_prompt_deltas() {
         let base = {
             let mut b = SystemPromptBuilder::new().with_personality(None);
