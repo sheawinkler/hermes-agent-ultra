@@ -4,6 +4,13 @@
 //! (`None`, trailing commas, truncated closing delimiters, or object-valued
 //! `arguments`). The runtime stores arguments as a JSON string, so normalize
 //! provider output at the boundary before execution.
+//!
+//! # Algorithm
+//!
+//! A single-byte-level pass simultaneously handles Python `None` → `null`,
+//! trailing-comma removal, brace/bracket balancing, control-character
+//! escaping, and extra-closer skipping — eliminating 5× `Vec<char>` alloc
+//! and 6 redundant passes found in the original per-operator pipeline.
 
 use serde_json::Value;
 
@@ -26,6 +33,10 @@ pub fn arguments_value_to_string(value: Option<&Value>) -> (String, ToolArgument
     }
 }
 
+/// Single-pass JSON argument repair.
+///
+/// Fast path (valid JSON) returns immediately. Otherwise a single byte-level
+/// scan handles all common malformations before a final `serde_json` check.
 pub fn repair_tool_call_arguments(raw: &str) -> (String, ToolArgumentRepair) {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -38,236 +49,167 @@ pub fn repair_tool_call_arguments(raw: &str) -> (String, ToolArgumentRepair) {
         return ("{}".to_string(), ToolArgumentRepair::EmptyInput);
     }
 
-    if let Some(canonical) = parse_canonical_json(trimmed) {
-        return (canonical, ToolArgumentRepair::Unchanged);
+    // Fast path: already valid JSON.
+    if serde_json::from_str::<Value>(trimmed).is_ok() {
+        return (trimmed.to_string(), ToolArgumentRepair::Unchanged);
     }
 
-    let control_escaped = escape_control_chars_in_strings(trimmed);
-    if control_escaped != trimmed {
-        if let Some(canonical) = parse_canonical_json(&control_escaped) {
-            return (canonical, ToolArgumentRepair::Repaired);
-        }
-    }
-
-    let mut candidate = trimmed.to_string();
-    replace_python_none_literals(&mut candidate);
-    candidate = strip_trailing_commas(&candidate);
-    candidate = balance_json_delimiters(&candidate);
-    candidate = strip_trailing_commas(&candidate);
-
-    if let Some(canonical) = parse_canonical_json(&candidate) {
-        return (canonical, ToolArgumentRepair::Repaired);
-    }
-
-    let escaped = escape_control_chars_in_strings(&candidate);
-    if let Some(canonical) = parse_canonical_json(&escaped) {
-        return (canonical, ToolArgumentRepair::Repaired);
-    }
-
-    (
-        "{}".to_string(),
-        ToolArgumentRepair::ReplacedWithEmptyObject,
-    )
-}
-
-fn parse_canonical_json(raw: &str) -> Option<String> {
-    serde_json::from_str::<Value>(raw)
-        .ok()
-        .and_then(|value| serde_json::to_string(&value).ok())
-}
-
-fn replace_python_none_literals(candidate: &mut String) {
-    let mut out = String::with_capacity(candidate.len());
+    // Single-pass repair.
+    let bytes = trimmed.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len() + 8);
     let mut in_string = false;
     let mut escape = false;
-    let chars: Vec<char> = candidate.chars().collect();
     let mut i = 0;
-    while i < chars.len() {
-        let ch = chars[i];
-        if in_string {
-            out.push(ch);
-            if escape {
-                escape = false;
-            } else if ch == '\\' {
-                escape = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
+    // Stack of expected closer bytes for brace/bracket balancing.
+    let mut closer_stack: Vec<u8> = Vec::with_capacity(16);
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if escape {
+            out.push(b);
+            escape = false;
             i += 1;
             continue;
         }
-        if ch == '"' {
-            in_string = true;
-            out.push(ch);
-            i += 1;
-            continue;
-        }
-        if starts_word_at(&chars, i, "None") {
-            out.push_str("null");
-            i += 4;
-            continue;
-        }
-        out.push(ch);
-        i += 1;
-    }
-    *candidate = out;
-}
 
-fn starts_word_at(chars: &[char], start: usize, word: &str) -> bool {
-    let word_chars: Vec<char> = word.chars().collect();
-    if start + word_chars.len() > chars.len() {
-        return false;
-    }
-    for (idx, expected) in word_chars.iter().enumerate() {
-        if chars[start + idx] != *expected {
-            return false;
-        }
-    }
-    let prev = start
-        .checked_sub(1)
-        .and_then(|i| chars.get(i))
-        .copied()
-        .unwrap_or(' ');
-    let next = chars.get(start + word_chars.len()).copied().unwrap_or(' ');
-    !prev.is_ascii_alphanumeric() && prev != '_' && !next.is_ascii_alphanumeric() && next != '_'
-}
-
-fn strip_trailing_commas(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    let mut in_string = false;
-    let mut escape = false;
-    let chars: Vec<char> = raw.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let ch = chars[i];
         if in_string {
-            out.push(ch);
-            if escape {
-                escape = false;
-            } else if ch == '\\' {
-                escape = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
-        if ch == '"' {
-            in_string = true;
-            out.push(ch);
-            i += 1;
-            continue;
-        }
-        if ch == ',' {
-            let mut j = i + 1;
-            while j < chars.len() && chars[j].is_whitespace() {
-                j += 1;
-            }
-            if j == chars.len() || matches!(chars.get(j), Some('}' | ']')) {
-                i += 1;
-                continue;
-            }
-        }
-        out.push(ch);
-        i += 1;
-    }
-    out
-}
-
-fn balance_json_delimiters(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len() + 8);
-    let mut stack = Vec::new();
-    let mut in_string = false;
-    let mut escape = false;
-
-    for ch in raw.chars() {
-        if in_string {
-            out.push(ch);
-            if escape {
-                escape = false;
-            } else if ch == '\\' {
-                escape = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-
-        match ch {
-            '"' => {
-                in_string = true;
-                out.push(ch);
-            }
-            '{' | '[' => {
-                stack.push(ch);
-                out.push(ch);
-            }
-            '}' => {
-                if matches!(stack.last(), Some('{')) {
-                    stack.pop();
-                    out.push(ch);
-                }
-            }
-            ']' => {
-                if matches!(stack.last(), Some('[')) {
-                    stack.pop();
-                    out.push(ch);
-                }
-            }
-            _ => out.push(ch),
-        }
-    }
-
-    if in_string {
-        return raw.to_string();
-    }
-
-    while let Some(ch) = stack.pop() {
-        out.push(match ch {
-            '{' => '}',
-            '[' => ']',
-            _ => unreachable!(),
-        });
-    }
-    out
-}
-
-fn escape_control_chars_in_strings(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    let mut in_string = false;
-    let mut escape = false;
-    for ch in raw.chars() {
-        if in_string {
-            if escape {
-                out.push(ch);
-                escape = false;
-                continue;
-            }
-            match ch {
-                '\\' => {
-                    out.push(ch);
+            match b {
+                b'\\' => {
+                    out.push(b);
                     escape = true;
+                    i += 1;
                 }
-                '"' => {
-                    out.push(ch);
+                b'"' => {
+                    out.push(b);
                     in_string = false;
+                    i += 1;
                 }
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c if c.is_control() => {
-                    out.push_str(&format!("\\u{:04x}", c as u32));
+                b'\n' => {
+                    out.extend_from_slice(b"\\n");
+                    i += 1;
                 }
-                _ => out.push(ch),
+                b'\r' => {
+                    out.extend_from_slice(b"\\r");
+                    i += 1;
+                }
+                // Tab (0x09) is valid inside JSON strings — keep as-is.
+                // All other C0 control characters must be escaped.
+                c if c.is_ascii_control() && c != b'\t' => {
+                    let esc = format!("\\u{:04x}", c);
+                    out.extend_from_slice(esc.as_bytes());
+                    i += 1;
+                }
+                _ => {
+                    out.push(b);
+                    i += 1;
+                }
             }
-        } else {
-            if ch == '"' {
+            continue;
+        }
+
+        // Outside string — structural characters.
+        match b {
+            b'"' => {
                 in_string = true;
+                out.push(b);
+                i += 1;
             }
-            out.push(ch);
+
+            b'{' => {
+                closer_stack.push(b'}');
+                out.push(b);
+                i += 1;
+            }
+            b'[' => {
+                closer_stack.push(b']');
+                out.push(b);
+                i += 1;
+            }
+
+            b'}' => {
+                if closer_stack.last() == Some(&b'}') {
+                    closer_stack.pop();
+                    out.push(b);
+                } /* else: skip unbalanced extra closer */
+                i += 1;
+            }
+            b']' => {
+                if closer_stack.last() == Some(&b']') {
+                    closer_stack.pop();
+                    out.push(b);
+                }
+                i += 1;
+            }
+
+            // Trailing-comma removal: skip comma when followed only by
+            // whitespace then `}` or `]` (or EOF).
+            b',' => {
+                let mut j = i + 1;
+                while j < bytes.len() && matches!(bytes[j], b' ' | b'\t' | b'\n' | b'\r') {
+                    j += 1;
+                }
+                if j >= bytes.len() || matches!(bytes[j], b'}' | b']') {
+                    i = j; // skip comma + whitespace entirely
+                    continue;
+                }
+                out.push(b);
+                i += 1;
+            }
+
+            // Python `None` → `null` (word-boundary check to avoid
+            // clobbering identifiers like "NoneType" inside strings,
+            // though those are already gated by `in_string` above).
+            b'N' if bytes[i..].starts_with(b"None") => {
+                let prev = if i > 0 { bytes[i - 1] } else { b' ' };
+                let next = bytes.get(i + 4).copied().unwrap_or(b' ');
+                if !prev.is_ascii_alphanumeric()
+                    && prev != b'_'
+                    && !next.is_ascii_alphanumeric()
+                    && next != b'_'
+                {
+                    out.extend_from_slice(b"null");
+                    i += 4;
+                    continue;
+                }
+                out.push(b);
+                i += 1;
+            }
+
+            _ => {
+                out.push(b);
+                i += 1;
+            }
         }
     }
-    out
+
+    // Unclosed string at EOF — cannot recover structurally.
+    if in_string {
+        return (
+            "{}".to_string(),
+            ToolArgumentRepair::ReplacedWithEmptyObject,
+        );
+    }
+
+    // Close any unclosed braces/brackets.
+    while let Some(closer) = closer_stack.pop() {
+        out.push(closer);
+    }
+
+    // SAFETY: we only ever produced valid UTF-8 (we either pass through
+    // original bytes verbatim, or emit ASCII escape sequences).
+    let repaired = unsafe { String::from_utf8_unchecked(out) };
+
+    // Final validation: original was already invalid (fast path would have
+    // returned Unchanged), so any valid output is necessarily Repaired.
+    if serde_json::from_str::<Value>(&repaired).is_ok() {
+        (repaired, ToolArgumentRepair::Repaired)
+    } else {
+        (
+            "{}".to_string(),
+            ToolArgumentRepair::ReplacedWithEmptyObject,
+        )
+    }
 }
 
 #[cfg(test)]
