@@ -1,5 +1,41 @@
 {
   "sha": {
+    "e9c47c70422d": {
+      "disposition": "ported",
+      "notes": "Rust CLI/TUI launch model overrides are represented by resolve_cli_chat_provider_model, apply_cli_chat_runtime_env, App::new startup resolution, and sync_runtime_model_env tests covering HERMES_MODEL/HERMES_INFERENCE_MODEL plus provider env synchronization."
+    },
+    "57b43fdd4bf9": {
+      "disposition": "ported",
+      "notes": "Rust startup provider precedence is typed through provider:model resolution and config.llm_providers lookup without treating stale HERMES_INFERENCE_PROVIDER as an explicit launch provider; regression coverage keeps config-selected providers authoritative."
+    },
+    "4db58d45d4e0": {
+      "disposition": "ported",
+      "notes": "Rust startup model parsing trims configured and env-sourced model strings through resolve_startup_model/resolve_provider_and_model, and runtime env synchronization keeps model/provider variables aligned for TUI sessions."
+    },
+    "2dfcc8087a8e": {
+      "disposition": "ported",
+      "notes": "Rust TUI startup uses static config/provider resolution and curated provider defaults only; live model discovery is isolated to explicit model-picker catalog paths, avoiding network lookup during App::new startup."
+    },
+    "e48a497d166b": {
+      "disposition": "ported",
+      "notes": "Rust shares static provider/model knowledge through model_switch curated catalogs, canonical provider IDs, and provider_model_ids_for_config tests for custom provider maps instead of duplicating startup detector code."
+    },
+    "c6fdf48b79eb": {
+      "disposition": "ported",
+      "notes": "Rust model switches call sync_runtime_model_env before rebuilding the active agent, updating HERMES_MODEL, HERMES_INFERENCE_MODEL, HERMES_INFERENCE_PROVIDER, and HERMES_TUI_PROVIDER for subsequent inference paths."
+    },
+    "458ce792d24e": {
+      "disposition": "ported",
+      "notes": "Rust App::switch_model persists the active session model in SessionPersistence by default and rebuilds the agent for the current session, with regression coverage for the session DB row."
+    },
+    "9e4d79b17fcf": {
+      "disposition": "ported",
+      "notes": "Rust sync_runtime_model_env and CLI chat env setup now write HERMES_TUI_PROVIDER unconditionally alongside HERMES_INFERENCE_PROVIDER, covering the explicit-provider carrier bug fixed upstream for /model followed by new sessions."
+    },
+    "443950e82736": {
+      "disposition": "ported",
+      "notes": "Rust model switching consumes GatewayConfig.llm_providers as a provider-keyed map, and model_switch tests cover custom provider slugs, explicit model lists, discover_models=false, and provider catalog entries without list coercion."
+    },
     "3d90292eda55": {
       "disposition": "superseded",
       "notes": "rust models_dev registry already resolves provider aliases in list_provider_models with regression coverage in crates/hermes-intelligence/src/models_dev/client.rs"

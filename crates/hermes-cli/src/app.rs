@@ -5319,6 +5319,51 @@ mod tests {
     }
 
     #[test]
+    fn test_sync_runtime_model_env_sets_tui_provider_when_absent() {
+        let _guard = env_test_lock();
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "custom-xuanji".to_string(),
+            LlmProviderConfig {
+                model: Some("deepseek-v4-pro".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let keys = [
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "HERMES_TUI_PROVIDER",
+        ];
+        let previous: Vec<(&str, Option<String>)> = keys
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect();
+        for key in keys {
+            std::env::remove_var(key);
+        }
+
+        sync_runtime_model_env(&cfg, "custom-xuanji:deepseek-v4-pro");
+
+        assert_eq!(
+            std::env::var("HERMES_TUI_PROVIDER").ok().as_deref(),
+            Some("custom-xuanji")
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_PROVIDER").ok().as_deref(),
+            Some("custom-xuanji")
+        );
+
+        for (key, value) in previous {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
     fn test_startup_model_env_sync_uses_config_provider_not_stale_env() {
         let _guard = env_test_lock();
         let keys = [
@@ -6853,9 +6898,7 @@ fn sync_runtime_model_env(config: &GatewayConfig, provider_model: &str) {
     std::env::set_var("HERMES_MODEL", model);
     std::env::set_var("HERMES_INFERENCE_MODEL", model);
     std::env::set_var("HERMES_INFERENCE_PROVIDER", provider.as_str());
-    if std::env::var_os("HERMES_TUI_PROVIDER").is_some() {
-        std::env::set_var("HERMES_TUI_PROVIDER", provider.as_str());
-    }
+    std::env::set_var("HERMES_TUI_PROVIDER", provider.as_str());
 }
 
 fn resolve_api_key_literal_or_env_ref(value: &str) -> Option<String> {
