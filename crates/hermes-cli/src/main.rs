@@ -60,7 +60,7 @@ use hermes_core::PlatformAdapter;
 use hermes_core::{MessageRole, StreamChunk};
 use hermes_cron::{
     cron_scheduler_for_data_dir, CronCompletionEvent, CronError, CronRunner, CronScheduler,
-    FileJobPersistence,
+    DeliverTarget, FileJobPersistence,
 };
 use hermes_gateway::gateway::GatewayConfig as RuntimeGatewayConfig;
 use hermes_gateway::gateway::IncomingMessage as GatewayIncomingMessage;
@@ -738,6 +738,7 @@ async fn main() {
             prompt,
             name,
             deliver,
+            deliver_chat_id,
             repeat,
             skills,
             add_skills,
@@ -760,6 +761,7 @@ async fn main() {
                 prompt,
                 name,
                 deliver,
+                deliver_chat_id,
                 repeat,
                 skills,
                 add_skills,
@@ -3430,6 +3432,7 @@ async fn run_gateway(
             let cron_runner = Arc::new(CronRunner::new(cron_llm, agent_tools_for_cron));
             let mut cron_scheduler = CronScheduler::new(cron_persistence, cron_runner);
             let (cron_tx, cron_rx) = broadcast::channel::<CronCompletionEvent>(64);
+            let cron_platform_rx = cron_tx.subscribe();
             cron_scheduler.set_completion_broadcast(cron_tx);
             cron_scheduler
                 .load_persisted_jobs()
@@ -3472,6 +3475,12 @@ async fn run_gateway(
             }
 
             gateway.start_all().await?;
+            {
+                let gw_cron_delivery = gateway.clone();
+                sidecar_tasks.push(tokio::spawn(async move {
+                    run_cron_gateway_delivery_loop(cron_platform_rx, gw_cron_delivery).await;
+                }));
+            }
             {
                 let gw_reconnect = gateway.clone();
                 sidecar_tasks.push(tokio::spawn(async move {
@@ -9181,8 +9190,16 @@ fn build_live_cron_scheduler(cli: &Cli, data_dir: &Path) -> Result<CronScheduler
     Ok(CronScheduler::new(persistence, runner))
 }
 
-fn parse_deliver_config(raw: &str) -> Option<hermes_cron::DeliverConfig> {
-    let value = raw.trim().to_ascii_lowercase();
+fn parse_deliver_config(
+    raw: &str,
+    deliver_chat_id: Option<&str>,
+) -> Option<hermes_cron::DeliverConfig> {
+    let trimmed = raw.trim();
+    let (target_raw, inline_chat_id) = trimmed
+        .split_once(':')
+        .map(|(target, rest)| (target.trim(), Some(rest.trim())))
+        .unwrap_or((trimmed, None));
+    let value = target_raw.to_ascii_lowercase();
     let target = match value.as_str() {
         "origin" => hermes_cron::DeliverTarget::Origin,
         "local" => hermes_cron::DeliverTarget::Local,
@@ -9204,10 +9221,12 @@ fn parse_deliver_config(raw: &str) -> Option<hermes_cron::DeliverConfig> {
         "ntfy" => hermes_cron::DeliverTarget::Ntfy,
         _ => return None,
     };
-    Some(hermes_cron::DeliverConfig {
-        target,
-        platform: None,
-    })
+    let platform = deliver_chat_id
+        .or(inline_chat_id)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    Some(hermes_cron::DeliverConfig { target, platform })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -9220,6 +9239,7 @@ async fn run_cron(
     prompt: Option<String>,
     name: Option<String>,
     deliver: Option<String>,
+    deliver_chat_id: Option<String>,
     repeat: Option<u32>,
     skills: Vec<String>,
     add_skills: Vec<String>,
@@ -9277,7 +9297,7 @@ async fn run_cron(
                 job.name = Some(name);
             }
             if let Some(raw) = deliver.as_deref() {
-                if let Some(cfg) = parse_deliver_config(raw) {
+                if let Some(cfg) = parse_deliver_config(raw, deliver_chat_id.as_deref()) {
                     job.deliver = Some(cfg);
                 } else {
                     return Err(AgentError::Config(format!(
@@ -9347,7 +9367,7 @@ async fn run_cron(
                 };
             }
             if let Some(raw) = deliver.as_deref() {
-                if let Some(cfg) = parse_deliver_config(raw) {
+                if let Some(cfg) = parse_deliver_config(raw, deliver_chat_id.as_deref()) {
                     job.deliver = Some(cfg);
                 } else {
                     return Err(AgentError::Config(format!(
@@ -9869,6 +9889,177 @@ async fn run_cron_webhook_delivery_loop(
         .await
         {
             tracing::warn!("cron webhook delivery: {e}");
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CronPlatformDeliveryTarget {
+    platform: &'static str,
+    chat_id: String,
+    thread_id: Option<String>,
+}
+
+fn cron_deliver_target_platform_name(target: &DeliverTarget) -> Option<&'static str> {
+    match target {
+        DeliverTarget::Origin | DeliverTarget::Local => None,
+        DeliverTarget::Telegram => Some("telegram"),
+        DeliverTarget::Discord => Some("discord"),
+        DeliverTarget::Slack => Some("slack"),
+        DeliverTarget::Email => Some("email"),
+        DeliverTarget::WhatsApp => Some("whatsapp"),
+        DeliverTarget::Signal => Some("signal"),
+        DeliverTarget::Matrix => Some("matrix"),
+        DeliverTarget::Mattermost => Some("mattermost"),
+        DeliverTarget::DingTalk => Some("dingtalk"),
+        DeliverTarget::Feishu => Some("feishu"),
+        DeliverTarget::WeCom => Some("wecom"),
+        DeliverTarget::Weixin => Some("weixin"),
+        DeliverTarget::BlueBubbles => Some("bluebubbles"),
+        DeliverTarget::Sms => Some("sms"),
+        DeliverTarget::HomeAssistant => Some("homeassistant"),
+        DeliverTarget::Ntfy => Some("ntfy"),
+    }
+}
+
+fn cron_home_channel_env_vars(platform: &str) -> &'static [&'static str] {
+    match platform {
+        "telegram" => &["TELEGRAM_HOME_CHANNEL"],
+        "discord" => &["DISCORD_HOME_CHANNEL"],
+        "slack" => &["SLACK_HOME_CHANNEL"],
+        "email" => &["EMAIL_HOME_CHANNEL"],
+        "whatsapp" => &["WHATSAPP_HOME_CHANNEL"],
+        "signal" => &["SIGNAL_HOME_CHANNEL"],
+        "matrix" => &["MATRIX_HOME_ROOM", "MATRIX_HOME_CHANNEL"],
+        "mattermost" => &["MATTERMOST_HOME_CHANNEL"],
+        "dingtalk" => &["DINGTALK_HOME_CHANNEL"],
+        "feishu" => &["FEISHU_HOME_CHANNEL"],
+        "wecom" => &["WECOM_HOME_CHANNEL"],
+        "weixin" => &["WEIXIN_HOME_CHANNEL"],
+        "bluebubbles" => &["BLUEBUBBLES_HOME_CHANNEL"],
+        "sms" => &["SMS_HOME_CHANNEL"],
+        "homeassistant" => &["HOMEASSISTANT_HOME_CHANNEL"],
+        "ntfy" => &["NTFY_HOME_CHANNEL"],
+        _ => &[],
+    }
+}
+
+fn cron_home_channel_for_platform(platform: &str) -> Option<String> {
+    cron_home_channel_env_vars(platform)
+        .iter()
+        .find_map(|key| env_string(key))
+}
+
+fn split_telegram_cron_target(chat_id: &str) -> (String, Option<String>) {
+    let chat_id = chat_id.trim();
+    if let Some((base, suffix)) = chat_id.rsplit_once(':') {
+        let base = base.trim();
+        let suffix = suffix.trim();
+        if !base.is_empty() && suffix.parse::<i64>().is_ok() {
+            return (base.to_string(), Some(suffix.to_string()));
+        }
+    }
+    let thread_id = env_string("TELEGRAM_CRON_THREAD_ID");
+    (chat_id.to_string(), thread_id)
+}
+
+fn cron_platform_delivery_target(
+    event: &CronCompletionEvent,
+) -> Option<CronPlatformDeliveryTarget> {
+    let deliver = event.deliver.as_ref()?;
+    let platform = cron_deliver_target_platform_name(&deliver.target)?;
+    let raw_chat_id = deliver
+        .platform
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| cron_home_channel_for_platform(platform))?;
+
+    let (chat_id, thread_id) = if platform == "telegram" {
+        split_telegram_cron_target(&raw_chat_id)
+    } else {
+        (raw_chat_id.trim().to_string(), None)
+    };
+
+    (!chat_id.trim().is_empty()).then_some(CronPlatformDeliveryTarget {
+        platform,
+        chat_id,
+        thread_id,
+    })
+}
+
+fn cron_platform_delivery_text(event: &CronCompletionEvent) -> Option<String> {
+    if event.ok {
+        let text = event
+            .assistant_output
+            .as_deref()
+            .or(event.assistant_snippet.as_deref())?;
+        let trimmed = text.trim();
+        if trimmed.is_empty() || trimmed.trim_start().starts_with("[SILENT]") {
+            return None;
+        }
+        return Some(trimmed.to_string());
+    }
+
+    let name = event
+        .job_name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(&event.job_id);
+    let error = event
+        .error
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown cron failure");
+    Some(format!("Cron job '{name}' failed:\n{error}"))
+}
+
+async fn run_cron_gateway_delivery_loop(
+    mut rx: broadcast::Receiver<CronCompletionEvent>,
+    gateway: Arc<Gateway>,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+
+    loop {
+        let event = match rx.recv().await {
+            Ok(event) => event,
+            Err(RecvError::Lagged(n)) => {
+                tracing::debug!(n, "cron gateway delivery receiver lagged; skipped messages");
+                continue;
+            }
+            Err(RecvError::Closed) => break,
+        };
+
+        let Some(target) = cron_platform_delivery_target(&event) else {
+            continue;
+        };
+        let Some(text) = cron_platform_delivery_text(&event) else {
+            tracing::debug!(
+                job_id = %event.job_id,
+                "cron gateway delivery skipped empty completion text"
+            );
+            continue;
+        };
+
+        if let Err(err) = gateway
+            .send_message_explicit(
+                target.platform,
+                &target.chat_id,
+                &text,
+                None,
+                target.thread_id.as_deref(),
+            )
+            .await
+        {
+            tracing::warn!(
+                job_id = %event.job_id,
+                platform = target.platform,
+                chat_id = %target.chat_id,
+                thread_id = ?target.thread_id,
+                "cron gateway delivery failed: {err}"
+            );
         }
     }
 }
@@ -15029,6 +15220,152 @@ mod tests {
         assert_eq!(routed.chat_id, "-1001:17585");
         assert_eq!(routed.user_id, "42");
         assert!(!routed.is_dm);
+    }
+
+    #[test]
+    fn cron_deliver_config_preserves_chat_id_and_telegram_thread_env() {
+        let _guard = env_lock();
+        let previous_thread = std::env::var("TELEGRAM_CRON_THREAD_ID").ok();
+        std::env::set_var("TELEGRAM_CRON_THREAD_ID", "777");
+
+        let telegram =
+            parse_deliver_config("telegram", Some("208214988")).expect("telegram deliver");
+        assert_eq!(telegram.target, hermes_cron::DeliverTarget::Telegram);
+        assert_eq!(telegram.platform.as_deref(), Some("208214988"));
+
+        let already_threaded =
+            parse_deliver_config("telegram:208214988:999", None).expect("threaded telegram");
+        assert_eq!(
+            already_threaded.target,
+            hermes_cron::DeliverTarget::Telegram
+        );
+        assert_eq!(already_threaded.platform.as_deref(), Some("208214988:999"));
+
+        let slack = parse_deliver_config("slack:C123ABC", None).expect("slack deliver");
+        assert_eq!(slack.target, hermes_cron::DeliverTarget::Slack);
+        assert_eq!(slack.platform.as_deref(), Some("C123ABC"));
+
+        match previous_thread {
+            Some(value) => std::env::set_var("TELEGRAM_CRON_THREAD_ID", value),
+            None => std::env::remove_var("TELEGRAM_CRON_THREAD_ID"),
+        }
+    }
+
+    #[test]
+    fn cron_platform_delivery_target_applies_telegram_cron_thread_at_fire_time() {
+        let _guard = env_lock();
+        let previous_thread = std::env::var("TELEGRAM_CRON_THREAD_ID").ok();
+        let previous_home = std::env::var("TELEGRAM_HOME_CHANNEL").ok();
+        std::env::set_var("TELEGRAM_CRON_THREAD_ID", "777");
+        std::env::set_var("TELEGRAM_HOME_CHANNEL", "208214988");
+
+        let mut explicit_job = hermes_cron::CronJob::new("0 * * * *", "ping");
+        explicit_job.deliver = Some(hermes_cron::DeliverConfig {
+            target: hermes_cron::DeliverTarget::Telegram,
+            platform: Some("208214988:999".to_string()),
+        });
+        let explicit = hermes_cron::CronCompletionEvent::new(
+            &explicit_job,
+            "schedule",
+            Ok(&hermes_core::AgentResult {
+                messages: vec![hermes_core::Message::assistant("done")],
+                finished_naturally: true,
+                total_turns: 1,
+                tool_errors: vec![],
+                usage: None,
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            cron_platform_delivery_target(&explicit),
+            Some(CronPlatformDeliveryTarget {
+                platform: "telegram",
+                chat_id: "208214988".to_string(),
+                thread_id: Some("999".to_string()),
+            })
+        );
+
+        let mut home_job = hermes_cron::CronJob::new("0 * * * *", "ping");
+        home_job.deliver = Some(hermes_cron::DeliverConfig {
+            target: hermes_cron::DeliverTarget::Telegram,
+            platform: None,
+        });
+        let home = hermes_cron::CronCompletionEvent::new(
+            &home_job,
+            "schedule",
+            Ok(&hermes_core::AgentResult {
+                messages: vec![hermes_core::Message::assistant("done")],
+                finished_naturally: true,
+                total_turns: 1,
+                tool_errors: vec![],
+                usage: None,
+                ..Default::default()
+            }),
+        );
+        assert_eq!(
+            cron_platform_delivery_target(&home),
+            Some(CronPlatformDeliveryTarget {
+                platform: "telegram",
+                chat_id: "208214988".to_string(),
+                thread_id: Some("777".to_string()),
+            })
+        );
+
+        match previous_thread {
+            Some(value) => std::env::set_var("TELEGRAM_CRON_THREAD_ID", value),
+            None => std::env::remove_var("TELEGRAM_CRON_THREAD_ID"),
+        }
+        match previous_home {
+            Some(value) => std::env::set_var("TELEGRAM_HOME_CHANNEL", value),
+            None => std::env::remove_var("TELEGRAM_HOME_CHANNEL"),
+        }
+    }
+
+    #[test]
+    fn cron_platform_delivery_text_uses_full_output_and_suppresses_silent() {
+        let mut job = hermes_cron::CronJob::new("0 * * * *", "ping");
+        job.deliver = Some(hermes_cron::DeliverConfig {
+            target: hermes_cron::DeliverTarget::Telegram,
+            platform: Some("208214988".to_string()),
+        });
+
+        let full = "x".repeat(2505);
+        let event = hermes_cron::CronCompletionEvent::new(
+            &job,
+            "schedule",
+            Ok(&hermes_core::AgentResult {
+                messages: vec![hermes_core::Message::assistant(full.clone())],
+                finished_naturally: true,
+                total_turns: 1,
+                tool_errors: vec![],
+                usage: None,
+                ..Default::default()
+            }),
+        );
+
+        assert_eq!(cron_platform_delivery_text(&event), Some(full));
+        let json = serde_json::to_value(&event).expect("completion json");
+        assert!(json.get("assistant_output").is_none());
+        assert_eq!(
+            json.get("assistant_snippet")
+                .and_then(serde_json::Value::as_str)
+                .map(|value| value.chars().count()),
+            Some(2001)
+        );
+
+        let silent = hermes_cron::CronCompletionEvent::new(
+            &job,
+            "schedule",
+            Ok(&hermes_core::AgentResult {
+                messages: vec![hermes_core::Message::assistant("[SILENT] no-op")],
+                finished_naturally: true,
+                total_turns: 1,
+                tool_errors: vec![],
+                usage: None,
+                ..Default::default()
+            }),
+        );
+        assert_eq!(cron_platform_delivery_text(&silent), None);
     }
 
     #[test]

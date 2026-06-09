@@ -4,7 +4,7 @@ use chrono::Utc;
 use hermes_core::{AgentResult, MessageRole};
 use serde::Serialize;
 
-use crate::job::CronJob;
+use crate::job::{CronJob, DeliverConfig};
 
 fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
@@ -25,11 +25,15 @@ pub struct CronCompletionEvent {
     pub job_name: Option<String>,
     pub schedule: String,
     pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deliver: Option<DeliverConfig>,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_turns: Option<u32>,
+    #[serde(skip)]
+    pub assistant_output: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assistant_snippet: Option<String>,
     pub finished_at: String,
@@ -43,18 +47,19 @@ impl CronCompletionEvent {
         outcome: Result<&AgentResult, String>,
     ) -> Self {
         let finished_at = Utc::now().to_rfc3339();
-        let (ok, error, total_turns, assistant_snippet) = match outcome {
+        let (ok, error, total_turns, assistant_output, assistant_snippet) = match outcome {
             Ok(r) => {
-                let snippet = r.messages.iter().rev().find_map(|m| {
+                let output = r.messages.iter().rev().find_map(|m| {
                     if m.role == MessageRole::Assistant {
-                        m.content.as_ref().map(|c| truncate_chars(c, 2000))
+                        m.content.clone()
                     } else {
                         None
                     }
                 });
-                (true, None, Some(r.total_turns), snippet)
+                let snippet = output.as_ref().map(|c| truncate_chars(c, 2000));
+                (true, None, Some(r.total_turns), output, snippet)
             }
-            Err(msg) => (false, Some(msg), None, None),
+            Err(msg) => (false, Some(msg), None, None, None),
         };
         Self {
             event: "cron_job_finished",
@@ -63,9 +68,11 @@ impl CronCompletionEvent {
             job_name: job.name.clone(),
             schedule: job.schedule.clone(),
             prompt: truncate_chars(&job.prompt, 4096),
+            deliver: job.deliver.clone(),
             ok,
             error,
             total_turns,
+            assistant_output,
             assistant_snippet,
             finished_at,
         }

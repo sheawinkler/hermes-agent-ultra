@@ -252,6 +252,16 @@ TELEGRAM_HOME_CHANNEL=-1001234567890
 TELEGRAM_HOME_CHANNEL_NAME="My Notes"
 ```
 
+If the home channel uses Telegram forum topics, cron deliveries can use a
+dedicated topic without changing other home-channel notifications:
+
+```bash
+TELEGRAM_CRON_THREAD_ID=17585
+```
+
+Explicit cron targets such as `telegram:-1001234567890:17585` still take
+precedence over this env var.
+
 :::tip
 Group chat IDs are negative numbers (e.g., `-1001234567890`). Your personal DM chat ID is the same as your user ID.
 :::

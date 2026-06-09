@@ -404,6 +404,9 @@ pub enum CliCommand {
         /// Delivery target override.
         #[arg(long)]
         deliver: Option<String>,
+        /// Delivery chat/channel id for cron result routing.
+        #[arg(long = "deliver-chat-id")]
+        deliver_chat_id: Option<String>,
         /// Repeat count override.
         #[arg(long)]
         repeat: Option<u32>,
