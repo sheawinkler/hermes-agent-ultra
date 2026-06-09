@@ -2807,6 +2807,30 @@
     "a4fb0a3ac39f": {
       "disposition": "ported",
       "notes": "Rust cron delivery routing preserves explicit inline platform chat ids/--deliver-chat-id, carries DeliverConfig on CronCompletionEvent, and the gateway cron delivery loop sends successful or failed cron completions through registered adapters. Telegram cron deliveries resolve TELEGRAM_CRON_THREAD_ID at fire time for unthreaded/home targets while explicit telegram:chat:thread wins. Tests cover stored chat id preservation, home-channel fallback, explicit thread precedence, webhook serialization, and docs now document the env var."
+    },
+    "a7683d04a964": {
+      "disposition": "ported",
+      "notes": "Rust Telegram topic sessions do not mutate Python SessionStore/SQLite bindings; topic identity is the encoded chat_id:thread_id session key. /new resets only that current encoded key, and /topic <session-id> now reuses the persisted session switch path for restores without split-brain binding state."
+    },
+    "1381c89e56fd": {
+      "disposition": "ported",
+      "notes": "Rust topic routing treats Telegram General topic thread_id=1 and threadless messages as the root chat, while every non-General thread gets an independent encoded session key. Python-specific cascade migration and auto-rename guards are superseded because this Rust runtime has no telegram_dm_topic_bindings table and no Telegram topic auto-rename path."
+    },
+    "d35efb989884": {
+      "disposition": "ported",
+      "notes": "Rust gateway now exposes /topic, /topic help, /topic off, and /topic <session-id>. Authorization is enforced by existing DM/platform access gates before command execution; /topic off is an idempotent no-op because there are no Python SQLite topic bindings to clear."
+    },
+    "0325e18f3426": {
+      "disposition": "ported",
+      "notes": "Rust Telegram status updates already use send_or_update_status with edit-in-place fallback, and gateway tool progress remains quiet for Telegram by default while /verbose can explicitly raise it. Progress/status docs now describe the Rust-native behavior instead of Python heartbeat binding state."
+    },
+    "2f0c8e90e613": {
+      "disposition": "superseded",
+      "notes": "Upstream Telegram QR dashboard onboarding targets the Python web dashboard, which is not a Rust runtime surface in this fork. Rust CLI QR onboarding remains the supported local setup path; adding the upstream Python web_server/dashboard flow would violate the Rust-only runtime boundary."
+    },
+    "dde9c0d19d16": {
+      "disposition": "ported",
+      "notes": "Rust gateway tool-progress callbacks now emit explicit progress messages when enabled, and markdown-capable platforms render terminal commands as full bash fenced code blocks through build_gateway_tool_progress_message. Tests cover Telegram bash blocks, plain-platform compact fallback, and blank-command fallback."
     }
   },
   "subject_patterns": [

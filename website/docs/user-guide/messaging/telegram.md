@@ -430,20 +430,18 @@ Topics created outside of the config (e.g., by manually calling the Telegram API
 
 ## Multi-session DM mode (`/topic`)
 
-A ChatGPT-style multi-session DM — one bot, many parallel conversations. Unlike the operator-curated `extra.dm_topics` above, this mode is **user-driven**: no config, no pre-declared topic names. The end user flips it on with `/topic`, then taps the Telegram **+** button to create as many topics as they want, each one a fully independent Hermes session.
+A ChatGPT-style multi-session DM — one bot, many parallel conversations. In the Rust gateway, Telegram topic isolation is native: any non-General `message_thread_id` is encoded into the gateway chat key as `chat_id:thread_id`, so each topic has its own session history and runtime state without a Python SQLite binding table.
 
 ### `/topic` subcommands
 
 | Form | Context | Effect |
 |------|---------|--------|
-| `/topic` | Root DM, not yet enabled | Check BotFather capabilities, enable multi-session mode, create pinned System topic |
-| `/topic` | Root DM, already enabled | Show status: unlinked sessions available for restore |
-| `/topic` | Inside a topic | Show the current topic's session binding |
+| `/topic` | Any Telegram DM | Show Rust topic-session status |
 | `/topic help` | Any | Inline usage |
-| `/topic off` | Root DM | Disable multi-session mode and clear all topic bindings for this chat |
-| `/topic <session-id>` | Inside a topic | Restore a previous Telegram session into the current topic |
+| `/topic off` | Any Telegram DM | Idempotent no-op for Python-style topic bindings; Rust has no topic SQLite state to clear |
+| `/topic <session-id>` | Inside a topic | Restore a previous session into the current topic via the normal `/sessions` switch path |
 
-Only authorized users (allowlist via `TELEGRAM_ALLOWED_USERS` / platform auth config) can run `/topic`. An unauthorized sender gets a refusal instead of activation.
+Only authorized users (allowlist via `TELEGRAM_ALLOWED_USERS` / platform auth config) can run `/topic`. Unauthorized DMs are rejected by the gateway before command execution.
 
 ### DM Topics vs Multi-session DM mode
 
@@ -451,10 +449,10 @@ Only authorized users (allowlist via `TELEGRAM_ALLOWED_USERS` / platform auth co
 |---|---|---|
 | Who activates it | Operator, in `config.yaml` | End user, by sending `/topic` |
 | Topic list | Fixed set declared in config | User creates/deletes topics freely |
-| Topic names | Chosen by operator | Chosen by user; auto-renamed to match Hermes session title |
-| Root DM behavior | Unchanged — normal chat | Becomes a system lobby (non-command messages are rejected) |
+| Topic names | Chosen by operator | Chosen by user |
+| Root DM behavior | Unchanged — normal chat | Unchanged — normal chat |
 | Primary use case | Permanent workspaces with optional skill binding | Ad-hoc parallel sessions |
-| Persistence | `extra.dm_topics` in config | `telegram_dm_topic_mode` + `telegram_dm_topic_bindings` SQLite tables |
+| Persistence | `extra.dm_topics` in config | Rust session keys scoped by `chat_id:thread_id` |
 
 Both features can coexist on the same bot — you'd run `/topic` from a user's DM, and `extra.dm_topics` continues to manage operator-declared topics for other chats.
 
@@ -465,7 +463,7 @@ In **@BotFather**, open your bot → **Bot Settings → Threads Settings**:
 1. Turn on **Threaded Mode** (enables `has_topics_enabled`)
 2. Do **not** disable users creating topics (keeps `allows_users_to_create_topics` on)
 
-When the user first runs `/topic`, Hermes calls `getMe` to verify both flags. If either is off, Hermes sends a screenshot of the BotFather Threads Settings page and explains what to toggle — no activation happens until prerequisites are met.
+The Rust gateway does not mutate BotFather settings for you. Configure Telegram once, then Hermes routes topic messages by the thread ID Telegram sends with each update.
 
 ### Activation flow
 
@@ -475,14 +473,7 @@ From the root DM, send:
 /topic
 ```
 
-Hermes will:
-
-1. Check `getMe().has_topics_enabled` and `allows_users_to_create_topics`
-2. If both are true, enable multi-session topic mode for this DM
-3. Create and pin a **System** topic for status/commands (best-effort)
-4. Reply with a list of previous unlinked Telegram sessions the user can restore
-
-After activation, the **root DM is a lobby**: normal prompts are rejected with guidance pointing at **All Messages**. System commands (`/status`, `/sessions`, `/usage`, `/help`, etc.) still work in the root.
+Hermes replies with the Rust topic-session status and usage. No database migration runs and the root DM remains a normal Hermes chat.
 
 ### Creating a new topic (end-user flow)
 
@@ -491,15 +482,11 @@ After activation, the **root DM is a lobby**: normal prompts are rejected with g
 3. Telegram creates a new topic for that message
 4. Hermes responds inside that topic — the topic is now a standalone session
 
-Every topic gets its own conversation history, model state, tool execution, and session ID. The isolation key is `agent:main:telegram:dm:{chat_id}:{thread_id}` — identical to the config-driven DM topics isolation.
-
-### Auto-renamed topics
-
-When Hermes generates a session title for a topic (via the auto-title pipeline, after the first exchange), the Telegram topic itself is renamed to match — e.g. "New Topic" becomes "Database migration plan". The rename is best-effort: failures are logged but don't break the session.
+Every topic gets its own conversation history, model state, tool execution, and session ID. The isolation key is the gateway session key for `telegram:{chat_id}:{thread_id}:{user_id}`. Telegram's General topic (`message_thread_id=1`) and threadless messages are treated as the root chat, not as separate topic lanes.
 
 ### `/new` inside a topic
 
-Resets the current topic's session (new session ID, fresh history) without touching other topics. Hermes replies with a reminder that for parallel work, creating another topic (via **All Messages**) is usually what you want.
+Resets the current topic's session without touching other topics.
 
 ### Restoring a previous session
 
@@ -509,48 +496,28 @@ Inside a topic, send:
 /topic <session-id>
 ```
 
-This binds the current topic to an existing Hermes session instead of starting fresh. Useful for continuing a conversation that started before topic mode was enabled. Restrictions:
-
-- The target session must belong to the same Telegram user
-- The target session must not already be bound to another topic
-
-Hermes confirms with the session title and replays the last assistant message for context.
-
-To discover session IDs, send `/topic` (no argument) in the root DM — Hermes lists the user's unlinked Telegram sessions.
+This copies a previous session's messages and title into the current topic context using the same switch path as `/sessions <session-id>`. To discover session IDs, use `/sessions`.
 
 ### `/topic` inside a topic (no argument)
 
-Shows the current topic's binding: session title, session ID, and hints for `/new` vs creating another topic.
+Shows the Rust topic-session status and usage.
 
 ### Under the hood
 
-- Activation persists to `telegram_dm_topic_mode(chat_id, user_id, enabled, ...)` in `state.db`
-- Each topic binding persists to `telegram_dm_topic_bindings(chat_id, thread_id, session_id, ...)` with `ON DELETE CASCADE` on `session_id` — pruning a session automatically clears its topic binding
-- The topic-mode SQLite migration is **opt-in**: it runs on the first `/topic` call, never on gateway startup. Until a user runs `/topic` in this profile, `state.db` is unchanged
-- Each inbound DM message looks up its `(chat_id, thread_id)` binding. If present, the lookup routes the message to the bound session via `SessionStore.switch_session()` so the session-key-to-session-id mapping stays consistent on disk
-- `/new` inside a topic rewrites the binding row to point at the new session ID, so the next message stays on the fresh session
-- Topics declared in `extra.dm_topics` are **never auto-renamed** — the operator-chosen name is preserved even when multi-session mode is enabled
-- The General (pinned top) topic in a forum-enabled DM is treated as the root lobby, regardless of whether Telegram delivers its messages with `message_thread_id=1` or with no thread_id
-- Root-lobby reminders are rate-limited to one message per 30 seconds per chat — a user who forgets topic mode is on and types ten prompts in the root won't get ten replies
-- BotFather setup screenshots are rate-limited to one send per 5 minutes per chat — repeated `/topic` attempts while Threads Settings are still disabled won't re-upload the same image
-- `/background <prompt>` started inside a topic delivers its result back to the same topic; background sessions don't trigger auto-rename of the owning topic
-- `/topic` itself is gated by the bot's user authorization check — unauthorized DMs get a refusal instead of activation
+- Rust routes Telegram topic updates by preserving the non-General `message_thread_id` in the gateway chat ID.
+- `/new` inside a topic resets only that encoded topic session key.
+- `/topic <session-id>` uses the same session switch path as `/sessions <session-id>`.
+- There is no Python `telegram_dm_topic_mode` or `telegram_dm_topic_bindings` runtime state in this fork.
+- `/background <prompt>` started inside a topic delivers its result back to the same encoded topic chat.
+- `/topic` itself is gated by the bot's user authorization check.
 
 ### Disabling multi-session mode
 
-Send `/topic off` in the root DM. Hermes flips the row off, clears the chat's `(thread_id → session_id)` bindings, and the root DM reverts to a normal Hermes chat. Existing topics in Telegram aren't deleted — they just stop being gated as independent sessions. Re-run `/topic` later to turn it back on.
-
-If you need to clean up by hand (e.g. a bulk reset across many chats), remove the rows directly:
-
-```bash
-sqlite3 ~/.hermes/state.db \
-  "UPDATE telegram_dm_topic_mode SET enabled = 0 WHERE chat_id = '<your_chat_id>'; \
-   DELETE FROM telegram_dm_topic_bindings WHERE chat_id = '<your_chat_id>';"
-```
+Send `/topic off` to confirm that no Python-style topic binding state is active. Existing Telegram topic sessions remain isolated by thread ID.
 
 ### Downgrading Hermes
 
-If you downgrade to a Hermes version that predates `/topic`, the feature simply stops working — the `telegram_dm_topic_mode` and `telegram_dm_topic_bindings` tables remain in `state.db` but are ignored by older code. DMs revert to the native per-thread isolation (each `message_thread_id` still gets its own session via `build_session_key`), so your existing Telegram topics keep working as parallel sessions. The root DM is no longer a lobby — messages there go into the agent like they used to. Re-upgrading reactivates multi-session mode exactly where it was.
+Because Rust topic routing is derived from Telegram update metadata, there is no topic-mode database to migrate or downgrade. Older builds that preserve `message_thread_id` routing keep topic sessions isolated; builds without topic routing fall back to root-chat behavior.
 
 ## Group Forum Topic Skill Binding
 

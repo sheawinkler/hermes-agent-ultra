@@ -48,7 +48,9 @@ use hermes_cli::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
 };
 use hermes_cli::terminal_backend::build_terminal_backend;
-use hermes_cli::tool_preview::{build_tool_preview_from_value, tool_emoji};
+use hermes_cli::tool_preview::{
+    build_gateway_tool_progress_message, build_tool_preview_from_value, tool_emoji,
+};
 use hermes_cli::App;
 use hermes_config::{
     gateway_pid_path_in, hermes_home, load_config, load_user_config_file, save_config_yaml,
@@ -56,8 +58,8 @@ use hermes_config::{
     GatewayConfig, PlatformConfig, UnauthorizedDmBehavior,
 };
 use hermes_core::AgentError;
-use hermes_core::PlatformAdapter;
 use hermes_core::{MessageRole, StreamChunk};
+use hermes_core::{ParseMode, PlatformAdapter};
 use hermes_cron::{
     cron_scheduler_for_data_dir, CronCompletionEvent, CronError, CronRunner, CronScheduler,
     DeliverTarget, FileJobPersistence,
@@ -3047,6 +3049,15 @@ async fn run_gateway(
                         });
                         let tool_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
                         let tool_events_for_start = tool_events.clone();
+                        let tool_progress_mode = resolve_gateway_tool_progress_mode(
+                            config.as_ref(),
+                            &ctx.platform,
+                            ctx.tool_progress.as_deref(),
+                        );
+                        let tool_progress_seen = Arc::new(Mutex::new(HashSet::<String>::new()));
+                        let gateway_for_tool_progress = gateway_for_review.clone();
+                        let platform_for_tool_progress = ctx.platform.clone();
+                        let chat_for_tool_progress = ctx.chat_id.clone();
                         let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
                             Box::new(move |name: &str, args: &serde_json::Value| {
                                 let preview = build_tool_preview_from_value(name, args, 60)
@@ -3061,6 +3072,32 @@ async fn run_gateway(
                                 }
                                 if let Ok(mut guard) = tool_events_for_start.lock() {
                                     guard.push(event);
+                                }
+                                if should_emit_gateway_tool_progress(
+                                    &tool_progress_mode,
+                                    name,
+                                    &tool_progress_seen,
+                                ) {
+                                    if let Some(message) = build_gateway_tool_progress_message(
+                                        &platform_for_tool_progress,
+                                        name,
+                                        args,
+                                        &tool_progress_mode,
+                                        60,
+                                    ) {
+                                        let gw = gateway_for_tool_progress.clone();
+                                        let platform = platform_for_tool_progress.clone();
+                                        let chat_id = chat_for_tool_progress.clone();
+                                        let parse_mode =
+                                            gateway_tool_progress_parse_mode(&platform, &message);
+                                        tokio::spawn(async move {
+                                            let _ = gw
+                                                .send_message(
+                                                    &platform, &chat_id, &message, parse_mode,
+                                                )
+                                                .await;
+                                        });
+                                    }
                                 }
                             });
                         let tool_events_for_complete = tool_events.clone();
@@ -3274,6 +3311,15 @@ async fn run_gateway(
                         });
                         let tool_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
                         let tool_events_for_start = tool_events.clone();
+                        let tool_progress_mode = resolve_gateway_tool_progress_mode(
+                            config.as_ref(),
+                            &ctx.platform,
+                            ctx.tool_progress.as_deref(),
+                        );
+                        let tool_progress_seen = Arc::new(Mutex::new(HashSet::<String>::new()));
+                        let gateway_for_tool_progress = gateway_for_review.clone();
+                        let platform_for_tool_progress = ctx.platform.clone();
+                        let chat_for_tool_progress = ctx.chat_id.clone();
                         let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
                             Box::new(move |name: &str, args: &serde_json::Value| {
                                 let preview = build_tool_preview_from_value(name, args, 60)
@@ -3288,6 +3334,32 @@ async fn run_gateway(
                                 }
                                 if let Ok(mut guard) = tool_events_for_start.lock() {
                                     guard.push(event);
+                                }
+                                if should_emit_gateway_tool_progress(
+                                    &tool_progress_mode,
+                                    name,
+                                    &tool_progress_seen,
+                                ) {
+                                    if let Some(message) = build_gateway_tool_progress_message(
+                                        &platform_for_tool_progress,
+                                        name,
+                                        args,
+                                        &tool_progress_mode,
+                                        60,
+                                    ) {
+                                        let gw = gateway_for_tool_progress.clone();
+                                        let platform = platform_for_tool_progress.clone();
+                                        let chat_id = chat_for_tool_progress.clone();
+                                        let parse_mode =
+                                            gateway_tool_progress_parse_mode(&platform, &message);
+                                        tokio::spawn(async move {
+                                            let _ = gw
+                                                .send_message(
+                                                    &platform, &chat_id, &message, parse_mode,
+                                                )
+                                                .await;
+                                        });
+                                    }
                                 }
                             });
                         let tool_events_for_complete = tool_events.clone();
@@ -4113,6 +4185,61 @@ fn resolve_model_for_gateway(default_model: &str, ctx: &GatewayRuntimeContext) -
     }
 
     default_model.to_string()
+}
+
+fn normalize_gateway_tool_progress_mode(raw: &str) -> Option<String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "off" | "none" | "false" | "0" => Some("off".to_string()),
+        "new" => Some("new".to_string()),
+        "all" | "true" | "1" => Some("all".to_string()),
+        "verbose" => Some("verbose".to_string()),
+        _ => None,
+    }
+}
+
+fn resolve_gateway_tool_progress_mode(
+    config: &hermes_config::GatewayConfig,
+    platform: &str,
+    session_override: Option<&str>,
+) -> String {
+    if let Some(mode) = session_override.and_then(normalize_gateway_tool_progress_mode) {
+        return mode;
+    }
+
+    let platform_key = platform.trim().to_ascii_lowercase().replace('-', "_");
+    config
+        .display
+        .platform_tool_progress(&platform_key)
+        .and_then(normalize_gateway_tool_progress_mode)
+        .unwrap_or_else(|| match platform_key.as_str() {
+            "telegram" | "slack" => "off".to_string(),
+            _ => "all".to_string(),
+        })
+}
+
+fn should_emit_gateway_tool_progress(
+    mode: &str,
+    tool_name: &str,
+    seen_tools: &Arc<Mutex<HashSet<String>>>,
+) -> bool {
+    match mode {
+        "off" => false,
+        "new" => seen_tools
+            .lock()
+            .map(|mut seen| seen.insert(tool_name.to_string()))
+            .unwrap_or(true),
+        "all" | "verbose" => true,
+        _ => false,
+    }
+}
+
+fn gateway_tool_progress_parse_mode(platform: &str, text: &str) -> Option<ParseMode> {
+    let markdown_code_block = text.trim_start().starts_with("```") || text.contains("\n```");
+    if markdown_code_block && platform.eq_ignore_ascii_case("telegram") {
+        Some(ParseMode::Markdown)
+    } else {
+        None
+    }
 }
 
 fn build_agent_for_gateway_context(
@@ -5770,6 +5897,13 @@ fn telegram_should_batch_text(msg: &TelegramIncomingMessage) -> bool {
         && msg.callback_data.is_none()
 }
 
+fn telegram_routable_topic_thread(thread_id: Option<i64>) -> Option<i64> {
+    match thread_id {
+        Some(id) if id > 1 => Some(id),
+        _ => None,
+    }
+}
+
 fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMessage {
     let text = msg.text.unwrap_or_else(|| {
         if msg.is_voice {
@@ -5786,10 +5920,8 @@ fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMess
         .or(msg.username)
         .unwrap_or_else(|| "unknown".to_string());
 
-    let chat_id = match msg.message_thread_id {
-        Some(thread_id) if msg.is_group && thread_id != 0 => {
-            format!("{}:{}", msg.chat_id, thread_id)
-        }
+    let chat_id = match telegram_routable_topic_thread(msg.message_thread_id) {
+        Some(thread_id) => format!("{}:{}", msg.chat_id, thread_id),
         _ => msg.chat_id.to_string(),
     };
 
@@ -15220,6 +15352,71 @@ mod tests {
         assert_eq!(routed.chat_id, "-1001:17585");
         assert_eq!(routed.user_id, "42");
         assert!(!routed.is_dm);
+    }
+
+    #[test]
+    fn telegram_gateway_message_preserves_private_topic_in_chat_id() {
+        let incoming = TelegramIncomingMessage {
+            chat_id: 208214988,
+            user_id: Some(42),
+            username: Some("alice".to_string()),
+            text: Some("topic hello".to_string()),
+            message_id: 77,
+            is_voice: false,
+            is_photo: false,
+            is_sticker: false,
+            is_document: false,
+            voice_file_id: None,
+            photo_file_id: None,
+            sticker_file_id: None,
+            document_file_id: None,
+            document_file_name: None,
+            document_mime_type: None,
+            document_file_size: None,
+            reply_to_message_id: None,
+            message_thread_id: Some(17585),
+            chat_type: hermes_gateway::platforms::telegram::ChatKind::Private,
+            is_group: false,
+            callback_query_id: None,
+            callback_data: None,
+        };
+
+        let routed = telegram_gateway_message(incoming);
+        assert_eq!(routed.chat_id, "208214988:17585");
+        assert_eq!(routed.user_id, "42");
+        assert!(routed.is_dm);
+    }
+
+    #[test]
+    fn telegram_gateway_message_treats_general_topic_as_root_lobby() {
+        let incoming = TelegramIncomingMessage {
+            chat_id: 208214988,
+            user_id: Some(42),
+            username: Some("alice".to_string()),
+            text: Some("root lobby".to_string()),
+            message_id: 77,
+            is_voice: false,
+            is_photo: false,
+            is_sticker: false,
+            is_document: false,
+            voice_file_id: None,
+            photo_file_id: None,
+            sticker_file_id: None,
+            document_file_id: None,
+            document_file_name: None,
+            document_mime_type: None,
+            document_file_size: None,
+            reply_to_message_id: None,
+            message_thread_id: Some(1),
+            chat_type: hermes_gateway::platforms::telegram::ChatKind::Private,
+            is_group: false,
+            callback_query_id: None,
+            callback_data: None,
+        };
+
+        let routed = telegram_gateway_message(incoming);
+        assert_eq!(routed.chat_id, "208214988");
+        assert!(routed.is_dm);
     }
 
     #[test]

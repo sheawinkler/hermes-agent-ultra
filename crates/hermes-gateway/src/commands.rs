@@ -124,6 +124,12 @@ pub fn all_commands() -> Vec<CommandInfo> {
             usage: "/reset",
         },
         CommandInfo {
+            name: "/topic",
+            aliases: &[],
+            description: "Inspect or restore Telegram topic sessions",
+            usage: "/topic [off|help|session-id]",
+        },
+        CommandInfo {
             name: "/model",
             aliases: &[],
             description: "Show or switch the LLM model",
@@ -390,6 +396,35 @@ pub fn should_bypass_active_session(raw: Option<&str>) -> bool {
     raw.is_some_and(is_registered_command_name)
 }
 
+fn telegram_topic_help_text() -> String {
+    "/topic — Telegram multi-session topic controls\n\n\
+Usage:\n\
+  /topic             Show Telegram topic-session status\n\
+  /topic help        Show this message\n\
+  /topic off         Disable Python-style topic binding state (no-op in Rust)\n\
+  /topic <id>        Restore a previous session into the current topic\n\n\
+Rust gateway behavior:\n\
+  Telegram messages with a non-General topic thread are routed as independent \
+session lanes using chat_id:thread_id. /new inside a topic resets only that \
+topic lane; General topic (thread 1) and threadless messages stay in the root chat."
+        .to_string()
+}
+
+fn telegram_topic_status_text() -> String {
+    "Telegram topic sessions are handled natively by the Rust gateway. \
+Non-General Telegram topics use independent session lanes; use /new inside a \
+topic to reset only that topic, /sessions to list prior sessions, or \
+/topic <session-id> to restore one into the current topic."
+        .to_string()
+}
+
+fn telegram_topic_off_text() -> String {
+    "Telegram Python-style topic binding mode is not enabled in the Rust gateway. \
+There are no SQLite topic bindings to clear; existing Telegram topic lanes remain \
+isolated by thread ID. The root DM remains a normal Hermes chat."
+        .to_string()
+}
+
 /// Parse and dispatch a gateway slash command.
 pub fn handle_command(input: &str) -> GatewayCommandResult {
     let trimmed = input.trim();
@@ -407,6 +442,16 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         "/start" => GatewayCommandResult::Noop,
         "/new" => GatewayCommandResult::ResetSession("🆕 New conversation started.".to_string()),
         "/reset" | "/clear" => GatewayCommandResult::ResetSession("🔄 Session reset.".to_string()),
+        "/topic" => match args.to_ascii_lowercase().as_str() {
+            "" | "status" => GatewayCommandResult::Reply(telegram_topic_status_text()),
+            "help" | "?" | "-h" | "--help" => {
+                GatewayCommandResult::Reply(telegram_topic_help_text())
+            }
+            "off" | "disable" | "stop" => GatewayCommandResult::Reply(telegram_topic_off_text()),
+            _ => GatewayCommandResult::SwitchSession {
+                session_id: args.clone(),
+            },
+        },
         "/model" => {
             if args.is_empty() {
                 GatewayCommandResult::Reply(
@@ -795,6 +840,41 @@ mod tests {
     }
 
     #[test]
+    fn test_topic_command_help_off_and_restore() {
+        match handle_command("/topic") {
+            GatewayCommandResult::Reply(text) => {
+                assert!(text.contains("Telegram topic sessions"));
+                assert!(text.contains("Rust gateway"));
+            }
+            other => panic!("Expected topic status reply, got {:?}", other),
+        }
+
+        match handle_command("/topic help") {
+            GatewayCommandResult::Reply(text) => {
+                assert!(text.contains("/topic off"));
+                assert!(text.contains("/topic <id>"));
+                assert!(text.contains("General topic"));
+            }
+            other => panic!("Expected topic help reply, got {:?}", other),
+        }
+
+        match handle_command("/topic off") {
+            GatewayCommandResult::Reply(text) => {
+                assert!(text.contains("not enabled in the Rust gateway"));
+                assert!(text.contains("no SQLite topic bindings"));
+            }
+            other => panic!("Expected topic off reply, got {:?}", other),
+        }
+
+        match handle_command("/topic session-123") {
+            GatewayCommandResult::SwitchSession { session_id } => {
+                assert_eq!(session_id, "session-123");
+            }
+            other => panic!("Expected topic restore to switch session, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_unknown_command() {
         match handle_command("/xyz123") {
             GatewayCommandResult::Unknown(_) => {}
@@ -892,6 +972,7 @@ mod tests {
             "usage",
             "reload-mcp",
             "sethome",
+            "topic",
         ] {
             assert!(should_bypass_active_session(Some(cmd)), "{cmd}");
         }
