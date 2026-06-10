@@ -4,6 +4,9 @@
 //! appropriate subcommand handler.
 
 mod gateway_handlers;
+mod interactive_lock;
+
+use interactive_lock::*;
 
 use hermes_cli::gateway_runtime_defaults;
 use hermes_cli::startup_metrics::StartupMetrics;
@@ -98,8 +101,7 @@ use hermes_tools::{ToolRegistry, default_tool_policy_counters_path, load_tool_po
 use hmac::KeyInit as _;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
-use std::fs::OpenOptions;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1095,242 +1097,9 @@ fn init_tracing(verbose: bool, interactive_tui: bool, gateway: bool) {
     init_telemetry_from_env("hermes-cli", default);
 }
 
-const INTERACTIVE_SESSION_LOCK_FILE: &str = "interactive.session.lock";
-const INTERACTIVE_SESSION_LOCK_BYPASS_ENV: &str = "HERMES_ALLOW_PARALLEL_INTERACTIVE";
-
-fn interactive_lock_path_for_cli(cli: &Cli) -> PathBuf {
-    hermes_state_root(cli).join(INTERACTIVE_SESSION_LOCK_FILE)
-}
-
-fn read_interactive_lock_pid(path: &Path) -> Option<u32> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if let Ok(pid) = trimmed.parse::<u32>() {
-        return Some(pid);
-    }
-    let json: serde_json::Value = serde_json::from_str(trimmed).ok()?;
-    let pid = json.get("pid")?.as_u64()?;
-    u32::try_from(pid).ok()
-}
-
-#[cfg(unix)]
-fn process_pid_is_alive(pid: u32) -> bool {
-    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    if rc == 0 {
-        return true;
-    }
-    matches!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::EPERM)
-    )
-}
-
-#[cfg(not(unix))]
-fn process_pid_is_alive(_pid: u32) -> bool {
-    false
-}
-
-#[cfg(unix)]
-#[derive(Debug, Clone)]
-struct InteractivePidSnapshot {
-    ppid: u32,
-    tty: String,
-    command: String,
-}
-
-#[cfg(unix)]
-fn parse_pid_snapshot_line(line: &str) -> Option<InteractivePidSnapshot> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let mut parts = trimmed.split_whitespace();
-    let ppid = parts.next()?.parse::<u32>().ok()?;
-    let tty = parts.next()?.to_string();
-    let command = parts.collect::<Vec<_>>().join(" ");
-    if command.is_empty() {
-        return None;
-    }
-    Some(InteractivePidSnapshot { ppid, tty, command })
-}
-
-#[cfg(unix)]
-fn interactive_pid_snapshot(pid: u32) -> Option<InteractivePidSnapshot> {
-    let output = std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "ppid=,tty=,command="])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let line = String::from_utf8_lossy(&output.stdout);
-    parse_pid_snapshot_line(line.as_ref())
-}
-
-#[cfg(unix)]
-fn looks_like_interactive_hermes_process(command: &str) -> bool {
-    let cmd = command.to_ascii_lowercase();
-    (cmd.contains("hermes-agent-ultra") || cmd.contains("hermes-ultra")) && !cmd.contains("gateway")
-}
-
-#[cfg(unix)]
-fn interactive_lock_holder_is_reapable_orphan(pid: u32) -> bool {
-    let snapshot = match interactive_pid_snapshot(pid) {
-        Some(snapshot) => snapshot,
-        None => return false,
-    };
-    // Reap only obvious abandoned interactive agents:
-    // orphaned from shell (ppid=1) and detached from a terminal.
-    looks_like_interactive_hermes_process(&snapshot.command)
-        && snapshot.ppid == 1
-        && (snapshot.tty == "??" || snapshot.tty == "?")
-}
-
-#[cfg(unix)]
-fn reap_interactive_orphan(pid: u32) -> bool {
-    let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
-    std::thread::sleep(std::time::Duration::from_millis(250));
-    if !process_pid_is_alive(pid) {
-        return true;
-    }
-    let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
-    std::thread::sleep(std::time::Duration::from_millis(150));
-    !process_pid_is_alive(pid)
-}
-
-#[cfg(unix)]
-fn reap_interactive_orphans_except(own_pid: u32) -> usize {
-    let output = match std::process::Command::new("ps")
-        .args(["-axo", "pid=,ppid=,command="])
-        .output()
-    {
-        Ok(output) if output.status.success() => output,
-        _ => return 0,
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut reaped = 0usize;
-    for line in stdout.lines() {
-        let mut parts = line.split_whitespace();
-        let Some(pid) = parts.next().and_then(|p| p.parse::<u32>().ok()) else {
-            continue;
-        };
-        let Some(ppid) = parts.next().and_then(|p| p.parse::<u32>().ok()) else {
-            continue;
-        };
-        if pid == own_pid || ppid != 1 {
-            continue;
-        }
-        let command = parts.collect::<Vec<_>>().join(" ");
-        if looks_like_interactive_hermes_process(&command) && reap_interactive_orphan(pid) {
-            reaped = reaped.saturating_add(1);
-        }
-    }
-    reaped
-}
-
-struct InteractiveSessionLockGuard {
-    lock_path: PathBuf,
-    pid: u32,
-    _lock_file: std::fs::File,
-}
-
-impl InteractiveSessionLockGuard {
-    fn acquire(cli: &Cli) -> Result<Option<Self>, AgentError> {
-        if hermes_config::env_var_enabled(INTERACTIVE_SESSION_LOCK_BYPASS_ENV) {
-            return Ok(None);
-        }
-        let lock_path = interactive_lock_path_for_cli(cli);
-        if let Some(parent) = lock_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                AgentError::Io(format!(
-                    "failed to create lock parent {}: {}",
-                    parent.display(),
-                    e
-                ))
-            })?;
-        }
-        let own_pid = std::process::id();
-        #[cfg(unix)]
-        {
-            let _ = reap_interactive_orphans_except(own_pid);
-        }
-
-        // Use create_new for atomic lock acquisition. This closes the race where
-        // two interactive sessions read "no lock" and both write concurrently.
-        let lock_file = loop {
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock_path)
-            {
-                Ok(file) => break file,
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if let Some(existing_pid) = read_interactive_lock_pid(&lock_path) {
-                        if existing_pid != own_pid && process_pid_is_alive(existing_pid) {
-                            #[cfg(unix)]
-                            {
-                                if interactive_lock_holder_is_reapable_orphan(existing_pid)
-                                    && reap_interactive_orphan(existing_pid)
-                                {
-                                    let _ = std::fs::remove_file(&lock_path);
-                                    continue;
-                                }
-                            }
-                            return Err(AgentError::Config(format!(
-                                "Another Hermes interactive session is running (PID {}). Close it first or set {}=1 to allow parallel sessions.",
-                                existing_pid, INTERACTIVE_SESSION_LOCK_BYPASS_ENV
-                            )));
-                        }
-                    }
-                    let _ = std::fs::remove_file(&lock_path);
-                    continue;
-                }
-                Err(err) => {
-                    return Err(AgentError::Io(format!(
-                        "failed to create interactive lock {}: {}",
-                        lock_path.display(),
-                        err
-                    )));
-                }
-            }
-        };
-
-        let mut lock_file = lock_file;
-        lock_file
-            .write_all(format!("{}\n", own_pid).as_bytes())
-            .map_err(|e| {
-                AgentError::Io(format!(
-                    "failed to write interactive lock {}: {}",
-                    lock_path.display(),
-                    e
-                ))
-            })?;
-        let _ = lock_file.flush();
-
-        Ok(Some(Self {
-            lock_path,
-            pid: own_pid,
-            _lock_file: lock_file,
-        }))
-    }
-}
-
-impl Drop for InteractiveSessionLockGuard {
-    fn drop(&mut self) {
-        if let Some(current_pid) = read_interactive_lock_pid(&self.lock_path) {
-            if current_pid == self.pid {
-                let _ = std::fs::remove_file(&self.lock_path);
-            }
-        }
-    }
-}
-
 /// Run the interactive REPL (default command).
 async fn run_interactive(cli: Cli) -> Result<(), AgentError> {
-    let _session_lock = InteractiveSessionLockGuard::acquire(&cli)?;
+    let _session_lock = InteractiveSessionLockGuard::acquire(&hermes_state_root(&cli))?;
     let app = App::new(cli).await?;
     hermes_cli::tui::run(app).await
 }
@@ -1346,7 +1115,7 @@ struct ResumeSessionPayload {
 }
 
 async fn run_resume(cli: Cli, requested_session_id: Option<String>) -> Result<(), AgentError> {
-    let _session_lock = InteractiveSessionLockGuard::acquire(&cli)?;
+    let _session_lock = InteractiveSessionLockGuard::acquire(&hermes_state_root(&cli))?;
     let requested = requested_session_id.as_deref();
     let payload = match load_resume_payload(&cli, requested) {
         Ok(payload) => payload,
@@ -15584,94 +15353,10 @@ max_turns: 50
     }
 
     #[test]
-    fn read_interactive_lock_pid_supports_plain_and_json_records() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let plain = tmp.path().join("interactive.lock");
-        std::fs::write(&plain, "12345\n").expect("write plain lock");
-        assert_eq!(read_interactive_lock_pid(&plain), Some(12345));
-
-        let json = tmp.path().join("interactive.json");
-        std::fs::write(&json, r#"{"pid":23456}"#).expect("write json lock");
-        assert_eq!(read_interactive_lock_pid(&json), Some(23456));
-    }
-
-    #[test]
     fn query_is_local_slash_command_detects_prefixed_queries() {
         assert!(query_is_local_slash_command("/model list"));
         assert!(query_is_local_slash_command("   /graph status"));
         assert!(!query_is_local_slash_command("hello world"));
-    }
-
-    #[test]
-    fn interactive_session_lock_guard_replaces_stale_pid_and_cleans_up() {
-        let old_bypass = std::env::var_os(INTERACTIVE_SESSION_LOCK_BYPASS_ENV);
-        hermes_cli::env_vars::remove_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV);
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let cli = cli_for_temp_state_root(tmp.path());
-        let lock_path = interactive_lock_path_for_cli(&cli);
-        if let Some(parent) = lock_path.parent() {
-            std::fs::create_dir_all(parent).expect("mkdir lock parent");
-        }
-        std::fs::write(&lock_path, "999999").expect("write stale lock");
-        let guard = InteractiveSessionLockGuard::acquire(&cli)
-            .expect("acquire lock")
-            .expect("guard enabled");
-        assert_eq!(
-            read_interactive_lock_pid(&lock_path),
-            Some(std::process::id())
-        );
-        drop(guard);
-        assert!(!lock_path.exists(), "lock file should be removed on drop");
-        if let Some(value) = old_bypass {
-            hermes_cli::env_vars::set_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV, value);
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn interactive_session_lock_guard_rejects_live_pid() {
-        let old_bypass = std::env::var_os(INTERACTIVE_SESSION_LOCK_BYPASS_ENV);
-        hermes_cli::env_vars::remove_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV);
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let cli = cli_for_temp_state_root(tmp.path());
-        let lock_path = interactive_lock_path_for_cli(&cli);
-        if let Some(parent) = lock_path.parent() {
-            std::fs::create_dir_all(parent).expect("mkdir lock parent");
-        }
-        // PID 1 should always be alive on Unix systems.
-        std::fs::write(&lock_path, "1").expect("write lock");
-        let err = match InteractiveSessionLockGuard::acquire(&cli) {
-            Err(err) => err,
-            Ok(_) => panic!("must reject live lock holder"),
-        };
-        let msg = format!("{err}");
-        assert!(msg.contains("Another Hermes interactive session is running"));
-        assert_eq!(read_interactive_lock_pid(&lock_path), Some(1));
-        if let Some(value) = old_bypass {
-            hermes_cli::env_vars::set_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV, value);
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn parse_pid_snapshot_line_parses_ppid_tty_and_command() {
-        let snap = parse_pid_snapshot_line("1 ?? /Users/sheawinkler/.cargo/bin/hermes-agent-ultra")
-            .expect("snapshot");
-        assert_eq!(snap.ppid, 1);
-        assert_eq!(snap.tty, "??");
-        assert!(snap.command.contains("hermes-agent-ultra"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn looks_like_interactive_hermes_process_matches_cli_and_not_gateway() {
-        assert!(looks_like_interactive_hermes_process(
-            "/Users/sheawinkler/.cargo/bin/hermes-agent-ultra"
-        ));
-        assert!(looks_like_interactive_hermes_process("hermes-ultra"));
-        assert!(!looks_like_interactive_hermes_process(
-            "/Users/sheawinkler/.cargo/bin/hermes-gateway"
-        ));
     }
 
     #[test]
