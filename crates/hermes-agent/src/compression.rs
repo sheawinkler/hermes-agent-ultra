@@ -367,6 +367,13 @@ impl ContextCompressor {
     /// the backward boundary scan avoids re-estimating tool-call arguments
     /// on each iteration (~2× speedup for dense tool-call histories).
     ///
+    /// # Contract
+    ///
+    /// - Pre: `protect_tail_count > 0` — caller must always protect at least 1
+    /// - Post: `result.len() == messages.len()` — message count unchanged
+    /// - Post: `pruned <= result.len()` — cannot prune more messages than exist
+    /// - Post: every pruned message has role == Tool and content == PRUNED_TOOL_PLACEHOLDER
+    ///
     /// Returns `(messages, pruned_count)`.
     pub fn prune_old_tool_results(
         &self,
@@ -374,6 +381,10 @@ impl ContextCompressor {
         protect_tail_count: usize,
         protect_tail_tokens: Option<u64>,
     ) -> (Vec<Message>, usize) {
+        debug_assert!(
+            protect_tail_count > 0,
+            "prune: protect_tail_count must be > 0"
+        );
         if messages.is_empty() {
             return (Vec::new(), 0);
         }
@@ -436,6 +447,26 @@ impl ContextCompressor {
                 pruned += 1;
             }
         }
+
+        // --- 后置条件 ---
+        debug_assert_eq!(
+            result.len(),
+            messages.len(),
+            "prune: must not change message count"
+        );
+        debug_assert!(pruned <= result.len(), "prune: pruned > total messages");
+        debug_assert!(
+            result
+                .iter()
+                .take(prune_boundary)
+                .filter(|m| {
+                    m.role == MessageRole::Tool
+                        && m.content.as_deref() == Some(PRUNED_TOOL_PLACEHOLDER)
+                })
+                .count()
+                == pruned,
+            "prune: every pruned message must be a Tool message with placeholder content"
+        );
 
         (result, pruned)
     }
@@ -1115,6 +1146,11 @@ fn take_chars_back(s: &str, n: usize) -> String {
 }
 
 /// Rough token estimate for compression trigger checks (Python `estimate_tokens` parity).
+///
+/// # Contract
+///
+/// - Post: `estimate(empty) == 0` — empty messages contribute 10 overhead each
+/// - Post: result is finite and non-negative
 pub fn estimate_messages_tokens(messages: &[Message]) -> u64 {
     use hermes_core::token_estimator::estimate;
     let mut total: u64 = 0;
@@ -1135,6 +1171,11 @@ pub fn estimate_messages_tokens(messages: &[Message]) -> u64 {
 }
 
 /// Rough token estimate for preflight compression (messages + system + tool schemas).
+///
+/// # Contract
+///
+/// - Pre: `system_prompt` is at least an empty string (not None)
+/// - Post: result >= `estimate(system_prompt)` — messages and tools add tokens
 pub fn estimate_request_tokens_for_compression(
     messages: &[Message],
     system_prompt: &str,

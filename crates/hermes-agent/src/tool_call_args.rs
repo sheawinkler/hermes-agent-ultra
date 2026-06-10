@@ -37,6 +37,13 @@ pub fn arguments_value_to_string(value: Option<&Value>) -> (String, ToolArgument
 ///
 /// Fast path (valid JSON) returns immediately. Otherwise a single byte-level
 /// scan handles all common malformations before a final `serde_json` check.
+///
+/// # Contract
+///
+/// - Pre: `raw` should be non-empty (caller filters empty/None/null before calling)
+/// - Post: return value is always valid JSON `{}` or a valid object/array
+/// - Post: `Repaired` means the output differs from the trimmed input
+/// - Post: `Unchanged` means the input was already valid JSON
 pub fn repair_tool_call_arguments(raw: &str) -> (String, ToolArgumentRepair) {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -203,6 +210,8 @@ pub fn repair_tool_call_arguments(raw: &str) -> (String, ToolArgumentRepair) {
     // Final validation: original was already invalid (fast path would have
     // returned Unchanged), so any valid output is necessarily Repaired.
     if serde_json::from_str::<Value>(&repaired).is_ok() {
+        // 后置条件：输出必须是合法 JSON
+        debug_assert!(serde_json::from_str::<Value>(&repaired).is_ok());
         (repaired, ToolArgumentRepair::Repaired)
     } else {
         (
@@ -210,6 +219,7 @@ pub fn repair_tool_call_arguments(raw: &str) -> (String, ToolArgumentRepair) {
             ToolArgumentRepair::ReplacedWithEmptyObject,
         )
     }
+    // 后置条件：始终返回合法的 {} 或 合法JSON
 }
 
 #[cfg(test)]

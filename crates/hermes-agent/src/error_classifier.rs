@@ -176,6 +176,13 @@ pub fn classify_failover_reason(err: &str) -> FailoverReason {
 }
 
 pub fn classify_failover_reason_with_provider(err: &str, provider: &str) -> FailoverReason {
+    // 前置条件：错误字符串不能为空
+    debug_assert!(!err.is_empty(), "classify: empty error string");
+    debug_assert!(
+        provider.is_empty() || !provider.trim().is_empty(),
+        "classify: provider must not be whitespace-only"
+    );
+
     let lower = err.to_ascii_lowercase();
     let bitmap = failover_bitmap(&lower);
 
