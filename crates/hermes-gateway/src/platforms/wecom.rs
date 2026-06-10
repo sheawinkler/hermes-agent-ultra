@@ -27,7 +27,7 @@ use uuid::Uuid;
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 
-use crate::adapter::{redact_identifier, AdapterProxyConfig, BasePlatformAdapter};
+use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter, redact_identifier};
 use crate::gateway::IncomingMessage;
 use crate::ssrf::is_safe_url;
 
@@ -280,6 +280,19 @@ fn raise_for_wecom_error(response: &Value, operation: &str) -> Result<(), Gatewa
         )));
     }
     Ok(())
+}
+
+fn wecom_text_log_tail(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    let count = trimmed.chars().count();
+    if count <= max_chars {
+        return trimmed.replace('\n', " ");
+    }
+    let tail: String = trimmed
+        .chars()
+        .skip(count.saturating_sub(max_chars))
+        .collect();
+    format!("…{}", tail.replace('\n', " "))
 }
 
 fn text_batch_delay_secs() -> f64 {
@@ -947,8 +960,7 @@ impl WeComAdapter {
                     return None;
                 }
             };
-            let normalized_content_type =
-                normalize_inbound_image_content_type(&content_type, ext);
+            let normalized_content_type = normalize_inbound_image_content_type(&content_type, ext);
             return Some(CachedInboundMedia {
                 path,
                 content_type: normalized_content_type,
@@ -1211,6 +1223,7 @@ impl WeComAdapter {
             "headers": { "req_id": req_id },
             "body": body,
         });
+        let msgtype = body.get("msgtype").and_then(|v| v.as_str()).unwrap_or("");
         let result = if let Err(e) = Self::send_ws_json(inner, frame).await {
             inner.pending.write().await.remove(req_id);
             Err(e)
@@ -1226,6 +1239,21 @@ impl WeComAdapter {
             }
         };
         inner.pending.write().await.remove(req_id);
+        match &result {
+            Ok(_) => info!(
+                cmd = %cmd,
+                msgtype = %msgtype,
+                reply_req_id = %redact_identifier(req_id),
+                "WeCom reply request succeeded"
+            ),
+            Err(err) => warn!(
+                cmd = %cmd,
+                msgtype = %msgtype,
+                reply_req_id = %redact_identifier(req_id),
+                error = %err,
+                "WeCom reply request failed"
+            ),
+        }
         result
     }
 
@@ -1389,11 +1417,12 @@ impl WeComAdapter {
         if should_batch {
             Self::enqueue_text_event(inner, incoming, delay).await;
         } else if let Some(tx) = inner.inbound_tx.read().await.clone() {
-            debug!(
+            info!(
                 chat_id = %incoming.chat_id,
                 text_chars = incoming.text.chars().count(),
+                text_preview = %wecom_text_log_tail(&incoming.text, 48),
                 bypass_chars = bypass_chars,
-                "WeCom text batch bypassed"
+                "WeCom inbound forwarded to gateway"
             );
             let _ = tx.send(incoming).await;
         }
@@ -1668,11 +1697,18 @@ impl WeComAdapter {
     ) -> Result<(), GatewayError> {
         let trimmed = content.chars().take(MAX_MESSAGE_LENGTH).collect::<String>();
         let reply_req_id = Self::reply_req_id_for_message(inner, reply_to).await;
-        debug!(
+        let path = if reply_req_id.is_some() {
+            "respond"
+        } else {
+            "send"
+        };
+        info!(
             chat_id = %chat_id,
+            path = %path,
             text_chars = trimmed.chars().count(),
-            reply = reply_req_id.is_some(),
-            "WeCom sending markdown"
+            text_tail = %wecom_text_log_tail(&trimmed, 80),
+            reply_to = ?reply_to.map(redact_identifier),
+            "WeCom outbound markdown"
         );
         if let Some(req_id) = reply_req_id {
             let body = serde_json::json!({
@@ -2045,7 +2081,9 @@ impl PlatformAdapter for WeComAdapter {
         _message_id: &str,
         _text: &str,
     ) -> Result<(), GatewayError> {
-        Err(GatewayError::Platform("WeCom does not support message editing".into()))
+        Err(GatewayError::Platform(
+            "WeCom does not support message editing".into(),
+        ))
     }
 
     async fn send_file(

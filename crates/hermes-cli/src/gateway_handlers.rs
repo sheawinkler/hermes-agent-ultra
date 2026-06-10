@@ -13,7 +13,7 @@ use hermes_gateway::{
 use hermes_tools::ToolRegistry;
 use hermes_tools::tools::clarify::MAX_CHOICES;
 use serde_json::Value;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use hermes_cli::app::bridge_tool_registry;
 use hermes_cli::platform_toolsets::{
@@ -32,6 +32,44 @@ fn gateway_conversation_reply(conv: &hermes_agent::ConversationResult) -> String
         .filter(|s| !s.trim().is_empty())
         .cloned()
         .unwrap_or_else(|| extract_last_assistant_reply(conv.messages()))
+}
+
+fn gateway_reply_log_tail(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    let count = trimmed.chars().count();
+    if count <= max_chars {
+        return trimmed.replace('\n', " ");
+    }
+    let tail: String = trimmed
+        .chars()
+        .skip(count.saturating_sub(max_chars))
+        .collect();
+    format!("…{}", tail.replace('\n', " "))
+}
+
+fn log_gateway_conversation_finished(
+    platform: &str,
+    chat_id: &str,
+    session_key: &str,
+    streaming: bool,
+    conv: &hermes_agent::ConversationResult,
+    reply: &str,
+) {
+    info!(
+        platform = %platform,
+        chat_id = %chat_id,
+        session_key = %session_key,
+        streaming,
+        turn_exit_reason = %conv.turn_exit_reason(),
+        completed = conv.completed,
+        partial = conv.partial(),
+        interrupted = conv.interrupted(),
+        failed = conv.failed(),
+        api_calls = conv.api_calls(),
+        reply_chars = reply.chars().count(),
+        reply_tail = %gateway_reply_log_tail(reply, 120),
+        "gateway conversation finished"
+    );
 }
 
 fn prepend_clarify_user_request_hint(
@@ -313,8 +351,19 @@ pub(crate) async fn gateway_handle_message_non_streaming(
     let gateway_for_clarify = gateway_for_review.clone();
     let platform_for_clarify = ctx.platform.clone();
     let chat_for_clarify = ctx.chat_id.clone();
+    let platform_for_tool_log = ctx.platform.clone();
+    let chat_for_tool_log = ctx.chat_id.clone();
     let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
         Box::new(move |name: &str, args: &serde_json::Value| {
+            let preview = build_tool_preview_from_value(name, args, 60).unwrap_or_default();
+            info!(
+                platform = %platform_for_tool_log,
+                chat_id = %chat_for_tool_log,
+                tool = %name,
+                preview = %preview,
+                streaming = false,
+                "gateway tool call started"
+            );
             if name == "clarify" {
                 debug!(
                     question = args.get("question").and_then(|v| v.as_str()),
@@ -328,7 +377,6 @@ pub(crate) async fn gateway_handle_message_non_streaming(
                     args,
                 );
             }
-            let preview = build_tool_preview_from_value(name, args, 60).unwrap_or_default();
             let mut event = serde_json::json!({
                 "phase": "start",
                 "name": name,
@@ -342,11 +390,22 @@ pub(crate) async fn gateway_handle_message_non_streaming(
             }
         });
     let tool_events_for_complete = tool_events.clone();
+    let platform_for_tool_complete = ctx.platform.clone();
+    let chat_for_tool_complete = ctx.chat_id.clone();
     let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
         Box::new(move |name: &str, result: &str| {
+            let truncated = truncate_hook_tool_result(result);
+            info!(
+                platform = %platform_for_tool_complete,
+                chat_id = %chat_for_tool_complete,
+                tool = %name,
+                result_preview = %truncated,
+                streaming = false,
+                "gateway tool call completed"
+            );
             if name == "clarify" {
                 debug!(
-                    result_preview = %truncate_hook_tool_result(result),
+                    result_preview = %truncated,
                     "gateway clarify: tool call completed (non-streaming)"
                 );
             }
@@ -355,7 +414,7 @@ pub(crate) async fn gateway_handle_message_non_streaming(
                     "phase": "complete",
                     "name": name,
                     "emoji": tool_emoji(name),
-                    "result": truncate_hook_tool_result(result)
+                    "result": truncated
                 }));
             }
         });
@@ -443,7 +502,16 @@ pub(crate) async fn gateway_handle_message_non_streaming(
     gateway_for_review
         .sync_session_token_usage(&session_key, usage_display)
         .await;
-    Ok(gateway_conversation_reply(&conv))
+    let reply = gateway_conversation_reply(&conv);
+    log_gateway_conversation_finished(
+        &ctx.platform,
+        &ctx.chat_id,
+        &ctx.session_key,
+        false,
+        &conv,
+        &reply,
+    );
+    Ok(reply)
 }
 
 /// Agent-layer POI / memory flush before gateway session reset, idle expiry, or shutdown.
@@ -563,8 +631,19 @@ pub(crate) async fn gateway_handle_message_streaming(
     let gateway_for_clarify = gateway_for_review.clone();
     let platform_for_clarify = ctx.platform.clone();
     let chat_for_clarify = ctx.chat_id.clone();
+    let platform_for_tool_log = ctx.platform.clone();
+    let chat_for_tool_log = ctx.chat_id.clone();
     let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
         Box::new(move |name: &str, args: &serde_json::Value| {
+            let preview = build_tool_preview_from_value(name, args, 60).unwrap_or_default();
+            info!(
+                platform = %platform_for_tool_log,
+                chat_id = %chat_for_tool_log,
+                tool = %name,
+                preview = %preview,
+                streaming = true,
+                "gateway tool call started"
+            );
             if name == "clarify" {
                 debug!(
                     question = args.get("question").and_then(|v| v.as_str()),
@@ -578,7 +657,6 @@ pub(crate) async fn gateway_handle_message_streaming(
                     args,
                 );
             }
-            let preview = build_tool_preview_from_value(name, args, 60).unwrap_or_default();
             let mut event = serde_json::json!({
                 "phase": "start",
                 "name": name,
@@ -592,11 +670,22 @@ pub(crate) async fn gateway_handle_message_streaming(
             }
         });
     let tool_events_for_complete = tool_events.clone();
+    let platform_for_tool_complete = ctx.platform.clone();
+    let chat_for_tool_complete = ctx.chat_id.clone();
     let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
         Box::new(move |name: &str, result: &str| {
+            let truncated = truncate_hook_tool_result(result);
+            info!(
+                platform = %platform_for_tool_complete,
+                chat_id = %chat_for_tool_complete,
+                tool = %name,
+                result_preview = %truncated,
+                streaming = true,
+                "gateway tool call completed"
+            );
             if name == "clarify" {
                 debug!(
-                    result_preview = %truncate_hook_tool_result(result),
+                    result_preview = %truncated,
                     "gateway clarify: tool call completed (streaming)"
                 );
             }
@@ -605,7 +694,7 @@ pub(crate) async fn gateway_handle_message_streaming(
                     "phase": "complete",
                     "name": name,
                     "emoji": tool_emoji(name),
-                    "result": truncate_hook_tool_result(result)
+                    "result": truncated
                 }));
             }
         });
@@ -628,6 +717,13 @@ pub(crate) async fn gateway_handle_message_streaming(
                     .map(|s| s.to_string())
             })
             .collect();
+        info!(
+            platform = %platform_for_step_hook,
+            session_key = %session_for_step_hook,
+            iteration,
+            tool_names = ?tool_names,
+            "gateway agent step completed"
+        );
         let gw_hook = gateway_for_step_hook.clone();
         let platform = platform_for_step_hook.clone();
         let user_id = user_for_step_hook.clone();
@@ -666,6 +762,8 @@ pub(crate) async fn gateway_handle_message_streaming(
     )
     .await;
     let emit = on_chunk.clone();
+    let platform_for_stream_log = ctx.platform.clone();
+    let chat_for_stream_log = ctx.chat_id.clone();
     let ui_state = Arc::new(Mutex::new((false, false)));
     let ui_state_cb = ui_state.clone();
     let stream_cb: Box<dyn Fn(StreamChunk) + Send + Sync> = Box::new(move |chunk: StreamChunk| {
@@ -677,10 +775,21 @@ pub(crate) async fn gateway_handle_message_streaming(
                             .get("enabled")
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false);
+                        info!(
+                            platform = %platform_for_stream_log,
+                            chat_id = %chat_for_stream_log,
+                            enabled,
+                            "gateway stream control: mute_post_response"
+                        );
                         if let Ok(mut st) = ui_state_cb.lock() {
                             st.0 = enabled;
                         }
                     } else if control == "stream_break" {
+                        info!(
+                            platform = %platform_for_stream_log,
+                            chat_id = %chat_for_stream_log,
+                            "gateway stream control: stream_break (post-tool assistant turn)"
+                        );
                         if let Ok(mut st) = ui_state_cb.lock() {
                             st.1 = true;
                         }
@@ -730,5 +839,14 @@ pub(crate) async fn gateway_handle_message_streaming(
     gateway_for_review
         .sync_session_token_usage(&session_key, usage_display)
         .await;
-    Ok(gateway_conversation_reply(&conv))
+    let reply = gateway_conversation_reply(&conv);
+    log_gateway_conversation_finished(
+        &ctx.platform,
+        &ctx.chat_id,
+        &ctx.session_key,
+        true,
+        &conv,
+        &reply,
+    );
+    Ok(reply)
 }

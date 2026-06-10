@@ -21,6 +21,8 @@ pub struct WebToolBudgetLimits {
     pub search_max: u32,
     /// Optional aggregate backstop (`HERMES_WEB_TOOL_BUDGET_MAX_CALLS`). When `None`, only per-pool caps apply.
     pub aggregate_max: Option<u32>,
+    /// Hard safety cap on all attempted web calls, including failures.
+    pub max_attempt_total: u32,
     pub max_consecutive_errors: u32,
 }
 
@@ -34,17 +36,40 @@ impl WebToolBudgetLimits {
                 .ok()
                 .and_then(|v| v.trim().parse::<u32>().ok())
                 .filter(|v| *v > 0),
+            max_attempt_total: env_u32("HERMES_WEB_TOOL_BUDGET_MAX_ATTEMPTS", 12),
             max_consecutive_errors: env_u32("HERMES_WEB_TOOL_BUDGET_MAX_CONSECUTIVE_ERRORS", 2),
         }
     }
 
     pub fn from_web_research_config(config: &WebResearchConfig) -> Self {
+        let search_max = config.message_caps.max_total_search.max(config.max_search);
+        let extract_max = config
+            .message_caps
+            .max_total_extract
+            .max(config.max_extract);
+        let default_total = search_max
+            .saturating_add(extract_max)
+            .saturating_add(config.max_browser)
+            .max(config.max_total);
+        let aggregate_max = env_u32_opt("HERMES_WEB_TOOL_BUDGET_MAX_CALLS").or(Some(default_total));
         Self {
-            browser_max: config.max_browser,
-            extract_max: config.max_extract,
-            search_max: config.max_search,
-            aggregate_max: Some(config.max_total).filter(|v| *v > 0),
-            max_consecutive_errors: config.max_consecutive_errors,
+            browser_max: env_u32_or("HERMES_BROWSER_BUDGET_MAX_CALLS", config.max_browser),
+            extract_max: env_u32_or("HERMES_WEB_EXTRACT_BUDGET_MAX_CALLS", extract_max),
+            search_max: env_u32_or("HERMES_WEB_SEARCH_BUDGET_MAX_CALLS", search_max),
+            aggregate_max,
+            max_attempt_total: env_u32_or(
+                "HERMES_WEB_TOOL_BUDGET_MAX_ATTEMPTS",
+                config.message_caps.max_attempt_total.max(
+                    aggregate_max
+                        .unwrap_or(config.max_total)
+                        .saturating_add(4)
+                        .max(12),
+                ),
+            ),
+            max_consecutive_errors: env_u32_or(
+                "HERMES_WEB_TOOL_BUDGET_MAX_CONSECUTIVE_ERRORS",
+                config.max_consecutive_errors,
+            ),
         }
     }
 
@@ -60,6 +85,7 @@ impl WebToolBudgetLimits {
             extract_max,
             browser_max,
             aggregate_max: aggregate_max.filter(|v| *v > 0),
+            max_attempt_total: aggregate_max.unwrap_or(8).saturating_add(4).max(12),
             max_consecutive_errors,
         }
     }
@@ -78,8 +104,13 @@ pub struct WebToolBudgetState {
     pub search_used: u32,
     /// Billable successes across all web tools (for optional aggregate backstop only).
     pub billable_total: u32,
+    /// Non-billable failures per pool, tracked for diagnostics and retry policy.
+    pub browser_failed: u32,
+    pub extract_failed: u32,
+    pub search_failed: u32,
     pub consecutive_error_turns: u32,
-    pub seen_search_queries: HashSet<String>,
+    pub successful_search_queries: HashSet<String>,
+    pub failed_search_queries: HashMap<String, u32>,
 }
 
 impl WebToolBudgetState {
@@ -89,11 +120,18 @@ impl WebToolBudgetState {
 }
 
 fn env_u32(key: &str, default: u32) -> u32 {
+    env_u32_opt(key).unwrap_or(default)
+}
+
+fn env_u32_or(key: &str, default: u32) -> u32 {
+    env_u32_opt(key).unwrap_or(default)
+}
+
+fn env_u32_opt(key: &str) -> Option<u32> {
     std::env::var(key)
         .ok()
         .and_then(|v| v.trim().parse::<u32>().ok())
         .filter(|v| *v > 0)
-        .unwrap_or(default)
 }
 
 pub fn is_budgeted_web_tool(name: &str) -> bool {
@@ -217,7 +255,11 @@ pub fn web_url_dedup_user_notice() -> String {
 
 /// Block `web_extract` / `browser_navigate` when the same URL was already extracted successfully.
 fn normalize_search_query(query: &str) -> String {
-    query.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase()
+    query
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
 }
 
 fn query_from_tool_arguments(name: &str, arguments: &str) -> Option<String> {
@@ -231,7 +273,7 @@ fn query_from_tool_arguments(name: &str, arguments: &str) -> Option<String> {
         .filter(|q| !q.is_empty())
 }
 
-/// Block repeat `web_search` queries already attempted successfully this user message.
+/// Block same-batch duplicate searches and queries already satisfied this user message.
 pub fn apply_web_query_dedup(
     _messages: &[Message],
     state: &mut WebToolBudgetState,
@@ -240,22 +282,35 @@ pub fn apply_web_query_dedup(
 ) -> Vec<(String, ToolResult)> {
     let mut blocked = Vec::new();
     let mut kept = Vec::with_capacity(tool_calls.len());
+    let mut batch_queries = HashSet::new();
     for tc in tool_calls.drain(..) {
         if tc.function.name != "web_search" {
             kept.push(tc);
             continue;
         }
-        let Some(query) = query_from_tool_arguments(&tc.function.name, &tc.function.arguments) else {
+        let Some(query) = query_from_tool_arguments(&tc.function.name, &tc.function.arguments)
+        else {
             kept.push(tc);
             continue;
         };
-        if state.seen_search_queries.contains(&query) {
+        let already_satisfied = state.successful_search_queries.contains(&query);
+        let duplicate_in_batch = !batch_queries.insert(query.clone());
+        let failed_too_often = state
+            .failed_search_queries
+            .get(&query)
+            .copied()
+            .unwrap_or(0)
+            > 1;
+        if already_satisfied || duplicate_in_batch || failed_too_often {
             let reason = format!(
-                "Web query dedup on turn {turn}: blocked repeat web_search for query already used ({query})."
+                "Web query dedup on turn {turn}: blocked repeat web_search for query ({query})."
             );
             tracing::info!(
                 turn = turn,
                 query = %query,
+                already_satisfied = already_satisfied,
+                duplicate_in_batch = duplicate_in_batch,
+                failed_too_often = failed_too_often,
                 scope = "run",
                 "web_tool_budget query dedup block"
             );
@@ -333,25 +388,46 @@ pub fn web_tool_budget_user_notice(tool_name: &str, blocked_by_errors: bool) -> 
         "web_extract" => format!(
             "网页抓取次数已达上限{scope}，将基于已有信息直接回复。可换 URL 或基于上文 tool 结果回答。"
         ),
-        "browser_navigate" => format!(
-            "浏览器打开次数已达上限{scope}，将基于已有信息直接回复。"
-        ),
+        "browser_navigate" => format!("浏览器打开次数已达上限{scope}，将基于已有信息直接回复。"),
         _ => format!("工具 {tool_name} 调用受限{scope}，将基于已有信息直接回复。"),
     }
 }
 
-fn web_budget_stop_instruction() -> &'static str {
-    " Do not retry web_search/web_extract/browser_navigate for this user message; answer now from existing information and mark anything unverified."
+fn web_budget_stop_instruction(tool_name: &str, stop_all_web: bool) -> String {
+    if stop_all_web {
+        return " Do not retry web_search/web_extract/browser_navigate for this user message; answer now from existing information and mark anything unverified.".to_string();
+    }
+    format!(
+        " Do not retry {tool_name} for this user message; use other available web tools if needed, or answer from existing information and mark anything unverified."
+    )
+}
+
+pub fn is_attempt_safety_block(output: &str) -> bool {
+    output.contains("web_attempt_safety_exhausted")
+}
+
+pub fn web_attempt_safety_user_notice() -> String {
+    "网络检索多次失败，未获得可验证结果；将标注未完成联网验证。".to_string()
 }
 
 fn increment_attempted(state: &mut WebToolBudgetState, tool_name: &str) {
     match tool_name {
-        "browser_navigate" => {
-            state.attempted_browser = state.attempted_browser.saturating_add(1)
-        }
+        "browser_navigate" => state.attempted_browser = state.attempted_browser.saturating_add(1),
         "web_extract" => state.attempted_extract = state.attempted_extract.saturating_add(1),
         "web_search" => state.attempted_search = state.attempted_search.saturating_add(1),
         _ => {}
+    }
+}
+
+fn reserve_success_slot(state: &mut WebToolBudgetState, tool_name: &str) {
+    match tool_name {
+        "browser_navigate" => state.browser_used = state.browser_used.saturating_add(1),
+        "web_extract" => state.extract_used = state.extract_used.saturating_add(1),
+        "web_search" => state.search_used = state.search_used.saturating_add(1),
+        _ => {}
+    }
+    if is_budgeted_web_tool(tool_name) {
+        state.billable_total = state.billable_total.saturating_add(1);
     }
 }
 
@@ -360,6 +436,16 @@ impl WebToolBudgetState {
         self.attempted_browser
             .saturating_add(self.attempted_extract)
             .saturating_add(self.attempted_search)
+    }
+
+    pub fn successful_total(&self) -> u32 {
+        self.browser_used
+            .saturating_add(self.extract_used)
+            .saturating_add(self.search_used)
+    }
+
+    pub fn has_successful_evidence(&self) -> bool {
+        self.successful_total() > 0 || self.billable_total > 0
     }
 }
 
@@ -381,22 +467,23 @@ pub fn apply_web_tool_budget(
         }
 
         let pool_block = match tc.function.name.as_str() {
-            "browser_navigate" => simulated.attempted_browser >= limits.browser_max,
-            "web_extract" => simulated.attempted_extract >= limits.extract_max,
-            "web_search" => simulated.attempted_search >= limits.search_max,
+            "browser_navigate" => simulated.browser_used >= limits.browser_max,
+            "web_extract" => simulated.extract_used >= limits.extract_max,
+            "web_search" => simulated.search_used >= limits.search_max,
             _ => false,
         };
         let aggregate_block = limits
             .aggregate_max
-            .is_some_and(|max| simulated.attempted_total() >= max);
-        let block = blocked_by_errors || pool_block || aggregate_block;
+            .is_some_and(|max| simulated.billable_total >= max);
+        let attempt_safety_block = simulated.attempted_total() >= limits.max_attempt_total;
+        let block = blocked_by_errors || pool_block || aggregate_block || attempt_safety_block;
         if block {
             let (used, limit, pool) = match tc.function.name.as_str() {
-                "browser_navigate" => (simulated.attempted_browser, limits.browser_max, "browser"),
-                "web_extract" => (simulated.attempted_extract, limits.extract_max, "extract"),
-                "web_search" => (simulated.attempted_search, limits.search_max, "search"),
+                "browser_navigate" => (simulated.browser_used, limits.browser_max, "browser"),
+                "web_extract" => (simulated.extract_used, limits.extract_max, "extract"),
+                "web_search" => (simulated.search_used, limits.search_max, "search"),
                 _ => (
-                    simulated.attempted_total(),
+                    simulated.billable_total,
                     limits.aggregate_max.unwrap_or(0),
                     "aggregate",
                 ),
@@ -406,11 +493,22 @@ pub fn apply_web_tool_budget(
                     "Web tool budget guard on turn {turn}: blocked '{}' after {} consecutive web-tool error turn(s).",
                     tc.function.name, state.consecutive_error_turns
                 )
-            } else if aggregate_block && !pool_block {
+            } else if attempt_safety_block && !simulated.has_successful_evidence() {
                 format!(
-                    "Web tool aggregate budget exceeded on turn {turn}: blocked '{}' (attempted_total={}).",
+                    "web_attempt_safety_exhausted_without_evidence on turn {turn}: blocked '{}' after {} attempted web call(s).",
                     tc.function.name,
                     simulated.attempted_total()
+                )
+            } else if attempt_safety_block {
+                format!(
+                    "web_attempt_safety_exhausted on turn {turn}: blocked '{}' after {} attempted web call(s).",
+                    tc.function.name,
+                    simulated.attempted_total()
+                )
+            } else if aggregate_block && !pool_block {
+                format!(
+                    "Web tool aggregate budget exceeded on turn {turn}: blocked '{}' (billable_total={}).",
+                    tc.function.name, simulated.billable_total
                 )
             } else {
                 format!(
@@ -424,17 +522,26 @@ pub fn apply_web_tool_budget(
                 pool = pool,
                 used = used,
                 limit = limit,
+                attempted_total = simulated.attempted_total(),
                 scope = "run",
                 blocked_by_errors = blocked_by_errors,
                 "web_tool_budget block"
             );
+            let stop_all_web = blocked_by_errors || attempt_safety_block || aggregate_block;
             blocked_results.push((
                 tc.function.name.clone(),
-                ToolResult::err(tc.id, format!("{reason}{}", web_budget_stop_instruction())),
+                ToolResult::err(
+                    tc.id,
+                    format!(
+                        "{reason}{}",
+                        web_budget_stop_instruction(&tc.function.name, stop_all_web)
+                    ),
+                ),
             ));
             continue;
         }
         increment_attempted(&mut simulated, &tc.function.name);
+        reserve_success_slot(&mut simulated, &tc.function.name);
         kept.push(tc);
     }
     *tool_calls = kept;
@@ -452,10 +559,53 @@ pub fn is_billable_web_tool_result(name: &str, output: &str) -> bool {
     if looks_like_tool_error_output(output) {
         return false;
     }
+    if name == "web_search" {
+        return has_useful_web_search_results(output);
+    }
+    if name == "web_extract" && is_extract_non_billable_failure(output) {
+        return false;
+    }
     if name == "browser_navigate" && is_browser_non_billable_failure(output) {
         return false;
     }
     true
+}
+
+fn has_useful_web_search_results(output: &str) -> bool {
+    let trimmed = output.trim();
+    let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+        return trimmed.len() >= 40;
+    };
+    let results = value
+        .get("results")
+        .or_else(|| value.get("web"))
+        .or_else(|| value.get("data").and_then(|v| v.get("results")))
+        .or_else(|| value.get("data").and_then(|v| v.get("web")))
+        .and_then(|v| v.as_array());
+    let Some(results) = results else {
+        return false;
+    };
+    results.iter().any(|item| {
+        let title = item
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let url = item
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let text = item
+            .get("text")
+            .or_else(|| item.get("snippet"))
+            .or_else(|| item.get("content"))
+            .or_else(|| item.get("description"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        !url.is_empty() && (!title.is_empty() || !text.is_empty())
+    })
 }
 
 fn is_browser_non_billable_failure(output: &str) -> bool {
@@ -467,6 +617,20 @@ fn is_browser_non_billable_failure(output: &str) -> bool {
         || lower.contains("chrome executable not found")
         || lower.contains("failed to open")
         || lower.contains("navigation failed")
+}
+
+fn is_extract_non_billable_failure(output: &str) -> bool {
+    let trimmed = output.trim();
+    if trimmed.chars().count() < 40 {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    lower.contains("404")
+        || lower.contains("not found")
+        || lower.contains("page not found")
+        || trimmed.contains("页面不存在")
+        || trimmed.contains("网页不存在")
+        || trimmed.contains("空正文")
 }
 
 pub fn looks_like_tool_error_output(output: &str) -> bool {
@@ -499,6 +663,21 @@ pub fn looks_like_tool_error_output(output: &str) -> bool {
         || lower.contains("missing '")
 }
 
+fn record_web_tool_failure(state: &mut WebToolBudgetState, tool_name: &str, query: Option<String>) {
+    match tool_name {
+        "browser_navigate" => state.browser_failed = state.browser_failed.saturating_add(1),
+        "web_extract" => state.extract_failed = state.extract_failed.saturating_add(1),
+        "web_search" => {
+            state.search_failed = state.search_failed.saturating_add(1);
+            if let Some(query) = query {
+                let count = state.failed_search_queries.entry(query).or_insert(0);
+                *count = count.saturating_add(1);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn record_web_tool_results(
     state: &mut WebToolBudgetState,
     _limits: &WebToolBudgetLimits,
@@ -514,9 +693,7 @@ pub fn record_web_tool_results(
         }
         web_turn_calls = web_turn_calls.saturating_add(1);
         increment_attempted(state, &tc.function.name);
-        if let Some(query) = query_from_tool_arguments(&tc.function.name, &tc.function.arguments) {
-            state.seen_search_queries.insert(query);
-        }
+        let query = query_from_tool_arguments(&tc.function.name, &tc.function.arguments);
         let result = results.iter().find(|r| r.tool_call_id == tc.id);
         let billable = result.is_some_and(|r| {
             !r.is_error && is_billable_web_tool_result(&tc.function.name, &r.content)
@@ -529,6 +706,10 @@ pub fn record_web_tool_results(
                 "web_search" => state.search_used = state.search_used.saturating_add(1),
                 _ => {}
             }
+            if let Some(query) = query {
+                state.successful_search_queries.insert(query.clone());
+                state.failed_search_queries.remove(&query);
+            }
             state.billable_total = state.billable_total.saturating_add(1);
             tracing::debug!(
                 tool = %tc.function.name,
@@ -539,6 +720,8 @@ pub fn record_web_tool_results(
                 scope = "run",
                 "web_tool_budget billable"
             );
+        } else {
+            record_web_tool_failure(state, &tc.function.name, query);
         }
     }
 
@@ -568,6 +751,7 @@ mod tests {
             extract_max: 5,
             search_max: 2,
             aggregate_max: None,
+            max_attempt_total: 12,
             max_consecutive_errors: 2,
         };
         let mut state = WebToolBudgetState {
@@ -608,6 +792,7 @@ mod tests {
             extract_max: 5,
             search_max: 2,
             aggregate_max: None,
+            max_attempt_total: 12,
             max_consecutive_errors: 2,
         };
         let state = WebToolBudgetState::default();
@@ -657,6 +842,7 @@ mod tests {
             extract_max: 5,
             search_max: 2,
             aggregate_max: None,
+            max_attempt_total: 12,
             max_consecutive_errors: 2,
         };
         let state = WebToolBudgetState {
@@ -684,6 +870,7 @@ mod tests {
             extract_max: 5,
             search_max: 2,
             aggregate_max: None,
+            max_attempt_total: 12,
             max_consecutive_errors: 2,
         };
         let calls = vec![ToolCall {
@@ -703,12 +890,60 @@ mod tests {
     }
 
     #[test]
+    fn failed_web_search_does_not_consume_success_budget() {
+        let mut state = WebToolBudgetState::default();
+        let limits = WebToolBudgetLimits::from_dynamic_pools(1, 1, 1, Some(1), 2);
+        let calls = vec![ToolCall {
+            id: "s1".into(),
+            function: FunctionCall {
+                name: "web_search".into(),
+                arguments: r#"{"query":"rust"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        let results = vec![ToolResult::err("s1", "timed out")];
+        record_web_tool_results(&mut state, &limits, &calls, &results);
+        assert_eq!(state.search_used, 0);
+        assert_eq!(state.billable_total, 0);
+        assert_eq!(state.search_failed, 1);
+    }
+
+    #[test]
+    fn empty_web_search_payload_is_not_billable() {
+        assert!(!is_billable_web_tool_result(
+            "web_search",
+            r#"{"data":{"web":[]}}"#
+        ));
+        assert!(!is_billable_web_tool_result(
+            "web_search",
+            r#"{"results":[]}"#
+        ));
+    }
+
+    #[test]
+    fn gateway_web_search_payload_is_billable_when_result_has_source() {
+        assert!(is_billable_web_tool_result(
+            "web_search",
+            r#"{"data":{"web":[{"title":"深圳天气","url":"https://weather.example/shenzhen","description":"今日天气"}]}}"#
+        ));
+    }
+
+    #[test]
+    fn web_extract_404_is_not_billable() {
+        assert!(!is_billable_web_tool_result(
+            "web_extract",
+            "HTTP 404 page not found 页面不存在"
+        ));
+    }
+
+    #[test]
     fn test_aggregate_backstop_blocks_when_enabled() {
         let limits = WebToolBudgetLimits {
             browser_max: 10,
             extract_max: 10,
             search_max: 10,
             aggregate_max: Some(2),
+            max_attempt_total: 12,
             max_consecutive_errors: 2,
         };
         let state = WebToolBudgetState {
@@ -728,6 +963,65 @@ mod tests {
         let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1);
         assert_eq!(blocked.len(), 1);
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn aggregate_backstop_uses_billable_not_attempted() {
+        let limits = WebToolBudgetLimits::from_dynamic_pools(10, 10, 10, Some(2), 2);
+        let state = WebToolBudgetState {
+            attempted_search: 2,
+            billable_total: 0,
+            ..Default::default()
+        };
+        let mut calls = vec![ToolCall {
+            id: "s3".into(),
+            function: FunctionCall {
+                name: "web_search".into(),
+                arguments: r#"{"query":"fresh"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1);
+        assert!(blocked.is_empty());
+        assert_eq!(calls.len(), 1);
+    }
+
+    #[test]
+    fn failed_query_gets_one_retry_success_query_dedups() {
+        let mut state = WebToolBudgetState::default();
+        state.failed_search_queries.insert("rust".into(), 1);
+        let mut retry = vec![ToolCall {
+            id: "s2".into(),
+            function: FunctionCall {
+                name: "web_search".into(),
+                arguments: r#"{"query":"rust"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        assert!(apply_web_query_dedup(&[], &mut state, &mut retry, 2).is_empty());
+        state.successful_search_queries.insert("rust".into());
+        let blocked = apply_web_query_dedup(&[], &mut state, &mut retry, 3);
+        assert_eq!(blocked.len(), 1);
+    }
+
+    #[test]
+    fn attempt_safety_has_distinct_stop_reason_without_evidence() {
+        let limits = WebToolBudgetLimits::from_dynamic_pools(10, 10, 10, Some(8), 2);
+        let state = WebToolBudgetState {
+            attempted_search: 12,
+            ..Default::default()
+        };
+        let mut calls = vec![ToolCall {
+            id: "s13".into(),
+            function: FunctionCall {
+                name: "web_search".into(),
+                arguments: r#"{"query":"still failing"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 13);
+        assert!(is_attempt_safety_block(&blocked[0].1.content));
+        assert!(blocked[0].1.content.contains("without_evidence"));
     }
 
     #[test]
@@ -776,7 +1070,10 @@ mod tests {
     #[test]
     fn test_budget_block_should_notify_user_browser_zero() {
         let limits = WebToolBudgetLimits::from_dynamic_pools(2, 1, 0, Some(3), 3);
-        assert!(!budget_block_should_notify_user("browser_navigate", &limits));
+        assert!(!budget_block_should_notify_user(
+            "browser_navigate",
+            &limits
+        ));
         assert!(budget_block_should_notify_user("web_extract", &limits));
     }
 

@@ -12,9 +12,9 @@
 use chrono::{DateTime, Utc};
 use futures::future::{AbortHandle, Abortable};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::process::Stdio;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
@@ -89,7 +89,7 @@ impl RouteTypingGuard {
     }
 }
 
-use hermes_config::{normalize_service_tier, DisplayConfig, QuickCommandConfig};
+use hermes_config::{DisplayConfig, QuickCommandConfig, normalize_service_tier};
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 use hermes_core::types::{Message, MessageRole};
@@ -98,14 +98,16 @@ use hermes_core::{
 };
 
 use crate::background::{BackgroundTaskManager, TaskStatus};
-use crate::commands::{BatchCommandClass, BatchedCommand, GatewayCommandResult, handle_command, parse_batch_commands};
+use crate::commands::{
+    BatchCommandClass, BatchedCommand, GatewayCommandResult, handle_command, parse_batch_commands,
+};
 use crate::dm::{DmDecision, DmManager};
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::pairing_store::DmPairingStore;
 use crate::platforms::helpers::extract_inline_images;
 use crate::session::{SessionManager, SessionTeardownSnapshot};
-use crate::tool_backends::ClarifyDispatcher;
 use crate::stream::{StreamConfig, StreamManager};
+use crate::tool_backends::ClarifyDispatcher;
 use crate::voice::VoiceManager;
 use hermes_config::resolve_outbound_media_path;
 use hermes_tools::extract_media;
@@ -602,6 +604,19 @@ fn inbound_text_log_fields(text: &str) -> (usize, String, String) {
     (chars, preview, text_fp)
 }
 
+fn outbound_text_log_tail(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    let count = trimmed.chars().count();
+    if count <= max_chars {
+        return trimmed.replace('\n', " ");
+    }
+    let tail: String = trimmed
+        .chars()
+        .skip(count.saturating_sub(max_chars))
+        .collect();
+    format!("…{}", tail.replace('\n', " "))
+}
+
 impl Gateway {
     fn route_correlation_id(incoming: &IncomingMessage, session_key: &str) -> String {
         if let Some(mid) = incoming
@@ -668,10 +683,7 @@ impl Gateway {
     }
 
     fn begin_turn_outbound_tracking(&self, session_key: &str, platform: &str, chat_id: &str) {
-        let mut guard = self
-            .turn_outbound
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.turn_outbound.lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(
             session_key.to_string(),
             TurnOutboundTracker::new(platform, chat_id),
@@ -679,10 +691,7 @@ impl Gateway {
     }
 
     fn clear_turn_outbound_tracking(&self, session_key: &str) {
-        let mut guard = self
-            .turn_outbound
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.turn_outbound.lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(session_key);
     }
 
@@ -1267,7 +1276,8 @@ impl Gateway {
                 handle_command(&incoming.text)
             };
             if matches!(command, GatewayCommandResult::StopAgent(_)) {
-                self.apply_command_result(incoming, &session_key, command).await?;
+                self.apply_command_result(incoming, &session_key, command)
+                    .await?;
                 return Ok(());
             }
         }
@@ -1310,7 +1320,11 @@ impl Gateway {
                 .apply_persisted_session_id(&session_key, &bound_id)
                 .await;
         }
-        let session = self.session_manager.get_session(&session_key).await.unwrap_or(session);
+        let session = self
+            .session_manager
+            .get_session(&session_key)
+            .await
+            .unwrap_or(session);
         trace!(
             platform = %incoming.platform,
             session_key = %session_key,
@@ -1356,11 +1370,7 @@ impl Gateway {
         }
 
         let typing_guard = if let Some(adapter) = self.get_adapter(&incoming.platform).await {
-            Self::spawn_route_typing(
-                &incoming.platform,
-                adapter,
-                incoming.chat_id.clone(),
-            )
+            Self::spawn_route_typing(&incoming.platform, adapter, incoming.chat_id.clone())
         } else {
             RouteTypingGuard::none()
         };
@@ -1446,11 +1456,18 @@ impl Gateway {
             && !incoming.platform.eq_ignore_ascii_case("weixin")
             // WhatsApp (wa-rs) 对 "..." 占位 + edit 流式不可靠，走一次性回复
             && !incoming.platform.eq_ignore_ascii_case("whatsapp");
-        self.begin_turn_outbound_tracking(
-            &session_key,
-            &incoming.platform,
-            &incoming.chat_id,
-        );
+        if incoming.platform.eq_ignore_ascii_case("wecom") {
+            info!(
+                route_id = %route_id,
+                chat_id = %incoming.chat_id,
+                session_key = %session_key,
+                streaming_enabled = self.config.streaming_enabled,
+                supports_streaming,
+                message_id = ?incoming.message_id,
+                "wecom route: streaming vs one-shot decision"
+            );
+        }
+        self.begin_turn_outbound_tracking(&session_key, &incoming.platform, &incoming.chat_id);
         let route_future = async {
             if supports_streaming {
                 self.route_streaming(&incoming, messages, &session_key, &route_id)
@@ -1728,7 +1745,9 @@ impl Gateway {
         // generalised batch dispatcher instead of the single-command path.
         let batch = parse_batch_commands(&incoming.text);
         if !batch.is_empty() {
-            return self.execute_batch_commands(incoming, session_key, batch).await;
+            return self
+                .execute_batch_commands(incoming, session_key, batch)
+                .await;
         }
 
         let result = handle_command(&incoming.text);
@@ -2575,7 +2594,8 @@ impl Gateway {
             &incoming.text,
             attachments_delivered,
         );
-        self.send_incoming_reply(incoming, &reply_text, None).await?;
+        self.send_incoming_reply(incoming, &reply_text, None)
+            .await?;
         self.flush_post_delivery_messages(
             &incoming.platform,
             &incoming.chat_id,
@@ -2894,12 +2914,23 @@ impl Gateway {
                                 }
                             }
                         } else if let Err(err) = edit_result {
+                            let content_chars = content.chars().count();
                             warn!(
                                 platform = %platform,
                                 chat_id = %chat_id,
                                 error = %err,
+                                content_chars,
+                                content_tail = %outbound_text_log_tail(&content, 64),
                                 "streaming progressive edit failed"
                             );
+                            if platform.eq_ignore_ascii_case("wecom") {
+                                info!(
+                                    chat_id = %chat_id,
+                                    content_chars,
+                                    content_tail = %outbound_text_log_tail(&content, 64),
+                                    "wecom streaming: edit unsupported, chunk not delivered until finalize"
+                                );
+                            }
                         }
                     } else if let Err(err) = adapter.send_message(&chat_id, &content, None).await {
                         warn!(
@@ -3021,13 +3052,8 @@ impl Gateway {
             let _ = worker.await;
             // If native stream could not start, fall back to one-shot delivery.
             if !native_started.load(Ordering::Acquire) || native_failed.load(Ordering::Acquire) {
-                self.send_message(
-                    &incoming.platform,
-                    &incoming.chat_id,
-                    &fallback_text,
-                    None,
-                )
-                .await?;
+                self.send_message(&incoming.platform, &incoming.chat_id, &fallback_text, None)
+                    .await?;
             }
             // Native stream success: final body was already sent via send_native_stream_chunk
             // (finish=true). Do not send_message again — it duplicates the streamed reply.
@@ -3045,6 +3071,20 @@ impl Gateway {
                 .await
                 .unwrap_or_default();
             let final_text = Self::streaming_delivery_text(&accumulated, &response);
+            if incoming.platform.eq_ignore_ascii_case("wecom") {
+                info!(
+                    route_id = %route_id,
+                    chat_id = %incoming.chat_id,
+                    streamed_chars = accumulated.chars().count(),
+                    handler_chars = response.chars().count(),
+                    final_chars = final_text.chars().count(),
+                    streamed_tail = %outbound_text_log_tail(&accumulated, 80),
+                    handler_tail = %outbound_text_log_tail(&response, 80),
+                    final_tail = %outbound_text_log_tail(&final_text, 80),
+                    anchor_message_id = ?anchor_message_id,
+                    "wecom streaming finalize: choosing delivery text"
+                );
+            }
             if !final_text.trim().is_empty() {
                 let trimmed = final_text.trim();
                 #[cfg(feature = "discord")]
@@ -3084,17 +3124,51 @@ impl Gateway {
                                         chat_id = %incoming.chat_id,
                                         message_id = %message_id,
                                         error = %err,
+                                        reply_chars = first.chars().count(),
+                                        reply_tail = %outbound_text_log_tail(first, 80),
                                         "streaming final edit failed; sending full reply"
                                     );
                                     adapter.send_message(&incoming.chat_id, first, None).await?;
+                                    if incoming.platform.eq_ignore_ascii_case("wecom") {
+                                        info!(
+                                            chat_id = %incoming.chat_id,
+                                            reply_chars = first.chars().count(),
+                                            reply_tail = %outbound_text_log_tail(first, 80),
+                                            "wecom streaming finalize: sent via send_message fallback"
+                                        );
+                                    }
+                                } else if incoming.platform.eq_ignore_ascii_case("wecom") {
+                                    info!(
+                                        chat_id = %incoming.chat_id,
+                                        message_id = %message_id,
+                                        reply_chars = first.chars().count(),
+                                        reply_tail = %outbound_text_log_tail(first, 80),
+                                        "wecom streaming finalize: final edit succeeded"
+                                    );
                                 }
                             }
                             for chunk in chunks.iter().skip(1) {
                                 adapter.send_message(&incoming.chat_id, chunk, None).await?;
+                                if incoming.platform.eq_ignore_ascii_case("wecom") {
+                                    info!(
+                                        chat_id = %incoming.chat_id,
+                                        chunk_chars = chunk.chars().count(),
+                                        chunk_tail = %outbound_text_log_tail(chunk, 80),
+                                        "wecom streaming finalize: sent extra chunk"
+                                    );
+                                }
                             }
                         } else {
                             for chunk in &chunks {
                                 adapter.send_message(&incoming.chat_id, chunk, None).await?;
+                                if incoming.platform.eq_ignore_ascii_case("wecom") {
+                                    info!(
+                                        chat_id = %incoming.chat_id,
+                                        chunk_chars = chunk.chars().count(),
+                                        chunk_tail = %outbound_text_log_tail(chunk, 80),
+                                        "wecom streaming finalize: sent chunk (no anchor)"
+                                    );
+                                }
                             }
                         }
                     }
@@ -3272,6 +3346,14 @@ impl Gateway {
             Err(_) => Vec::new(),
         };
         for message in queued {
+            if platform.eq_ignore_ascii_case("wecom") {
+                info!(
+                    chat_id = chat_id,
+                    message_chars = message.chars().count(),
+                    message_tail = %outbound_text_log_tail(&message, 80),
+                    "wecom flushing deferred post-delivery message"
+                );
+            }
             if let Err(e) = self.send_message(platform, chat_id, &message, None).await {
                 warn!(
                     platform = platform,
@@ -3482,7 +3564,9 @@ impl Gateway {
         session_key: &str,
         commands: Vec<BatchedCommand>,
     ) -> Result<bool, GatewayError> {
-        let has_control = commands.iter().any(|c| c.class == BatchCommandClass::Control);
+        let has_control = commands
+            .iter()
+            .any(|c| c.class == BatchCommandClass::Control);
         let has_mutation = commands
             .iter()
             .any(|c| c.class == BatchCommandClass::SessionMutation);
@@ -3557,8 +3641,7 @@ impl Gateway {
                     .submit_with_id(task_id.clone(), cmd.args.clone());
 
                 let messages: Arc<Vec<Message>> = if is_btw {
-                    let mut history =
-                        self.session_manager.get_messages(session_key).await;
+                    let mut history = self.session_manager.get_messages(session_key).await;
                     history.push(Message::user(format!(
                         "[Ephemeral /btw side question. Answer using the conversation \
                          context. No tools available. Be direct and concise.]\n\n{}",
@@ -3576,8 +3659,7 @@ impl Gateway {
             for (task_id, messages) in dispatches {
                 let manager = self.background_tasks.clone();
                 let task_id_inner = task_id;
-                let runtime_context =
-                    self.build_runtime_context(incoming, session_key).await;
+                let runtime_context = self.build_runtime_context(incoming, session_key).await;
                 let ctx_handler = context_handler.clone();
                 let leg_handler = legacy_handler.clone();
                 tokio::spawn(async move {
@@ -4033,7 +4115,9 @@ impl Gateway {
         let adapter = self.get_adapter(platform).await.ok_or_else(|| {
             GatewayError::Platform(format!("No adapter registered for platform: {}", platform))
         })?;
-        adapter.send_message_with_id(chat_id, text, parse_mode).await
+        adapter
+            .send_message_with_id(chat_id, text, parse_mode)
+            .await
     }
 
     /// Edit an existing message on a specific platform chat.
@@ -4099,7 +4183,8 @@ impl Gateway {
             let expired = self.session_manager.expire_idle_sessions().await;
             let expired_count = expired.len();
             for snapshot in expired {
-                self.teardown_session_snapshot(snapshot, "idle_expiry").await;
+                self.teardown_session_snapshot(snapshot, "idle_expiry")
+                    .await;
             }
             if expired_count > 0 {
                 tracing::info!(expired = expired_count, "Expired idle sessions");
@@ -4487,10 +4572,7 @@ mod tests {
         }
 
         async fn stop_typing(&self, chat_id: &str) -> Result<(), GatewayError> {
-            self.typing_stops
-                .lock()
-                .unwrap()
-                .push(chat_id.to_string());
+            self.typing_stops.lock().unwrap().push(chat_id.to_string());
             Ok(())
         }
 
