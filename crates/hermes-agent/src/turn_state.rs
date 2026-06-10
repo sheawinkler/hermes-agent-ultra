@@ -158,6 +158,7 @@ pub(crate) struct TurnContext {
     pub web_search_calls_used: u32,
     pub web_tool_consecutive_error_turns: u32,
     pub web_finalize_hint_injected: bool,
+    pub web_active_hint_injected: bool,
     pub review_memory_at_end: bool,
     pub first_user: String,
 
@@ -283,6 +284,7 @@ impl TurnContext {
             web_search_calls_used: 0,
             web_tool_consecutive_error_turns: 0,
             web_finalize_hint_injected: false,
+            web_active_hint_injected: false,
             governor_llm_latency_window: VecDeque::new(),
             governor_tool_error_window: VecDeque::new(),
             governor_consecutive_error_turns: 0,
@@ -465,6 +467,12 @@ async fn turn_route(agent: &AgentLoop, tc: &mut TurnContext) -> TurnState {
 
     if let Some(ref ctrl) = tc.web_research_ctrl {
         tc.active_tool_schemas = Arc::from(ctrl.filter_tool_schemas(tc.tool_schemas.as_ref()));
+        if !tc.web_active_hint_injected {
+            if let Some(hint) = ctrl.active_research_system_hint() {
+                tc.ctx.add_message(Message::system(hint));
+                tc.web_active_hint_injected = true;
+            }
+        }
         if !tc.web_finalize_hint_injected {
             if let Some(hint) = ctrl.finalization_system_hint() {
                 tc.ctx.add_message(Message::system(hint));

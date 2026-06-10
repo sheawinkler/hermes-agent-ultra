@@ -76,6 +76,16 @@ pub struct WebResearchConfig {
     pub source_classes: HashMap<String, WebSourceClassConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planner_prompt_path: Option<String>,
+    /// Optional auxiliary LLM pass to split multi-intent messages into tasks (falls back to rules).
+    #[serde(default)]
+    pub llm_decomposer_enabled: bool,
+    /// Max billable web tools executed in parallel within one agent turn batch.
+    #[serde(default = "default_max_parallel_web_calls")]
+    pub max_parallel_web_calls: u32,
+    /// Snippet-first policy: weather blocks web_extract while search budget remains; numeric tasks may
+    /// web_extract. browser_navigate is only enabled when the user message explicitly requests it.
+    #[serde(default = "default_true")]
+    pub search_snippet_first: bool,
 }
 
 fn default_web_research_enabled() -> bool {
@@ -135,7 +145,11 @@ fn default_simple_lookup_profile() -> WebResearchTaskProfile {
 }
 
 fn default_targeted_numeric_fact_profile() -> WebResearchTaskProfile {
-    profile(6, 3, 25_000)
+    profile(4, 2, 20_000)
+}
+
+fn default_max_parallel_web_calls() -> u32 {
+    3
 }
 
 fn default_message_max_total_search() -> u32 {
@@ -197,6 +211,9 @@ impl Default for WebResearchConfig {
             message_caps: WebResearchMessageCaps::default(),
             source_classes: default_source_classes(),
             planner_prompt_path: None,
+            llm_decomposer_enabled: false,
+            max_parallel_web_calls: default_max_parallel_web_calls(),
+            search_snippet_first: default_true(),
         }
     }
 }
@@ -212,7 +229,8 @@ mod tests {
         assert!(cfg.planner_enabled);
         assert_eq!(cfg.max_search, 5);
         assert_eq!(cfg.fallback_search, 5);
-        assert_eq!(cfg.task_profiles.targeted_numeric_fact.max_search, 6);
+        assert_eq!(cfg.task_profiles.targeted_numeric_fact.max_search, 4);
+        assert_eq!(cfg.max_parallel_web_calls, 3);
         assert_eq!(cfg.message_caps.max_total_search, 10);
         assert!(cfg.source_classes.is_empty());
     }

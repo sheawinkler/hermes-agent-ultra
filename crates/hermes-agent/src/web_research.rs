@@ -6,20 +6,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hermes_config::{WebResearchConfig, web_research::WebResearchTaskProfile};
+use chrono::Datelike;
 use hermes_core::{Message, ToolCall, ToolResult, ToolSchema};
 use hermes_intelligence::auxiliary::{AuxiliaryClient, AuxiliaryRequest, AuxiliaryTask};
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::web_tool_budget::{
-    WebToolBudgetLimits, WebToolBudgetState, apply_web_query_dedup, apply_web_tool_budget,
-    apply_web_url_dedup, budget_block_should_notify_user, is_attempt_safety_block,
-    is_billable_web_tool_result, is_budgeted_web_tool, record_web_tool_results,
-    web_attempt_safety_user_notice, web_tool_budget_user_notice, web_url_dedup_user_notice,
+    BudgetMode, WebToolBudgetLimits, WebToolBudgetState, apply_web_query_dedup,
+    apply_web_tool_budget, apply_web_url_dedup, budget_block_should_notify_user,
+    is_attempt_safety_block, is_billable_web_tool_result, is_budgeted_web_tool,
+    record_web_tool_results, web_attempt_safety_user_notice, web_tool_budget_user_notice,
+    web_url_dedup_user_notice,
 };
 
 const PLANNER_TASK: &str = "web_research_planner";
 const EVALUATOR_TASK: &str = "web_research_evaluator";
+const DECOMPOSER_TASK: &str = "web_research_decomposer";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResearchTaskType {
@@ -46,6 +49,8 @@ struct SearchEvidence {
 struct ResearchTask {
     id: usize,
     task_type: ResearchTaskType,
+    /// Sub-question text used for entity/term extraction (may be a clause, not the full message).
+    focus_text: String,
     entities: Vec<String>,
     time_scope: Option<String>,
     query_terms: Vec<String>,
@@ -105,6 +110,8 @@ pub struct WebResearchController {
     planner_invoked: bool,
     /// Planner set `browser_budget` to 0 but light web tools failed — grant fallback browser pool.
     browser_budget_escalated: bool,
+    /// Inbound user message explicitly asked for browser automation (`browser_navigate`).
+    user_requested_browser: bool,
     #[cfg(test)]
     test_llm: Option<WebResearchTestLlm>,
 }
@@ -114,11 +121,23 @@ pub struct WebResearchController {
 pub struct WebResearchTestLlm {
     pub planner_json: Option<String>,
     pub evaluator_json: Option<String>,
+    pub decomposer_json: Option<String>,
 }
 
 impl WebResearchController {
     pub fn new(config: WebResearchConfig) -> Self {
-        let limits = limits_for_config(&config, None);
+        Self::with_user_message(config, "")
+    }
+
+    pub fn with_user_message(config: WebResearchConfig, user_message: &str) -> Self {
+        let user_requested_browser = user_explicitly_requested_browser(user_message);
+        let limits = limits_for_config(&config, None, &[], user_requested_browser);
+        if user_requested_browser {
+            tracing::info!(
+                browser_max = limits.browser_max,
+                "web_research browser enabled by explicit user request"
+            );
+        }
         Self {
             config,
             limits,
@@ -132,6 +151,7 @@ impl WebResearchController {
             notice_seen: HashSet::new(),
             planner_invoked: false,
             browser_budget_escalated: false,
+            user_requested_browser,
             #[cfg(test)]
             test_llm: None,
         }
@@ -161,6 +181,9 @@ impl WebResearchController {
                 .collect();
         }
         let mut out: Vec<ToolSchema> = schemas.to_vec();
+        if self.config.enabled && !self.user_requested_browser {
+            out.retain(|s| s.name != "browser_navigate");
+        }
         if self.config.enabled && self.planner_invoked {
             out.retain(|s| match s.name.as_str() {
                 "browser_navigate" => self.limits.browser_max > 0,
@@ -168,8 +191,34 @@ impl WebResearchController {
                 "web_extract" => self.limits.extract_max > 0,
                 _ => true,
             });
+            if !self.tasks.is_empty()
+                && self.tasks.iter().all(|t| t.status == ResearchTaskStatus::Verified)
+            {
+                out.retain(|s| !matches!(s.name.as_str(), "web_extract" | "browser_navigate"));
+            }
         }
         out
+    }
+
+    /// One-shot guidance injected after web_research planner/decompose runs.
+    pub fn active_research_system_hint(&self) -> Option<String> {
+        if !self.config.enabled || !self.planner_invoked || self.tasks.is_empty() {
+            return None;
+        }
+        if !self.config.search_snippet_first {
+            return None;
+        }
+        let browser_line = if self.user_requested_browser {
+            " Browser is available because the user requested it."
+        } else {
+            " Do not use browser_navigate for this message."
+        };
+        Some(format!(
+            "Web research policy: prefer web_search snippets when they already contain the answer. \
+             When snippets omit a needed figure, web_extract URLs returned by web_search.{browser_line} \
+             For today-scoped questions without digits in the user text, avoid web_extract while search \
+             budget remains; use another web_search query instead."
+        ))
     }
 
     fn should_strip_web_tools(&self) -> bool {
@@ -216,19 +265,44 @@ impl WebResearchController {
         }
         self.planner_invoked = true;
         self.tasks = decompose_research_tasks(user_message, &self.config);
+        if self.config.llm_decomposer_enabled {
+            if let Some(tasks) = self
+                .fetch_decomposed_tasks(auxiliary, user_message)
+                .await
+            {
+                if !tasks.is_empty() {
+                    tracing::info!(task_count = tasks.len(), "web_research llm decomposer applied");
+                    self.tasks = tasks;
+                }
+            }
+        }
         if !self.config.planner_enabled {
-            self.plan = Some(fallback_plan(&self.config));
-            self.limits = limits_for_config(&self.config, self.plan.as_ref());
+            self.plan = Some(fallback_plan(
+                &self.config,
+                &self.tasks,
+                self.user_requested_browser,
+            ));
+            self.limits = limits_for_config(
+                &self.config,
+                self.plan.as_ref(),
+                &self.tasks,
+                self.user_requested_browser,
+            );
             return;
         }
         let plan = match self.fetch_plan(auxiliary, user_message).await {
             Some(p) => p,
             None => {
                 tracing::warn!("web_research planner failed; using fallback budgets");
-                fallback_plan(&self.config)
+                fallback_plan(&self.config, &self.tasks, self.user_requested_browser)
             }
         };
-        self.limits = limits_for_config(&self.config, Some(&plan));
+        self.limits = limits_for_config(
+            &self.config,
+            Some(&plan),
+            &self.tasks,
+            self.user_requested_browser,
+        );
         if !plan.need_web {
             self.web_stopped = true;
             self.force_finalize = true;
@@ -252,6 +326,7 @@ impl WebResearchController {
                 &WebToolBudgetLimits::from_env(),
                 tool_calls,
                 turn,
+                BudgetMode::Global,
             );
             return (blocked, user_notices);
         }
@@ -268,17 +343,25 @@ impl WebResearchController {
         {
             if let Some(decision) = self.fetch_decision(auxiliary, messages).await {
                 if decision.sufficient_answer || !decision.continue_web {
-                    self.web_stopped = true;
-                    self.force_finalize = true;
-                    self.finalization_reason = Some("evaluator_stop");
-                    let blocked = self.block_all_web_calls(tool_calls, turn, "evaluator stop");
                     if !decision.final_answer_instruction.is_empty() {
                         tracing::debug!(
                             instruction_len = decision.final_answer_instruction.len(),
                             "web_research evaluator finalization instruction"
                         );
                     }
-                    return (blocked, user_notices);
+                    if all_tasks_terminal(&self.tasks) {
+                        self.web_stopped = true;
+                        self.force_finalize = true;
+                        self.finalization_reason = Some("evaluator_stop");
+                        let blocked = self.block_all_web_calls(tool_calls, turn, "evaluator stop");
+                        return (blocked, user_notices);
+                    }
+                    tracing::info!(
+                        sufficient_answer = decision.sufficient_answer,
+                        continue_web = decision.continue_web,
+                        pending_tasks = self.tasks.iter().filter(|t| t.status == ResearchTaskStatus::Pending).count(),
+                        "web_research evaluator suggested stop but tasks still pending; continue"
+                    );
                 }
             }
         }
@@ -299,6 +382,7 @@ impl WebResearchController {
             if tool_calls
                 .iter()
                 .all(|tc| is_budgeted_web_tool(&tc.function.name))
+                && all_tasks_terminal(&self.tasks)
             {
                 self.web_stopped = true;
                 self.force_finalize = true;
@@ -306,10 +390,21 @@ impl WebResearchController {
             }
         }
 
+        trim_parallel_web_calls(tool_calls, self.config.max_parallel_web_calls);
         deferred.extend(self.apply_task_policy(tool_calls, turn));
 
-        let budget_blocked =
-            apply_web_tool_budget(&self.budget_state, &self.limits, tool_calls, turn);
+        let budget_mode = if self.tasks.is_empty() {
+            BudgetMode::Global
+        } else {
+            BudgetMode::TaskPrimary
+        };
+        let budget_blocked = apply_web_tool_budget(
+            &self.budget_state,
+            &self.limits,
+            tool_calls,
+            turn,
+            budget_mode,
+        );
         if !budget_blocked.is_empty() {
             let blocked_by_errors =
                 self.budget_state.consecutive_error_turns >= self.limits.max_consecutive_errors;
@@ -352,7 +447,10 @@ impl WebResearchController {
                     user_notices.push(notice);
                 }
             }
-            if tool_calls.is_empty() && !self.any_web_pool_has_capacity() {
+            if tool_calls.is_empty()
+                && !self.any_web_pool_has_capacity()
+                && all_tasks_terminal(&self.tasks)
+            {
                 self.web_stopped = true;
                 self.force_finalize = true;
                 self.finalization_reason = if budget_blocked
@@ -379,6 +477,16 @@ impl WebResearchController {
     fn any_web_pool_has_capacity(&self) -> bool {
         if self.budget_state.attempted_total() >= self.limits.max_attempt_total {
             return false;
+        }
+        if !self.tasks.is_empty() {
+            let task_capacity = self.tasks.iter().any(|task| {
+                task.status == ResearchTaskStatus::Pending
+                    && (task.search_attempts < task.max_search
+                        || task.extract_attempts < task.max_extract)
+            });
+            return task_capacity
+                || (self.limits.browser_max > 0
+                    && self.budget_state.browser_used < self.limits.browser_max);
         }
         self.budget_state.search_used < self.limits.search_max
             || self.budget_state.extract_used < self.limits.extract_max
@@ -506,6 +614,16 @@ impl WebResearchController {
                 task.status = ResearchTaskStatus::Exhausted;
             }
         }
+        tracing::info!(
+            task_id = task.id,
+            task_type = ?task.task_type,
+            status = ?task.status,
+            search_attempts = task.search_attempts,
+            extract_attempts = task.extract_attempts,
+            low_signal_count = task.low_signal_count,
+            accepted = accepted,
+            "web_research task search recorded"
+        );
         accepted
     }
 
@@ -527,7 +645,8 @@ impl WebResearchController {
     }
 
     fn maybe_escalate_browser_after_light_failure(&mut self) -> bool {
-        if !self.config.enabled
+        if !self.user_requested_browser
+            || !self.config.enabled
             || !self.planner_invoked
             || self.browser_budget_escalated
             || self.limits.browser_max > 0
@@ -538,7 +657,7 @@ impl WebResearchController {
         if !plan_need_web {
             return false;
         }
-        let grant = browser_escalation_budget(&self.config);
+        let grant = browser_escalation_budget(&self.config, self.user_requested_browser);
         self.limits.browser_max = grant;
         if let Some(plan) = self.plan.as_mut() {
             plan.browser_budget = grant;
@@ -579,6 +698,9 @@ impl WebResearchController {
         }
         let mut lines = vec![
             "Answer per research task. For targeted_numeric_fact tasks, do not estimate a value unless that task is verified.".to_string(),
+            "When multiple tasks are pending, issue one web_search(num_results=5) per unfinished task in the first round; parallel calls in the same batch are allowed.".to_string(),
+            "Chinese queries use DDGS meta-search (international + sogou/bing_cn when CJK is detected).".to_string(),
+            "If snippets already contain the answer, mark the task done and reply; do not fetch pages.".to_string(),
         ];
         for task in &self.tasks {
             let evidence_preview = task.evidence.first().map(|e| {
@@ -590,10 +712,11 @@ impl WebResearchController {
                 )
             });
             lines.push(format!(
-                "task#{} type={:?} status={:?} entities={:?} criteria={:?} evidence_count={} max_latency_ms={} evidence_preview={:?}",
+                "task#{} type={:?} status={:?} focus={:?} entities={:?} criteria={:?} evidence_count={} max_latency_ms={} evidence_preview={:?}",
                 task.id,
                 task.task_type,
                 task.status,
+                task.focus_text,
                 task.entities,
                 task.answer_criteria,
                 task.evidence.len(),
@@ -674,7 +797,22 @@ impl WebResearchController {
                 &mut source_counts,
                 &mut extract_counts,
             ) {
-                tracing::info!(turn, tool = %tc.function.name, task_idx, "web_research task policy block");
+                if let Some(idx) = task_idx {
+                    let task = &self.tasks[idx];
+                    tracing::info!(
+                        turn,
+                        tool = %tc.function.name,
+                        task_id = task.id,
+                        task_type = ?task.task_type,
+                        status = ?task.status,
+                        search_attempts = task.search_attempts,
+                        extract_attempts = task.extract_attempts,
+                        low_signal_count = task.low_signal_count,
+                        "web_research task policy block"
+                    );
+                } else {
+                    tracing::info!(turn, tool = %tc.function.name, "web_research task policy block");
+                }
                 blocked.push((
                     tc.function.name.clone(),
                     ToolResult::err(
@@ -691,6 +829,11 @@ impl WebResearchController {
     }
 
     fn infer_task_for_call(&self, tc: &ToolCall) -> Option<usize> {
+        if let Some(query) = query_from_tool_arguments(&tc.function.name, &tc.function.arguments) {
+            if let Some(idx) = best_task_for_text(&self.tasks, &query) {
+                return Some(idx);
+            }
+        }
         if let Some(url) = url_from_tool_arguments(&tc.function.name, &tc.function.arguments) {
             let normalized = normalize_url(&url)?;
             return self
@@ -698,15 +841,7 @@ impl WebResearchController {
                 .iter()
                 .position(|task| task.allowed_urls.contains(&normalized));
         }
-        let query = query_from_tool_arguments(&tc.function.name, &tc.function.arguments)?;
-        if let Some(task_type) = task_type_for_text(&query) {
-            if let Some(idx) = self.tasks.iter().position(|task| {
-                task.task_type == task_type && task.status != ResearchTaskStatus::Verified
-            }) {
-                return Some(idx);
-            }
-        }
-        best_task_for_text(&self.tasks, &query)
+        None
     }
 
     fn should_block_task_call(
@@ -741,7 +876,22 @@ impl WebResearchController {
                 search_counts[idx] = search_counts[idx].saturating_add(1);
                 false
             }
-            "web_extract" | "browser_navigate" => {
+            "browser_navigate" => {
+                if !self.user_requested_browser || task.status == ResearchTaskStatus::Verified {
+                    return true;
+                }
+                false
+            }
+            "web_extract" => {
+                if task.status == ResearchTaskStatus::Verified {
+                    return true;
+                }
+                if self.config.search_snippet_first
+                    && task_prefers_snippet_first(task)
+                    && task.search_attempts < task.max_search
+                {
+                    return true;
+                }
                 if !self.extract_url_allowed(tc, idx) || extract_counts[idx] >= task.max_extract {
                     return true;
                 }
@@ -760,6 +910,33 @@ impl WebResearchController {
             return false;
         };
         self.tasks[task_idx].allowed_urls.contains(&normalized)
+    }
+
+    async fn fetch_decomposed_tasks(
+        &self,
+        auxiliary: Option<&Arc<AuxiliaryClient>>,
+        user_message: &str,
+    ) -> Option<Vec<ResearchTask>> {
+        #[cfg(test)]
+        if let Some(test) = &self.test_llm {
+            if let Some(raw) = &test.decomposer_json {
+                return parse_decomposer_json(raw, user_message, &self.config);
+            }
+        }
+        let aux = auxiliary?;
+        let system = "Split the user message into independent web research tasks. Output JSON only: \
+                      {\"tasks\":[{\"task_type\":\"realtime_weather|targeted_numeric_fact|simple_lookup\",\
+                      \"focus\":\"sub-question text\"}]}. Max 3 tasks. focus must be a short clause.";
+        let user = format!("User message:\n{}", user_message.trim());
+        let request = AuxiliaryRequest::new(
+            AuxiliaryTask::Custom(DECOMPOSER_TASK.to_string()),
+            vec![Message::system(system), Message::user(user)],
+        )
+        .with_temperature(0.0)
+        .with_max_tokens(500)
+        .with_timeout(Duration::from_secs(30));
+        let text = aux.call(request).await.ok()?.text()?.to_string();
+        parse_decomposer_json(&text, user_message, &self.config)
     }
 
     async fn fetch_plan(
@@ -820,8 +997,50 @@ impl WebResearchController {
 }
 
 /// Browser pool granted when planner set 0 but search/extract failed (uses `fallback_browser`, default 2).
-fn browser_escalation_budget(config: &WebResearchConfig) -> u32 {
+fn browser_escalation_budget(config: &WebResearchConfig, user_requested_browser: bool) -> u32 {
+    if !user_requested_browser {
+        return 0;
+    }
     config.fallback_browser.max(1).min(config.max_browser)
+}
+
+fn effective_browser_budget(
+    config: &WebResearchConfig,
+    raw: u32,
+    user_requested_browser: bool,
+) -> u32 {
+    if !user_requested_browser {
+        return 0;
+    }
+    let grant = if raw > 0 {
+        raw
+    } else {
+        config.fallback_browser
+    };
+    grant.min(config.max_browser)
+}
+
+/// True when the inbound user message explicitly asks for browser automation.
+fn user_explicitly_requested_browser(user_message: &str) -> bool {
+    let text = user_message.trim();
+    if text.is_empty() {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("browser_navigate") {
+        return true;
+    }
+    ["用浏览器", "使用浏览器", "浏览器打开", "浏览器访问", "打开浏览器"]
+        .iter()
+        .any(|cue| text.contains(cue))
+        || [
+            "use browser",
+            "open in browser",
+            "using browser",
+            "browser navigate",
+        ]
+        .iter()
+        .any(|cue| lower.contains(cue))
 }
 
 fn is_failed_light_web_attempt(tool_name: &str, result: Option<&ToolResult>) -> bool {
@@ -837,28 +1056,61 @@ fn is_failed_light_web_attempt(tool_name: &str, result: Option<&ToolResult>) -> 
     !is_billable_web_tool_result(tool_name, &r.content)
 }
 
+fn task_budget_ceilings(tasks: &[ResearchTask], config: &WebResearchConfig) -> (u32, u32) {
+    if tasks.is_empty() {
+        return (0, 0);
+    }
+    let search = tasks
+        .iter()
+        .map(|t| t.max_search)
+        .sum::<u32>()
+        .min(config.message_caps.max_total_search);
+    let extract = tasks
+        .iter()
+        .map(|t| t.max_extract)
+        .sum::<u32>()
+        .min(config.message_caps.max_total_extract);
+    (search, extract)
+}
+
+fn all_tasks_terminal(tasks: &[ResearchTask]) -> bool {
+    tasks.is_empty()
+        || tasks
+            .iter()
+            .all(|t| matches!(t.status, ResearchTaskStatus::Verified | ResearchTaskStatus::Exhausted))
+}
+
 fn limits_for_config(
     config: &WebResearchConfig,
     plan: Option<&WebResearchPlan>,
+    tasks: &[ResearchTask],
+    user_requested_browser: bool,
 ) -> WebToolBudgetLimits {
     if let Some(plan) = plan {
-        let search_max = plan
-            .search_budget
-            .min(config.message_caps.max_total_search.max(config.max_search));
-        let extract_max = plan.extract_budget.min(
-            config
-                .message_caps
-                .max_total_extract
-                .max(config.max_extract),
-        );
+        let (search_max, extract_max) = if !tasks.is_empty() {
+            task_budget_ceilings(tasks, config)
+        } else {
+            (
+                plan.search_budget
+                    .min(config.message_caps.max_total_search.max(config.max_search)),
+                plan.extract_budget.min(
+                    config
+                        .message_caps
+                        .max_total_extract
+                        .max(config.max_extract),
+                ),
+            )
+        };
+        let browser_max =
+            effective_browser_budget(config, plan.browser_budget, user_requested_browser);
         let aggregate = search_max
             .saturating_add(extract_max)
-            .saturating_add(plan.browser_budget.min(config.max_browser))
+            .saturating_add(browser_max)
             .max(plan.total_budget);
         let mut limits = WebToolBudgetLimits::from_dynamic_pools(
             search_max,
             extract_max,
-            plan.browser_budget.min(config.max_browser),
+            browser_max,
             Some(aggregate),
             config.max_consecutive_errors,
         );
@@ -867,20 +1119,39 @@ fn limits_for_config(
             .max(config.message_caps.max_attempt_total);
         limits
     } else {
-        WebToolBudgetLimits::from_web_research_config(config)
+        let mut limits = WebToolBudgetLimits::from_web_research_config(config);
+        limits.browser_max =
+            effective_browser_budget(config, limits.browser_max, user_requested_browser);
+        limits
     }
 }
 
-fn fallback_plan(config: &WebResearchConfig) -> WebResearchPlan {
+fn fallback_plan(
+    config: &WebResearchConfig,
+    tasks: &[ResearchTask],
+    user_requested_browser: bool,
+) -> WebResearchPlan {
+    let (search_budget, extract_budget) = if !tasks.is_empty() {
+        task_budget_ceilings(tasks, config)
+    } else {
+        (config.fallback_search, config.fallback_extract)
+    };
     WebResearchPlan {
         need_web: true,
-        search_budget: config.fallback_search,
-        extract_budget: config.fallback_extract,
-        browser_budget: config.fallback_browser,
-        total_budget: config
-            .fallback_search
-            .saturating_add(config.fallback_extract)
-            .saturating_add(config.fallback_browser)
+        search_budget,
+        extract_budget,
+        browser_budget: effective_browser_budget(
+            config,
+            config.fallback_browser,
+            user_requested_browser,
+        ),
+        total_budget: search_budget
+            .saturating_add(extract_budget)
+            .saturating_add(effective_browser_budget(
+                config,
+                config.fallback_browser,
+                user_requested_browser,
+            ))
             .min(config.max_total),
         stop_conditions: "fallback budgets".to_string(),
     }
@@ -901,12 +1172,14 @@ fn planner_system_prompt(config: &WebResearchConfig) -> String {
     }
     "You allocate web research work per user message. Split multi-intent questions into small \
      independent research tasks, keep simple realtime lookups low-latency, and expand only when \
-     evidence has not passed task criteria. Search results are not verified evidence until they \
-     match the requested entity, time scope, answer type, and required fact signal. For numeric \
-     facts, never estimate values when verified evidence is missing. A source-directed query \
-     such as a site/domain query is only one branch; if it does not pass evidence criteria, \
-     continue with broader public reporting queries before finalizing. Never exceed configured \
-     ceilings in your output; they will be clamped in Rust."
+     evidence has not passed task criteria. When multiple tasks are open, the first round should \
+     launch one web_search(num_results=5) per unfinished task; parallel calls in the same batch are \
+     expected. Search results are not verified evidence until they match the requested entity, \
+     time scope, answer type, and required fact signal. For numeric facts, never estimate values \
+     when verified evidence is missing. A source-directed query such as a site/domain query is only \
+     one branch; if it does not pass evidence criteria, continue with broader public reporting \
+     queries before finalizing. Never exceed configured ceilings in your output; they will be \
+     clamped in Rust."
         .to_string()
 }
 
@@ -974,6 +1247,58 @@ pub fn parse_plan_json(raw: &str, config: &WebResearchConfig) -> Option<WebResea
 }
 
 #[derive(Debug, Deserialize)]
+struct RawDecomposerTask {
+    #[serde(default)]
+    task_type: Option<String>,
+    #[serde(default)]
+    focus: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawDecomposerOutput {
+    #[serde(default)]
+    tasks: Vec<RawDecomposerTask>,
+}
+
+fn parse_task_type_name(raw: &str) -> Option<ResearchTaskType> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "realtime_weather" | "weather" => Some(ResearchTaskType::RealtimeWeather),
+        "targeted_numeric_fact" | "numeric" | "numeric_fact" => {
+            Some(ResearchTaskType::TargetedNumericFact)
+        }
+        "simple_lookup" | "lookup" => Some(ResearchTaskType::SimpleLookup),
+        _ => None,
+    }
+}
+
+fn parse_decomposer_json(
+    raw: &str,
+    user_message: &str,
+    config: &WebResearchConfig,
+) -> Option<Vec<ResearchTask>> {
+    let value = extract_json_value(raw)?;
+    let output: RawDecomposerOutput = serde_json::from_value(value).ok()?;
+    let mut tasks = Vec::new();
+    for (id, entry) in output.tasks.into_iter().take(3).enumerate() {
+        let focus = entry
+            .focus
+            .filter(|f| !f.trim().is_empty())
+            .unwrap_or_else(|| user_message.to_string());
+        let task_type = entry
+            .task_type
+            .as_deref()
+            .and_then(parse_task_type_name)
+            .unwrap_or_else(|| infer_task_type_from_focus(&focus));
+        tasks.push(new_research_task(id, task_type, &focus, config));
+    }
+    if tasks.is_empty() {
+        None
+    } else {
+        Some(tasks)
+    }
+}
+
+#[derive(Debug, Deserialize)]
 struct RawWebResearchDecision {
     #[serde(default = "default_true")]
     continue_web: bool,
@@ -1009,56 +1334,111 @@ struct SearchItem {
 }
 
 fn decompose_research_tasks(user_message: &str, config: &WebResearchConfig) -> Vec<ResearchTask> {
-    let mut types = Vec::new();
-    if matches!(
-        task_type_for_text(user_message),
-        Some(ResearchTaskType::RealtimeWeather)
-    ) {
-        types.push(ResearchTaskType::RealtimeWeather);
-    }
-    if contains_any(
-        user_message,
-        &["人数", "多少人", "报名", "考生", "录取", "比例", "数量"],
-    ) {
-        types.push(ResearchTaskType::TargetedNumericFact);
-    }
-    if types.is_empty() {
-        types.push(ResearchTaskType::SimpleLookup);
-    }
-    types
+    let segments = split_intent_segments(user_message);
+    let specs: Vec<(ResearchTaskType, String)> = if segments.len() > 1 {
+        segments
+            .into_iter()
+            .map(|segment| (infer_task_type_from_focus(&segment), segment))
+            .collect()
+    } else {
+        vec![(
+            infer_task_type_from_focus(user_message),
+            user_message.to_string(),
+        )]
+    };
+    specs
         .into_iter()
         .take(3)
         .enumerate()
-        .map(|(id, task_type)| new_research_task(id, task_type, user_message, config))
+        .map(|(id, (task_type, focus))| new_research_task(id, task_type, &focus, config))
         .collect()
 }
 
-fn task_type_for_text(text: &str) -> Option<ResearchTaskType> {
-    if contains_any(text, &["天气", "气温", "降雨", "下雨", "预报", "温度"]) {
-        Some(ResearchTaskType::RealtimeWeather)
-    } else if contains_any(
-        text,
-        &["人数", "多少人", "报名", "考生", "录取", "比例", "数量"],
-    ) {
-        Some(ResearchTaskType::TargetedNumericFact)
+fn split_intent_segments(text: &str) -> Vec<String> {
+    let segments: Vec<String> = text
+        .split(['，', ',', '。', ';', '；', '?', '？', '!', '！', '\n'])
+        .map(trim_segment_noise)
+        .filter(|segment| segment.chars().count() >= 4)
+        .collect();
+    if segments.len() > 1 {
+        return segments;
+    }
+    split_multi_intent_on_whitespace(text).unwrap_or(segments)
+}
+
+/// WeCom-style messages often use spaces instead of commas between sub-questions.
+fn split_multi_intent_on_whitespace(text: &str) -> Option<Vec<String>> {
+    let segments: Vec<String> = text
+        .split_whitespace()
+        .map(str::trim)
+        .filter(|part| part.chars().count() >= 4)
+        .map(trim_segment_noise)
+        .filter(|segment| segment.chars().count() >= 4)
+        .collect();
+    if segments.len() >= 2 {
+        Some(segments)
     } else {
         None
     }
 }
 
+fn trim_parallel_web_calls(tool_calls: &mut Vec<ToolCall>, max_parallel: u32) {
+    if max_parallel == 0 {
+        return;
+    }
+    let web_count = tool_calls
+        .iter()
+        .filter(|tc| matches!(tc.function.name.as_str(), "web_search" | "web_extract" | "browser_navigate"))
+        .count() as u32;
+    if web_count <= max_parallel {
+        return;
+    }
+    let mut kept_web = 0u32;
+    tool_calls.retain(|tc| {
+        if !matches!(
+            tc.function.name.as_str(),
+            "web_search" | "web_extract" | "browser_navigate"
+        ) {
+            return true;
+        }
+        if kept_web < max_parallel {
+            kept_web += 1;
+            true
+        } else {
+            false
+        }
+    });
+}
+
+/// Classify from structural signals only (digits, calendar year, today time scope).
+fn infer_task_type_from_focus(focus_text: &str) -> ResearchTaskType {
+    if has_numeric_signal(focus_text) {
+        ResearchTaskType::TargetedNumericFact
+    } else if extract_time_scope(focus_text).as_deref() == Some("today") {
+        ResearchTaskType::RealtimeWeather
+    } else {
+        ResearchTaskType::SimpleLookup
+    }
+}
+
+fn task_prefers_snippet_first(task: &ResearchTask) -> bool {
+    task.time_scope.as_deref() == Some("today") && !has_numeric_signal(&task.focus_text)
+}
+
 fn new_research_task(
     id: usize,
     task_type: ResearchTaskType,
-    user_message: &str,
+    focus_text: &str,
     config: &WebResearchConfig,
 ) -> ResearchTask {
     let profile = task_profile(config, task_type);
     ResearchTask {
         id,
         task_type,
-        entities: extract_entities(user_message),
-        time_scope: extract_time_scope(user_message),
-        query_terms: extract_query_terms(user_message),
+        focus_text: focus_text.to_string(),
+        entities: extract_entities(focus_text),
+        time_scope: extract_time_scope(focus_text),
+        query_terms: extract_query_terms(focus_text),
         answer_criteria: answer_criteria(task_type),
         max_search: profile.max_search,
         max_extract: profile.max_extract,
@@ -1082,12 +1462,11 @@ fn task_profile(config: &WebResearchConfig, task_type: ResearchTaskType) -> WebR
 }
 
 fn answer_criteria(task_type: ResearchTaskType) -> Vec<String> {
-    let criteria: &[&str] = match task_type {
-        ResearchTaskType::RealtimeWeather => &["地点", "当天", "天气", "温度", "降雨"],
-        ResearchTaskType::TargetedNumericFact => &["实体", "年份", "主题", "明确数字"],
-        ResearchTaskType::SimpleLookup => &["实体", "主题", "来源"],
-    };
-    criteria.iter().map(|s| (*s).to_string()).collect()
+    match task_type {
+        ResearchTaskType::TargetedNumericFact => vec!["numeric_signal".into()],
+        ResearchTaskType::RealtimeWeather => vec!["time_scope".into(), "entity".into()],
+        ResearchTaskType::SimpleLookup => vec!["entity".into()],
+    }
 }
 
 fn contains_any(text: &str, needles: &[&str]) -> bool {
@@ -1110,7 +1489,7 @@ fn extract_time_scope(text: &str) -> Option<String> {
 fn extract_entities(text: &str) -> Vec<String> {
     extract_query_terms(text)
         .into_iter()
-        .filter(|term| !is_generic_intent_term(term))
+        .filter(|term| !is_filler_term(term))
         .take(3)
         .collect()
 }
@@ -1119,11 +1498,11 @@ fn extract_query_terms(text: &str) -> Vec<String> {
     let mut terms = Vec::new();
     for part in text.split(|c: char| !c.is_alphanumeric() && !is_cjk(c)) {
         let trimmed = trim_common_words(part);
-        if trimmed.chars().count() >= 2 && !is_generic_intent_term(&trimmed) {
+        if trimmed.chars().count() >= 2 && !is_filler_term(&trimmed) {
             push_unique(&mut terms, trimmed.clone());
         }
         for gram in cjk_ngrams(&trimmed, 2) {
-            if !is_generic_intent_term(&gram) {
+            if !is_filler_term(&gram) {
                 push_unique(&mut terms, gram);
             }
         }
@@ -1141,32 +1520,29 @@ fn is_cjk(c: char) -> bool {
     ('\u{4e00}'..='\u{9fff}').contains(&c)
 }
 
-fn trim_common_words(text: &str) -> String {
+/// Strip greeting noise for segment boundaries; preserve time/year tokens in focus text.
+fn trim_segment_noise(text: &str) -> String {
     let mut value = text.trim().to_string();
-    for word in [
-        "你好",
-        "请问",
-        "帮我",
-        "一下",
-        "怎么样",
-        "多少",
-        "今天",
-        "今日",
-        "现在",
-        "这个",
-    ] {
+    for word in ["你好", "请问", "帮我", "一下"] {
         value = value.replace(word, "");
     }
     value
-        .trim_matches(|c: char| c.is_whitespace() || "，。！？、的了呢吗".contains(c))
+        .trim_matches(|c: char| c.is_whitespace() || "，。！？、".contains(c))
         .to_string()
 }
 
-fn is_generic_intent_term(term: &str) -> bool {
-    matches!(
-        term,
-        "天气" | "气温" | "降雨" | "预报" | "人数" | "多少人" | "数量" | "报名" | "考生" | "学生"
-    )
+fn trim_common_words(text: &str) -> String {
+    let mut value = trim_segment_noise(text);
+    for word in ["怎么样", "怎么", "什么"] {
+        value = value.replace(word, "");
+    }
+    value
+        .trim_matches(|c: char| c.is_whitespace() || "的了呢吗".contains(c))
+        .to_string()
+}
+
+fn is_filler_term(term: &str) -> bool {
+    term.chars().count() < 2 || matches!(term, "的" | "了" | "呢" | "吗" | "吧")
 }
 
 fn cjk_ngrams(text: &str, n: usize) -> Vec<String> {
@@ -1300,22 +1676,67 @@ fn text_passes_task(task: &ResearchTask, text: &str, _config: &WebResearchConfig
     if text.trim().chars().count() < 20 || looks_like_missing_page(text) {
         return false;
     }
-    if !matches_time_scope(task, text) || !matches_required_terms(task, text) {
+    if !matches_time_scope(task, text) || !matches_entity_scope(task, text) {
+        return false;
+    }
+    if !matches_required_terms(task, text) {
         return false;
     }
     match task.task_type {
-        ResearchTaskType::RealtimeWeather => has_weather_signal(text),
+        ResearchTaskType::RealtimeWeather | ResearchTaskType::SimpleLookup => true,
         ResearchTaskType::TargetedNumericFact => has_numeric_signal(text),
-        ResearchTaskType::SimpleLookup => true,
     }
+}
+
+fn matches_entity_scope(task: &ResearchTask, text: &str) -> bool {
+    let scope_terms: Vec<&str> = if !task.entities.is_empty() {
+        task.entities.iter().map(String::as_str).collect()
+    } else {
+        task.query_terms.iter().map(String::as_str).collect()
+    };
+    if scope_terms.is_empty() {
+        return true;
+    }
+    let required = match task.task_type {
+        ResearchTaskType::TargetedNumericFact => scope_terms.len().min(1),
+        ResearchTaskType::RealtimeWeather => 1,
+        ResearchTaskType::SimpleLookup => 1,
+    };
+    scope_terms
+        .iter()
+        .filter(|term| text.contains(**term))
+        .count()
+        >= required
 }
 
 fn matches_time_scope(task: &ResearchTask, text: &str) -> bool {
     match task.time_scope.as_deref() {
-        Some("today") => contains_any(text, &["今天", "今日", "当前", "实时"]),
+        Some("today") => {
+            if contains_any(text, &["今天", "今日", "当前", "实时"]) {
+                return true;
+            }
+            text_matches_today_wall_date(text)
+        }
         Some(year) => text.contains(year),
         None => true,
     }
+}
+
+fn text_matches_today_wall_date(text: &str) -> bool {
+    let dt = hermes_core::now();
+    let month = dt.month();
+    let day = dt.day();
+    let year = dt.year();
+    [
+        format!("{month}月{day}日"),
+        format!("{month}月{day}号"),
+        format!("{year}年{month}月{day}日"),
+        format!("{year}-{month:02}-{day:02}"),
+        format!("{month}/{day}"),
+        format!("{month}-{day}"),
+    ]
+    .iter()
+    .any(|token| text.contains(token))
 }
 
 fn matches_required_terms(task: &ResearchTask, text: &str) -> bool {
@@ -1328,7 +1749,7 @@ fn matches_required_terms(task: &ResearchTask, text: &str) -> bool {
         return true;
     }
     let required = match task.task_type {
-        ResearchTaskType::TargetedNumericFact => terms.len().min(2),
+        ResearchTaskType::TargetedNumericFact => 1,
         _ => 1,
     };
     terms
@@ -1338,26 +1759,10 @@ fn matches_required_terms(task: &ResearchTask, text: &str) -> bool {
         >= required
 }
 
-fn has_weather_signal(text: &str) -> bool {
-    contains_any(
-        text,
-        &[
-            "天气",
-            "气温",
-            "温度",
-            "降雨",
-            "降水",
-            "雷阵雨",
-            "多云",
-            "晴",
-            "阴",
-        ],
-    )
-}
-
 fn has_numeric_signal(text: &str) -> bool {
-    text.chars().any(|c| c.is_ascii_digit())
-        || contains_any(text, &["万", "千", "百", "人", "名", "%", "％"])
+    text.chars().any(|c| {
+        c.is_ascii_digit() || ('０'..='９').contains(&c) || matches!(c, '〇' | '零')
+    })
 }
 
 fn looks_like_missing_page(text: &str) -> bool {
@@ -1453,14 +1858,15 @@ mod tests {
     }
 
     #[test]
-    fn decomposes_weather_and_numeric_fact_tasks() {
+    fn decomposes_multi_clause_tasks_without_domain_keywords() {
         let cfg = test_config();
         let tasks = decompose_research_tasks("某地今天天气怎么样，某项考试学生有多少人", &cfg);
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].task_type, ResearchTaskType::RealtimeWeather);
+        assert_eq!(tasks[0].time_scope.as_deref(), Some("today"));
         assert_eq!(tasks[0].max_search, 2);
-        assert_eq!(tasks[1].task_type, ResearchTaskType::TargetedNumericFact);
-        assert_eq!(tasks[1].max_search, 6);
+        assert_eq!(tasks[1].task_type, ResearchTaskType::SimpleLookup);
+        assert_eq!(tasks[1].max_search, 2);
     }
 
     #[test]
@@ -1593,6 +1999,7 @@ mod tests {
                         .to_string(),
                 ),
                 evaluator_json: None,
+                decomposer_json: None,
             },
         );
         ctrl.plan = parse_plan_json(
@@ -1631,7 +2038,12 @@ mod tests {
         let plan_json = r#"{"need_web":true,"search_budget":4,"extract_budget":0,"browser_budget":0,"total_budget":4}"#;
         let mut ctrl = WebResearchController::new(cfg.clone());
         ctrl.plan = parse_plan_json(plan_json, &cfg);
-        ctrl.limits = limits_for_config(&cfg, ctrl.plan.as_ref());
+        ctrl.limits = limits_for_config(
+            &cfg,
+            ctrl.plan.as_ref(),
+            &ctrl.tasks,
+            ctrl.user_requested_browser,
+        );
         ctrl.planner_invoked = true;
 
         for i in 0..4 {
@@ -1688,7 +2100,12 @@ mod tests {
             r#"{"need_web":true,"search_budget":2,"extract_budget":0,"browser_budget":0,"total_budget":2}"#,
             &cfg,
         );
-        ctrl.limits = limits_for_config(&cfg, ctrl.plan.as_ref());
+        ctrl.limits = limits_for_config(
+            &cfg,
+            ctrl.plan.as_ref(),
+            &ctrl.tasks,
+            ctrl.user_requested_browser,
+        );
         ctrl.planner_invoked = true;
 
         let mut calls: Vec<ToolCall> = (0..3)
@@ -1710,8 +2127,13 @@ mod tests {
     async fn fallback_allows_third_search_after_two_failures() {
         let cfg = test_config();
         let mut ctrl = WebResearchController::new(cfg.clone());
-        ctrl.plan = Some(fallback_plan(&cfg));
-        ctrl.limits = limits_for_config(&cfg, ctrl.plan.as_ref());
+        ctrl.plan = Some(fallback_plan(&cfg, &ctrl.tasks, ctrl.user_requested_browser));
+        ctrl.limits = limits_for_config(
+            &cfg,
+            ctrl.plan.as_ref(),
+            &ctrl.tasks,
+            ctrl.user_requested_browser,
+        );
         ctrl.planner_invoked = true;
         ctrl.budget_state.attempted_search = 2;
         ctrl.budget_state.search_failed = 2;
@@ -1782,7 +2204,12 @@ mod tests {
             r#"{"need_web":true,"search_budget":4,"extract_budget":0,"browser_budget":0,"total_budget":4}"#,
             &cfg,
         );
-        ctrl.limits = limits_for_config(&cfg, ctrl.plan.as_ref());
+        ctrl.limits = limits_for_config(
+            &cfg,
+            ctrl.plan.as_ref(),
+            &ctrl.tasks,
+            ctrl.user_requested_browser,
+        );
         ctrl.planner_invoked = true;
         let mut calls: Vec<ToolCall> = (0..5)
             .map(|i| ToolCall {
@@ -1801,14 +2228,19 @@ mod tests {
     }
 
     #[test]
-    fn escalate_browser_after_extract_failure_when_planner_zeroed_browser() {
+    fn snippet_first_does_not_escalate_browser_after_extract_failure() {
         let cfg = test_config();
         let mut ctrl = WebResearchController::new(cfg.clone());
         ctrl.plan = parse_plan_json(
             r#"{"need_web":true,"search_budget":2,"extract_budget":1,"browser_budget":0,"total_budget":3}"#,
             &cfg,
         );
-        ctrl.limits = limits_for_config(&cfg, ctrl.plan.as_ref());
+        ctrl.limits = limits_for_config(
+            &cfg,
+            ctrl.plan.as_ref(),
+            &ctrl.tasks,
+            ctrl.user_requested_browser,
+        );
         ctrl.planner_invoked = true;
 
         let calls = vec![ToolCall {
@@ -1820,16 +2252,17 @@ mod tests {
             extra_content: None,
         }];
         let results = vec![ToolResult::err("e1", "HTTP 403 blocks automated access")];
-        assert!(ctrl.record_results(&calls, &results));
-        assert_eq!(ctrl.limits.browser_max, cfg.fallback_browser);
+        assert!(!ctrl.record_results(&calls, &results));
+        assert_eq!(ctrl.limits.browser_max, 0);
         assert!(
-            ctrl.filter_tool_schemas(&[ToolSchema::new(
-                "browser_navigate",
-                "",
-                JsonSchema::new("object")
-            )])
-            .iter()
-            .any(|s| s.name == "browser_navigate")
+            !ctrl
+                .filter_tool_schemas(&[ToolSchema::new(
+                    "browser_navigate",
+                    "",
+                    JsonSchema::new("object")
+                )])
+                .iter()
+                .any(|s| s.name == "browser_navigate")
         );
     }
 
@@ -1841,7 +2274,12 @@ mod tests {
             r#"{"need_web":true,"search_budget":2,"extract_budget":1,"browser_budget":0,"total_budget":3}"#,
             &cfg,
         );
-        ctrl.limits = limits_for_config(&cfg, ctrl.plan.as_ref());
+        ctrl.limits = limits_for_config(
+            &cfg,
+            ctrl.plan.as_ref(),
+            &ctrl.tasks,
+            ctrl.user_requested_browser,
+        );
         ctrl.planner_invoked = true;
 
         let calls = vec![ToolCall {
@@ -1866,7 +2304,12 @@ mod tests {
             r#"{"need_web":true,"search_budget":2,"extract_budget":1,"browser_budget":0,"total_budget":3}"#,
             &cfg,
         );
-        ctrl.limits = limits_for_config(&cfg, ctrl.plan.as_ref());
+        ctrl.limits = limits_for_config(
+            &cfg,
+            ctrl.plan.as_ref(),
+            &ctrl.tasks,
+            ctrl.user_requested_browser,
+        );
         ctrl.planner_invoked = true;
 
         let mut calls = vec![ToolCall {
@@ -1898,6 +2341,160 @@ mod tests {
         assert!(!filtered.iter().any(|s| s.name == "browser_navigate"));
     }
 
+    #[test]
+    fn fallback_plan_uses_task_sum() {
+        let cfg = test_config();
+        let tasks = decompose_research_tasks("某地今天天气怎么样，某项考试学生有多少人", &cfg);
+        let plan = fallback_plan(&cfg, &tasks, false);
+        assert!(plan.search_budget >= 2);
+        let limits = limits_for_config(&cfg, Some(&plan), &tasks, false);
+        assert!(limits.search_max >= 6);
+    }
+
+    #[test]
+    fn infer_site_query_routes_by_focus_overlap() {
+        let cfg = test_config();
+        let mut ctrl = WebResearchController::new(cfg.clone());
+        ctrl.tasks = decompose_research_tasks("深圳天气 深圳高考人数", &cfg);
+        let tc = ToolCall {
+            id: "s1".into(),
+            function: FunctionCall {
+                name: "web_search".into(),
+                arguments: r#"{"query":"site:sz.gov.cn 深圳高考人数"}"#.into(),
+            },
+            extra_content: None,
+        };
+        let idx = ctrl.infer_task_for_call(&tc).unwrap();
+        assert!(
+            ctrl.tasks[idx].focus_text.contains("高考") || ctrl.tasks[idx].focus_text.contains("人数")
+        );
+    }
+
+    #[tokio::test]
+    async fn dual_task_parallel_search_not_global_blocked() {
+        let cfg = test_config();
+        let mut ctrl = WebResearchController::new(cfg.clone());
+        ctrl.tasks = decompose_research_tasks("深圳天气 深圳高考人数", &cfg);
+        ctrl.plan = Some(fallback_plan(&cfg, &ctrl.tasks, ctrl.user_requested_browser));
+        ctrl.limits = WebToolBudgetLimits::from_dynamic_pools(2, 5, 2, Some(2), 2);
+        ctrl.planner_invoked = true;
+
+        let mut calls: Vec<ToolCall> = vec![
+            ToolCall {
+                id: "w1".into(),
+                function: FunctionCall {
+                    name: "web_search".into(),
+                    arguments: r#"{"query":"深圳今天天气"}"#.into(),
+                },
+                extra_content: None,
+            },
+            ToolCall {
+                id: "n1".into(),
+                function: FunctionCall {
+                    name: "web_search".into(),
+                    arguments: r#"{"query":"深圳高考报名人数"}"#.into(),
+                },
+                extra_content: None,
+            },
+        ];
+        let (blocked, _) = ctrl.gate_web_batch(None, &[], &mut calls, 1).await;
+        assert!(blocked.is_empty(), "dual parallel search should pass task policy");
+        assert_eq!(calls.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn dual_task_second_round_search_after_first() {
+        let cfg = test_config();
+        let mut ctrl = WebResearchController::new(cfg.clone());
+        ctrl.tasks = decompose_research_tasks("深圳天气 深圳高考人数", &cfg);
+        ctrl.plan = Some(fallback_plan(&cfg, &ctrl.tasks, ctrl.user_requested_browser));
+        ctrl.limits = WebToolBudgetLimits::from_dynamic_pools(2, 5, 2, Some(2), 2);
+        ctrl.planner_invoked = true;
+        ctrl.tasks[0].search_attempts = 1;
+        ctrl.tasks[1].search_attempts = 1;
+
+        let mut calls = vec![ToolCall {
+            id: "n2".into(),
+            function: FunctionCall {
+                name: "web_search".into(),
+                arguments: r#"{"query":"site:sz.gov.cn 深圳高考人数"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        let (blocked, _) = ctrl.gate_web_batch(None, &[], &mut calls, 2).await;
+        assert!(blocked.is_empty());
+        assert_eq!(calls.len(), 1);
+        assert!(!ctrl.web_stopped);
+    }
+
+    #[tokio::test]
+    async fn evaluator_stop_while_task_pending_does_not_block() {
+        let cfg = test_config();
+        let mut ctrl = WebResearchController::with_test_llm(
+            cfg.clone(),
+            WebResearchTestLlm {
+                planner_json: None,
+                evaluator_json: Some(
+                    r#"{"continue_web":false,"sufficient_answer":true,"final_answer_instruction":"answer now"}"#
+                        .to_string(),
+                ),
+                decomposer_json: None,
+            },
+        );
+        ctrl.tasks = decompose_research_tasks("深圳天气 深圳高考人数", &cfg);
+        ctrl.planner_invoked = true;
+        ctrl.evidence.successful_searches = 1;
+        ctrl.tasks[0].status = ResearchTaskStatus::Verified;
+
+        let mut calls = vec![ToolCall {
+            id: "n1".into(),
+            function: FunctionCall {
+                name: "web_search".into(),
+                arguments: r#"{"query":"深圳高考报名人数"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        let (blocked, _) = ctrl.gate_web_batch(None, &[], &mut calls, 2).await;
+        assert!(blocked.is_empty());
+        assert_eq!(calls.len(), 1);
+        assert!(!ctrl.force_finalize());
+        assert!(!ctrl.web_stopped);
+    }
+
+    #[tokio::test]
+    async fn evaluator_stop_when_all_tasks_terminal() {
+        let cfg = test_config();
+        let mut ctrl = WebResearchController::with_test_llm(
+            cfg.clone(),
+            WebResearchTestLlm {
+                planner_json: None,
+                evaluator_json: Some(
+                    r#"{"continue_web":false,"sufficient_answer":true,"final_answer_instruction":"answer now"}"#
+                        .to_string(),
+                ),
+                decomposer_json: None,
+            },
+        );
+        ctrl.tasks = decompose_research_tasks("深圳天气 深圳高考人数", &cfg);
+        ctrl.planner_invoked = true;
+        ctrl.evidence.successful_searches = 2;
+        ctrl.tasks[0].status = ResearchTaskStatus::Verified;
+        ctrl.tasks[1].status = ResearchTaskStatus::Verified;
+
+        let mut calls = vec![ToolCall {
+            id: "w1".into(),
+            function: FunctionCall {
+                name: "web_search".into(),
+                arguments: r#"{"query":"more"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        let (blocked, _) = ctrl.gate_web_batch(None, &[], &mut calls, 2).await;
+        assert_eq!(blocked.len(), 1);
+        assert!(ctrl.force_finalize());
+        assert!(calls.is_empty());
+    }
+
     #[tokio::test]
     async fn fake_evaluator_stop_blocks_web_and_sets_finalize() {
         let cfg = test_config();
@@ -1909,6 +2506,7 @@ mod tests {
                     r#"{"continue_web":false,"sufficient_answer":true,"final_answer_instruction":"answer now"}"#
                         .to_string(),
                 ),
+                decomposer_json: None,
             },
         );
         ctrl.planner_invoked = true;
@@ -1926,5 +2524,177 @@ mod tests {
         assert_eq!(blocked.len(), 1);
         assert!(ctrl.force_finalize());
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn weather_snippet_with_date_not_jintian_passes() {
+        let cfg = test_config();
+        let task = new_research_task(
+            0,
+            ResearchTaskType::RealtimeWeather,
+            "深圳今天天气怎么样",
+            &cfg,
+        );
+        let dt = hermes_core::now();
+        let snippet = format!(
+            "深圳天气预报 {}月{}日 多云 气温28℃ 湿度75%",
+            dt.month(),
+            dt.day()
+        );
+        assert!(text_passes_task(&task, &snippet, &cfg));
+    }
+
+    #[test]
+    fn weather_snippet_with_location_and_condition_passes_without_jintian() {
+        let cfg = test_config();
+        let task = new_research_task(
+            0,
+            ResearchTaskType::RealtimeWeather,
+            "深圳今天天气怎么样",
+            &cfg,
+        );
+        let dt = hermes_core::now();
+        let snippet = format!(
+            "深圳 {}月{}日 天气预报 多云 气温26到33℃ 有阵雨 东南风3级",
+            dt.month(),
+            dt.day()
+        );
+        assert!(text_passes_task(&task, &snippet, &cfg));
+    }
+
+    #[test]
+    fn segment_decompose_uses_clause_focus_text() {
+        let cfg = test_config();
+        let msg = "你好，深圳今天天气怎么样，深圳高考学生有多少人呢";
+        let tasks = decompose_research_tasks(msg, &cfg);
+        assert_eq!(tasks.len(), 2);
+        assert!(tasks[0].focus_text.contains("天气"));
+        assert!(tasks[1].focus_text.contains("高考") || tasks[1].focus_text.contains("学生"));
+    }
+
+    #[test]
+    fn space_separated_message_decomposes_without_commas() {
+        let cfg = test_config();
+        let msg = "你好 深圳今天天气怎么样了 深圳高考学生有多少呢";
+        let tasks = decompose_research_tasks(msg, &cfg);
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].task_type, ResearchTaskType::RealtimeWeather);
+        assert_eq!(tasks[0].time_scope.as_deref(), Some("today"));
+        assert_eq!(tasks[1].task_type, ResearchTaskType::SimpleLookup);
+        assert!(tasks[0].focus_text.contains("天气"));
+        assert!(!tasks[0].focus_text.contains("高考"));
+        assert!(tasks[1].focus_text.contains("高考") || tasks[1].focus_text.contains("学生"));
+    }
+
+    #[test]
+    fn infer_task_type_uses_digits_and_today_scope_only() {
+        assert_eq!(
+            infer_task_type_from_focus("深圳今天天气怎么样"),
+            ResearchTaskType::RealtimeWeather
+        );
+        assert_eq!(
+            infer_task_type_from_focus("2026年某地甲项考试人数"),
+            ResearchTaskType::TargetedNumericFact
+        );
+        assert_eq!(
+            infer_task_type_from_focus("深圳高考学生有多少人"),
+            ResearchTaskType::SimpleLookup
+        );
+    }
+
+    #[test]
+    fn weak_numeric_signal_rejected() {
+        assert!(!has_numeric_signal("参考往年约有众多考生报名"));
+    }
+
+    #[test]
+    fn user_browser_request_detection() {
+        assert!(!user_explicitly_requested_browser("深圳今天天气怎么样"));
+        assert!(user_explicitly_requested_browser("请用 browser_navigate 打开这个页面"));
+        assert!(user_explicitly_requested_browser("用浏览器打开官网"));
+    }
+
+    #[test]
+    fn browser_disabled_until_user_requests() {
+        let cfg = test_config();
+        let ctrl = WebResearchController::with_user_message(cfg, "深圳今天天气怎么样");
+        assert!(!ctrl.user_requested_browser);
+        assert_eq!(ctrl.limits.browser_max, 0);
+        let schemas = vec![
+            ToolSchema::new("web_search", "", JsonSchema::new("object")),
+            ToolSchema::new("browser_navigate", "", JsonSchema::new("object")),
+        ];
+        assert!(!ctrl.filter_tool_schemas(&schemas).iter().any(|s| s.name == "browser_navigate"));
+
+        let ctrl = WebResearchController::with_user_message(test_config(), "请 browser_navigate 打开");
+        assert!(ctrl.user_requested_browser);
+        assert!(ctrl.limits.browser_max > 0);
+        assert!(ctrl.filter_tool_schemas(&schemas).iter().any(|s| s.name == "browser_navigate"));
+    }
+
+    #[test]
+    fn search_snippet_first_blocks_extract_for_weather_not_numeric() {
+        let cfg = test_config();
+        let mut ctrl = WebResearchController::new(cfg.clone());
+        ctrl.tasks = decompose_research_tasks("深圳今天天气怎么样", &cfg);
+        ctrl.tasks[0].search_attempts = 1;
+        ctrl.tasks[0]
+            .allowed_urls
+            .insert("https://weather.sz.gov.cn/".into());
+        let mut weather_calls = vec![ToolCall {
+            id: "e1".into(),
+            function: FunctionCall {
+                name: "web_extract".into(),
+                arguments: r#"{"url":"https://weather.sz.gov.cn/"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        let blocked = ctrl.apply_task_policy(&mut weather_calls, 2);
+        assert_eq!(blocked.len(), 1);
+        assert!(weather_calls.is_empty());
+
+        let mut ctrl = WebResearchController::new(cfg.clone());
+        ctrl.tasks = decompose_research_tasks("2026年深圳高考报名人数", &cfg);
+        ctrl.tasks[0].search_attempts = 1;
+        ctrl.tasks[0]
+            .allowed_urls
+            .insert("https://www.sznews.com/news/content/2026-06/07/content_32081114.htm".into());
+        let mut numeric_calls = vec![ToolCall {
+            id: "e2".into(),
+            function: FunctionCall {
+                name: "web_extract".into(),
+                arguments: r#"{"url":"https://www.sznews.com/news/content/2026-06/07/content_32081114.htm"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        let blocked = ctrl.apply_task_policy(&mut numeric_calls, 2);
+        assert!(blocked.is_empty());
+        assert_eq!(numeric_calls.len(), 1);
+    }
+
+    #[test]
+    fn parallel_cap_trims_excess_web_calls() {
+        let mut calls: Vec<ToolCall> = (0..5)
+            .map(|i| ToolCall {
+                id: format!("s{i}"),
+                function: FunctionCall {
+                    name: "web_search".into(),
+                    arguments: format!(r#"{{"query":"q{i}"}}"#),
+                },
+                extra_content: None,
+            })
+            .collect();
+        trim_parallel_web_calls(&mut calls, 3);
+        assert_eq!(calls.len(), 3);
+    }
+
+    #[test]
+    fn parse_decomposer_json_builds_tasks() {
+        let cfg = test_config();
+        let raw = r#"{"tasks":[{"task_type":"realtime_weather","focus":"深圳今天天气"},{"task_type":"targeted_numeric_fact","focus":"深圳高考报名人数"}]}"#;
+        let tasks = parse_decomposer_json(raw, "fallback", &cfg).unwrap();
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].task_type, ResearchTaskType::RealtimeWeather);
+        assert_eq!(tasks[1].task_type, ResearchTaskType::TargetedNumericFact);
     }
 }

@@ -92,6 +92,7 @@ cron = "0.16"
 # Utils
 regex = "1"
 aho-corasick = "1"
+scraper = "0.23"
 async-trait = "0.1"
 # TODO: re-enable after CI can reliably fetch pdfium (liteparse-pdfium-sys build.rs download)
 # liteparse = { version = "2", default-features = false }

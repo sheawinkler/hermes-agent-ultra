@@ -34,6 +34,7 @@ rand = "0.10"
 sha2 = "0.11"
 tempfile = "3"
 ddgs = "0.1.0"
+scraper = { workspace = true }
 hex = "0.4"
 
 [dev-dependencies]

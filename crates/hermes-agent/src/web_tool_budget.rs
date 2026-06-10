@@ -13,6 +13,16 @@ use serde_json::Value;
 // Limits & state
 // ---------------------------------------------------------------------------
 
+/// How per-pool caps interact with [`apply_web_tool_budget`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BudgetMode {
+    /// Per-tool pools (`search_max` / `extract_max` / `browser_max`) are enforced.
+    #[default]
+    Global,
+    /// Task policy owns search/extract pools; global layer only fuses (attempt / aggregate / errors).
+    TaskPrimary,
+}
+
 /// Per-run limits loaded from environment (see `docs/sop/web_tool_budget.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WebToolBudgetLimits {
@@ -454,6 +464,7 @@ pub fn apply_web_tool_budget(
     limits: &WebToolBudgetLimits,
     tool_calls: &mut Vec<ToolCall>,
     turn: u32,
+    mode: BudgetMode,
 ) -> Vec<(String, ToolResult)> {
     let mut blocked_results = Vec::new();
     let blocked_by_errors = state.consecutive_error_turns >= limits.max_consecutive_errors;
@@ -466,11 +477,14 @@ pub fn apply_web_tool_budget(
             continue;
         }
 
-        let pool_block = match tc.function.name.as_str() {
-            "browser_navigate" => simulated.browser_used >= limits.browser_max,
-            "web_extract" => simulated.extract_used >= limits.extract_max,
-            "web_search" => simulated.search_used >= limits.search_max,
-            _ => false,
+        let pool_block = match mode {
+            BudgetMode::TaskPrimary => false,
+            BudgetMode::Global => match tc.function.name.as_str() {
+                "browser_navigate" => simulated.browser_used >= limits.browser_max,
+                "web_extract" => simulated.extract_used >= limits.extract_max,
+                "web_search" => simulated.search_used >= limits.search_max,
+                _ => false,
+            },
         };
         let aggregate_block = limits
             .aggregate_max
@@ -524,6 +538,7 @@ pub fn apply_web_tool_budget(
                 limit = limit,
                 attempted_total = simulated.attempted_total(),
                 scope = "run",
+                mode = ?mode,
                 blocked_by_errors = blocked_by_errors,
                 "web_tool_budget block"
             );
@@ -767,7 +782,7 @@ mod tests {
             },
             extra_content: None,
         }];
-        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1);
+        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1, BudgetMode::Global);
         assert!(blocked.is_empty());
         assert_eq!(calls.len(), 1);
 
@@ -779,7 +794,7 @@ mod tests {
             },
             extra_content: None,
         }];
-        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1);
+        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1, BudgetMode::Global);
         assert_eq!(blocked.len(), 1);
         assert!(calls.is_empty());
         let _ = &mut state;
@@ -806,9 +821,60 @@ mod tests {
                 extra_content: None,
             })
             .collect();
-        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1);
+        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1, BudgetMode::Global);
         assert_eq!(calls.len(), 2);
         assert_eq!(blocked.len(), 1);
+    }
+
+    #[test]
+    fn task_primary_skips_search_pool_but_attempt_fuse_still_blocks() {
+        let limits = WebToolBudgetLimits {
+            browser_max: 2,
+            extract_max: 5,
+            search_max: 2,
+            aggregate_max: None,
+            max_attempt_total: 12,
+            max_consecutive_errors: 2,
+        };
+        let state = WebToolBudgetState {
+            attempted_search: 2,
+            search_used: 2,
+            ..Default::default()
+        };
+        let mut calls = vec![ToolCall {
+            id: "s1".into(),
+            function: FunctionCall {
+                name: "web_search".into(),
+                arguments: r#"{"query":"more"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        let blocked =
+            apply_web_tool_budget(&state, &limits, &mut calls, 1, BudgetMode::TaskPrimary);
+        assert!(blocked.is_empty());
+        assert_eq!(calls.len(), 1);
+
+        let state_exhausted = WebToolBudgetState {
+            attempted_search: 12,
+            ..Default::default()
+        };
+        let mut calls2 = vec![ToolCall {
+            id: "s2".into(),
+            function: FunctionCall {
+                name: "web_search".into(),
+                arguments: r#"{"query":"fuse"}"#.into(),
+            },
+            extra_content: None,
+        }];
+        let blocked2 = apply_web_tool_budget(
+            &state_exhausted,
+            &limits,
+            &mut calls2,
+            2,
+            BudgetMode::TaskPrimary,
+        );
+        assert_eq!(blocked2.len(), 1);
+        assert!(calls2.is_empty());
     }
 
     #[test]
@@ -829,7 +895,7 @@ mod tests {
             },
             extra_content: None,
         }];
-        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1);
+        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1, BudgetMode::Global);
         assert_eq!(blocked.len(), 1);
         assert!(calls.is_empty());
         hermes_core::test_env::remove_var("HERMES_WEB_SEARCH_BUDGET_MAX_CALLS");
@@ -858,7 +924,7 @@ mod tests {
             },
             extra_content: None,
         }];
-        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1);
+        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1, BudgetMode::Global);
         assert!(blocked[0].1.content.contains("Do not retry"));
     }
 
@@ -960,7 +1026,7 @@ mod tests {
             },
             extra_content: None,
         }];
-        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1);
+        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1, BudgetMode::Global);
         assert_eq!(blocked.len(), 1);
         assert!(calls.is_empty());
     }
@@ -981,7 +1047,7 @@ mod tests {
             },
             extra_content: None,
         }];
-        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1);
+        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 1, BudgetMode::Global);
         assert!(blocked.is_empty());
         assert_eq!(calls.len(), 1);
     }
@@ -1019,7 +1085,7 @@ mod tests {
             },
             extra_content: None,
         }];
-        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 13);
+        let blocked = apply_web_tool_budget(&state, &limits, &mut calls, 13, BudgetMode::Global);
         assert!(is_attempt_safety_block(&blocked[0].1.content));
         assert!(blocked[0].1.content.contains("without_evidence"));
     }

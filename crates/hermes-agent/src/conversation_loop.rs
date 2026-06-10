@@ -628,11 +628,9 @@ async fn run_with_message_prelude(
     } else {
         None
     };
-    let mut web_research_ctrl = web_research_cfg
-        .enabled
-        .then(|| WebResearchController::new(web_research_cfg));
-    let mut active_tool_schemas = tool_schemas.clone();
-    let mut web_finalize_hint_injected = false;
+    let web_research_ctrl = web_research_cfg.enabled.then(|| {
+        WebResearchController::with_user_message(web_research_cfg, &first_user)
+    });
 
     // Enter the turn state machine
     let max_turns_limit = effective_max_turns(agent.config().max_turns);

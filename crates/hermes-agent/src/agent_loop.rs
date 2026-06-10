@@ -1,4 +1,4 @@
-﻿//! Core agent loop engine.
+//! Core agent loop engine.
 //!
 //! The `AgentLoop` orchestrates the autonomous agent cycle:
 //! 1. Send messages + tools to the LLM
@@ -696,7 +696,7 @@ pub(crate) fn summarize_tool_failure_for_user(tool_name: &str, error: &str) -> O
         "web_extract"
             if err.contains("403") || err.contains("401") || err.contains("blocks automated") =>
         {
-            Some("该网页拒绝自动抓取，正在尝试浏览器打开…".to_string())
+            Some("该网页拒绝自动抓取，将优先基于已有搜索结果摘要回答，或换一条检索词继续搜索。".to_string())
         }
         "browser_navigate"
             if err.contains("cdp not reachable")
