@@ -8,6 +8,7 @@ pub mod agent_callbacks;
 pub mod agent_config;
 pub mod agent_loop;
 pub mod agent_runtime_helpers;
+pub mod agent_state;
 pub mod api_bridge;
 pub mod api_message_oracle;
 pub mod api_messages;

@@ -1,6 +1,6 @@
 //! Codex app-server runtime — parity with `agent/codex_runtime.py`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use hermes_core::Message;
@@ -11,10 +11,6 @@ use crate::transports::codex_app_server::check_codex_binary;
 use crate::transports::codex_app_server_session::CodexAppServerSession;
 
 impl AgentLoop {
-    fn codex_session_slot(&self) -> &Arc<Mutex<Option<CodexAppServerSession>>> {
-        &self.codex_app_server_session
-    }
-
     /// True when the active runtime is the codex app-server path.
     pub(crate) fn api_mode_is_codex_app_server(&self) -> bool {
         use crate::smart_model_routing::ApiMode;
@@ -27,7 +23,7 @@ impl AgentLoop {
     fn session_cwd(&self) -> String {
         std::env::current_dir()
             .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| ".".into())
+            .unwrap_or_else(|_| ".".to_string())
     }
 
     /// Drive one user turn through codex app-server (Python `run_codex_app_server_turn`).
@@ -54,8 +50,18 @@ impl AgentLoop {
         }
         tracing::info!(codex_version = %version_msg, "codex app-server binary ok");
 
+        // Extract the codex session from shared state for use in spawn_blocking.
+        // We wrap it in a standalone Arc<Mutex<>> so the blocking closure does not
+        // hold the global AgentSharedState lock during the session's run_turn call.
+        let codex_session_arc: Arc<std::sync::Mutex<Option<CodexAppServerSession>>> =
+            Arc::new(std::sync::Mutex::new(
+                self.state
+                    .lock()
+                    .map(|mut state| state.codex_app_server_session.take())
+                    .unwrap_or(None),
+            ));
         let turn_result = tokio::task::spawn_blocking({
-            let slot = self.codex_session_slot().clone();
+            let slot = codex_session_arc.clone();
             let interrupt = Arc::new(self.interrupt.clone());
             let cwd = self.session_cwd();
             let codex_home = self.config().hermes_home.clone();
@@ -108,7 +114,7 @@ impl AgentLoop {
         };
 
         if turn.should_retire {
-            if let Ok(mut guard) = self.codex_session_slot().lock() {
+            if let Ok(mut guard) = codex_session_arc.lock() {
                 if let Some(mut session) = guard.take() {
                     session.close();
                 }
@@ -128,9 +134,18 @@ impl AgentLoop {
             }
         }
 
+        // Store the codex session back into shared state.
+        if let Ok(mut state) = self.state.lock() {
+            state.codex_app_server_session =
+                codex_session_arc.lock().ok().and_then(|mut g| g.take());
+        }
+
         if !turn.interrupted && turn.error.is_none() {
-            if let Ok(mut c) = self.evolution_counters.lock() {
-                c.iters_since_skill = c.iters_since_skill.saturating_add(turn.tool_iterations);
+            if let Ok(mut state) = self.state.lock() {
+                state.evolution_counters.iters_since_skill = state
+                    .evolution_counters
+                    .iters_since_skill
+                    .saturating_add(turn.tool_iterations);
             }
         }
 

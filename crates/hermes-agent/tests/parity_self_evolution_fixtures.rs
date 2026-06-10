@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use hermes_agent::agent_loop::{AgentConfig, AgentLoop, ToolRegistry};
 use hermes_agent::AgentError;
+use hermes_agent::agent_loop::{AgentConfig, AgentLoop, ToolRegistry};
 use hermes_core::{JsonSchema, LlmProvider, Message, StreamChunk, ToolSchema};
 use serde::Deserialize;
 
-use futures::stream::BoxStream;
 use futures::StreamExt;
+use futures::stream::BoxStream;
 
 #[derive(Debug, Deserialize)]
 struct FixtureCase {
@@ -39,7 +39,7 @@ impl LlmProvider for DummyProvider {
             usage: None,
             model: "dummy".into(),
             finish_reason: Some("stop".into()),
-        ..Default::default()
+            ..Default::default()
         })
     }
 
@@ -92,7 +92,8 @@ fn parity_python_v2026_4_13_self_evolution_fixtures() {
                 .expect("agent run should succeed");
         }
 
-        let counters = agent.evolution_counters.lock().expect("counter lock");
+        let counters = agent.state.lock().expect("counter lock");
+        let counters = &counters.evolution_counters;
         assert_eq!(
             counters.turns_since_memory, case.expected_turns_since_memory,
             "fixture={} turns_since_memory mismatch",

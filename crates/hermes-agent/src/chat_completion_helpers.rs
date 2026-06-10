@@ -6,8 +6,8 @@ use hermes_core::{AgentError, ToolSchema};
 use tokio::time::sleep;
 
 use crate::agent_loop::{
-    classify_error, is_tool_payload_validation_error, jittered_backoff, maybe_nous_401_diagnostic,
-    preferred_tool_payload_fallback_model, AgentLoop, ErrorClass, TurnRuntimeRoute,
+    AgentLoop, ErrorClass, TurnRuntimeRoute, classify_error, is_tool_payload_validation_error,
+    jittered_backoff, maybe_nous_401_diagnostic, preferred_tool_payload_fallback_model,
 };
 use crate::context::ContextManager;
 
@@ -196,8 +196,8 @@ impl AgentLoop {
                     hermes_telemetry::record_llm_latency(api_start.elapsed());
                     if active_provider == "nous" {
                         if let Some(headers) = response.rate_limit_headers.take() {
-                            if let Ok(mut slot) = self.last_nous_rate_limit_headers.lock() {
-                                *slot = Some(headers);
+                            if let Ok(mut state) = self.state.lock() {
+                                state.last_nous_rate_limit_headers = Some(headers);
                             }
                         }
                     }
@@ -240,8 +240,7 @@ impl AgentLoop {
                         );
                         continue;
                     }
-                    if failover == crate::error_classifier::FailoverReason::InvalidEncryptedReplay
-                    {
+                    if failover == crate::error_classifier::FailoverReason::InvalidEncryptedReplay {
                         if crate::error_classifier::strip_invalid_encrypted_replay_from_context(ctx)
                         {
                             self.invalidate_turn_api_messages_cache();
@@ -255,8 +254,7 @@ impl AgentLoop {
                             continue;
                         }
                     }
-                    if failover == crate::error_classifier::FailoverReason::ImageTooLarge
-                    {
+                    if failover == crate::error_classifier::FailoverReason::ImageTooLarge {
                         if crate::error_classifier::shrink_oversized_images_in_context(ctx) {
                             self.invalidate_turn_api_messages_cache();
                             tracing::warn!("Image too large — stripped image parts and retrying");
@@ -267,8 +265,7 @@ impl AgentLoop {
                             continue;
                         }
                     }
-                    if failover == crate::error_classifier::FailoverReason::LlamaCppGrammarPattern
-                    {
+                    if failover == crate::error_classifier::FailoverReason::LlamaCppGrammarPattern {
                         tracing::warn!(
                             "llama.cpp grammar/schema error — retrying without tool strictness"
                         );
@@ -287,8 +284,7 @@ impl AgentLoop {
                         );
                         continue;
                     }
-                    if failover == crate::error_classifier::FailoverReason::ProviderPolicyBlocked
-                    {
+                    if failover == crate::error_classifier::FailoverReason::ProviderPolicyBlocked {
                         return Err(AgentError::LlmApi(format!(
                             "{err_str}\n\nProvider policy blocked this model endpoint. \
                              Adjust privacy/guardrail settings at the provider console."
@@ -546,23 +542,21 @@ impl AgentLoop {
                                     }
                                 }
                             }
-                            if matches!(class, ErrorClass::RateLimit)
-                                && active_provider == "nous"
-                            {
+                            if matches!(class, ErrorClass::RateLimit) && active_provider == "nous" {
                                 let parsed =
                                     crate::nous_rate_guard::parse_rate_limit_headers_from_llm_error(
                                         &err_str,
                                     );
-                                let last = self
-                                    .last_nous_rate_limit_headers
-                                    .lock()
-                                    .ok()
-                                    .and_then(|g| g.clone());
+                                let last =
+                                    self.state.lock().ok().and_then(|state| {
+                                        state.last_nous_rate_limit_headers.clone()
+                                    });
                                 let genuine = crate::nous_rate_guard::is_genuine_nous_rate_limit(
                                     parsed.as_ref(),
-                                ) || crate::nous_rate_guard::is_genuine_nous_rate_limit(
-                                    last.as_ref(),
-                                );
+                                )
+                                    || crate::nous_rate_guard::is_genuine_nous_rate_limit(
+                                        last.as_ref(),
+                                    );
                                 if genuine {
                                     crate::nous_rate_guard::record_nous_rate_limit(
                                         self.config().hermes_home.as_deref(),
@@ -574,8 +568,7 @@ impl AgentLoop {
                                     tracing::info!(
                                         "Nous genuine rate limit — tripping cross-session breaker"
                                     );
-                                    if self.try_activate_session_fallback(&effective_model_name)
-                                    {
+                                    if self.try_activate_session_fallback(&effective_model_name) {
                                         return self
                                             .call_llm_with_retry(
                                                 ctx,
@@ -590,9 +583,7 @@ impl AgentLoop {
                                         retry_after_secs: parsed
                                             .as_ref()
                                             .and_then(|h| {
-                                                crate::nous_rate_guard::parse_reset_seconds(
-                                                    Some(h),
-                                                )
+                                                crate::nous_rate_guard::parse_reset_seconds(Some(h))
                                             })
                                             .map(|s| s.ceil() as u64),
                                     });
@@ -648,9 +639,11 @@ impl AgentLoop {
                                 if !failover_chain.is_empty() {
                                     let mut failover_errors = Vec::new();
                                     for fallback in failover_chain {
-                                        if let Ok(mut fb) = self.turn_fallback.lock() {
-                                            fb.fallback_chain_index =
-                                                fb.fallback_chain_index.saturating_add(1);
+                                        if let Ok(mut state) = self.state.lock() {
+                                            state.turn_fallback.fallback_chain_index = state
+                                                .turn_fallback
+                                                .fallback_chain_index
+                                                .saturating_add(1);
                                         }
                                         tracing::info!(
                                             "All retries exhausted on {}. Trying fallback: {}",
@@ -734,5 +727,4 @@ impl AgentLoop {
         }
         unreachable!()
     }
-
 }

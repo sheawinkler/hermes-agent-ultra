@@ -40,7 +40,6 @@ use crate::context::ContextManager;
 use crate::context_files::{load_hermes_context_files, load_workspace_context};
 use crate::context_references::preprocess_context_references_async;
 use crate::credential_pool::CredentialPool;
-use crate::fallback::TurnFallbackState;
 use crate::interrupt::InterruptController;
 use crate::lsp_context::{LspContextConfig, build_lsp_context_note};
 use crate::memory_manager::MemoryManager;
@@ -68,9 +67,7 @@ use crate::steer::PendingSteer;
 use crate::system_prompt::{
     BACKEND_PROBE_COMMAND, format_probe_output, platform_hint_for, probe_remote_backend_cached,
 };
-use crate::user_interest::{
-    InterestStore, SessionPoiBuffer, ingest_user_message, is_poi_synthetic_user_text,
-};
+use crate::user_interest::{InterestStore, ingest_user_message, is_poi_synthetic_user_text};
 use crate::work_session::{spawn_session_end_pipeline, touch_active_session};
 use hermes_intelligence::auxiliary::AuxiliaryClient;
 
@@ -87,6 +84,7 @@ use crate::agent_config::{
     has_ssl_transient_phrase, is_copilot_acp_transport, is_stream_not_supported_error,
     is_transient_stream_error, rand_u64_range, should_inject_tool_enforcement_for_model,
 };
+pub(crate) use crate::agent_state::AgentSharedState;
 pub use crate::tool_registry::{ToolEntry, ToolRegistry};
 
 // ---------------------------------------------------------------------------
@@ -883,12 +881,8 @@ pub struct AgentLoop {
     pub memory_manager: Option<Arc<std::sync::Mutex<MemoryManager>>>,
     /// Local POI store (works even when `skip_memory` is true).
     interest_store: Option<Arc<Mutex<InterestStore>>>,
-    /// Dedupes per-session user-message POI ingest.
-    interest_synced_user_hashes: Arc<Mutex<HashSet<u64>>>,
-    /// Messages prefix already scanned by [`Self::interest_sync_user_messages`].
-    interest_synced_message_len: Arc<Mutex<usize>>,
-    /// Per-session POI signals until session-end flush (`per_turn_buffer`).
-    interest_session_buffer: Arc<Mutex<SessionPoiBuffer>>,
+    /// Consolidated shared mutable state (replaces ~20 scattered Arc<Mutex<>> fields).
+    pub state: Arc<Mutex<AgentSharedState>>,
     /// Optional plugin manager for lifecycle hooks.
     pub plugin_manager: Option<Arc<std::sync::Mutex<PluginManager>>>,
     /// Callbacks for progress reporting.
@@ -897,12 +891,6 @@ pub struct AgentLoop {
     pub delegate_depth: u32,
     /// Primary LLM credential pool (Python `primary["credential_pool"]` / runtime pool).
     pub primary_credential_pool: Option<Arc<CredentialPool>>,
-    /// Memory/skill nudge counters (persist for the lifetime of this `AgentLoop`).
-    pub evolution_counters: Arc<Mutex<EvolutionCounters>>,
-    /// Session-scoped token/cost counters (Python `session_*` fields).
-    pub session_usage: Arc<Mutex<crate::session_state::SessionUsageMetrics>>,
-    /// Backoff window for oauth refresh failures (avoid hammering token endpoints every turn).
-    oauth_refresh_backoff: Arc<Mutex<HashMap<String, Instant>>>,
     /// Optional in-process sub-agent orchestrator. When set, `delegate_task`
     /// tool calls are executed by the orchestrator (spawn/timeout/cancel/
     /// lineage) instead of simply returning a signal envelope.
@@ -916,45 +904,21 @@ pub struct AgentLoop {
     route_learning: Arc<Mutex<HashMap<String, RouteLearningStats>>>,
     /// Frozen primary runtime at session start (Python `_primary_runtime`).
     stored_primary_runtime: PrimaryRuntime,
-    /// Effective model/provider for the current turn (restored at turn boundaries).
-    active_runtime: Mutex<PrimaryRuntime>,
-    /// Turn-scoped fallback activation (Python `_fallback_activated` / chain index).
-    pub(crate) turn_fallback: Mutex<TurnFallbackState>,
     /// When set, tool calls use this async path instead of sync `ToolRegistry` handlers
     /// (avoids `block_in_place` + `block_on` from inside `JoinSet` tasks on the gateway).
     pub(crate) async_tool_dispatch: Option<AsyncToolDispatch>,
     /// Mid-run `/steer` queue (Python `_pending_steer`).
     pub(crate) pending_steer: PendingSteer,
-    /// Active turn task id (Python `_current_task_id`).
-    pub(crate) current_task_id: Arc<Mutex<Option<String>>>,
-    /// Python `AIAgent._last_flushed_db_idx` — incremental SQLite session writes.
-    pub(crate) session_db_flush: Arc<Mutex<SessionFlushCursor>>,
-    /// Python `_cached_system_prompt` — built once per session, invalidated on compression.
-    pub(crate) cached_system_prompt: Arc<Mutex<Option<String>>>,
-    /// Python `_ext_prefetch_cache` — fetched once per turn, injected at API-call time only.
-    turn_ext_prefetch_cache: Arc<Mutex<String>>,
     /// Python `agent.context_compressor.ContextCompressor` (LLM summary + boundary alignment).
     pub(crate) context_compressor: Arc<tokio::sync::Mutex<ContextCompressor>>,
     /// Reused SQLite persistence handle for this agent (Python `SessionDB._conn` parity).
     shared_session_persistence: std::sync::OnceLock<Arc<SessionPersistence>>,
-    /// Per-turn cache of assembled API messages (LLM retry fast path).
-    turn_api_messages_cache:
-        Mutex<Option<(crate::api_messages::ApiMessagesCacheKey, Arc<[Message]>)>>,
     /// Per-turn cache for OpenAI-compat provider message/tool JSON serialization.
     provider_serialize_cache: Arc<crate::provider_serialize_cache::ProviderSerializeCache>,
     /// Python `_disable_streaming` — set after "stream not supported" for the rest of the session.
     disable_streaming: Arc<AtomicBool>,
-    /// Lazy `CodexAppServerSession` (Python `agent._codex_session`).
-    pub(crate) codex_app_server_session:
-        Arc<Mutex<Option<crate::transports::codex_app_server_session::CodexAppServerSession>>>,
-    /// Last-known Nous `x-ratelimit-*` headers from a successful response (Python `_rate_limit_state`).
-    pub(crate) last_nous_rate_limit_headers:
-        Arc<Mutex<Option<std::collections::HashMap<String, String>>>>,
     /// Per-turn vision capability (Python `_vision_supported`; reset each `prepare_turn`).
     pub(crate) vision_supported: Arc<std::sync::atomic::AtomicBool>,
-    /// Compression feasibility warning replayed at turn start (Python `_compression_warning`).
-    compression_warning: Arc<Mutex<Option<String>>>,
-    compression_feasibility_checked: Arc<AtomicBool>,
 }
 
 /// Async tool execution hook (gateway: `hermes_tools::ToolRegistry::dispatch_async`).
@@ -1332,26 +1296,30 @@ impl AgentLoop {
 
     /// Restore primary model/provider at the start of a new turn (Python `run_conversation` prelude).
     pub(crate) fn restore_primary_runtime_at_turn_start(&self) {
-        let mut active = match self.active_runtime.lock() {
-            Ok(guard) => guard,
-            Err(_) => return,
+        let restored = {
+            // Clone both fields out, operate on them, then write back.
+            // This avoids double-mutable-borrow issues since both fields live
+            // behind the same MutexGuard on AgentSharedState.
+            let mut state = match self.state.lock() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            };
+            let mut fb = state.turn_fallback.clone();
+            let restored =
+                fb.restore_primary_runtime(&self.stored_primary_runtime, &mut state.active_runtime);
+            state.turn_fallback = fb;
+            restored
         };
-        let mut fallback = match self.turn_fallback.lock() {
-            Ok(guard) => guard,
-            Err(_) => return,
-        };
-        let restored = fallback.restore_primary_runtime(&self.stored_primary_runtime, &mut active);
         if restored {
-            drop(fallback);
-            drop(active);
             self.sync_config_from_active_runtime();
         }
     }
 
     fn sync_config_from_active_runtime(&self) {
-        let Ok(active) = self.active_runtime.lock() else {
+        let Ok(state) = self.state.lock() else {
             return;
         };
+        let active = &state.active_runtime;
         let mut cfg = self
             .config_runtime
             .write()
@@ -1496,13 +1464,13 @@ impl AgentLoop {
     /// Effective provider for API calls: rebuild from active runtime when fallback is active.
     pub(crate) fn effective_llm_provider(&self) -> Arc<dyn LlmProvider> {
         let fallback_active = self
-            .turn_fallback
+            .state
             .lock()
-            .map(|fb| fb.is_fallback_activated())
+            .map(|state| state.turn_fallback.is_fallback_activated())
             .unwrap_or(false);
         if fallback_active {
-            if let Ok(active) = self.active_runtime.lock() {
-                if let Ok(provider) = self.build_llm_provider_for_runtime(&active) {
+            if let Ok(state) = self.state.lock() {
+                if let Ok(provider) = self.build_llm_provider_for_runtime(&state.active_runtime) {
                     return provider;
                 }
             }
@@ -1512,9 +1480,9 @@ impl AgentLoop {
 
     pub(crate) fn note_primary_rate_limited_if_applicable(&self) {
         let already = self
-            .turn_fallback
+            .state
             .lock()
-            .map(|fb| fb.is_fallback_activated())
+            .map(|state| state.turn_fallback.is_fallback_activated())
             .unwrap_or(false);
         let primary_prov = self
             .stored_primary_runtime
@@ -1531,24 +1499,24 @@ impl AgentLoop {
         if already && !primary_prov.is_empty() && active_prov != primary_prov {
             return;
         }
-        if let Ok(mut fb) = self.turn_fallback.lock() {
-            fb.note_primary_rate_limited();
+        if let Ok(mut state) = self.state.lock() {
+            state.turn_fallback.note_primary_rate_limited();
         }
     }
 
     pub(crate) fn active_model(&self) -> String {
-        self.active_runtime
+        self.state
             .lock()
-            .map(|rt| rt.model.clone())
+            .map(|state| state.active_runtime.model.clone())
             .unwrap_or_else(|_| self.config_snapshot().model)
     }
 
     /// Try switching to a configured fallback model (Nous guard, billing, rate limit).
     pub(crate) fn try_activate_session_fallback(&self, active_model: &str) -> bool {
         if self
-            .turn_fallback
+            .state
             .lock()
-            .map(|fb| fb.is_fallback_activated())
+            .map(|state| state.turn_fallback.is_fallback_activated())
             .unwrap_or(false)
         {
             return false;
@@ -1564,11 +1532,9 @@ impl AgentLoop {
 
     /// Apply an in-session fallback runtime (Python `_try_activate_fallback` outcome).
     pub(crate) fn activate_runtime_fallback(&self, runtime: PrimaryRuntime) {
-        if let Ok(mut active) = self.active_runtime.lock() {
-            *active = runtime;
-        }
-        if let Ok(mut fb) = self.turn_fallback.lock() {
-            fb.mark_fallback_activated();
+        if let Ok(mut state) = self.state.lock() {
+            state.active_runtime = runtime;
+            state.turn_fallback.mark_fallback_activated();
         }
         self.sync_config_from_active_runtime();
     }
@@ -1595,7 +1561,6 @@ impl AgentLoop {
         let code_index = Self::init_code_index(&config);
         let lsp_context = Self::build_lsp_context_config(&config);
         let stored_primary_runtime = Self::primary_runtime_from_config(&config);
-        let active_runtime = Mutex::new(stored_primary_runtime.clone());
         let context_compressor = build_context_compressor_for_config(&config);
         Self {
             config_runtime: std::sync::RwLock::new(config),
@@ -1604,70 +1569,55 @@ impl AgentLoop {
             interrupt: InterruptController::new(),
             memory_manager: None,
             interest_store: None,
-            interest_synced_user_hashes: Arc::new(Mutex::new(HashSet::new())),
-            interest_synced_message_len: Arc::new(Mutex::new(0)),
-            interest_session_buffer: Arc::new(Mutex::new(SessionPoiBuffer::default())),
+            state: Arc::new(Mutex::new(AgentSharedState::new(
+                stored_primary_runtime.clone(),
+                EvolutionCounters::default(),
+            ))),
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
             primary_credential_pool: None,
-            evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
-            session_usage: Arc::new(Mutex::new(
-                crate::session_state::SessionUsageMetrics::default(),
-            )),
-            oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
             sub_agent_orchestrator: None,
             code_index,
             lsp_context,
             route_learning,
             stored_primary_runtime,
-            active_runtime,
-            turn_fallback: Mutex::new(TurnFallbackState::new()),
             async_tool_dispatch: None,
             pending_steer: PendingSteer::new(),
-            current_task_id: Arc::new(Mutex::new(None)),
-            session_db_flush: Arc::new(Mutex::new(SessionFlushCursor::new())),
-            cached_system_prompt: Arc::new(Mutex::new(None)),
-            turn_ext_prefetch_cache: Arc::new(Mutex::new(String::new())),
             context_compressor,
             shared_session_persistence: std::sync::OnceLock::new(),
-            turn_api_messages_cache: Mutex::new(None),
             provider_serialize_cache: Arc::new(
                 crate::provider_serialize_cache::ProviderSerializeCache::new(),
             ),
             disable_streaming: Arc::new(AtomicBool::new(false)),
-            codex_app_server_session: Arc::new(Mutex::new(None)),
-            last_nous_rate_limit_headers: Arc::new(Mutex::new(None)),
             vision_supported: Arc::new(AtomicBool::new(true)),
-            compression_warning: Arc::new(Mutex::new(None)),
-            compression_feasibility_checked: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Reset incremental session DB flush cursor (e.g. after `/new` or compression rotation).
     pub fn reset_session_db_flush_cursor(&self) {
-        if let Ok(mut guard) = self.session_db_flush.lock() {
-            guard.reset();
+        if let Ok(mut state) = self.state.lock() {
+            state.session_db_flush.reset();
         }
     }
 
     /// Invalidate session-scoped system prompt cache (compression / `/new`).
     pub fn invalidate_cached_system_prompt(&self) {
-        if let Ok(mut guard) = self.cached_system_prompt.lock() {
-            *guard = None;
+        if let Ok(mut state) = self.state.lock() {
+            state.cached_system_prompt = None;
         }
     }
 
     pub(crate) fn set_turn_ext_prefetch_cache(&self, prefetch: String) {
-        if let Ok(mut guard) = self.turn_ext_prefetch_cache.lock() {
-            *guard = prefetch;
+        if let Ok(mut state) = self.state.lock() {
+            state.turn_ext_prefetch_cache = prefetch;
         }
         self.invalidate_turn_api_messages_cache();
     }
 
     pub(crate) fn invalidate_turn_api_messages_cache(&self) {
-        if let Ok(mut guard) = self.turn_api_messages_cache.lock() {
-            *guard = None;
+        if let Ok(mut state) = self.state.lock() {
+            state.turn_api_messages_cache = None;
         }
         self.provider_serialize_cache.invalidate();
     }
@@ -1684,9 +1634,9 @@ impl AgentLoop {
         ctx: &ContextManager,
     ) -> crate::api_messages::ApiMessagesCacheKey {
         let prefetch = self
-            .turn_ext_prefetch_cache
+            .state
             .lock()
-            .map(|g| g.clone())
+            .map(|state| state.turn_ext_prefetch_cache.clone())
             .unwrap_or_default();
         let cfg = self.config();
         crate::api_messages::ApiMessagesCacheKey {
@@ -1735,8 +1685,8 @@ impl AgentLoop {
     pub(crate) fn build_turn_api_messages(&self, ctx: &mut ContextManager) -> Arc<[Message]> {
         self.prepare_ctx_for_api_call(ctx);
         let key = self.api_messages_cache_key(ctx);
-        if let Ok(guard) = self.turn_api_messages_cache.lock() {
-            if let Some((cached_key, arc)) = guard.as_ref() {
+        if let Ok(state) = self.state.lock() {
+            if let Some((cached_key, arc)) = state.turn_api_messages_cache.as_ref() {
                 if *cached_key == key {
                     return Arc::clone(arc);
                 }
@@ -1745,9 +1695,9 @@ impl AgentLoop {
 
         let cfg = self.config();
         let prefetch = self
-            .turn_ext_prefetch_cache
+            .state
             .lock()
-            .map(|g| g.clone())
+            .map(|state| state.turn_ext_prefetch_cache.clone())
             .unwrap_or_default();
         let ephemeral = cfg
             .ephemeral_system_prompt
@@ -1779,8 +1729,8 @@ impl AgentLoop {
         );
         let arc: Arc<[Message]> = messages.into();
 
-        if let Ok(mut guard) = self.turn_api_messages_cache.lock() {
-            *guard = Some((key, Arc::clone(&arc)));
+        if let Ok(mut state) = self.state.lock() {
+            state.turn_api_messages_cache = Some((key, Arc::clone(&arc)));
         }
         arc
     }
@@ -1789,9 +1739,9 @@ impl AgentLoop {
         self.prepare_ctx_for_api_call(ctx);
         let mut messages = ctx.get_messages().to_vec();
         let prefetch = self
-            .turn_ext_prefetch_cache
+            .state
             .lock()
-            .map(|g| g.clone())
+            .map(|state| state.turn_ext_prefetch_cache.clone())
             .unwrap_or_default();
         crate::api_messages::apply_prefetch_to_last_user(&mut messages, &prefetch);
         if let Some(ephemeral) = self
@@ -1911,7 +1861,6 @@ impl AgentLoop {
         // let code_index = Self::init_code_index(&config);
         let lsp_context = Self::build_lsp_context_config(&config);
         let stored_primary_runtime = Self::primary_runtime_from_config(&config);
-        let active_runtime = Mutex::new(stored_primary_runtime.clone());
         let context_compressor = build_context_compressor_for_config(&config);
         Self {
             config_runtime: std::sync::RwLock::new(config),
@@ -1920,43 +1869,28 @@ impl AgentLoop {
             interrupt,
             memory_manager: None,
             interest_store: None,
-            interest_synced_user_hashes: Arc::new(Mutex::new(HashSet::new())),
-            interest_synced_message_len: Arc::new(Mutex::new(0)),
-            interest_session_buffer: Arc::new(Mutex::new(SessionPoiBuffer::default())),
+            state: Arc::new(Mutex::new(AgentSharedState::new(
+                stored_primary_runtime.clone(),
+                EvolutionCounters::default(),
+            ))),
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
             primary_credential_pool: None,
-            evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
-            session_usage: Arc::new(Mutex::new(
-                crate::session_state::SessionUsageMetrics::default(),
-            )),
-            oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
             sub_agent_orchestrator: None,
             code_index: None,
             lsp_context,
             route_learning,
             stored_primary_runtime,
-            active_runtime,
-            turn_fallback: Mutex::new(TurnFallbackState::new()),
             async_tool_dispatch: None,
             pending_steer: PendingSteer::new(),
-            current_task_id: Arc::new(Mutex::new(None)),
-            session_db_flush: Arc::new(Mutex::new(SessionFlushCursor::new())),
-            cached_system_prompt: Arc::new(Mutex::new(None)),
-            turn_ext_prefetch_cache: Arc::new(Mutex::new(String::new())),
             context_compressor,
             shared_session_persistence: std::sync::OnceLock::new(),
-            turn_api_messages_cache: Mutex::new(None),
             provider_serialize_cache: Arc::new(
                 crate::provider_serialize_cache::ProviderSerializeCache::new(),
             ),
             disable_streaming: Arc::new(AtomicBool::new(false)),
-            codex_app_server_session: Arc::new(Mutex::new(None)),
-            last_nous_rate_limit_headers: Arc::new(Mutex::new(None)),
             vision_supported: Arc::new(AtomicBool::new(true)),
-            compression_warning: Arc::new(Mutex::new(None)),
-            compression_feasibility_checked: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -2326,14 +2260,10 @@ impl AgentLoop {
     }
 
     fn reset_interest_sync_cursor(&self) {
-        if let Ok(mut len) = self.interest_synced_message_len.lock() {
-            *len = 0;
-        }
-        if let Ok(mut synced) = self.interest_synced_user_hashes.lock() {
-            synced.clear();
-        }
-        if let Ok(mut buffer) = self.interest_session_buffer.lock() {
-            buffer.clear();
+        if let Ok(mut state) = self.state.lock() {
+            state.interest_synced_message_len = 0;
+            state.interest_synced_user_hashes.clear();
+            state.interest_session_buffer.clear();
         }
     }
 
@@ -2345,16 +2275,13 @@ impl AgentLoop {
         if !interest_cfg.per_turn_persist && !interest_cfg.per_turn_buffer {
             return;
         }
-        let Ok(mut synced_len) = self.interest_synced_message_len.lock() else {
+        let Ok(mut state) = self.state.lock() else {
             return;
         };
-        let start = *synced_len;
+        let start = state.interest_synced_message_len;
         if start >= messages.len() {
             return;
         }
-        let Ok(mut synced) = self.interest_synced_user_hashes.lock() else {
-            return;
-        };
         for msg in messages.iter().skip(start) {
             if msg.role != MessageRole::User {
                 continue;
@@ -2372,7 +2299,7 @@ impl AgentLoop {
                 let digest = hasher.finalize();
                 u64::from_be_bytes(digest[..8].try_into().unwrap_or([0u8; 8]))
             };
-            if !synced.insert(hash) {
+            if !state.interest_synced_user_hashes.insert(hash) {
                 continue;
             }
             if interest_cfg.per_turn_persist {
@@ -2383,12 +2310,12 @@ impl AgentLoop {
                     let _ = ingest_user_message(&guard, &interest_cfg, trimmed, 0.35);
                 }
             } else if interest_cfg.per_turn_buffer {
-                if let Ok(mut buffer) = self.interest_session_buffer.lock() {
-                    buffer.absorb_turn(trimmed, &interest_cfg);
-                }
+                state
+                    .interest_session_buffer
+                    .absorb_turn(trimmed, &interest_cfg);
             }
         }
-        *synced_len = messages.len();
+        state.interest_synced_message_len = messages.len();
     }
 
     fn interest_on_session_end(&self, messages: &[Message]) {
@@ -2402,19 +2329,17 @@ impl AgentLoop {
             return;
         }
         let buffered = if interest_enabled {
-            self.interest_session_buffer
+            self.state
                 .lock()
-                .map(|mut b| b.drain())
+                .map(|mut state| state.interest_session_buffer.drain())
                 .unwrap_or_default()
         } else {
             Vec::new()
         };
         if interest_enabled {
-            if let Ok(mut synced) = self.interest_synced_user_hashes.lock() {
-                synced.clear();
-            }
-            if let Ok(mut len) = self.interest_synced_message_len.lock() {
-                *len = 0;
+            if let Ok(mut state) = self.state.lock() {
+                state.interest_synced_user_hashes.clear();
+                state.interest_synced_message_len = 0;
             }
         }
         let as_values: Vec<Value> = messages
@@ -2568,21 +2493,29 @@ impl AgentLoop {
 
     /// Replay stored compression feasibility warning once (Python `_replay_compression_warning`).
     pub(crate) async fn replay_compression_warning_at_turn_start(&self) {
-        if !self
-            .compression_feasibility_checked
-            .swap(true, Ordering::AcqRel)
-        {
+        let should_compile = {
+            let Ok(mut state) = self.state.lock() else {
+                return;
+            };
+            if !state.compression_feasibility_checked {
+                state.compression_feasibility_checked = true;
+                true
+            } else {
+                false
+            }
+        };
+        if should_compile {
             if let Some(msg) = self.compute_compression_feasibility_warning().await {
-                if let Ok(mut slot) = self.compression_warning.lock() {
-                    *slot = Some(msg);
+                if let Ok(mut state) = self.state.lock() {
+                    state.compression_warning = Some(msg);
                 }
             }
         }
         let msg = self
-            .compression_warning
+            .state
             .lock()
             .ok()
-            .and_then(|mut g| g.take());
+            .and_then(|mut state| state.compression_warning.take());
         if let Some(msg) = msg {
             self.emit_status("lifecycle", &msg);
         }
@@ -3648,24 +3581,26 @@ impl AgentLoop {
     }
 
     fn can_attempt_oauth_refresh(&self, provider_key: &str) -> bool {
-        let Ok(guard) = self.oauth_refresh_backoff.lock() else {
+        let Ok(state) = self.state.lock() else {
             return true;
         };
-        let Some(last_fail) = guard.get(provider_key) else {
+        let Some(last_fail) = state.oauth_refresh_backoff.get(provider_key) else {
             return true;
         };
         last_fail.elapsed().as_secs() >= OAUTH_REFRESH_BACKOFF_SECS
     }
 
     fn mark_oauth_refresh_failure(&self, provider_key: &str) {
-        if let Ok(mut guard) = self.oauth_refresh_backoff.lock() {
-            guard.insert(provider_key.to_string(), Instant::now());
+        if let Ok(mut state) = self.state.lock() {
+            state
+                .oauth_refresh_backoff
+                .insert(provider_key.to_string(), Instant::now());
         }
     }
 
     fn mark_oauth_refresh_success(&self, provider_key: &str) {
-        if let Ok(mut guard) = self.oauth_refresh_backoff.lock() {
-            guard.remove(provider_key);
+        if let Ok(mut state) = self.state.lock() {
+            state.oauth_refresh_backoff.remove(provider_key);
         }
     }
 
@@ -5197,9 +5132,9 @@ impl AgentLoop {
 
     pub(crate) fn primary_runtime_snapshot(&self) -> PrimaryRuntime {
         let mut snap = self
-            .active_runtime
+            .state
             .lock()
-            .map(|rt| rt.clone())
+            .map(|state| state.active_runtime.clone())
             .unwrap_or_else(|_| self.stored_primary_runtime.clone());
         snap.credential_pool = self.primary_credential_pool.clone();
         snap
@@ -5846,10 +5781,12 @@ impl AgentLoop {
                 .iter()
                 .any(|n| n == "skill_manage")
         {
-            if let Ok(mut c) = self.evolution_counters.lock() {
-                if c.iters_since_skill >= self.config().skill_creation_nudge_interval {
+            if let Ok(mut state) = self.state.lock() {
+                if state.evolution_counters.iters_since_skill
+                    >= self.config().skill_creation_nudge_interval
+                {
                     review_skills = true;
-                    c.iters_since_skill = 0;
+                    state.evolution_counters.iters_since_skill = 0;
                 }
             }
         }
@@ -7452,9 +7389,10 @@ mod tests {
         assert_eq!(agent.config().model, "gpt-4o");
         assert!(
             !agent
-                .turn_fallback
+                .state
                 .lock()
                 .expect("lock")
+                .turn_fallback
                 .is_fallback_activated()
         );
     }
@@ -10533,7 +10471,7 @@ mod tests {
             .block_on(agent.run(vec![Message::user("hello")], None))
             .expect("agent run should succeed");
 
-        let counters = agent.evolution_counters.lock().expect("counter lock");
+        let counters = &agent.state.lock().expect("counter lock").evolution_counters;
         assert_eq!(counters.iters_since_skill, 1);
     }
 
@@ -10614,7 +10552,7 @@ mod tests {
                     .block_on(agent.run(vec![Message::user("hello")], None))
                     .expect("agent run should succeed");
             }
-            let counters = agent.evolution_counters.lock().expect("counter lock");
+            let counters = &agent.state.lock().expect("counter lock").evolution_counters;
             assert_eq!(
                 counters.turns_since_memory, case.expected_turns_since_memory,
                 "fixture runs={} mismatch",
@@ -10701,7 +10639,7 @@ mod tests {
             .block_on(agent.run(vec![Message::user("hello")], None))
             .expect("agent run should succeed");
 
-        let counters = agent.evolution_counters.lock().expect("counter lock");
+        let counters = &agent.state.lock().expect("counter lock").evolution_counters;
         // Iteration #1 increments then skill_manage resets to 0.
         // Iteration #2 (final assistant turn) increments again to 1.
         // Python follows the same cadence because `_iters_since_skill += 1`

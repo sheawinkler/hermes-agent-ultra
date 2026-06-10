@@ -12,7 +12,7 @@ use hermes_core::LlmProvider;
 use crate::smart_model_routing::PrimaryRuntime;
 
 /// Per-session turn-scoped fallback state (Python `_fallback_activated` / `_fallback_index`).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TurnFallbackState {
     pub fallback_activated: bool,
     pub fallback_chain_index: usize,

@@ -251,16 +251,17 @@ impl AgentLoop {
             .clone()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        if let Ok(mut slot) = self.current_task_id.lock() {
-            *slot = Some(task_id.clone());
+        if let Ok(mut state) = self.state.lock() {
+            state.current_task_id = Some(task_id.clone());
         }
 
         let conversation_history = strip_system_messages_from_history(&params.conversation_history);
         self.hydrate_memory_nudge_counters_from_history(&conversation_history);
         let user_turn_count = {
-            if let Ok(mut c) = self.evolution_counters.lock() {
-                c.user_turn_count = c.user_turn_count.saturating_add(1);
-                c.user_turn_count
+            if let Ok(mut state) = self.state.lock() {
+                state.evolution_counters.user_turn_count =
+                    state.evolution_counters.user_turn_count.saturating_add(1);
+                state.evolution_counters.user_turn_count
             } else {
                 1
             }
@@ -392,12 +393,13 @@ impl AgentLoop {
         if prior_user_turns == 0 {
             return;
         }
-        if let Ok(mut c) = self.evolution_counters.lock() {
-            if c.user_turn_count == 0 {
-                c.user_turn_count = prior_user_turns as u32;
+        if let Ok(mut state) = self.state.lock() {
+            if state.evolution_counters.user_turn_count == 0 {
+                state.evolution_counters.user_turn_count = prior_user_turns as u32;
             }
-            if c.turns_since_memory == 0 {
-                c.turns_since_memory = (prior_user_turns % interval as usize) as u32;
+            if state.evolution_counters.turns_since_memory == 0 {
+                state.evolution_counters.turns_since_memory =
+                    (prior_user_turns % interval as usize) as u32;
             }
         }
     }
@@ -449,9 +451,9 @@ impl AgentLoop {
         let platform = cfg.platform.as_deref();
         let model = self.active_model();
         let mut cursor = self
-            .session_db_flush
+            .state
             .lock()
-            .map(|mut g| std::mem::take(&mut *g))
+            .map(|mut state| std::mem::take(&mut state.session_db_flush))
             .unwrap_or_default();
         let result = sp.persist_session(
             sid,
@@ -462,8 +464,8 @@ impl AgentLoop {
             None,
             sys.as_deref(),
         );
-        if let Ok(mut guard) = self.session_db_flush.lock() {
-            *guard = cursor;
+        if let Ok(mut state) = self.state.lock() {
+            state.session_db_flush = cursor;
         }
         if let Err(err) = result {
             tracing::warn!(session_id = %sid, "persist_session after run_conversation: {}", err);
@@ -485,7 +487,10 @@ impl AgentLoop {
 
     /// Active task id for this turn (Python `agent._current_task_id`).
     pub fn current_task_id(&self) -> Option<String> {
-        self.current_task_id.lock().ok().and_then(|g| g.clone())
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| state.current_task_id.clone())
     }
 
     /// Returns `(prompt, restored_from_storage)` using session-level cache when warm.
@@ -494,16 +499,16 @@ impl AgentLoop {
         task_hint: &str,
         tool_schemas: &[ToolSchema],
     ) -> (String, bool) {
-        if let Ok(guard) = self.cached_system_prompt.lock() {
-            if let Some(ref cached) = *guard {
+        if let Ok(state) = self.state.lock() {
+            if let Some(ref cached) = state.cached_system_prompt {
                 if !cached.trim().is_empty() {
                     return (cached.clone(), true);
                 }
             }
         }
         let (prompt, restored) = self.resolve_initial_system_prompt(task_hint, tool_schemas);
-        if let Ok(mut guard) = self.cached_system_prompt.lock() {
-            *guard = Some(prompt.clone());
+        if let Ok(mut state) = self.state.lock() {
+            state.cached_system_prompt = Some(prompt.clone());
         }
         (prompt, restored)
     }
@@ -683,11 +688,16 @@ impl AgentLoop {
         if self.config().memory_nudge_interval > 0
             && self.tool_registry.names().iter().any(|n| n == "memory")
         {
-            if let Ok(mut c) = self.evolution_counters.lock() {
-                c.turns_since_memory = c.turns_since_memory.saturating_add(1);
-                if c.turns_since_memory >= self.config().memory_nudge_interval {
+            if let Ok(mut state) = self.state.lock() {
+                state.evolution_counters.turns_since_memory = state
+                    .evolution_counters
+                    .turns_since_memory
+                    .saturating_add(1);
+                if state.evolution_counters.turns_since_memory
+                    >= self.config().memory_nudge_interval
+                {
                     review_memory_at_end = true;
-                    c.turns_since_memory = 0;
+                    state.evolution_counters.turns_since_memory = 0;
                 }
             }
         }
@@ -891,8 +901,9 @@ impl AgentLoop {
                     .iter()
                     .any(|n| n == "skill_manage")
             {
-                if let Ok(mut c) = self.evolution_counters.lock() {
-                    c.iters_since_skill = c.iters_since_skill.saturating_add(1);
+                if let Ok(mut state) = self.state.lock() {
+                    state.evolution_counters.iters_since_skill =
+                        state.evolution_counters.iters_since_skill.saturating_add(1);
                 }
             }
 
@@ -1827,10 +1838,10 @@ impl AgentLoop {
             }
             invalid_json_retries = 0;
             for tc in &tool_calls {
-                if let Ok(mut c) = self.evolution_counters.lock() {
+                if let Ok(mut state) = self.state.lock() {
                     match tc.function.name.as_str() {
-                        "memory" => c.turns_since_memory = 0,
-                        "skill_manage" => c.iters_since_skill = 0,
+                        "memory" => state.evolution_counters.turns_since_memory = 0,
+                        "skill_manage" => state.evolution_counters.iters_since_skill = 0,
                         _ => {}
                     }
                 }
@@ -2448,7 +2459,7 @@ mod tests {
         );
         let history: Vec<Message> = (0..5).map(|i| Message::user(format!("u{i}"))).collect();
         agent.hydrate_memory_nudge_counters_from_history(&history);
-        let counters = agent.evolution_counters.lock().expect("lock");
+        let counters = &agent.state.lock().expect("lock").evolution_counters;
         assert_eq!(counters.turns_since_memory, 1);
         assert_eq!(counters.user_turn_count, 5);
     }
@@ -2504,9 +2515,10 @@ mod tests {
         agent.hydrate_memory_nudge_counters_from_history(&history);
         assert_eq!(
             agent
-                .evolution_counters
+                .state
                 .lock()
                 .expect("lock")
+                .evolution_counters
                 .user_turn_count,
             3
         );

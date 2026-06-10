@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use hermes_core::{Message, UsageStats};
 use hermes_intelligence::usage_pricing::{
-    calculate_cost, CanonicalUsage, CostResult, CostSource, CostStatus,
+    CanonicalUsage, CostResult, CostSource, CostStatus, calculate_cost,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::debug;
 
 use crate::agent_loop::{AgentConfig, AgentLoop};
@@ -56,7 +56,9 @@ impl SessionUsageMetrics {
     ) {
         self.api_calls = self.api_calls.saturating_add(1);
         self.prompt_tokens = self.prompt_tokens.saturating_add(usage.prompt_tokens);
-        self.completion_tokens = self.completion_tokens.saturating_add(usage.completion_tokens);
+        self.completion_tokens = self
+            .completion_tokens
+            .saturating_add(usage.completion_tokens);
         self.total_tokens = self.total_tokens.saturating_add(usage.total_tokens);
         let input = if usage.input_tokens > 0 {
             usage.input_tokens
@@ -76,9 +78,7 @@ impl SessionUsageMetrics {
         self.cache_write_tokens = self
             .cache_write_tokens
             .saturating_add(usage.cache_write_tokens);
-        self.reasoning_tokens = self
-            .reasoning_tokens
-            .saturating_add(usage.reasoning_tokens);
+        self.reasoning_tokens = self.reasoning_tokens.saturating_add(usage.reasoning_tokens);
 
         let canonical = CanonicalUsage {
             input_tokens: input,
@@ -160,9 +160,11 @@ pub fn format_usage_command_text(display: &SessionUsageDisplay) -> String {
     lines.push(format!("  Prompt:      {:>12}", display.prompt));
     lines.push(format!("  Completion:  {:>12}", display.completion));
     lines.push(format!("  Total:       {:>12}", display.total));
-    if let (Some(used), Some(max), Some(pct)) =
-        (display.context_used, display.context_max, display.context_percent)
-    {
+    if let (Some(used), Some(max), Some(pct)) = (
+        display.context_used,
+        display.context_max,
+        display.context_percent,
+    ) {
         lines.push(format!("  Context:     {:>12} / {} ({}%)", used, max, pct));
     }
     if display.compressions > 0 {
@@ -198,7 +200,10 @@ pub fn format_gateway_usage_text(display: &SessionUsageDisplay) -> String {
     lines.push(format!("- total tokens: {}", display.total));
     lines.push(format!("- api calls: {}", display.calls));
     if let Some(cost) = display.cost_usd {
-        lines.push(format!("- est. cost: ${:.4} ({})", cost, display.cost_status));
+        lines.push(format!(
+            "- est. cost: ${:.4} ({})",
+            cost, display.cost_status
+        ));
     }
     lines.join("\n")
 }
@@ -277,14 +282,8 @@ pub(crate) fn transition_context_engine_session(
                 "carry_over_context".to_string(),
                 Value::Bool(carry_over_context),
             ),
-            (
-                "platform".to_string(),
-                Value::String(platform),
-            ),
-            (
-                "model".to_string(),
-                Value::String(config.model.clone()),
-            ),
+            ("platform".to_string(), Value::String(platform)),
+            ("model".to_string(), Value::String(config.model.clone())),
         ]);
         if let Some(old) = old_session_id.filter(|s| !s.is_empty()) {
             start_context.insert("old_session_id".to_string(), Value::String(old.to_string()));
@@ -294,13 +293,15 @@ pub(crate) fn transition_context_engine_session(
         }
         if let Some(ref conv_id) = config.gateway_session_key {
             if !conv_id.is_empty() {
-                start_context.insert("conversation_id".to_string(), Value::String(conv_id.clone()));
+                start_context.insert(
+                    "conversation_id".to_string(),
+                    Value::String(conv_id.clone()),
+                );
             }
         }
         start_context.extend(extra_context);
         start_context.retain(|_, v| {
-            !v.is_null()
-                && !(v.is_string() && v.as_str().is_some_and(|s| s.is_empty()))
+            !v.is_null() && !(v.is_string() && v.as_str().is_some_and(|s| s.is_empty()))
         });
         engine.on_session_start(&target_session_id, &start_context);
     }
@@ -322,11 +323,9 @@ impl AgentLoop {
         old_session_id: Option<&str>,
         carry_over_context: bool,
     ) {
-        if let Ok(mut metrics) = self.session_usage.lock() {
-            metrics.reset();
-        }
-        if let Ok(mut counters) = self.evolution_counters.lock() {
-            counters.user_turn_count = 0;
+        if let Ok(mut state) = self.state.lock() {
+            state.session_usage.reset();
+            state.evolution_counters.user_turn_count = 0;
         }
 
         let config = self.config();
@@ -348,9 +347,9 @@ impl AgentLoop {
     }
 
     pub fn session_usage_metrics(&self) -> SessionUsageMetrics {
-        self.session_usage
+        self.state
             .lock()
-            .map(|g| g.clone())
+            .map(|state| state.session_usage.clone())
             .unwrap_or_default()
     }
 
@@ -361,8 +360,10 @@ impl AgentLoop {
         let provider = config.provider.as_deref();
         let runtime = self.primary_runtime_snapshot();
         let base_url = runtime.base_url.as_deref();
-        if let Ok(mut metrics) = self.session_usage.lock() {
-            metrics.accumulate_api_call(usage, &model, provider, base_url);
+        if let Ok(mut state) = self.state.lock() {
+            state
+                .session_usage
+                .accumulate_api_call(usage, &model, provider, base_url);
         }
         if let Ok(mut compressor) = self.context_compressor.try_lock() {
             compressor.update_from_usage(usage.prompt_tokens);
@@ -577,7 +578,10 @@ mod tests {
             ctx.get("old_session_id").and_then(|v| v.as_str()),
             Some("old-sid")
         );
-        assert_eq!(ctx.get("platform").and_then(|v| v.as_str()), Some("telegram"));
+        assert_eq!(
+            ctx.get("platform").and_then(|v| v.as_str()),
+            Some("telegram")
+        );
     }
 
     #[test]

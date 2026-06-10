@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use futures::stream::BoxStream;
 use futures::StreamExt;
+use futures::stream::BoxStream;
 use hermes_agent::{AgentConfig, AgentLoop, ToolRegistry};
 use hermes_core::{AgentError, LlmProvider, Message, StreamChunk, ToolSchema};
 
@@ -39,20 +39,24 @@ impl LlmProvider for DummyProvider {
 
 fn test_agent() -> AgentLoop {
     let config = AgentConfig::default();
-    AgentLoop::new(config, Arc::new(ToolRegistry::new()), Arc::new(DummyProvider))
+    AgentLoop::new(
+        config,
+        Arc::new(ToolRegistry::new()),
+        Arc::new(DummyProvider),
+    )
 }
 
 #[test]
 fn reset_clears_session_usage_metrics() {
     let agent = test_agent();
     {
-        let mut m = agent.session_usage.lock().expect("lock");
-        m.total_tokens = 999;
-        m.input_tokens = 100;
-        m.api_calls = 5;
-        m.estimated_cost_usd = 0.42;
-        m.cost_status = "estimated".into();
-        m.cost_source = "openrouter".into();
+        let mut state = agent.state.lock().expect("lock");
+        state.session_usage.total_tokens = 999;
+        state.session_usage.input_tokens = 100;
+        state.session_usage.api_calls = 5;
+        state.session_usage.estimated_cost_usd = 0.42;
+        state.session_usage.cost_status = "estimated".into();
+        state.session_usage.cost_source = "openrouter".into();
     }
     agent.reset_session_state(None, None, false);
     let m = agent.session_usage_metrics();
@@ -68,12 +72,17 @@ fn reset_clears_session_usage_metrics() {
 fn reset_clears_user_turn_count() {
     let agent = test_agent();
     {
-        let mut c = agent.evolution_counters.lock().expect("lock");
-        c.user_turn_count = 7;
+        let mut state = agent.state.lock().expect("lock");
+        state.evolution_counters.user_turn_count = 7;
     }
     agent.reset_session_state(None, None, false);
     assert_eq!(
-        agent.evolution_counters.lock().expect("lock").user_turn_count,
+        agent
+            .state
+            .lock()
+            .expect("lock")
+            .evolution_counters
+            .user_turn_count,
         0
     );
 }
@@ -107,11 +116,7 @@ fn accumulate_api_call_updates_session_metrics() {
 fn reset_with_session_metadata_clears_counters() {
     let agent = test_agent();
     agent.set_runtime_session_id("new-sid");
-    agent.reset_session_state(
-        Some(&[Message::user("hi")]),
-        Some("old-sid"),
-        false,
-    );
+    agent.reset_session_state(Some(&[Message::user("hi")]), Some("old-sid"), false);
     let m = agent.session_usage_metrics();
     assert_eq!(m.total_tokens, 0);
 }
