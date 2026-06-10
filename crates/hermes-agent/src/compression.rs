@@ -193,7 +193,10 @@ pub struct ContextCompressor {
     last_summary_error: Option<String>,
     last_summary_dropped_count: usize,
     last_summary_fallback_used: bool,
-    ineffective_compression_count: u32,
+    /// Exponentially weighted moving average of compression savings
+    /// (fraction of tokens saved). α = 0.3 => effective window ~5 compressions.
+    /// Compression is skipped when this drops below 0.10.
+    avg_savings_pct: f64,
 }
 
 impl ContextCompressor {
@@ -237,7 +240,7 @@ impl ContextCompressor {
             last_summary_error: None,
             last_summary_dropped_count: 0,
             last_summary_fallback_used: false,
-            ineffective_compression_count: 0,
+            avg_savings_pct: 1.0, // start optimistic — first compression always allowed
         }
     }
 
@@ -295,7 +298,7 @@ impl ContextCompressor {
         self.last_summary_error = None;
         self.last_summary_dropped_count = 0;
         self.last_summary_fallback_used = false;
-        self.ineffective_compression_count = 0;
+        self.avg_savings_pct = 1.0;
     }
 
     /// Re-target token budgets when the active model changes mid-session.
@@ -314,11 +317,11 @@ impl ContextCompressor {
         if tokens < self.threshold_tokens {
             return false;
         }
-        if self.ineffective_compression_count >= 2 {
+        if self.avg_savings_pct < 0.10 {
             if !self.config.quiet_mode {
                 tracing::warn!(
-                    ineffective_count = self.ineffective_compression_count,
-                    "Compression skipped — last compressions saved <10% each; consider /new or /compress"
+                    avg_savings_pct = self.avg_savings_pct,
+                    "Compression skipped — avg savings <10%; consider /new or /compress"
                 );
             }
             return false;
@@ -333,11 +336,10 @@ impl ContextCompressor {
         } else {
             0.0
         };
-        if savings_pct < 10.0 {
-            self.ineffective_compression_count += 1;
-        } else {
-            self.ineffective_compression_count = 0;
-        }
+        // EWMA: α = 0.3, effective window ~5 compressions
+        const EWMA_ALPHA: f64 = 0.3;
+        self.avg_savings_pct =
+            EWMA_ALPHA * (savings_pct / 100.0) + (1.0 - EWMA_ALPHA) * self.avg_savings_pct;
     }
 
     fn rehydrate_previous_summary_from_messages(&mut self, messages: &[Message]) {
@@ -1483,7 +1485,7 @@ mod tests {
         };
         let mut compressor =
             ContextCompressor::new(cfg, aux_with_provider(CannedSummaryProvider::new("x")));
-        compressor.ineffective_compression_count = 2;
+        compressor.avg_savings_pct = 0.05;
         assert!(!compressor.should_compress(Some(60_000)));
     }
 
