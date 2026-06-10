@@ -33,6 +33,11 @@ def parse_args() -> argparse.Namespace:
         help="Global parity proof JSON path relative to repo root",
     )
     parser.add_argument(
+        "--test-coverage-audit",
+        default="docs/parity/test-coverage-audit.json",
+        help="Test coverage audit JSON path relative to repo root",
+    )
+    parser.add_argument(
         "--output",
         default="docs/parity/PARITY_DASHBOARD.md",
         help="Output markdown path relative to repo root",
@@ -82,6 +87,7 @@ def render_dashboard(
     workstream_status: dict[str, Any],
     queue_json: dict[str, Any],
     proof_json: dict[str, Any],
+    test_coverage_audit: dict[str, Any],
 ) -> str:
     summary = parity_matrix.get("summary", {}) if isinstance(parity_matrix.get("summary"), dict) else {}
     queue_summary = queue_json.get("summary", {}) if isinstance(queue_json.get("summary"), dict) else {}
@@ -90,6 +96,16 @@ def render_dashboard(
 
     release_gate = proof_json.get("release_gate", {}) if isinstance(proof_json.get("release_gate"), dict) else {}
     ci_gate = proof_json.get("ci_gate", {}) if isinstance(proof_json.get("ci_gate"), dict) else {}
+    coverage_summary = (
+        test_coverage_audit.get("summary", {})
+        if isinstance(test_coverage_audit.get("summary"), dict)
+        else {}
+    )
+    coverage_gate = (
+        test_coverage_audit.get("audit_gate", {})
+        if isinstance(test_coverage_audit.get("audit_gate"), dict)
+        else {}
+    )
 
     upstream_ref = str(workstream_status.get("upstream_ref") or "unknown")
     upstream_sha = str(workstream_status.get("upstream_sha") or "unknown")
@@ -123,8 +139,33 @@ def render_dashboard(
     lines.append("")
     lines.append(f"- Release gate: **{gate_status(release_gate.get('pass'))}**")
     lines.append(f"- CI/tree-drift gate: **{gate_status(ci_gate.get('pass'))}**")
+    lines.append(f"- Test coverage audit: **{gate_status(coverage_gate.get('pass'))}**")
     lines.append(f"- Release gate failures: {format_failed_checks(release_gate)}")
     lines.append(f"- CI gate failures: {format_failed_checks(ci_gate)}")
+    lines.append("")
+    lines.append("## Test Coverage Audit")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("| --- | ---: |")
+    lines.append(
+        f"| Tracked behavior rows | {int(coverage_summary.get('tracked_behavior_rows', 0) or 0)} |"
+    )
+    lines.append(
+        f"| Covered behavior rows | {int(coverage_summary.get('covered_behavior_rows', 0) or 0)} |"
+    )
+    lines.append(
+        "| Tracked behavior coverage ratio | "
+        f"{float(coverage_summary.get('tracked_behavior_coverage_ratio', 0.0) or 0.0):.4f} |"
+    )
+    lines.append(
+        f"| Rust test functions | {int(coverage_summary.get('rust_test_functions', 0) or 0)} |"
+    )
+    lines.append(
+        f"| Missing Rust test refs | {int(coverage_summary.get('missing_rust_test_refs', 0) or 0)} |"
+    )
+    lines.append(
+        f"| Critical gaps | {int(coverage_gate.get('critical_gaps', 0) or 0)} |"
+    )
     lines.append("")
     lines.append("## Queue Summary")
     lines.append("")
@@ -181,6 +222,7 @@ def render_dashboard(
     lines.append("- `docs/parity/workstream-status.json`")
     lines.append("- `docs/parity/upstream-missing-queue.json`")
     lines.append("- `docs/parity/global-parity-proof.json`")
+    lines.append("- `docs/parity/test-coverage-audit.json`")
     lines.append("")
     return "\n".join(lines)
 
@@ -193,10 +235,17 @@ def main() -> int:
     workstream_status = load_json((repo_root / args.workstream_status).resolve())
     queue_json = load_json((repo_root / args.queue_json).resolve())
     proof_json = load_json((repo_root / args.proof_json).resolve())
+    test_coverage_audit = load_json((repo_root / args.test_coverage_audit).resolve())
 
     output = (repo_root / args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    dashboard = render_dashboard(parity_matrix, workstream_status, queue_json, proof_json)
+    dashboard = render_dashboard(
+        parity_matrix,
+        workstream_status,
+        queue_json,
+        proof_json,
+        test_coverage_audit,
+    )
     output.write_text(dashboard + "\n", encoding="utf-8")
     print(f"Wrote parity dashboard: {output}")
     return 0

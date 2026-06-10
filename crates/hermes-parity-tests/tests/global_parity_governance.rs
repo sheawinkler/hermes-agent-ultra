@@ -28,6 +28,41 @@ fn test_intent_mapping_ratio_meets_gate() {
 }
 
 #[test]
+fn test_coverage_audit_gate_passes() {
+    let payload = read_json("docs/parity/test-coverage-audit.json");
+    assert_eq!(
+        payload["audit_gate"]["pass"].as_bool(),
+        Some(true),
+        "test coverage audit gate must pass"
+    );
+    assert_eq!(
+        payload["audit_gate"]["critical_gaps"].as_u64(),
+        Some(0),
+        "test coverage audit must have zero critical gaps"
+    );
+    assert_eq!(
+        payload["summary"]["missing_rust_test_refs"].as_u64(),
+        Some(0),
+        "test coverage audit must have zero missing Rust test refs"
+    );
+    let ratio = payload["summary"]["tracked_behavior_coverage_ratio"]
+        .as_f64()
+        .expect("tracked_behavior_coverage_ratio should be number");
+    assert!(
+        ratio >= 1.0,
+        "tracked behavior coverage ratio below gate: {}",
+        ratio
+    );
+    let rust_tests = payload["summary"]["rust_test_functions"]
+        .as_u64()
+        .expect("rust_test_functions should be integer");
+    assert!(
+        rust_tests > 0,
+        "test coverage audit must observe Rust test functions"
+    );
+}
+
+#[test]
 fn test_adapter_matrix_has_no_placeholder_status() {
     let payload = read_json("docs/parity/adapter-feature-matrix.json");
     let non_native = payload["summary"]["non_rust_native"]

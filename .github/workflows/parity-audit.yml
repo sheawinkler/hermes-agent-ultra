@@ -24,6 +24,7 @@ jobs:
           python3 scripts/generate-parity-matrix.py --local-ref origin/main
           python3 scripts/generate-workstream-status.py
           python3 scripts/generate-test-intent-mapping.py
+          python3 scripts/generate-test-coverage-audit.py --check
           python3 scripts/generate-adapter-matrix.py
           python3 scripts/validate-intentional-divergence.py --check --allow-warnings
           python3 scripts/generate-shared-diff-backlog.py --local-ref origin/main --no-fetch
@@ -54,6 +55,8 @@ jobs:
             docs/parity/workstream-status.md
             docs/parity/test-intent-mapping.json
             docs/parity/test-intent-mapping.md
+            docs/parity/test-coverage-audit.json
+            docs/parity/test-coverage-audit.md
             docs/parity/adapter-feature-matrix.json
             docs/parity/adapter-feature-matrix.md
             docs/parity/divergence-validation.json
@@ -88,6 +91,9 @@ jobs:
               print(f"- commits_behind: `{metrics.get('max_commits_behind')}`")
               print(f"- upstream_patch_missing: `{metrics.get('max_upstream_patch_missing')}`")
               print(f"- files_only_upstream: `{metrics.get('max_files_only_upstream')}`")
+              print(f"- test_coverage_ratio: `{metrics.get('min_test_coverage_tracked_behavior_ratio')}`")
+              print(f"- test_coverage_critical_gaps: `{metrics.get('max_test_coverage_audit_critical_gaps')}`")
+              print(f"- test_coverage_missing_rust_refs: `{metrics.get('max_test_coverage_missing_rust_refs')}`")
               if backlog_summary:
                   print(f"- shared_diff_pending_classification: `{backlog_summary.get('pending_classification')}`")
                   print(f"- shared_diff_pending_review: `{backlog_summary.get('pending_review')}`")

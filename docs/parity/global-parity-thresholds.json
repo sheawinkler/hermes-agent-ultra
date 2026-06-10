@@ -12,6 +12,9 @@
       "max_unowned_divergences": 0,
       "max_divergence_review_overdue": 0,
       "min_test_intent_mapping_ratio": 0.9,
+      "min_test_coverage_tracked_behavior_ratio": 1.0,
+      "max_test_coverage_audit_critical_gaps": 0,
+      "max_test_coverage_missing_rust_refs": 0,
       "max_queue_pending_commits": 0
     },
     "required_workstreams_complete": [
@@ -34,6 +37,9 @@
     "max_unowned_divergences": 0,
     "max_divergence_review_overdue": 0,
     "min_test_intent_mapping_ratio": 0.9,
+    "min_test_coverage_tracked_behavior_ratio": 1.0,
+    "max_test_coverage_audit_critical_gaps": 0,
+    "max_test_coverage_missing_rust_refs": 0,
     "max_queue_pending_commits": 100,
     "special_rules": {
       "allow_files_only_upstream_overshoot_when_functional_clean": {

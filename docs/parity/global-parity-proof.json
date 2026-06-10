@@ -38,6 +38,24 @@
         "status": "pass"
       },
       {
+        "actual": 1.0,
+        "limit": 1.0,
+        "metric": "min_test_coverage_tracked_behavior_ratio",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_test_coverage_audit_critical_gaps",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_test_coverage_missing_rust_refs",
+        "status": "pass"
+      },
+      {
         "actual": 0.0,
         "limit": 100,
         "metric": "max_queue_pending_commits",
@@ -47,7 +65,7 @@
     "mode": "tree-drift",
     "pass": true
   },
-  "generated_at_utc": "2026-06-09T17:45:05.699969+00:00",
+  "generated_at_utc": "2026-06-10T08:53:14.867685+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -64,8 +82,11 @@
     "max_divergence_review_overdue": 0.0,
     "max_files_only_upstream": 1493.0,
     "max_queue_pending_commits": 0.0,
+    "max_test_coverage_audit_critical_gaps": 0.0,
+    "max_test_coverage_missing_rust_refs": 0.0,
     "max_unowned_divergences": 0.0,
     "max_upstream_patch_missing": 4374.0,
+    "min_test_coverage_tracked_behavior_ratio": 1.0,
     "min_test_intent_mapping_ratio": 1.0
   },
   "program": {
@@ -112,6 +133,24 @@
         "status": "pass"
       },
       {
+        "actual": 1.0,
+        "limit": 1.0,
+        "metric": "min_test_coverage_tracked_behavior_ratio",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_test_coverage_audit_critical_gaps",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_test_coverage_missing_rust_refs",
+        "status": "pass"
+      },
+      {
         "actual": 0.0,
         "limit": 0,
         "metric": "max_queue_pending_commits",
@@ -144,8 +183,34 @@
     "parity_matrix": "docs/parity/parity-matrix.json",
     "patch_queue": "docs/parity/upstream-missing-queue.json",
     "shared_diff_classification": "docs/parity/shared-different-classification.json",
+    "test_coverage_audit": "docs/parity/test-coverage-audit.json",
     "thresholds": "docs/parity/global-parity-thresholds.json",
     "workstream_status": "docs/parity/workstream-status.json"
+  },
+  "test_coverage_audit_summary": {
+    "audit_gate": {
+      "advisory_gaps": 3,
+      "critical_gaps": 0,
+      "pass": true
+    },
+    "summary": {
+      "coverage_manifest_entries": 374,
+      "coverage_manifest_entries_with_valid_rust_tests": 374,
+      "covered_behavior_rows": 384,
+      "divergence_errors": 0,
+      "divergence_review_overdue": 0,
+      "divergence_unowned": 0,
+      "missing_rust_test_refs": 0,
+      "queue_pending": 0,
+      "queue_total": 5375,
+      "rust_test_files": 302,
+      "rust_test_functions": 3409,
+      "test_intent_mapping_ratio": 1.0,
+      "test_intents_mapped": 10,
+      "test_intents_total": 10,
+      "tracked_behavior_coverage_ratio": 1.0,
+      "tracked_behavior_rows": 384
+    }
   },
   "ws_legacy_states": {
     "complete": 7

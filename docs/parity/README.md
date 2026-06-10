@@ -11,6 +11,7 @@ From repository root:
 python3 scripts/generate-parity-matrix.py
 python3 scripts/generate-workstream-status.py
 python3 scripts/generate-test-intent-mapping.py
+python3 scripts/generate-test-coverage-audit.py --check
 python3 scripts/generate-adapter-matrix.py
 python3 scripts/validate-intentional-divergence.py --check --allow-warnings
 python3 scripts/generate-upstream-patch-queue.py --max-commits 0
@@ -31,6 +32,8 @@ By default this command fetches upstream directly from GitHub
 - `workstream-status.md`: human-readable WS2-WS8 status report
 - `test-intent-mapping.json`: upstream test-intent domain coverage mapped to Rust evidence
 - `test-intent-mapping.md`: human-readable intent mapping table
+- `test-coverage-audit.json`: upstream behavior/test-intent coverage audit with Rust test-reference validation
+- `test-coverage-audit.md`: human-readable coverage audit, advisory gaps, and next harness moves
 - `adapter-feature-matrix.json`: platform adapter + memory plugin matrix
 - `adapter-feature-matrix.md`: human-readable adapter matrix
 - `divergence-validation.json`: ownership/review freshness and coverage checks for intentional divergences

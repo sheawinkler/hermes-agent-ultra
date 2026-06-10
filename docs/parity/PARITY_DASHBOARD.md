@@ -1,6 +1,6 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-09T17:45:05.699969+00:00`_
+_Generated from source artifacts: `2026-06-10T08:53:14.867685+00:00`_
 
 ## Snapshot
 
@@ -8,14 +8,26 @@ _Generated from source artifacts: `2026-06-09T17:45:05.699969+00:00`_
 - Workstream snapshot generated: `2026-05-29T14:31:44-06:00`
 - Parity matrix generated: `2026-05-30T18:13:57.840432+00:00`
 - Queue snapshot generated: `2026-06-09T17:29:51.616492+00:00`
-- Proof snapshot generated: `2026-06-09T17:45:05.699969+00:00`
+- Proof snapshot generated: `2026-06-10T08:53:14.867685+00:00`
 
 ## Gate Status
 
 - Release gate: **PASS**
 - CI/tree-drift gate: **PASS**
+- Test coverage audit: **PASS**
 - Release gate failures: none
 - CI gate failures: none
+
+## Test Coverage Audit
+
+| Metric | Value |
+| --- | ---: |
+| Tracked behavior rows | 384 |
+| Covered behavior rows | 384 |
+| Tracked behavior coverage ratio | 1.0000 |
+| Rust test functions | 3409 |
+| Missing Rust test refs | 0 |
+| Critical gaps | 0 |
 
 ## Queue Summary
 
@@ -64,4 +76,5 @@ _Generated from source artifacts: `2026-06-09T17:45:05.699969+00:00`_
 - `docs/parity/workstream-status.json`
 - `docs/parity/upstream-missing-queue.json`
 - `docs/parity/global-parity-proof.json`
+- `docs/parity/test-coverage-audit.json`
 

@@ -888,6 +888,7 @@ def maybe_check_global_parity_drift(
         ["scripts/generate-parity-matrix.py"],
         ["scripts/generate-workstream-status.py"],
         ["scripts/generate-test-intent-mapping.py"],
+        ["scripts/generate-test-coverage-audit.py", "--check"],
         ["scripts/generate-adapter-matrix.py"],
         ["scripts/validate-intentional-divergence.py", "--check", "--allow-warnings"],
         [
