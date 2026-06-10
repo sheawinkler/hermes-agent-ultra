@@ -1,0 +1,564 @@
+{
+  "advisory_gaps": [
+    {
+      "kind": "nonzero_tree_drift",
+      "message": "max_commits_behind remains nonzero in parity matrix",
+      "metric": "max_commits_behind",
+      "value": 4494.0
+    },
+    {
+      "kind": "nonzero_tree_drift",
+      "message": "max_upstream_patch_missing remains nonzero in parity matrix",
+      "metric": "max_upstream_patch_missing",
+      "value": 4374.0
+    },
+    {
+      "kind": "nonzero_tree_drift",
+      "message": "max_files_only_upstream remains nonzero in parity matrix",
+      "metric": "max_files_only_upstream",
+      "value": 1493.0
+    }
+  ],
+  "audit_gate": {
+    "advisory_gaps": 3,
+    "critical_gaps": 0,
+    "pass": true
+  },
+  "audit_unit": "upstream_behavior_or_test_intent",
+  "coverage_manifests": [
+    {
+      "entries": 174,
+      "missing_rust_test_refs": [],
+      "missing_rust_tests_entries": [],
+      "path": "docs/parity/python-test-suite-coverage.json",
+      "referenced_rust_tests": 91,
+      "status_counts": {
+        "covered_by_rust_test_suite_contracts": 174
+      },
+      "valid_entries_with_rust_tests": 174
+    },
+    {
+      "entries": 113,
+      "missing_rust_test_refs": [],
+      "missing_rust_tests_entries": [],
+      "path": "docs/parity/hermes-cli-test-coverage.json",
+      "referenced_rust_tests": 61,
+      "status_counts": {
+        "covered_by_rust_contracts": 113
+      },
+      "valid_entries_with_rust_tests": 113
+    },
+    {
+      "entries": 87,
+      "missing_rust_test_refs": [],
+      "missing_rust_tests_entries": [],
+      "path": "docs/parity/ui-tui-source-coverage.json",
+      "referenced_rust_tests": 55,
+      "status_counts": {
+        "covered_by_rust_primary_tui_contracts": 87
+      },
+      "valid_entries_with_rust_tests": 87
+    }
+  ],
+  "critical_gaps": [],
+  "generated_at_utc": "2026-06-10T08:53:14.773456+00:00",
+  "intent_domains": [
+    {
+      "classification": "direct_rust_test",
+      "direct_test_evidence_count": 22,
+      "direct_test_evidence_sample": [
+        "crates/hermes-cli/tests/e2e_gateway_cron_webhook.rs",
+        "crates/hermes-cli/tests/e2e_gateway_process.rs",
+        "crates/hermes-gateway/src/platforms/api_server.rs",
+        "crates/hermes-gateway/src/platforms/bluebubbles.rs",
+        "crates/hermes-gateway/src/platforms/dingtalk.rs",
+        "crates/hermes-gateway/src/platforms/discord.rs",
+        "crates/hermes-gateway/src/platforms/email.rs",
+        "crates/hermes-gateway/src/platforms/feishu.rs",
+        "crates/hermes-gateway/src/platforms/helpers.rs",
+        "crates/hermes-gateway/src/platforms/matrix.rs",
+        "crates/hermes-gateway/src/platforms/mattermost.rs",
+        "crates/hermes-gateway/src/platforms/ntfy.rs",
+        "crates/hermes-gateway/src/platforms/qqbot.rs",
+        "crates/hermes-gateway/src/platforms/signal.rs",
+        "crates/hermes-gateway/src/platforms/signal_rate_limit.rs",
+        "crates/hermes-gateway/src/platforms/slack.rs",
+        "crates/hermes-gateway/src/platforms/telegram.rs",
+        "crates/hermes-gateway/src/platforms/webhook.rs",
+        "crates/hermes-gateway/src/platforms/wecom.rs",
+        "crates/hermes-gateway/src/platforms/wecom_callback.rs",
+        "crates/hermes-gateway/src/platforms/weixin.rs",
+        "crates/hermes-gateway/src/platforms/whatsapp.rs"
+      ],
+      "evidence_count": 25,
+      "evidence_sample": [
+        "crates/hermes-cli/tests/e2e_gateway_cron_webhook.rs",
+        "crates/hermes-cli/tests/e2e_gateway_process.rs",
+        "crates/hermes-gateway/src/platforms/api_server.rs",
+        "crates/hermes-gateway/src/platforms/bluebubbles.rs",
+        "crates/hermes-gateway/src/platforms/dingtalk.rs",
+        "crates/hermes-gateway/src/platforms/discord.rs",
+        "crates/hermes-gateway/src/platforms/email.rs",
+        "crates/hermes-gateway/src/platforms/feishu.rs",
+        "crates/hermes-gateway/src/platforms/helpers.rs",
+        "crates/hermes-gateway/src/platforms/homeassistant.rs",
+        "crates/hermes-gateway/src/platforms/matrix.rs",
+        "crates/hermes-gateway/src/platforms/mattermost.rs",
+        "crates/hermes-gateway/src/platforms/mod.rs",
+        "crates/hermes-gateway/src/platforms/ntfy.rs",
+        "crates/hermes-gateway/src/platforms/qqbot.rs",
+        "crates/hermes-gateway/src/platforms/signal.rs",
+        "crates/hermes-gateway/src/platforms/signal_rate_limit.rs",
+        "crates/hermes-gateway/src/platforms/slack.rs",
+        "crates/hermes-gateway/src/platforms/sms.rs",
+        "crates/hermes-gateway/src/platforms/telegram.rs",
+        "crates/hermes-gateway/src/platforms/webhook.rs",
+        "crates/hermes-gateway/src/platforms/wecom.rs",
+        "crates/hermes-gateway/src/platforms/wecom_callback.rs",
+        "crates/hermes-gateway/src/platforms/weixin.rs",
+        "crates/hermes-gateway/src/platforms/whatsapp.rs"
+      ],
+      "id": "gateway-platform-behavior",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/gateway",
+        "gateway/platforms"
+      ]
+    },
+    {
+      "classification": "direct_rust_test",
+      "direct_test_evidence_count": 82,
+      "direct_test_evidence_sample": [
+        "crates/hermes-tools/src/approval.rs",
+        "crates/hermes-tools/src/backends/browser.rs",
+        "crates/hermes-tools/src/backends/code_execution.rs",
+        "crates/hermes-tools/src/backends/delegation.rs",
+        "crates/hermes-tools/src/backends/file.rs",
+        "crates/hermes-tools/src/backends/homeassistant.rs",
+        "crates/hermes-tools/src/backends/image_gen.rs",
+        "crates/hermes-tools/src/backends/memory.rs",
+        "crates/hermes-tools/src/backends/session_search.rs",
+        "crates/hermes-tools/src/backends/spotify.rs",
+        "crates/hermes-tools/src/backends/tts.rs",
+        "crates/hermes-tools/src/backends/video.rs",
+        "crates/hermes-tools/src/backends/video_gen.rs",
+        "crates/hermes-tools/src/backends/vision.rs",
+        "crates/hermes-tools/src/backends/web.rs",
+        "crates/hermes-tools/src/credential_guard.rs",
+        "crates/hermes-tools/src/dispatch.rs",
+        "crates/hermes-tools/src/register_builtins.rs",
+        "crates/hermes-tools/src/registry.rs",
+        "crates/hermes-tools/src/repo.rs",
+        "crates/hermes-tools/src/rtk_filter.rs",
+        "crates/hermes-tools/src/teams_pipeline.rs",
+        "crates/hermes-tools/src/terminal_requirements.rs",
+        "crates/hermes-tools/src/tool_policy.rs",
+        "crates/hermes-tools/src/tools/alpha_snapshot.rs"
+      ],
+      "evidence_count": 91,
+      "evidence_sample": [
+        "crates/hermes-tools/src/approval.rs",
+        "crates/hermes-tools/src/backends/browser.rs",
+        "crates/hermes-tools/src/backends/clarify.rs",
+        "crates/hermes-tools/src/backends/code_execution.rs",
+        "crates/hermes-tools/src/backends/cronjob.rs",
+        "crates/hermes-tools/src/backends/delegation.rs",
+        "crates/hermes-tools/src/backends/file.rs",
+        "crates/hermes-tools/src/backends/homeassistant.rs",
+        "crates/hermes-tools/src/backends/image_gen.rs",
+        "crates/hermes-tools/src/backends/memory.rs",
+        "crates/hermes-tools/src/backends/messaging.rs",
+        "crates/hermes-tools/src/backends/mod.rs",
+        "crates/hermes-tools/src/backends/session_search.rs",
+        "crates/hermes-tools/src/backends/spotify.rs",
+        "crates/hermes-tools/src/backends/todo.rs",
+        "crates/hermes-tools/src/backends/tts.rs",
+        "crates/hermes-tools/src/backends/video.rs",
+        "crates/hermes-tools/src/backends/video_gen.rs",
+        "crates/hermes-tools/src/backends/vision.rs",
+        "crates/hermes-tools/src/backends/web.rs",
+        "crates/hermes-tools/src/credential_guard.rs",
+        "crates/hermes-tools/src/dispatch.rs",
+        "crates/hermes-tools/src/lib.rs",
+        "crates/hermes-tools/src/register_builtins.rs",
+        "crates/hermes-tools/src/registry.rs"
+      ],
+      "id": "tool-runtime-behavior",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/tools",
+        "tools/environments"
+      ]
+    },
+    {
+      "classification": "direct_rust_test",
+      "direct_test_evidence_count": 24,
+      "direct_test_evidence_sample": [
+        "crates/hermes-cli/src/alpha_runtime.rs",
+        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-cli/src/auth.rs",
+        "crates/hermes-cli/src/checklist.rs",
+        "crates/hermes-cli/src/claw_migrate.rs",
+        "crates/hermes-cli/src/cli.rs",
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-cli/src/config_env.rs",
+        "crates/hermes-cli/src/kanban.rs",
+        "crates/hermes-cli/src/lumio.rs",
+        "crates/hermes-cli/src/main.rs",
+        "crates/hermes-cli/src/mcp_config.rs",
+        "crates/hermes-cli/src/model_switch.rs",
+        "crates/hermes-cli/src/pairing_store.rs",
+        "crates/hermes-cli/src/platform_toolsets.rs",
+        "crates/hermes-cli/src/runtime_tool_wiring.rs",
+        "crates/hermes-cli/src/skin_engine.rs",
+        "crates/hermes-cli/src/systems.rs",
+        "crates/hermes-cli/src/teams_pipeline_cli.rs",
+        "crates/hermes-cli/src/terminal_backend.rs",
+        "crates/hermes-cli/src/theme.rs",
+        "crates/hermes-cli/src/tool_preview.rs",
+        "crates/hermes-cli/src/tui.rs",
+        "crates/hermes-parity-tests/tests/cli_command_contract.rs"
+      ],
+      "evidence_count": 40,
+      "evidence_sample": [
+        "crates/hermes-cli/src/alpha_runtime.rs",
+        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-cli/src/auth.rs",
+        "crates/hermes-cli/src/banner.rs",
+        "crates/hermes-cli/src/bin/hermes-ultra.rs",
+        "crates/hermes-cli/src/bin/hermes.rs",
+        "crates/hermes-cli/src/checklist.rs",
+        "crates/hermes-cli/src/claw_migrate.rs",
+        "crates/hermes-cli/src/cli.rs",
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-cli/src/config_env.rs",
+        "crates/hermes-cli/src/copilot_auth.rs",
+        "crates/hermes-cli/src/doctor.rs",
+        "crates/hermes-cli/src/env_loader.rs",
+        "crates/hermes-cli/src/gateway_cmd.rs",
+        "crates/hermes-cli/src/kanban.rs",
+        "crates/hermes-cli/src/lib.rs",
+        "crates/hermes-cli/src/lumio.rs",
+        "crates/hermes-cli/src/main.rs",
+        "crates/hermes-cli/src/mcp_config.rs",
+        "crates/hermes-cli/src/model_switch.rs",
+        "crates/hermes-cli/src/pairing_store.rs",
+        "crates/hermes-cli/src/platform_toolsets.rs",
+        "crates/hermes-cli/src/profiles.rs",
+        "crates/hermes-cli/src/providers.rs"
+      ],
+      "id": "cli-command-surface",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/hermes_cli",
+        "tests/cli"
+      ]
+    },
+    {
+      "classification": "direct_rust_test",
+      "direct_test_evidence_count": 45,
+      "direct_test_evidence_sample": [
+        "crates/hermes-agent/src/agent_loop.rs",
+        "crates/hermes-agent/src/api_bridge.rs",
+        "crates/hermes-agent/src/auxiliary_builder.rs",
+        "crates/hermes-agent/src/bedrock.rs",
+        "crates/hermes-agent/src/budget.rs",
+        "crates/hermes-agent/src/code_index.rs",
+        "crates/hermes-agent/src/compression.rs",
+        "crates/hermes-agent/src/context.rs",
+        "crates/hermes-agent/src/context_files.rs",
+        "crates/hermes-agent/src/context_references.rs",
+        "crates/hermes-agent/src/credential_pool.rs",
+        "crates/hermes-agent/src/honcho_provider.rs",
+        "crates/hermes-agent/src/interrupt.rs",
+        "crates/hermes-agent/src/lsp_context.rs",
+        "crates/hermes-agent/src/memory_manager.rs",
+        "crates/hermes-agent/src/memory_plugins/byterover.rs",
+        "crates/hermes-agent/src/memory_plugins/config_io.rs",
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-agent/src/memory_plugins/hindsight.rs",
+        "crates/hermes-agent/src/memory_plugins/holographic.rs",
+        "crates/hermes-agent/src/memory_plugins/honcho.rs",
+        "crates/hermes-agent/src/memory_plugins/mem0.rs",
+        "crates/hermes-agent/src/memory_plugins/openviking.rs",
+        "crates/hermes-agent/src/memory_plugins/retaindb.rs",
+        "crates/hermes-agent/src/memory_plugins/supermemory.rs"
+      ],
+      "evidence_count": 49,
+      "evidence_sample": [
+        "crates/hermes-agent/src/agent_loop.rs",
+        "crates/hermes-agent/src/api_bridge.rs",
+        "crates/hermes-agent/src/auxiliary_builder.rs",
+        "crates/hermes-agent/src/bedrock.rs",
+        "crates/hermes-agent/src/budget.rs",
+        "crates/hermes-agent/src/code_index.rs",
+        "crates/hermes-agent/src/compression.rs",
+        "crates/hermes-agent/src/context.rs",
+        "crates/hermes-agent/src/context_files.rs",
+        "crates/hermes-agent/src/context_references.rs",
+        "crates/hermes-agent/src/credential_pool.rs",
+        "crates/hermes-agent/src/fallback.rs",
+        "crates/hermes-agent/src/honcho_provider.rs",
+        "crates/hermes-agent/src/interrupt.rs",
+        "crates/hermes-agent/src/lib.rs",
+        "crates/hermes-agent/src/lsp_context.rs",
+        "crates/hermes-agent/src/memory_manager.rs",
+        "crates/hermes-agent/src/memory_plugins/byterover.rs",
+        "crates/hermes-agent/src/memory_plugins/config_io.rs",
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-agent/src/memory_plugins/hindsight.rs",
+        "crates/hermes-agent/src/memory_plugins/holographic.rs",
+        "crates/hermes-agent/src/memory_plugins/honcho.rs",
+        "crates/hermes-agent/src/memory_plugins/mem0.rs",
+        "crates/hermes-agent/src/memory_plugins/mod.rs"
+      ],
+      "id": "agent-loop-and-runtime",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/run_agent",
+        "tests/agent"
+      ]
+    },
+    {
+      "classification": "direct_rust_test",
+      "direct_test_evidence_count": 8,
+      "direct_test_evidence_sample": [
+        "crates/hermes-acp/src/auth.rs",
+        "crates/hermes-acp/src/events.rs",
+        "crates/hermes-acp/src/handler.rs",
+        "crates/hermes-acp/src/permissions.rs",
+        "crates/hermes-acp/src/protocol.rs",
+        "crates/hermes-acp/src/server.rs",
+        "crates/hermes-acp/src/session.rs",
+        "crates/hermes-acp/src/tools.rs"
+      ],
+      "evidence_count": 9,
+      "evidence_sample": [
+        "crates/hermes-acp/src/auth.rs",
+        "crates/hermes-acp/src/events.rs",
+        "crates/hermes-acp/src/handler.rs",
+        "crates/hermes-acp/src/lib.rs",
+        "crates/hermes-acp/src/permissions.rs",
+        "crates/hermes-acp/src/protocol.rs",
+        "crates/hermes-acp/src/server.rs",
+        "crates/hermes-acp/src/session.rs",
+        "crates/hermes-acp/src/tools.rs"
+      ],
+      "id": "acp-protocol-and-transport",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/acp"
+      ]
+    },
+    {
+      "classification": "direct_rust_test",
+      "direct_test_evidence_count": 9,
+      "direct_test_evidence_sample": [
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-skills/src/guard.rs",
+        "crates/hermes-skills/src/hub.rs",
+        "crates/hermes-skills/src/provenance.rs",
+        "crates/hermes-skills/src/skill.rs",
+        "crates/hermes-skills/src/store.rs",
+        "crates/hermes-skills/src/sync.rs",
+        "crates/hermes-skills/src/usage.rs",
+        "crates/hermes-skills/src/version.rs"
+      ],
+      "evidence_count": 10,
+      "evidence_sample": [
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-skills/src/guard.rs",
+        "crates/hermes-skills/src/hub.rs",
+        "crates/hermes-skills/src/lib.rs",
+        "crates/hermes-skills/src/provenance.rs",
+        "crates/hermes-skills/src/skill.rs",
+        "crates/hermes-skills/src/store.rs",
+        "crates/hermes-skills/src/sync.rs",
+        "crates/hermes-skills/src/usage.rs",
+        "crates/hermes-skills/src/version.rs"
+      ],
+      "id": "skills-management-contract",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/skills",
+        "skills",
+        "optional-skills"
+      ]
+    },
+    {
+      "classification": "direct_rust_test",
+      "direct_test_evidence_count": 6,
+      "direct_test_evidence_sample": [
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-cron/src/backend.rs",
+        "crates/hermes-cron/src/job.rs",
+        "crates/hermes-cron/src/persistence.rs",
+        "crates/hermes-cron/src/runner.rs",
+        "crates/hermes-cron/src/scheduler.rs"
+      ],
+      "evidence_count": 9,
+      "evidence_sample": [
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-cron/src/backend.rs",
+        "crates/hermes-cron/src/cli_support.rs",
+        "crates/hermes-cron/src/completion.rs",
+        "crates/hermes-cron/src/job.rs",
+        "crates/hermes-cron/src/lib.rs",
+        "crates/hermes-cron/src/persistence.rs",
+        "crates/hermes-cron/src/runner.rs",
+        "crates/hermes-cron/src/scheduler.rs"
+      ],
+      "id": "cron-and-scheduler-runtime",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/cron"
+      ]
+    },
+    {
+      "classification": "direct_rust_test",
+      "direct_test_evidence_count": 11,
+      "direct_test_evidence_sample": [
+        "crates/hermes-agent/src/memory_plugins/byterover.rs",
+        "crates/hermes-agent/src/memory_plugins/config_io.rs",
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-agent/src/memory_plugins/hindsight.rs",
+        "crates/hermes-agent/src/memory_plugins/holographic.rs",
+        "crates/hermes-agent/src/memory_plugins/honcho.rs",
+        "crates/hermes-agent/src/memory_plugins/mem0.rs",
+        "crates/hermes-agent/src/memory_plugins/openviking.rs",
+        "crates/hermes-agent/src/memory_plugins/retaindb.rs",
+        "crates/hermes-agent/src/memory_plugins/supermemory.rs",
+        "crates/hermes-agent/tests/parity_self_evolution_fixtures.rs"
+      ],
+      "evidence_count": 12,
+      "evidence_sample": [
+        "crates/hermes-agent/src/memory_plugins/byterover.rs",
+        "crates/hermes-agent/src/memory_plugins/config_io.rs",
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-agent/src/memory_plugins/hindsight.rs",
+        "crates/hermes-agent/src/memory_plugins/holographic.rs",
+        "crates/hermes-agent/src/memory_plugins/honcho.rs",
+        "crates/hermes-agent/src/memory_plugins/mem0.rs",
+        "crates/hermes-agent/src/memory_plugins/mod.rs",
+        "crates/hermes-agent/src/memory_plugins/openviking.rs",
+        "crates/hermes-agent/src/memory_plugins/retaindb.rs",
+        "crates/hermes-agent/src/memory_plugins/supermemory.rs",
+        "crates/hermes-agent/tests/parity_self_evolution_fixtures.rs"
+      ],
+      "id": "memory-plugin-integration",
+      "mapped": true,
+      "upstream_scope": [
+        "plugins/memory",
+        "tests/plugins"
+      ]
+    },
+    {
+      "classification": "direct_rust_test",
+      "direct_test_evidence_count": 8,
+      "direct_test_evidence_sample": [
+        "crates/hermes-environments/src/docker.rs",
+        "crates/hermes-environments/src/file_sync.rs",
+        "crates/hermes-environments/src/local.rs",
+        "crates/hermes-environments/src/managed_modal.rs",
+        "crates/hermes-environments/src/manager.rs",
+        "crates/hermes-environments/src/singularity.rs",
+        "crates/hermes-environments/src/ssh.rs",
+        "crates/hermes-environments/tests/backend_integration.rs"
+      ],
+      "evidence_count": 12,
+      "evidence_sample": [
+        "crates/hermes-environments/src/daytona.rs",
+        "crates/hermes-environments/src/docker.rs",
+        "crates/hermes-environments/src/file_sync.rs",
+        "crates/hermes-environments/src/lib.rs",
+        "crates/hermes-environments/src/local.rs",
+        "crates/hermes-environments/src/managed_modal.rs",
+        "crates/hermes-environments/src/manager.rs",
+        "crates/hermes-environments/src/modal.rs",
+        "crates/hermes-environments/src/singularity.rs",
+        "crates/hermes-environments/src/ssh.rs",
+        "crates/hermes-environments/src/training/mod.rs",
+        "crates/hermes-environments/tests/backend_integration.rs"
+      ],
+      "id": "environment-lifecycle-contract",
+      "mapped": true,
+      "upstream_scope": [
+        "environments/benchmarks",
+        "tools/environments"
+      ]
+    },
+    {
+      "classification": "direct_rust_test",
+      "direct_test_evidence_count": 3,
+      "direct_test_evidence_sample": [
+        "crates/hermes-core/src/tool_call_parser.rs",
+        "crates/hermes-parity-tests/fixtures/hermes_core/format_tool_calls.json",
+        "crates/hermes-parity-tests/fixtures/hermes_core/tool_call_parser.json"
+      ],
+      "evidence_count": 3,
+      "evidence_sample": [
+        "crates/hermes-core/src/tool_call_parser.rs",
+        "crates/hermes-parity-tests/fixtures/hermes_core/format_tool_calls.json",
+        "crates/hermes-parity-tests/fixtures/hermes_core/tool_call_parser.json"
+      ],
+      "id": "tool-call-parser-contract",
+      "mapped": true,
+      "upstream_scope": [
+        "environments/tool_call_parsers",
+        "tests/integration"
+      ]
+    }
+  ],
+  "next_sigma_harness_moves": [
+    {
+      "rationale": "Record CLI/TUI/gateway task journeys as deterministic fixtures so regressions are caught at the workflow level, not only at unit boundaries.",
+      "title": "User-journey replay corpus"
+    },
+    {
+      "rationale": "Run provider, MCP, ACP, and gateway request/response fixtures through normalized differential checks against upstream intent and Ultra policy.",
+      "title": "Protocol differential contracts"
+    },
+    {
+      "rationale": "Inject network stalls, partial streams, auth expiry, tool failures, and malformed model/tool payloads into the Rust runtime to prove recovery behavior.",
+      "title": "Fault-injection matrix"
+    },
+    {
+      "rationale": "Exercise real terminal input/output flows and snapshot critical UX states so command ergonomics and status rendering are protected.",
+      "title": "PTY and TUI golden snapshots"
+    },
+    {
+      "rationale": "Track behavior coverage over time so new upstream rows or local harness regressions create visible deltas before release prep.",
+      "title": "Coverage trend ledger"
+    }
+  ],
+  "schema_version": 1,
+  "source_artifacts": {
+    "coverage_manifests": [
+      "docs/parity/python-test-suite-coverage.json",
+      "docs/parity/hermes-cli-test-coverage.json",
+      "docs/parity/ui-tui-source-coverage.json"
+    ],
+    "divergence_validation": "docs/parity/divergence-validation.json",
+    "parity_matrix": "docs/parity/parity-matrix.json",
+    "test_intent_mapping": "docs/parity/test-intent-mapping.json",
+    "upstream_missing_queue": "docs/parity/upstream-missing-queue.json"
+  },
+  "summary": {
+    "coverage_manifest_entries": 374,
+    "coverage_manifest_entries_with_valid_rust_tests": 374,
+    "covered_behavior_rows": 384,
+    "divergence_errors": 0,
+    "divergence_review_overdue": 0,
+    "divergence_unowned": 0,
+    "missing_rust_test_refs": 0,
+    "queue_pending": 0,
+    "queue_total": 5375,
+    "rust_test_files": 302,
+    "rust_test_functions": 3409,
+    "test_intent_mapping_ratio": 1.0,
+    "test_intents_mapped": 10,
+    "test_intents_total": 10,
+    "tracked_behavior_coverage_ratio": 1.0,
+    "tracked_behavior_rows": 384
+  }
+}

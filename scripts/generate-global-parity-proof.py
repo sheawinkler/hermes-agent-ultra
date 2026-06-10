@@ -192,6 +192,12 @@ def main() -> int:
         help="Upstream patch queue JSON file",
     )
     parser.add_argument(
+        "--test-coverage-audit",
+        default="docs/parity/test-coverage-audit.json",
+        type=Path,
+        help="Test coverage audit JSON file",
+    )
+    parser.add_argument(
         "--out-json",
         default="docs/parity/global-parity-proof.json",
         type=Path,
@@ -216,12 +222,15 @@ def main() -> int:
     shared_diff = load_json((repo_root / args.shared_diff_classification).resolve())
     divergence = load_json((repo_root / args.divergence_validation).resolve())
     patch_queue = load_json((repo_root / args.patch_queue).resolve())
+    test_coverage = load_json((repo_root / args.test_coverage_audit).resolve())
 
     parity_summary = parity.get("summary", {})
     intent_summary = intents.get("summary", {})
     adapter_summary = adapters.get("summary", {})
     divergence_summary = divergence.get("summary", {})
     queue_summary = patch_queue.get("summary", {})
+    test_coverage_summary = test_coverage.get("summary", {})
+    test_coverage_gate = test_coverage.get("audit_gate", {})
     ws_states = ws.get("states", {})
     shared_diff_items = {str(i.get("path", "")) for i in shared_diff.get("items", [])}
     parity_shared = {str(i.get("path", "")) for i in parity.get("top_shared_different", [])}
@@ -238,7 +247,7 @@ def main() -> int:
         "GPAR-08": int(divergence_summary.get("errors", 0)) == 0
         and int(divergence_summary.get("unowned", 0)) == 0
         and int(divergence_summary.get("review_overdue", 0)) == 0,
-        "GPAR-09": True,
+        "GPAR-09": bool(test_coverage_gate.get("pass", False)),
     }
 
     metrics = {
@@ -248,6 +257,15 @@ def main() -> int:
         "max_unowned_divergences": float(divergence_summary.get("unowned", 0)),
         "max_divergence_review_overdue": float(divergence_summary.get("review_overdue", 0)),
         "min_test_intent_mapping_ratio": float(intent_summary.get("mapping_ratio", 0.0)),
+        "min_test_coverage_tracked_behavior_ratio": float(
+            test_coverage_summary.get("tracked_behavior_coverage_ratio", 0.0)
+        ),
+        "max_test_coverage_audit_critical_gaps": float(
+            test_coverage_gate.get("critical_gaps", 0)
+        ),
+        "max_test_coverage_missing_rust_refs": float(
+            test_coverage_summary.get("missing_rust_test_refs", 0)
+        ),
         "max_queue_pending_commits": float(
             queue_summary.get("by_disposition", {}).get("pending", 0)
         ),
@@ -304,8 +322,13 @@ def main() -> int:
             "shared_diff_classification": str(args.shared_diff_classification),
             "divergence_validation": str(args.divergence_validation),
             "patch_queue": str(args.patch_queue),
+            "test_coverage_audit": str(args.test_coverage_audit),
         },
         "queue_summary": queue_summary,
+        "test_coverage_audit_summary": {
+            "summary": test_coverage_summary,
+            "audit_gate": test_coverage_gate,
+        },
     }
 
     out_json = (repo_root / args.out_json).resolve()
@@ -340,6 +363,20 @@ def main() -> int:
     md.append("| --- | --- |")
     for key in sorted(gpar_completion.keys()):
         md.append(f"| `{key}` | {'yes' if gpar_completion[key] else 'no'} |")
+    md.append("")
+
+    md.append("## Test Coverage Audit")
+    md.append("")
+    md.append(f"- Audit gate: **{'PASS' if test_coverage_gate.get('pass') else 'FAIL'}**")
+    md.append(
+        "- Tracked behavior coverage ratio: "
+        f"`{test_coverage_summary.get('tracked_behavior_coverage_ratio', 0)}`"
+    )
+    md.append(f"- Critical gaps: `{test_coverage_gate.get('critical_gaps', 0)}`")
+    md.append(
+        "- Missing Rust test refs: "
+        f"`{test_coverage_summary.get('missing_rust_test_refs', 0)}`"
+    )
     md.append("")
 
     md.append("## Queue Summary")

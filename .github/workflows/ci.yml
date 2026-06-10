@@ -24,6 +24,7 @@ jobs:
           python3 scripts/generate-parity-matrix.py --local-ref HEAD
           python3 scripts/generate-workstream-status.py
           python3 scripts/generate-test-intent-mapping.py
+          python3 scripts/generate-test-coverage-audit.py --check
           python3 scripts/generate-adapter-matrix.py
           python3 scripts/validate-intentional-divergence.py --check --allow-warnings
           python3 scripts/generate-shared-diff-backlog.py --local-ref HEAD --no-fetch
@@ -55,6 +56,7 @@ jobs:
           python3 -m py_compile scripts/run-upstream-slash-parity-gate.py
           python3 -m py_compile scripts/run-upstream-surface-coverage-gate.py
           python3 -m py_compile scripts/generate-shared-diff-backlog.py
+          python3 -m py_compile scripts/generate-test-coverage-audit.py
           python3 -m py_compile scripts/release_secret_scan.py
 
   cross-build:

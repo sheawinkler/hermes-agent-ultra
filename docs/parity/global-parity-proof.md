@@ -1,6 +1,6 @@
 # Global Parity Proof
 
-Generated: `2026-06-09T17:45:05.699969+00:00`
+Generated: `2026-06-10T08:53:14.867685+00:00`
 
 ## Gate Status
 
@@ -19,6 +19,9 @@ Generated: `2026-06-09T17:45:05.699969+00:00`
 | `max_unowned_divergences` | 0.0 |
 | `max_divergence_review_overdue` | 0.0 |
 | `min_test_intent_mapping_ratio` | 1.0 |
+| `min_test_coverage_tracked_behavior_ratio` | 1.0 |
+| `max_test_coverage_audit_critical_gaps` | 0.0 |
+| `max_test_coverage_missing_rust_refs` | 0.0 |
 | `max_queue_pending_commits` | 0.0 |
 
 ## GPAR Ticket Completion
@@ -34,6 +37,13 @@ Generated: `2026-06-09T17:45:05.699969+00:00`
 | `GPAR-07` | yes |
 | `GPAR-08` | yes |
 | `GPAR-09` | yes |
+
+## Test Coverage Audit
+
+- Audit gate: **PASS**
+- Tracked behavior coverage ratio: `1.0`
+- Critical gaps: `0`
+- Missing Rust test refs: `0`
 
 ## Queue Summary
 
