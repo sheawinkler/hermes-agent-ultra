@@ -73,6 +73,7 @@ pub mod tool_registry;
 pub mod tools_wiring;
 pub mod transports;
 mod turn_finalize_hooks;
+pub mod turn_state;
 pub mod usage_parse;
 pub mod user_interest;
 pub mod vision_adapter;
