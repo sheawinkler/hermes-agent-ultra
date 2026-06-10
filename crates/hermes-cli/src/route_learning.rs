@@ -4,12 +4,12 @@
 //! and gateway lifecycle. All items here are `pub(crate)` so they remain
 //! visible to the rest of the binary crate.
 
-use crate::build_elite_doctor_diagnostics;
-use crate::build_doctor_support_bundle_with_options;
+use crate::doctor::build_doctor_support_bundle_with_options;
+use crate::doctor::build_elite_doctor_diagnostics;
+use crate::doctor::write_doctor_snapshot;
 use crate::hermes_state_root;
 use crate::provenance::sign_artifact_bytes;
 use crate::provenance::write_provenance_sidecar;
-use crate::write_doctor_snapshot;
 use hermes_core::AgentError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -956,7 +956,9 @@ pub(crate) async fn run_incident_pack(
         });
         let out = write_doctor_snapshot(&cli, &payload, None)?;
         if let Ok(snapshot_bytes) = std::fs::read(&out) {
-            if let Ok(sig) = sign_artifact_bytes(&crate::hermes_state_root(&cli), &snapshot_bytes, true) {
+            if let Ok(sig) =
+                sign_artifact_bytes(&crate::hermes_state_root(&cli), &snapshot_bytes, true)
+            {
                 let _ = write_provenance_sidecar(&out, &sig);
             }
         }

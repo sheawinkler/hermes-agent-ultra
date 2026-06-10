@@ -10,8 +10,8 @@
 //! - CLI argument parsing via clap (9.7)
 //! - Theme/skin engine (9.8)
 
-pub mod alpha_runtime;
 pub mod acp_command;
+pub mod alpha_runtime;
 pub mod app;
 pub mod auth;
 pub mod banner;
@@ -23,7 +23,6 @@ pub mod config_env;
 pub mod copilot_auth;
 pub mod cron_delivery;
 pub mod dep_ensure;
-pub mod doctor;
 pub mod env_loader;
 pub mod env_vars;
 pub mod gateway_cmd;
