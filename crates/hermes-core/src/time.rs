@@ -141,6 +141,15 @@ pub fn format_wall_datetime(dt: DateTime<Utc>) -> String {
         .format_wall_datetime(dt)
 }
 
+/// Cron / reminder wall-clock label including seconds (e.g. `June 09, 2026 at 05:55:55 PM`).
+pub fn format_wall_datetime_precise(dt: DateTime<Utc>) -> String {
+    global_state()
+        .lock()
+        .expect("hermes time lock poisoned")
+        .clock
+        .format_wall_datetime_precise(dt)
+}
+
 /// Fixed offset for cron expression evaluation at `instant` (IANA + DST, or legacy fallbacks).
 pub fn cron_wall_offset_at(instant: DateTime<Utc>) -> Option<FixedOffset> {
     global_state()
@@ -200,16 +209,21 @@ impl HermesClock {
         self.now().format("%A, %B %d, %Y").to_string()
     }
 
+    /// Format a UTC instant for human display in the Hermes wall timezone.
     pub fn format_wall_datetime(&self, dt: DateTime<Utc>) -> String {
+        self.format_wall_datetime_with_format(dt, "%B %d, %Y at %I:%M %p")
+    }
+
+    /// Wall-clock label with seconds — used for cron `next_run_display` so short reminders
+    /// do not look up to 59s late when the user compares chat timestamps.
+    pub fn format_wall_datetime_precise(&self, dt: DateTime<Utc>) -> String {
+        self.format_wall_datetime_with_format(dt, "%B %d, %Y at %I:%M:%S %p")
+    }
+
+    fn format_wall_datetime_with_format(&self, dt: DateTime<Utc>, fmt: &str) -> String {
         match &self.timezone {
-            Some(tz) => dt
-                .with_timezone(tz)
-                .format("%B %d, %Y at %I:%M %p")
-                .to_string(),
-            None => dt
-                .with_timezone(&Local)
-                .format("%B %d, %Y at %I:%M %p")
-                .to_string(),
+            Some(tz) => dt.with_timezone(tz).format(fmt).to_string(),
+            None => dt.with_timezone(&Local).format(fmt).to_string(),
         }
     }
 
@@ -400,6 +414,15 @@ mod tests {
                 5 * 3600 + 30 * 60
             );
         });
+    }
+
+    #[test]
+    fn format_wall_datetime_precise_includes_seconds() {
+        let clock = HermesClock::with_fixed_tz("UTC");
+        let instant = Utc.with_ymd_and_hms(2026, 6, 9, 9, 55, 55).unwrap();
+        let label = clock.format_wall_datetime_precise(instant);
+        assert!(label.contains(":55"), "expected seconds in {label}");
+        assert!(label.contains("09:55:55") || label.contains("9:55:55"));
     }
 
     #[test]

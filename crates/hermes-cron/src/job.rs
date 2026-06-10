@@ -8,6 +8,7 @@ use crate::python_job::JobOrigin;
 use crate::schedule::{
     compute_next_run, fast_forward_if_stale, normalize_schedule_input, parse_schedule, ScheduleSpec,
 };
+use crate::timing::execution_fire_at;
 
 // ---------------------------------------------------------------------------
 // JobStatus
@@ -459,12 +460,14 @@ impl CronJob {
         changed
     }
 
+    /// Whether the job should start now (may fire before user-facing `next_run` when
+    /// [`crate::timing::execution_lead_seconds`] is non-zero).
     pub fn is_due(&self, now: DateTime<Utc>) -> bool {
         if self.status != JobStatus::Active {
             return false;
         }
-        match self.next_run {
-            Some(next) => now >= next,
+        match execution_fire_at(self) {
+            Some(fire_at) => now >= fire_at,
             None => false,
         }
     }

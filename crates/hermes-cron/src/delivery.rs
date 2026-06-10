@@ -1,9 +1,12 @@
 //! Cron result delivery (Python `cron.scheduler._deliver_result` parity).
 
+use std::time::Instant;
+
 use async_trait::async_trait;
 
 use crate::job::{CronJob, DeliverConfig, DeliverTarget};
 use crate::python_job::JobOrigin;
+use crate::timing::log_job_delivery;
 
 /// Resolved IM delivery target.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,14 +175,34 @@ pub async fn deliver_text(
             }
             let mut last_err = None;
             for t in targets {
-                if let Err(e) = backend.send(&t.platform, &t.chat_id, text).await {
-                    tracing::warn!(
-                        "Cron delivery to {}:{} failed: {}",
-                        t.platform,
-                        t.chat_id,
-                        e
-                    );
-                    last_err = Some(e);
+                log_job_delivery(&job.id, &t.platform, &t.chat_id, "start", None, None);
+                let send_started = Instant::now();
+                match backend.send(&t.platform, &t.chat_id, text).await {
+                    Ok(()) => {
+                        let elapsed_ms =
+                            i64::try_from(send_started.elapsed().as_millis()).unwrap_or(i64::MAX);
+                        log_job_delivery(
+                            &job.id,
+                            &t.platform,
+                            &t.chat_id,
+                            "finish",
+                            Some(elapsed_ms),
+                            None,
+                        );
+                    }
+                    Err(e) => {
+                        let elapsed_ms =
+                            i64::try_from(send_started.elapsed().as_millis()).unwrap_or(i64::MAX);
+                        log_job_delivery(
+                            &job.id,
+                            &t.platform,
+                            &t.chat_id,
+                            "finish",
+                            Some(elapsed_ms),
+                            Some(&e),
+                        );
+                        last_err = Some(e);
+                    }
                 }
             }
             last_err

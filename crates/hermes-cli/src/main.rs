@@ -382,6 +382,7 @@ async fn run(cli: Cli) {
             effective_command,
             CliCommand::Hermes | CliCommand::Resume { .. }
         ),
+        matches!(effective_command, CliCommand::Gateway { .. }),
     );
     if let Err(err) = hydrate_provider_env_from_vault_for_cli(&cli).await {
         tracing::warn!("Secret-vault hydration skipped: {}", err);
@@ -1060,7 +1061,7 @@ async fn run_profile_command(
 }
 
 /// Initialize the tracing subscriber with env filter.
-fn init_tracing(verbose: bool, interactive_tui: bool) {
+fn init_tracing(verbose: bool, interactive_tui: bool, gateway: bool) {
     let default = if interactive_tui {
         if verbose {
             "info,rustls=warn,hyper=warn,h2=warn"
@@ -1068,7 +1069,10 @@ fn init_tracing(verbose: bool, interactive_tui: bool) {
             "error,rustls=warn,hyper=warn,h2=warn"
         }
     } else if verbose {
-        "debug,rustls=warn,hyper=warn,h2=warn"
+        "debug,hermes_cron=debug,rustls=warn,hyper=warn,h2=warn"
+    } else if gateway {
+        // Gateway runs cron in-process; surface schedule/trigger/delivery at info without -v.
+        "warn,hermes_cron=info,rustls=warn,hyper=warn,h2=warn"
     } else {
         "warn,rustls=warn,hyper=warn,h2=warn"
     };

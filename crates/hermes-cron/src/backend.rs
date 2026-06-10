@@ -258,7 +258,7 @@ fn next_run_response_fields(next_run: Option<DateTime<Utc>>) -> (Value, Value) {
     match next_run {
         Some(dt) => (
             json!(dt.to_rfc3339()),
-            json!(hermes_core::format_wall_datetime(dt)),
+            json!(hermes_core::format_wall_datetime_precise(dt)),
         ),
         None => (Value::Null, Value::Null),
     }
@@ -663,6 +663,10 @@ mod tests {
             .and_then(|v| v.as_str())
             .expect("next_run_display");
         assert!(display.contains(" at "));
+        assert!(
+            display.contains(':'),
+            "next_run_display should include seconds: {display}"
+        );
     }
 
     #[tokio::test]

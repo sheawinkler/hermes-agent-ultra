@@ -10,12 +10,15 @@ use std::sync::Arc;
 
 const CRONJOB_DESCRIPTION: &str = "\
 Manage scheduled cron jobs with a single compressed tool.\n\n\
+REQUIRED for user reminders: when the user asks to be reminded later or wants a scheduled \
+task, call action='create' in the same turn. Do not promise a reminder without creating \
+the job — chat memory alone never fires reminders.\n\n\
 Use action='create' to schedule a new job from a prompt/task or one or more skills.\n\
 Use action='list' to inspect jobs.\n\
 Use action='update', 'pause', 'resume', 'remove', or 'run' to manage an existing job.\n\n\
 To stop a job the user no longer wants: first action='list' to find the job id (or job_id), then action='remove' with that id. Never guess job IDs — always list first.\n\n\
-Schedule DSL (required on create): '2m' or '30m' = one-shot in N minutes; 'every 30m' or 'every 2h' = recurring; '0 9 * * *' = daily cron; ISO timestamp = one-shot at time. For 'remind me in 2 minutes' use '2m', NOT '2 minutes from now' or cron expressions.\n\
-On create success, the response includes `next_run` (RFC3339 UTC) and `next_run_display` (Hermes wall-clock). When telling the user when a reminder will fire, quote `next_run_display` — do not guess from conversation context or session start time.\n\n\
+Schedule DSL (required on create): '2m' or '30m' = one-shot in N minutes; 'every 30m' or 'every 2h' = recurring; '0 9 * * *' = daily cron; ISO timestamp = one-shot at time. For 'remind me in 2 minutes' / '2分钟后提醒我' use '2m', NOT '2 minutes from now' or cron expressions like '*/2 * * * *'.\n\
+On create success, the response includes `next_run` (RFC3339 UTC) and `next_run_display` (Hermes wall-clock with seconds, e.g. June 09, 2026 at 05:55:55 PM). When telling the user when a reminder will fire, quote `next_run_display` exactly — do not guess from conversation context or session start time.\n\n\
 Jobs run in a fresh session with no current-chat context, so prompts/tasks must be self-contained.\n\
 If skills are provided on create, the future cron run loads those skills in order, then follows the prompt/task as the task instruction.\n\
 On update, passing skills=[] clears attached skills.\n\n\
@@ -357,7 +360,7 @@ impl ToolHandler for CronjobHandler {
             "schedule".into(),
             json!({
                 "type": "string",
-                "description": "REQUIRED for action=create. Schedule DSL (not natural language): '2m' or '30m' = one-shot in N minutes; 'every 30m' or 'every 2h' = recurring; '0 9 * * *' = daily cron; '2026-06-01T09:00:00' = one-shot at time. Examples: '2m' (once in 2 minutes), 'every 2h' (every 2 hours), '0 9 * * *' (daily at 9am). For 'remind me in 2 minutes' use '2m', NOT '2 minutes from now' or cron expressions. You MUST include this field when action=create."
+                "description": "REQUIRED for action=create. Schedule DSL (not natural language): '2m' or '30m' = one-shot in N minutes; 'every 30m' or 'every 2h' = recurring; '0 9 * * *' = daily cron; '2026-06-01T09:00:00' = one-shot at time. Examples: '2m' (once in 2 minutes), 'every 2h' (every 2 hours), '0 9 * * *' (daily at 9am). For 'remind me in 2 minutes' / '2分钟后提醒我' use '2m', NOT '2 minutes from now' or cron expressions like '*/2 * * * *'. You MUST include this field when action=create."
             }),
         );
         props.insert(

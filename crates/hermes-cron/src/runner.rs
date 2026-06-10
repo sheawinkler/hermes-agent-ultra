@@ -31,6 +31,7 @@ use tokio::time::timeout;
 use crate::delivery::{deliver_text, CronDeliveryBackend};
 use crate::job::CronJob;
 use crate::scheduler::CronError;
+use crate::timing::{is_ping_reminder, log_job_execute_finish, log_job_execute_start, format_ping_reminder_text};
 
 /// Result of running a cron job, including optional delivery failure (Python `mark_job_run` `delivery_error`).
 #[derive(Debug, Clone)]
@@ -712,12 +713,37 @@ impl CronRunner {
     /// The agent is run with a restricted tool set that excludes the
     /// `cronjob` tool to prevent recursive scheduling.
     pub async fn run_job(&self, job: &CronJob) -> Result<CronRunOutcome, CronError> {
-        tracing::info!(
-            "Running cron job '{}' ({})",
-            job.name.as_deref().unwrap_or(&job.id),
-            job.id
-        );
+        let started_at = hermes_core::now_utc();
+        let started_instant = std::time::Instant::now();
+        log_job_execute_start(job, started_at);
+        let outcome = self.run_job_inner(job).await;
+        let now = hermes_core::now_utc();
+        let elapsed_ms =
+            i64::try_from(started_instant.elapsed().as_millis()).unwrap_or(i64::MAX);
+        match &outcome {
+            Ok(o) => log_job_execute_finish(
+                job,
+                now,
+                started_at,
+                elapsed_ms,
+                o.result.total_turns,
+                o.delivery_error.as_deref(),
+                false,
+            ),
+            Err(e) => log_job_execute_finish(
+                job,
+                now,
+                started_at,
+                elapsed_ms,
+                0,
+                Some(&e.to_string()),
+                true,
+            ),
+        }
+        outcome
+    }
 
+    async fn run_job_inner(&self, job: &CronJob) -> Result<CronRunOutcome, CronError> {
         if let Some(rule) = detect_cron_prompt_injection(&job.prompt) {
             return Err(CronError::InvalidJob(format!(
                 "blocked cron prompt by security scanner ({rule})"
@@ -741,6 +767,10 @@ impl CronRunner {
                 result,
                 delivery_error,
             });
+        }
+
+        if is_ping_reminder(job) {
+            return self.run_ping_reminder_job(job).await;
         }
 
         // Build agent config from job settings
@@ -826,9 +856,6 @@ impl CronRunner {
             .map_err(CronError::Agent)?;
 
         let delivery_error = self.delivery_error_for_result(job, &result).await;
-        if let Some(ref err) = delivery_error {
-            tracing::warn!("Failed to deliver result for job '{}': {}", job.id, err);
-        }
 
         Ok(CronRunOutcome {
             result,
@@ -890,6 +917,31 @@ impl CronRunner {
             return None;
         };
         deliver_text(backend.as_ref(), job, &text).await
+    }
+
+    async fn run_ping_reminder_job(&self, job: &CronJob) -> Result<CronRunOutcome, CronError> {
+        let text = format_ping_reminder_text(&job.prompt);
+        let delivery_error = if let Some(backend) = self.delivery.as_ref() {
+            deliver_text(backend.as_ref(), job, &text).await
+        } else {
+            tracing::warn!(
+                event = "cron.delivery",
+                job_id = %job.id,
+                "cron ping job has no CronDeliveryBackend; output not sent"
+            );
+            None
+        };
+        let result = AgentResult {
+            messages: vec![Message::assistant(text.clone())],
+            finished_naturally: true,
+            total_turns: 0,
+            turn_exit_reason: "cron_ping".to_string(),
+            ..Default::default()
+        };
+        Ok(CronRunOutcome {
+            result,
+            delivery_error,
+        })
     }
 
     async fn run_script_only_job(&self, job: &CronJob) -> Result<AgentResult, CronError> {

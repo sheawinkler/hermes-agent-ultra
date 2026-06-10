@@ -16,6 +16,7 @@ pub mod python_job;
 pub mod runner;
 pub mod schedule;
 pub mod scheduler;
+pub mod timing;
 
 // Re-export primary types
 pub use backend::ScheduledCronjobBackend;

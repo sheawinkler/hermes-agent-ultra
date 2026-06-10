@@ -16,19 +16,65 @@ use crate::completion::CronCompletionEvent;
 use crate::job::{CronJob, JobStatus};
 use crate::persistence::JobPersistence;
 use crate::runner::{CronRunOutcome, CronRunner};
-use crate::schedule::advance_next_run_before_execute;
+use crate::schedule::{
+    advance_next_run_before_execute, compute_next_run as schedule_compute_next_run,
+    normalize_schedule_input, parse_duration, parse_schedule,
+};
+use crate::timing::{log_job_registered, log_job_trigger, log_scheduler_tick};
 
-/// Background poll interval for due jobs. Default **60** seconds.
+/// Maximum idle poll interval when no due jobs are imminent. Default **60** seconds.
 ///
 /// Override with **`HERMES_CRON_TICK_SECS`** (integer **1–300**) for integration tests
 /// or local debugging; values outside the range are clamped.
-fn cron_poll_interval() -> Duration {
+fn cron_max_poll_interval() -> Duration {
     let secs = std::env::var("HERMES_CRON_TICK_SECS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(60)
         .clamp(1, 300);
     Duration::from_secs(secs)
+}
+
+const CRON_MIN_POLL_SECS: u64 = 1;
+
+/// Compute how long the scheduler loop should sleep before the next due-job check.
+///
+/// When an active job has `next_run` soon, sleep only until that instant (capped by
+/// [`cron_max_poll_interval`] for long-range schedules). This avoids the up-to-60s
+/// alignment skew of a fixed poll cadence when jobs are created mid-interval.
+fn cron_sleep_duration(
+    earliest_next_run: Option<chrono::DateTime<chrono::Utc>>,
+    max_poll: Duration,
+) -> Duration {
+    let min_poll = Duration::from_secs(CRON_MIN_POLL_SECS);
+    let Some(next) = earliest_next_run else {
+        return max_poll;
+    };
+    let now = now_utc();
+    if now >= next {
+        return Duration::ZERO;
+    }
+    let remaining_secs = (next - now).num_seconds().max(0) as u64;
+    let capped = remaining_secs.min(max_poll.as_secs()).max(CRON_MIN_POLL_SECS);
+    Duration::from_secs(capped).max(min_poll)
+}
+
+fn earliest_active_execution_fire(
+    jobs: &HashMap<String, CronJob>,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    jobs.values()
+        .filter(|job| job.status == JobStatus::Active)
+        .filter_map(|job| crate::timing::execution_fire_at(job))
+        .min()
+}
+
+/// Relative duration / interval schedules must be anchored at job registration time.
+fn should_refresh_schedule_at_registration(schedule: &str) -> bool {
+    let normalized = normalize_schedule_input(schedule);
+    if normalized.to_ascii_lowercase().starts_with("every ") {
+        return true;
+    }
+    parse_duration(&normalized).is_ok()
 }
 
 const MAX_CONTEXT_CHARS: usize = 8_000;
@@ -154,6 +200,8 @@ pub struct CronScheduler {
     completion_tx: Option<broadcast::Sender<CronCompletionEvent>>,
     /// Notification handle to stop the scheduler loop.
     stop_notify: Arc<Notify>,
+    /// Wake the scheduler loop early (new/updated job with sooner `next_run`).
+    tick_notify: Arc<Notify>,
     /// Whether the scheduler loop is running.
     running: Arc<Mutex<bool>>,
     /// Generation counter: incremented on structural changes (remove_job).
@@ -171,9 +219,15 @@ impl CronScheduler {
             runner,
             completion_tx: None,
             stop_notify: Arc::new(Notify::new()),
+            tick_notify: Arc::new(Notify::new()),
             running: Arc::new(Mutex::new(false)),
             generation: Arc::new(Mutex::new(0)),
         }
+    }
+
+    /// Wake the background loop so it recomputes sleep until the next due job.
+    fn wake_scheduler(&self) {
+        self.tick_notify.notify_one();
     }
 
     /// Receive [`CronCompletionEvent`] on every finished run (scheduled or manual).
@@ -219,13 +273,14 @@ impl CronScheduler {
         }
 
         tracing::info!(job_count = guard.len(), "Loaded persisted cron jobs");
+        self.wake_scheduler();
         Ok(())
     }
 
     /// Start the scheduler loop in the background.
     ///
-    /// The loop sleeps (see [`cron_poll_interval`]) then dispatches due jobs.
-    /// Returns immediately; the loop runs as a spawned tokio task.
+    /// The loop sleeps until the earliest active `next_run` (see [`cron_sleep_duration`])
+    /// then dispatches due jobs. Returns immediately; the loop runs as a spawned task.
     pub async fn start(&self) {
         let mut running = self.running.lock().await;
         if *running {
@@ -235,36 +290,50 @@ impl CronScheduler {
         *running = true;
         drop(running);
 
-        tracing::info!("Starting cron scheduler");
+        tracing::info!(event = "cron.start", "Starting cron scheduler");
 
         let jobs = self.jobs.clone();
         let runner = self.runner.clone();
         let persistence = self.persistence.clone();
         let completion_tx = self.completion_tx.clone();
         let stop_notify = self.stop_notify.clone();
+        let tick_notify = self.tick_notify.clone();
         let running_flag = self.running.clone();
         let generation = self.generation.clone();
 
+        self.wake_scheduler();
+
         tokio::spawn(async move {
+            let max_poll = cron_max_poll_interval();
             loop {
                 // Check if we should stop
                 if !*running_flag.lock().await {
                     break;
                 }
 
-                // Wait for next poll tick or stop signal
+                let sleep_for = {
+                    let guard = jobs.lock().await;
+                    cron_sleep_duration(earliest_active_execution_fire(&guard), max_poll)
+                };
+
+                // Wait until the next due job, a schedule change, or stop.
+                let wake_reason: &str;
                 tokio::select! {
-                    _ = time::sleep(cron_poll_interval()) => {
-                        // Tick: check for due jobs
+                    _ = time::sleep(sleep_for) => {
+                        wake_reason = "timer";
+                    }
+                    _ = tick_notify.notified() => {
+                        wake_reason = "schedule_change";
                     }
                     _ = stop_notify.notified() => {
-                        tracing::info!("Scheduler received stop signal");
+                        tracing::info!(event = "cron.stop", "cron scheduler stopping");
                         break;
                     }
                 }
 
                 let now = now_utc();
                 let mut guard = jobs.lock().await;
+                let active_jobs = guard.values().filter(|j| j.status == JobStatus::Active).count();
                 let mut tick_dirty = false;
                 for job in guard.values_mut() {
                     if job.prepare_for_tick(now) {
@@ -286,6 +355,14 @@ impl CronScheduler {
                     .filter(|(_, job)| job.is_due(now))
                     .map(|(id, _)| id.clone())
                     .collect();
+
+                log_scheduler_tick(
+                    now,
+                    wake_reason,
+                    sleep_for.as_secs(),
+                    active_jobs,
+                    due_job_ids.len(),
+                );
 
                 // Phase 1: pre-process all due jobs while holding the lock.
                 // Advance next_run timestamps and build context-enriched runnables.
@@ -352,11 +429,7 @@ impl CronScheduler {
                 for (original, runnable) in parallel_queue {
                     let runner_clone = runner.clone();
                     let gen_before = *generation.lock().await;
-                    tracing::info!(
-                        "Executing cron job '{}' ({})",
-                        runnable.name.as_deref().unwrap_or(&runnable.id),
-                        runnable.id,
-                    );
+                    log_job_trigger(&runnable, now, "schedule");
                     parallel_handles.push(tokio::spawn(async move {
                         let outcome = runner_clone.run_job(&runnable).await;
                         (original, outcome, gen_before)
@@ -366,18 +439,9 @@ impl CronScheduler {
                 // Phase 3: run workdir/profile jobs serially (env-mutation safety).
                 for (mut job, runnable) in sequential_queue {
                     let gen_before = *generation.lock().await;
-                    tracing::info!(
-                        "Executing cron job '{}' ({})",
-                        job.name.as_deref().unwrap_or(&job.id),
-                        job.id
-                    );
+                    log_job_trigger(&runnable, now, "schedule");
                     match runner.run_job(&runnable).await {
                         Ok(outcome) => {
-                            tracing::info!(
-                                "Cron job '{}' completed successfully (turns: {})",
-                                job.id,
-                                outcome.result.total_turns
-                            );
                             Self::emit_completion(
                                 &completion_tx,
                                 &job,
@@ -431,11 +495,6 @@ impl CronScheduler {
                 for handle in parallel_handles {
                     match handle.await {
                         Ok((mut job, Ok(outcome), gen_before)) => {
-                            tracing::info!(
-                                "Cron job '{}' completed successfully (turns: {})",
-                                job.id,
-                                outcome.result.total_turns
-                            );
                             Self::emit_completion(
                                 &completion_tx,
                                 &job,
@@ -551,8 +610,14 @@ impl CronScheduler {
             }
         }
 
-        // Compute next_run if not set
-        if job.next_run.is_none() && job.status == JobStatus::Active {
+        // Anchor relative schedules (e.g. `2m`, `every 30m`) to registration time.
+        job.normalize_schedule();
+        if job.status == JobStatus::Active && should_refresh_schedule_at_registration(&schedule) {
+            if let Ok(spec) = parse_schedule(&job.schedule) {
+                job.next_run = schedule_compute_next_run(&spec, None);
+                job.schedule_spec = Some(spec);
+            }
+        } else if job.next_run.is_none() && job.status == JobStatus::Active {
             job.next_run = job.compute_next_run(now_utc());
         }
 
@@ -563,10 +628,12 @@ impl CronScheduler {
             .map_err(|e| CronError::Persistence(e.to_string()))?;
 
         // Register in memory
+        log_job_registered(&job, "create");
         {
             let mut guard = self.jobs.lock().await;
             guard.insert(id.clone(), job);
         }
+        self.wake_scheduler();
 
         tracing::info!("Created cron job '{}' ({})", id, schedule);
         Ok(id)
@@ -608,6 +675,7 @@ impl CronScheduler {
             .map_err(|e| CronError::Persistence(e.to_string()))?;
 
         guard.insert(id.to_string(), job);
+        self.wake_scheduler();
         Ok(())
     }
 
@@ -667,6 +735,7 @@ impl CronScheduler {
         }
 
         tracing::info!("Resumed cron job '{}'", id);
+        self.wake_scheduler();
         Ok(())
     }
 
@@ -714,6 +783,7 @@ impl CronScheduler {
         }
 
         tracing::info!("Manually triggering cron job '{}'", id);
+        log_job_trigger(&job, now_utc(), "manual");
         let run_result = self.runner.run_job(&runnable_job).await;
         let delivery_error = match &run_result {
             Ok(outcome) => {
@@ -840,6 +910,38 @@ mod tests {
         jobs.insert(target.id.clone(), target.clone());
 
         assert!(build_context_prefix_for_job(&target, &jobs).is_none());
+    }
+
+    #[test]
+    fn cron_sleep_duration_zero_when_due() {
+        let past = now_utc() - chrono::Duration::minutes(1);
+        assert_eq!(
+            cron_sleep_duration(Some(past), Duration::from_secs(60)),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn cron_sleep_duration_matches_short_reminder() {
+        let next = now_utc() + chrono::Duration::seconds(90);
+        let sleep = cron_sleep_duration(Some(next), Duration::from_secs(60));
+        assert!(sleep >= Duration::from_secs(1));
+        assert!(sleep <= Duration::from_secs(60));
+    }
+
+    #[test]
+    fn cron_sleep_duration_falls_back_without_jobs() {
+        assert_eq!(
+            cron_sleep_duration(None, Duration::from_secs(45)),
+            Duration::from_secs(45)
+        );
+    }
+
+    #[test]
+    fn should_refresh_relative_duration_schedules() {
+        assert!(should_refresh_schedule_at_registration("2m"));
+        assert!(should_refresh_schedule_at_registration("every 30m"));
+        assert!(!should_refresh_schedule_at_registration("0 9 * * *"));
     }
 
     #[test]

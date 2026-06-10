@@ -86,12 +86,25 @@ pub const SESSION_SEARCH_GUIDANCE: &str = "When the user references something fr
 relevant cross-session context exists, use session_search to recall it before \
 asking them to repeat themselves.";
 
-pub const CRONJOB_GUIDANCE: &str = "# Cron reminders — user-visible time wording\n\
+pub const CRONJOB_GUIDANCE: &str = "# Cron reminders — mandatory tool use + user-visible time wording\n\
+When the user asks for a reminder, alarm, scheduled task, or anything like \"in N minutes \
+remind me…\" / \"N分钟后提醒我…\" / \"every hour check…\" / \"定时…\", you MUST call \
+cronjob(action='create') in the SAME turn BEFORE telling them it is scheduled. \
+Conversational memory does NOT fire reminders — only a persisted cron job does. \
+Never reply \"I'll remind you\" without a successful cronjob create in this turn.\n\
+For one-shot delays use compact schedule DSL: `2m`, `30m`, `1h` (NOT cron expressions, \
+NOT natural language like \"2 minutes from now\"). Example: user says drink water in 2 \
+minutes → cronjob(action='create', schedule='2m', task='Remind the user to drink water.'). \
+Simple one-shot reminders like this use a fast ping path: Hermes delivers the reminder text \
+directly at `next_run` with no LLM round-trip. Complex scheduled tasks still run an agent \
+and may start slightly early (see `HERMES_CRON_DELIVERY_LEAD_SECS`, default 15s) so delivery \
+lands on time.\n\
 When you create or update a reminder with the cronjob tool, the tool response includes \
-`next_run` (RFC3339 UTC) and `next_run_display` (Hermes wall-clock). When telling the \
+`next_run` (RFC3339 UTC) and `next_run_display` (Hermes wall-clock, **including seconds**, \
+e.g. `June 09, 2026 at 05:55:55 PM`). When telling the \
 user when the reminder will fire, you MUST quote the clock and calendar from \
 `next_run_display`. You may translate into the user's language, but do not change the \
-date or time.\n\
+date, time, or drop seconds.\n\
 Do NOT infer trigger time from Conversation started, session age, your guess of 'now', \
 or phrases like tomorrow / 明天 / the day after / 后天 / later / 稍后 unless that exact \
 wording matches `next_run_display`. If you have not read `next_run_display` from the \

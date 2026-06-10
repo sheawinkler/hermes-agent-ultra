@@ -28,9 +28,10 @@ pub use build_info::startup_commit_info;
 pub use errors::{AgentError, ConfigError, GatewayError, ToolError};
 pub use time::{
     HermesClock, cron_wall_offset_at, ensure_aware, ensure_aware_naive, ensure_aware_utc,
-    format_conversation_started_date, format_wall_compact, format_wall_datetime, format_wall_hms,
-    format_wall_ymd_hms, get_timezone, init_global_clock, now, now_utc, reset_cache,
-    reset_global_clock_cache, timezone_name, tz_for_child_env,
+    format_conversation_started_date, format_wall_compact, format_wall_datetime,
+    format_wall_datetime_precise, format_wall_hms, format_wall_ymd_hms, get_timezone,
+    init_global_clock, now, now_utc, reset_cache, reset_global_clock_cache, timezone_name,
+    tz_for_child_env,
 };
 
 // Re-export all core types
