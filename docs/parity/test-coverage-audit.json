@@ -4,19 +4,19 @@
       "kind": "nonzero_tree_drift",
       "message": "max_commits_behind remains nonzero in parity matrix",
       "metric": "max_commits_behind",
-      "value": 5737.0
+      "value": 5796.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_upstream_patch_missing remains nonzero in parity matrix",
       "metric": "max_upstream_patch_missing",
-      "value": 5530.0
+      "value": 5586.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_files_only_upstream remains nonzero in parity matrix",
       "metric": "max_files_only_upstream",
-      "value": 2235.0
+      "value": 2280.0
     }
   ],
   "audit_gate": {
@@ -61,7 +61,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-11T07:59:41.324519+00:00",
+  "generated_at_utc": "2026-06-11T21:26:21.505744+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -388,19 +388,21 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 6,
+      "direct_test_evidence_count": 7,
       "direct_test_evidence_sample": [
         "crates/hermes-cli/src/commands.rs",
         "crates/hermes-cron/src/backend.rs",
+        "crates/hermes-cron/src/blueprints.rs",
         "crates/hermes-cron/src/job.rs",
         "crates/hermes-cron/src/persistence.rs",
         "crates/hermes-cron/src/runner.rs",
         "crates/hermes-cron/src/scheduler.rs"
       ],
-      "evidence_count": 9,
+      "evidence_count": 10,
       "evidence_sample": [
         "crates/hermes-cli/src/commands.rs",
         "crates/hermes-cron/src/backend.rs",
+        "crates/hermes-cron/src/blueprints.rs",
         "crates/hermes-cron/src/cli_support.rs",
         "crates/hermes-cron/src/completion.rs",
         "crates/hermes-cron/src/job.rs",
@@ -545,9 +547,9 @@
     "divergence_unowned": 0,
     "missing_rust_test_refs": 0,
     "queue_pending": 0,
-    "queue_total": 5532,
-    "rust_test_files": 307,
-    "rust_test_functions": 3452,
+    "queue_total": 5593,
+    "rust_test_files": 308,
+    "rust_test_functions": 3465,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,

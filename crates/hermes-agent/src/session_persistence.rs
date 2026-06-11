@@ -302,6 +302,61 @@ impl SessionPersistence {
         &self.db_path
     }
 
+    fn snapshot_file_is_empty_session(path: &Path, session_id: &str) -> bool {
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            return false;
+        };
+        let Some(snapshot_session_id) = value
+            .get("session_info")
+            .and_then(|info| info.get("session_id"))
+            .and_then(|value| value.as_str())
+        else {
+            return false;
+        };
+        if snapshot_session_id != session_id {
+            return false;
+        }
+        value
+            .get("messages")
+            .and_then(|messages| messages.as_array())
+            .is_some_and(|messages| messages.is_empty())
+    }
+
+    fn remove_empty_session_files(&self, session_id: &str) -> Result<bool, AgentError> {
+        let mut removed = false;
+
+        let json_path = self.sessions_dir.join(format!("{session_id}.json"));
+        if Self::snapshot_file_is_empty_session(&json_path, session_id) {
+            std::fs::remove_file(&json_path).map_err(|e| {
+                AgentError::Io(format!(
+                    "Failed to remove empty session snapshot {}: {e}",
+                    json_path.display()
+                ))
+            })?;
+            removed = true;
+        }
+
+        let jsonl_path = self.sessions_dir.join(format!("{session_id}.jsonl"));
+        if jsonl_path
+            .metadata()
+            .map(|metadata| metadata.len() == 0)
+            .unwrap_or(false)
+        {
+            std::fs::remove_file(&jsonl_path).map_err(|e| {
+                AgentError::Io(format!(
+                    "Failed to remove empty session transcript {}: {e}",
+                    jsonl_path.display()
+                ))
+            })?;
+            removed = true;
+        }
+
+        Ok(removed)
+    }
+
     fn copy_if_exists(src: &Path, dst: &Path) -> std::io::Result<bool> {
         if !src.exists() {
             return Ok(false);
@@ -790,6 +845,45 @@ impl SessionPersistence {
         tx.commit()
             .map_err(|e| AgentError::Io(format!("Failed to commit prune transaction: {e}")))?;
         Ok(session_ids.len() as u64)
+    }
+
+    /// Delete a session row only when it never gained resumable content.
+    ///
+    /// Empty sessions have no messages, no title, and no child sessions. The
+    /// check and delete run in one SQLite statement so a concurrently flushed
+    /// message cannot be removed after the emptiness check. Exact empty JSON
+    /// snapshot files are removed conservatively after the row delete.
+    pub fn delete_session_if_empty(&self, session_id: &str) -> Result<bool, AgentError> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() || !self.db_path.exists() {
+            return Ok(false);
+        }
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+
+        let deleted = conn
+            .execute(
+                "DELETE FROM sessions
+                 WHERE id = ?1
+                   AND NULLIF(TRIM(title), '') IS NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM messages
+                       WHERE messages.session_id = sessions.id
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sessions child
+                       WHERE child.parent_session_id = sessions.id
+                   )",
+                rusqlite::params![session_id],
+            )
+            .map_err(|e| AgentError::Io(format!("Failed to delete empty session row: {e}")))?
+            > 0;
+
+        if deleted {
+            self.remove_empty_session_files(session_id)?;
+        }
+        Ok(deleted)
     }
 
     /// Opportunistic startup maintenance with interval gating via `state_meta`.
@@ -1784,6 +1878,96 @@ mod tests {
             )
             .unwrap();
         assert_eq!(model, "nous:hermes-4");
+    }
+
+    #[test]
+    fn delete_session_if_empty_deletes_empty_untitled_row_and_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session("empty", &[], Some("gpt-4o"), Some("cli"), None, None)
+            .unwrap();
+        std::fs::create_dir_all(tmp.path().join("sessions")).unwrap();
+        std::fs::write(
+            tmp.path().join("sessions").join("empty.json"),
+            r#"{"session_info":{"session_id":"empty"},"messages":[]}"#,
+        )
+        .unwrap();
+
+        assert!(sp.delete_session_if_empty("empty").unwrap());
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE id='empty'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+        assert!(!tmp.path().join("sessions").join("empty.json").exists());
+    }
+
+    #[test]
+    fn delete_session_if_empty_preserves_sessions_with_messages_title_or_children() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session(
+            "with-message",
+            &[Message::user("hello")],
+            None,
+            Some("cli"),
+            None,
+            None,
+        )
+        .unwrap();
+        sp.persist_session("titled", &[], None, Some("cli"), Some("Plans"), None)
+            .unwrap();
+        sp.persist_session("parent", &[], None, Some("cli"), None, None)
+            .unwrap();
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO sessions (id, model, platform, created_at, updated_at, parent_session_id)
+             VALUES ('child', 'gpt-4o', 'cli', ?1, ?1, 'parent')",
+            rusqlite::params![now],
+        )
+        .unwrap();
+        drop(conn);
+
+        assert!(!sp.delete_session_if_empty("with-message").unwrap());
+        assert!(!sp.delete_session_if_empty("titled").unwrap());
+        assert!(!sp.delete_session_if_empty("parent").unwrap());
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        for session_id in ["with-message", "titled", "parent", "child"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sessions WHERE id = ?1",
+                    rusqlite::params![session_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "{session_id} should remain");
+        }
+    }
+
+    #[test]
+    fn delete_session_if_empty_keeps_nonempty_snapshot_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session("empty-db", &[], Some("gpt-4o"), Some("cli"), None, None)
+            .unwrap();
+        let sessions_dir = tmp.path().join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+        let snapshot_path = sessions_dir.join("empty-db.json");
+        std::fs::write(
+            &snapshot_path,
+            r#"{"session_info":{"session_id":"empty-db"},"messages":[{"role":"User","content":"keep"}]}"#,
+        )
+        .unwrap();
+
+        assert!(sp.delete_session_if_empty("empty-db").unwrap());
+        assert!(snapshot_path.exists());
     }
 
     #[test]

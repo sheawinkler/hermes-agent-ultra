@@ -5686,6 +5686,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
 
     app.interrupt_controller.interrupt(None);
     abort_and_join_task(&mut active_agent_task).await;
+    app.discard_current_session_if_empty();
     if let Some(summary) = app.tool_registry.disk_cleanup_session_end() {
         tracing::debug!(
             deleted = summary.deleted,
