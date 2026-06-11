@@ -6,8 +6,10 @@
 //! caching, inline keyboards, callback queries, rate limiting, exponential
 //! backoff reconnection, and group chat support.
 
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+pub mod sticker_cache;
+
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use reqwest::Client;
@@ -18,7 +20,7 @@ use tracing::{info, warn};
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 
-use crate::adapter::{describe_secret, AdapterProxyConfig, BasePlatformAdapter};
+use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter, describe_secret};
 
 /// Maximum message length for Telegram (4096 characters).
 const MAX_MESSAGE_LENGTH: usize = 4096;

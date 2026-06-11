@@ -19,9 +19,11 @@ pub mod channel_directory;
 pub mod clarify_session;
 pub mod command_runtime;
 pub mod commands;
+pub mod config;
 pub mod delivery;
+pub use config::display as display_config;
+pub use config::voice as voice_config;
 pub mod delivery_layer;
-pub mod display_config;
 pub mod dm;
 pub mod extension_bus;
 pub mod format;
@@ -43,14 +45,12 @@ pub mod session;
 pub mod session_control;
 pub mod session_layer;
 pub mod ssrf;
-pub mod sticker_cache;
 pub mod stream;
 pub mod telegram_topic;
 #[cfg(test)]
 mod test_env;
 pub mod tool_backends;
 pub mod voice;
-pub mod voice_config;
 pub mod whatsapp_identity;
 pub mod ws_proxy;
 
@@ -98,7 +98,8 @@ pub use dm::{DmDecision, DmManager};
 pub use mirror::MirrorManager;
 pub use pairing::{PairingManager, PairingState};
 pub use pairing_store::{ApprovedPairing, ApprovedUser, DmPairingStore, PendingPairing};
-pub use sticker_cache::{StickerCache, StickerMeta};
+#[cfg(feature = "telegram")]
+pub use platforms::telegram::sticker_cache::{StickerCache, StickerMeta};
 
 // Re-export adapter base
 pub use adapter::BasePlatformAdapter;

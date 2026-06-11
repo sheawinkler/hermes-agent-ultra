@@ -38,24 +38,6 @@ pub use crate::session_layer::{SessionTeardownContext, SessionTeardownHandler};
 /// Placeholder shown while the model is generating (WeCom native stream).
 const WECOM_NATIVE_STREAM_THINKING: &str = "思考中...";
 
-/// Interval between WeCom stream refreshes (full accumulated text), matching agent-demo.
-fn wecom_native_stream_flush_interval_ms() -> u64 {
-    std::env::var("HERMES_WECOM_STREAM_FLUSH_INTERVAL_MS")
-        .or_else(|_| std::env::var("HERMES_WECOM_STREAM_CHAR_INTERVAL_MS"))
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .filter(|&ms| ms > 0)
-        .unwrap_or(150)
-}
-
-fn non_streaming_feedback_delay_ms() -> u64 {
-    std::env::var("HERMES_GATEWAY_PROCESSING_FEEDBACK_DELAY_MS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|&ms| ms > 0)
-        .unwrap_or(1200)
-}
-
 fn platform_wants_processing_ack(platform: &str) -> bool {
     matches!(
         platform.trim().to_ascii_lowercase().as_str(),
@@ -168,9 +150,36 @@ pub struct GatewayConfig {
     #[serde(default = "default_true")]
     pub kanban_dispatch_in_gateway: bool,
 
+    /// Interval (ms) between WeCom native-stream refreshes. Overridden at runtime
+    /// by `HERMES_WECOM_STREAM_FLUSH_INTERVAL_MS` or `HERMES_WECOM_STREAM_CHAR_INTERVAL_MS`.
+    #[serde(default = "default_wecom_stream_flush_interval_ms")]
+    pub wecom_stream_flush_interval_ms: u64,
+
+    /// Minimum delay (ms) before sending a "processing…" typing indicator for
+    /// non-streaming platforms. Overridden by `HERMES_GATEWAY_PROCESSING_FEEDBACK_DELAY_MS`.
+    #[serde(default = "default_processing_feedback_delay_ms")]
+    pub processing_feedback_delay_ms: u64,
+
     /// Curator engine configuration.
     #[serde(default)]
     pub curator: hermes_skills::CuratorConfig,
+}
+
+fn default_wecom_stream_flush_interval_ms() -> u64 {
+    std::env::var("HERMES_WECOM_STREAM_FLUSH_INTERVAL_MS")
+        .or_else(|_| std::env::var("HERMES_WECOM_STREAM_CHAR_INTERVAL_MS"))
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&ms| ms > 0)
+        .unwrap_or(150)
+}
+
+fn default_processing_feedback_delay_ms() -> u64 {
+    std::env::var("HERMES_GATEWAY_PROCESSING_FEEDBACK_DELAY_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|&ms| ms > 0)
+        .unwrap_or(1200)
 }
 
 impl Default for GatewayConfig {
@@ -185,6 +194,8 @@ impl Default for GatewayConfig {
             display: DisplayConfig::default(),
             quick_commands: BTreeMap::new(),
             kanban_dispatch_in_gateway: true,
+            wecom_stream_flush_interval_ms: default_wecom_stream_flush_interval_ms(),
+            processing_feedback_delay_ms: default_processing_feedback_delay_ms(),
             curator: hermes_skills::CuratorConfig::default(),
         }
     }
@@ -1228,8 +1239,9 @@ impl Gateway {
             let adapter = self.get_adapter(&incoming.platform).await;
             let chat_id = incoming.chat_id.clone();
             let done = feedback_done.clone();
+            let feedback_delay_ms = self.config.processing_feedback_delay_ms;
             tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(non_streaming_feedback_delay_ms())).await;
+                tokio::time::sleep(Duration::from_millis(feedback_delay_ms)).await;
                 if !done.load(Ordering::Acquire) {
                     if let Some(adapter) = adapter {
                         let _ = adapter
@@ -1426,8 +1438,9 @@ impl Gateway {
             let failed = native_failed.clone();
             let visible_emitted = first_visible_emitted.clone();
             let visible_ms = first_visible_chunk_ms.clone();
+            let wecom_flush_ms = self.config.wecom_stream_flush_interval_ms;
             native_worker = Some(tokio::spawn(async move {
-                let flush_interval = Duration::from_millis(wecom_native_stream_flush_interval_ms());
+                let flush_interval = Duration::from_millis(wecom_flush_ms);
                 let mut ticker = tokio::time::interval(flush_interval);
                 ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
