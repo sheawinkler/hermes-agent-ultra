@@ -1,4 +1,4 @@
-use super::actors::PersistLane;
+use super::actors::AuthLane;
 use super::provider::NoBackendProvider;
 use super::provider::{allow_no_api_key, clear_provider_cache, provider_cache_key};
 use super::quorum::{QUORUM_DEFAULT_VOTER_PASSES, QUORUM_HINT_PREFIX};
@@ -58,6 +58,7 @@ fn build_minimal_test_app() -> App {
         acp: AcpState::new(),
         snapshot_gate: SnapshotPersistGate::new(),
         persist_lane: PersistLane::spawn(),
+        auth_lane: AuthLane::new(),
     }
 }
 

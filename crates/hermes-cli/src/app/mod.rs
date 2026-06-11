@@ -59,7 +59,7 @@ pub use traits::{
     UiChromeRuntime,
 };
 
-use actors::PersistLane;
+use actors::{AuthLane, PersistLane};
 use pet::{load_pet_settings, persist_pet_settings};
 use provider::{
     apply_cli_runtime_overrides, default_mouse_enabled, default_rtk_raw_mode,
@@ -80,6 +80,7 @@ pub struct App {
     pub acp: AcpState,
     pub(super) snapshot_gate: SnapshotPersistGate,
     pub(super) persist_lane: PersistLane,
+    pub(super) auth_lane: AuthLane,
 }
 
 impl std::fmt::Debug for App {
@@ -115,6 +116,7 @@ impl Clone for App {
             acp: self.acp.clone(),
             snapshot_gate: self.snapshot_gate.clone(),
             persist_lane: self.persist_lane.clone(),
+            auth_lane: self.auth_lane.clone(),
         }
     }
 }
@@ -285,6 +287,7 @@ impl App {
             acp: AcpState::new(),
             snapshot_gate: SnapshotPersistGate::new(),
             persist_lane: PersistLane::spawn(),
+            auth_lane: AuthLane::new(),
         };
         app.ensure_session_stub_snapshot();
         Ok(app)

@@ -2,8 +2,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use hermes_config::hermes_home as hermes_home_dir;
 use hermes_core::AgentError;
+
+use crate::paths::CliStateRoot;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PetDock {
@@ -77,7 +78,7 @@ impl PetSettings {
 }
 
 pub(super) fn pet_settings_path() -> PathBuf {
-    hermes_home_dir().join("pet.json")
+    CliStateRoot::from_config_dir(None).pet_settings()
 }
 
 fn parse_runtime_provider_api_mode(value: &str) -> Option<hermes_agent::agent_loop::ApiMode> {

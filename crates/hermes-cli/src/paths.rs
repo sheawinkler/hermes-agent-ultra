@@ -77,6 +77,22 @@ impl CliStateRoot {
         self.root.join("logs").join("route-autotune.env")
     }
 
+    pub fn debug_reports_dir(&self) -> PathBuf {
+        self.root.join("debug-reports")
+    }
+
+    pub fn gateway_lock(&self) -> PathBuf {
+        self.gateway_pid().with_file_name("gateway.lock")
+    }
+
+    pub fn pet_settings(&self) -> PathBuf {
+        self.root.join("pet.json")
+    }
+
+    pub fn profiles_dir(&self) -> PathBuf {
+        self.root.join("profiles")
+    }
+
     pub fn from_state_root(state_root: &Path) -> Self {
         Self::from_path(state_root.to_path_buf())
     }

@@ -98,6 +98,8 @@ impl App {
         &mut self,
         force_refresh: bool,
     ) {
+        let auth_lane = self.auth_lane.clone();
+        let _auth_guard = auth_lane.lock().await;
         let (provider_name, _) =
             resolve_provider_and_model(&self.core.config, &self.model.current_model);
         let provider = normalize_runtime_provider_name(provider_name.as_str());
@@ -242,6 +244,8 @@ impl App {
     ///
     /// This is the command-surface lifecycle helper used by `/auth`.
     pub async fn verify_runtime_auth(&mut self, force_refresh: bool) -> Result<String, AgentError> {
+        let auth_lane = self.auth_lane.clone();
+        let _auth_guard = auth_lane.lock().await;
         let provider = self.current_runtime_provider();
         let before_present = provider_api_key_from_env(&provider).is_some();
         self.refresh_runtime_provider_credentials_if_needed(force_refresh)

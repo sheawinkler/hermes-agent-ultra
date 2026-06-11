@@ -23,6 +23,11 @@ pub(crate) fn gateway_lock_path_for_pid_path(pid_path: &Path) -> PathBuf {
     pid_path.with_file_name("gateway.lock")
 }
 
+/// Returns the gateway lock path for a state root.
+pub(crate) fn gateway_lock_path_for_cli(state_root: &Path) -> PathBuf {
+    CliStateRoot::from_path(state_root.to_path_buf()).gateway_lock()
+}
+
 pub(crate) fn read_gateway_pid(path: &Path) -> Option<u32> {
     let raw = std::fs::read_to_string(path).ok()?;
     let trimmed = raw.trim();

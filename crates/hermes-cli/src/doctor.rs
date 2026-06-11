@@ -1005,7 +1005,8 @@ fn build_doctor_support_bundle(
 // ---------------------------------------------------------------------------
 
 pub(crate) fn debug_reports_dir_for_cli(cli: &crate::Cli) -> PathBuf {
-    crate::hermes_state_root(cli).join("debug-reports")
+    hermes_cli::paths::CliStateRoot::from_config_dir(cli.config_dir.as_deref().map(Path::new))
+        .debug_reports_dir()
 }
 
 #[allow(unused)]
