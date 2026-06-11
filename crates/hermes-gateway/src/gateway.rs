@@ -424,20 +424,6 @@ impl Gateway {
         self.register_adapter("discord", adapter).await;
     }
 
-    /// Hold the per-session lock for the full `route_message` pipeline (agent + session writes).
-    pub(crate) async fn acquire_session_serial(
-        &self,
-        session_key: &str,
-    ) -> tokio::sync::OwnedMutexGuard<()> {
-        let mutex = {
-            let mut map = self.session.session_serial.write().await;
-            map.entry(session_key.to_string())
-                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-                .clone()
-        };
-        mutex.lock_owned().await
-    }
-
     async fn abort_active_route(&self, session_key: &str) -> bool {
         let handle = self.session.active_routes.write().await.remove(session_key);
         if let Some(handle) = handle {

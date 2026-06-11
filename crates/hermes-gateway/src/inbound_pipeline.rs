@@ -21,6 +21,7 @@ use crate::dm::DmDecision;
 use crate::gateway::{Gateway, IncomingMessage, RouteTypingGuard, inbound_text_log_fields};
 use crate::message_router::{DmAccessMode, PlatformAccessPolicy};
 use crate::session::Session;
+use crate::session_layer::SessionGuard;
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::PlatformAdapter;
 use hermes_core::types::Message;
@@ -58,9 +59,9 @@ pub(crate) async fn route_inbound(
         return Ok(());
     }
 
-    let _session_serial = gw.acquire_session_serial(&session_key).await;
+    let session_guard = gw.session.lock_session(&session_key).await;
 
-    if setup_session(gw, incoming, &session_key, is_slash_command)
+    if setup_session(gw, incoming, &session_guard.key, is_slash_command)
         .await?
         .is_none()
     {
@@ -71,8 +72,16 @@ pub(crate) async fn route_inbound(
 
     let result = {
         let (messages, _prep_ms) =
-            prepare_user_turn(gw, incoming, &session_key, &route_id, route_start).await?;
-        dispatch_agent_route(gw, incoming, &session_key, &route_id, messages, route_start).await
+            prepare_user_turn(gw, incoming, &session_guard.key, &route_id, route_start).await?;
+        dispatch_agent_route(
+            gw,
+            incoming,
+            &session_guard,
+            &route_id,
+            messages,
+            route_start,
+        )
+        .await
     };
 
     typing_guard.finish().await;
@@ -521,14 +530,19 @@ pub(crate) async fn prepare_user_turn(
 /// Dispatches the prepared messages to the agent handler (streaming or one-shot),
 /// wraps the future in an `AbortHandle` for stop-command interruption, and logs
 /// the final timing.
+///
+/// Requires `&SessionGuard` to enforce that `active_routes` is only mutated
+/// while the session serial is held (see session_layer module doc).
 pub(crate) async fn dispatch_agent_route(
     gw: &Gateway,
     incoming: &IncomingMessage,
-    session_key: &str,
+    guard: &SessionGuard,
     route_id: &str,
     messages: Arc<Vec<Message>>,
     route_start: Instant,
 ) -> Result<(), GatewayError> {
+    let session_key = &guard.key;
+
     let supports_streaming = gw.config.streaming_enabled
         // WeCom native stream flush: iLink API does not support message edits.
         && !incoming.platform.eq_ignore_ascii_case("weixin")
@@ -560,18 +574,14 @@ pub(crate) async fn dispatch_agent_route(
         }
     };
 
-    // active_routes insert/remove wraps the agent future so stop commands can
-    // abort it via abort_active_route.
+    // Guard-gated insert/remove enforces that active_routes is only mutated
+    // while session_serial is held.
     let (abort_handle, abort_reg) = AbortHandle::new_pair();
-    gw.session
-        .active_routes
-        .write()
-        .await
-        .insert(session_key.to_string(), abort_handle);
+    gw.session.register_route(guard, abort_handle).await;
 
     let routed = Abortable::new(route_future, abort_reg).await;
 
-    gw.session.active_routes.write().await.remove(session_key);
+    gw.session.unregister_route(guard).await;
     gw.clear_turn_outbound_tracking(session_key);
 
     let processing_ms = process_start.elapsed().as_millis() as u64;

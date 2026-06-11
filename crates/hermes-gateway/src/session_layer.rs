@@ -1,11 +1,23 @@
 //! Session state layer: per-session runtime settings, usage counters, concurrency
 //! locks, and the teardown lifecycle.
+//!
+//! # Lock ordering
+//!
+//! All mutations of `active_routes` **must** be made while the per-session
+//! `session_serial` mutex is held (represented at the type level by
+//! `&SessionGuard`).  `runtime_state` may be mutated independently of the
+//! serial, but when both are needed the serial must be acquired first.
+//!
+//! The one deliberate exception is `abort_active_route` (called by the
+//! stop-command fast-path), which removes from `active_routes` *without* the
+//! serial so that it can interrupt an in-flight route.
 
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use futures::future::AbortHandle;
 use tokio::sync::RwLock;
 
 use hermes_core::types::Message;
@@ -122,4 +134,58 @@ impl SessionLayer {
             session_teardown_handler: RwLock::new(None),
         }
     }
+
+    /// Acquire the per-session serial lock, returning a `SessionGuard` that
+    /// proves the serial is held for `session_key`.
+    ///
+    /// Callers **must not** hold any other locks on this `SessionLayer` when
+    /// calling this method to avoid priority inversion.
+    pub(crate) async fn lock_session(&self, session_key: &str) -> SessionGuard {
+        let mutex = {
+            let mut map = self.session_serial.write().await;
+            map.entry(session_key.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+                .clone()
+        };
+        let serial = mutex.lock_owned().await;
+        SessionGuard {
+            key: session_key.to_string(),
+            _serial: serial,
+        }
+    }
+
+    /// Register an abort handle for an in-flight route.
+    ///
+    /// Requires `&SessionGuard` as proof that the session serial is held,
+    /// enforcing the invariant that `active_routes` is only mutated while the
+    /// serial lock is owned.
+    pub(crate) async fn register_route(&self, guard: &SessionGuard, handle: AbortHandle) {
+        self.active_routes
+            .write()
+            .await
+            .insert(guard.key.clone(), handle);
+    }
+
+    /// Remove the abort handle for a completed or stopped route.
+    ///
+    /// Requires `&SessionGuard` for the same reason as `register_route`.
+    pub(crate) async fn unregister_route(&self, guard: &SessionGuard) {
+        self.active_routes.write().await.remove(&guard.key);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SessionGuard
+// ---------------------------------------------------------------------------
+
+/// RAII token representing exclusive ownership of the per-session serial lock.
+///
+/// Holding a `SessionGuard` proves that `session_serial` is currently owned
+/// for `key`, which is required before inserting into `active_routes`.
+/// The guard is intentionally `!Clone` and `!Copy` — there can be at most one
+/// active guard per session key at any time.
+pub(crate) struct SessionGuard {
+    pub(crate) key: String,
+    /// Keeps the session_serial mutex locked for the guard's lifetime.
+    _serial: tokio::sync::OwnedMutexGuard<()>,
 }
