@@ -1,17 +1,22 @@
-//! Centralized Hermes state-root and well-known path helpers for the CLI binary.
+//! Binary-crate re-exports for Hermes state-root path helpers.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use hermes_cli::cli::Cli;
-use hermes_config::state_dir;
+use hermes_cli::paths::CliStateRoot;
 
 /// Config/state root shared by CLI, `hermes gateway`, cron, and `webhooks.json`.
 pub(crate) fn hermes_state_root(cli: &Cli) -> PathBuf {
-    state_dir(cli.config_dir.as_deref().map(Path::new))
+    CliStateRoot::from_config_dir(cli.config_dir.as_deref().map(std::path::Path::new))
+        .root()
+        .to_path_buf()
 }
 
 /// Log when `HERMES_HOME` was remapped to the ultra home for this process.
-pub(crate) fn log_legacy_home_env_hint(prior_home: Option<&str>, migrated_home: &Path) {
+pub(crate) fn log_legacy_home_env_hint(
+    prior_home: Option<&str>,
+    migrated_home: &std::path::Path,
+) {
     let migrated = migrated_home.to_string_lossy();
     let Some(prior) = prior_home.map(str::trim).filter(|s| !s.is_empty()) else {
         return;

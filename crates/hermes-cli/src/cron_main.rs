@@ -384,11 +384,13 @@ pub(crate) async fn run_cron(
 }
 
 fn webhook_store_path(cli: &Cli) -> PathBuf {
-    hermes_state_root(&cli).join("webhooks.json")
+    hermes_cli::paths::CliStateRoot::from_config_dir(cli.config_dir.as_deref().map(Path::new))
+        .webhooks_json()
 }
 
 fn webhook_subscriptions_path(cli: &Cli) -> PathBuf {
-    hermes_state_root(&cli).join("webhook_subscriptions.json")
+    hermes_cli::paths::CliStateRoot::from_config_dir(cli.config_dir.as_deref().map(Path::new))
+        .webhook_subscriptions_json()
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

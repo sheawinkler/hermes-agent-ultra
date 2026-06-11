@@ -3,7 +3,7 @@
 //!
 //! Extracted from the monolithic `main.rs` binary entry point.
 
-use hermes_config::gateway_pid_path_in;
+use hermes_cli::paths::CliStateRoot;
 use hermes_core::AgentError;
 
 #[cfg(target_os = "macos")]
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 /// Returns the path to the gateway PID file within a given state root.
 pub(crate) fn gateway_pid_path_for_cli(state_root: &Path) -> PathBuf {
-    gateway_pid_path_in(state_root)
+    CliStateRoot::from_path(state_root.to_path_buf()).gateway_pid()
 }
 
 pub(crate) fn gateway_lock_path_for_pid_path(pid_path: &Path) -> PathBuf {
