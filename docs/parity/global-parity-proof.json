@@ -2,21 +2,21 @@
   "ci_gate": {
     "checks": [
       {
-        "actual": 5696.0,
+        "actual": 5737.0,
         "limit": 5500,
         "metric": "max_commits_behind",
         "special_rule": "allow_tree_drift_when_functional_clean",
         "status": "warn"
       },
       {
-        "actual": 5495.0,
+        "actual": 5530.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
         "special_rule": "allow_tree_drift_when_functional_clean",
         "status": "warn"
       },
       {
-        "actual": 2253.0,
+        "actual": 2235.0,
         "limit": 2600,
         "metric": "max_files_only_upstream",
         "status": "pass"
@@ -95,7 +95,7 @@
       }
     ]
   },
-  "generated_at_utc": "2026-06-11T06:28:55.752916+00:00",
+  "generated_at_utc": "2026-06-11T07:59:51.939256+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -108,16 +108,16 @@
     "GPAR-09": true
   },
   "metrics": {
-    "max_commits_behind": 5696.0,
+    "max_commits_behind": 5737.0,
     "max_divergence_review_overdue": 0.0,
-    "max_files_only_upstream": 2253.0,
+    "max_files_only_upstream": 2235.0,
     "max_queue_pending_commits": 0.0,
     "max_sota_harness_critical_gaps": 0.0,
     "max_sota_harness_missing_rust_refs": 0.0,
     "max_test_coverage_audit_critical_gaps": 0.0,
     "max_test_coverage_missing_rust_refs": 0.0,
     "max_unowned_divergences": 0.0,
-    "max_upstream_patch_missing": 5495.0,
+    "max_upstream_patch_missing": 5530.0,
     "min_sota_harness_domain_coverage_ratio": 1.0,
     "min_test_coverage_tracked_behavior_ratio": 1.0,
     "min_test_intent_mapping_ratio": 1.0
@@ -132,20 +132,20 @@
     "by_disposition": {
       "mirrored": 70,
       "ported": 262,
-      "superseded": 5194
+      "superseded": 5200
     },
     "by_target_ticket": {
-      "20": 2352,
+      "20": 2355,
       "21": 118,
       "22": 842,
       "23": 391,
       "24": 22,
       "25": 120,
-      "26": 1681
+      "26": 1684
     },
     "overrides_path": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/queue-overrides.json",
     "patch_equivalent_count": 2,
-    "total_commits": 5526
+    "total_commits": 5532
   },
   "release_gate": {
     "checks": [
@@ -274,9 +274,9 @@
       "divergence_unowned": 0,
       "missing_rust_test_refs": 0,
       "queue_pending": 0,
-      "queue_total": 5497,
-      "rust_test_files": 306,
-      "rust_test_functions": 3425,
+      "queue_total": 5532,
+      "rust_test_files": 307,
+      "rust_test_functions": 3452,
       "test_intent_mapping_ratio": 1.0,
       "test_intents_mapped": 10,
       "test_intents_total": 10,

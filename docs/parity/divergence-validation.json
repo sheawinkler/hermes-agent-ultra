@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-06-11T00:16:38.789710+00:00",
+  "generated_at_utc": "2026-06-11T07:59:41.948619+00:00",
   "items": [
     {
       "errors": [],
@@ -111,7 +111,7 @@
     {
       "errors": [],
       "id": "upstream-python-plugin-backend-drift-20260527",
-      "last_reviewed": "2026-05-27",
+      "last_reviewed": "2026-06-11",
       "matched_files": 10,
       "matched_sample": [
         "plugins/dashboard_auth/nous/__init__.py",
@@ -127,7 +127,7 @@
       ],
       "overdue": false,
       "owner": "sheawinkler",
-      "review_date": "2026-06-10",
+      "review_date": "2026-07-11",
       "status": "temporary",
       "ticket": 319,
       "warnings": []
@@ -185,10 +185,10 @@
   "summary": {
     "errors": 0,
     "items": 8,
-    "local_paths": 3424,
+    "local_paths": 3458,
     "review_overdue": 0,
     "unowned": 0,
-    "upstream_paths": 4958,
+    "upstream_paths": 4966,
     "warnings": 1
   }
 }
