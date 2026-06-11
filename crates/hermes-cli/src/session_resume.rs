@@ -40,28 +40,28 @@ pub(crate) async fn run_resume(
     let mut app = hermes_cli::App::new(cli).await?;
 
     if let Some(model) = payload.model.clone().filter(|m| !m.trim().is_empty()) {
-        if model != app.current_model {
+        if model != app.model.current_model {
             app.switch_model(&model);
         } else {
-            app.current_model = model;
+            app.model.current_model = model;
         }
     }
 
-    app.current_personality = payload
+    app.model.current_personality = payload
         .personality
         .clone()
         .filter(|name| !name.trim().is_empty());
-    app.session_id = payload.session_id.clone();
-    app.messages = payload.messages;
-    app.ui_messages.clear();
-    app.input_history.clear();
-    app.history_index = 0;
-    app.session_objective = extract_session_objective(&app.messages);
+    app.session.session_id = payload.session_id.clone();
+    app.session.messages = payload.messages;
+    app.session.ui_messages.clear();
+    app.session.input_history.clear();
+    app.session.history_index = 0;
+    app.session.session_objective = extract_session_objective(&app.session.messages);
     app.push_ui_assistant(format!(
         "Resumed session `{}` from {} ({} messages).",
         payload.resolved_id,
         payload.source_path.display(),
-        app.messages.len()
+        app.session.messages.len()
     ));
 
     hermes_cli::tui::run(app).await

@@ -111,22 +111,22 @@ impl App {
             Ok(policy) => policy,
             Err(err) => {
                 Self::emit_lifecycle_event(
-                    &self.stream_handle_shared,
+                    &self.stream.stream_handle_shared,
                     format!("quorum policy load failed: {}", err),
                 );
                 return None;
             }
         };
         if !policy.enabled {
-            if self.quorum_armed_once {
+            if self.runtime.quorum_armed_once {
                 Self::emit_lifecycle_event(
-                    &self.stream_handle_shared,
+                    &self.stream.stream_handle_shared,
                     "quorum run requested but policy is disabled; run `/quorum on` first",
                 );
             }
             return None;
         }
-        let has_hint = self.messages.iter().any(|message| {
+        let has_hint = self.session.messages.iter().any(|message| {
             message.role == hermes_core::MessageRole::System
                 && message
                     .content
@@ -135,19 +135,20 @@ impl App {
                     .starts_with(QUORUM_HINT_PREFIX)
         });
         let has_user_turn = self
+            .session
             .messages
             .iter()
             .any(|m| m.role == hermes_core::MessageRole::User);
         if !has_user_turn {
-            if self.quorum_armed_once || has_hint {
+            if self.runtime.quorum_armed_once || has_hint {
                 Self::emit_lifecycle_event(
-                    &self.stream_handle_shared,
+                    &self.stream.stream_handle_shared,
                     "quorum armed but no user turn present yet; waiting for next user prompt",
                 );
             }
             return None;
         }
-        if !(self.quorum_armed_once || has_hint) {
+        if !(self.runtime.quorum_armed_once || has_hint) {
             let auto_arm = std::env::var("HERMES_QUORUM_AUTO_ARM")
                 .ok()
                 .map(|raw| {
@@ -159,7 +160,7 @@ impl App {
                 .unwrap_or(false);
             if auto_arm {
                 Self::emit_lifecycle_event(
-                    &self.stream_handle_shared,
+                    &self.stream.stream_handle_shared,
                     "quorum auto-arm enabled via HERMES_QUORUM_AUTO_ARM=1",
                 );
                 return Some(policy);
@@ -170,7 +171,7 @@ impl App {
     }
 
     pub(super) fn clear_quorum_system_hints_inplace(&mut self) {
-        self.messages.retain(|message| {
+        self.session.messages.retain(|message| {
             if message.role != hermes_core::MessageRole::System {
                 return true;
             }
@@ -363,14 +364,15 @@ impl App {
     }
 
     async fn resolve_quorum_models(&self, policy: &QuorumPolicy) -> (Vec<String>, Vec<String>) {
-        let raw = Self::collect_quorum_models(policy, &self.current_model);
+        let raw = Self::collect_quorum_models(policy, &self.model.current_model);
         if raw.is_empty() {
             return (Vec::new(), Vec::new());
         }
         let mut notes = Vec::new();
         let mut resolved = Vec::new();
         for raw_target in raw {
-            let normalized = Self::normalize_quorum_model_target(&self.current_model, &raw_target);
+            let normalized =
+                Self::normalize_quorum_model_target(&self.model.current_model, &raw_target);
             let (provider, model_id) = Self::split_provider_model(&normalized);
             let provider = provider.trim().to_ascii_lowercase();
             let model_id = model_id.trim();
@@ -588,13 +590,13 @@ impl App {
             ))
         })?;
         let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ").to_string();
-        let file_name = format!("{}-{}.json", self.session_id, timestamp);
+        let file_name = format!("{}-{}.json", self.session.session_id, timestamp);
         let path = dir.join(file_name);
         let payload = serde_json::json!({
-            "session_id": self.session_id,
+            "session_id": self.session.session_id,
             "saved_at": chrono::Utc::now().to_rfc3339(),
             "policy": policy,
-            "model_at_start": self.current_model,
+            "model_at_start": self.model.current_model,
             "voters": voter_outcomes,
         });
         let raw = serde_json::to_string_pretty(&payload)
@@ -652,11 +654,11 @@ impl App {
         let quorum_contract = self.load_quorum_agent_contract_text();
         let (voter_models, model_resolution_notes) = self.resolve_quorum_models(&policy).await;
         for note in model_resolution_notes {
-            Self::emit_lifecycle_event(&self.stream_handle_shared, note);
+            Self::emit_lifecycle_event(&self.stream.stream_handle_shared, note);
         }
         if voter_models.len() < 2 {
             Self::emit_lifecycle_event(
-                &self.stream_handle_shared,
+                &self.stream.stream_handle_shared,
                 format!(
                     "quorum armed but only {} distinct model configured; falling back to normal run",
                     voter_models.len()
@@ -668,17 +670,17 @@ impl App {
         let (base_messages, reformulated) = self.build_inference_messages();
         if reformulated {
             Self::emit_lifecycle_event(
-                &self.stream_handle_shared,
+                &self.stream.stream_handle_shared,
                 "runtime prompt reformulation injected (anti-scheming + context + tool routing + contradiction self-check)",
             );
         }
-        let original_model = self.current_model.clone();
+        let original_model = self.model.current_model.clone();
         let mut outcomes: Vec<QuorumVoterOutcome> = Vec::new();
         let mut succeeded = 0usize;
         let output_char_cap = Self::quorum_output_char_cap();
 
         Self::emit_phase_event(
-            &self.stream_handle_shared,
+            &self.stream.stream_handle_shared,
             "quorum",
             "multi-voter fan-out dispatch",
             30,
@@ -687,7 +689,7 @@ impl App {
         for (idx, model) in voter_models.iter().enumerate() {
             let display_index = idx + 1;
             Self::emit_lifecycle_event(
-                &self.stream_handle_shared,
+                &self.stream.stream_handle_shared,
                 format!(
                     "quorum voter {}/{} dispatch -> {}",
                     display_index,
@@ -695,7 +697,7 @@ impl App {
                     model
                 ),
             );
-            if self.current_model != *model {
+            if self.model.current_model != *model {
                 self.switch_model(model);
             }
             let force_refresh = display_index == 1 || Self::quorum_force_refresh_each_voter();
@@ -715,7 +717,7 @@ impl App {
 
             for pass_idx in 0..voter_passes {
                 Self::emit_lifecycle_event(
-                    &self.stream_handle_shared,
+                    &self.stream.stream_handle_shared,
                     format!(
                         "quorum voter {}/{} pass {}/{}",
                         display_index,
@@ -782,7 +784,7 @@ impl App {
                                     pass_idx + 1
                                 ));
                                 Self::emit_lifecycle_event(
-                                    &self.stream_handle_shared,
+                                    &self.stream.stream_handle_shared,
                                     format!(
                                         "quorum voter {}/{} provider rejected tool schema; retrying this voter pass without tool schemas",
                                         display_index,
@@ -818,7 +820,7 @@ impl App {
                             if Self::is_transient_retryable_error(&err) && attempts < max_attempts {
                                 let backoff_ms = (attempts as u64).saturating_mul(750).max(500);
                                 Self::emit_lifecycle_event(
-                                    &self.stream_handle_shared,
+                                    &self.stream.stream_handle_shared,
                                     format!(
                                         "quorum voter {}/{} transient error (attempt {}/{}): {} — retrying after {}ms",
                                         display_index,
@@ -906,12 +908,12 @@ impl App {
             }
         }
 
-        if self.current_model != original_model {
+        if self.model.current_model != original_model {
             self.switch_model(&original_model);
         }
         let artifact_path = self.persist_quorum_artifact(&policy, &outcomes)?;
         Self::emit_lifecycle_event(
-            &self.stream_handle_shared,
+            &self.stream.stream_handle_shared,
             format!("quorum voter artifact saved: {}", artifact_path.display()),
         );
 
@@ -953,7 +955,7 @@ impl App {
             Self::compose_quorum_messages(synthesis_system_sections, base_messages, None);
 
         Self::emit_phase_event(
-            &self.stream_handle_shared,
+            &self.stream.stream_handle_shared,
             "synthesis",
             "quorum synthesis from voter outputs",
             75,
@@ -972,7 +974,7 @@ impl App {
         {
             tracing::warn!("quorum synthesis artifact update skipped: {}", err);
             Self::emit_lifecycle_event(
-                &self.stream_handle_shared,
+                &self.stream.stream_handle_shared,
                 format!("warning: quorum synthesis artifact update skipped: {}", err),
             );
         }
@@ -980,7 +982,7 @@ impl App {
             tracing::warn!("session autosave skipped: {}", err);
         }
         Self::emit_lifecycle_event(
-            &self.stream_handle_shared,
+            &self.stream.stream_handle_shared,
             format!(
                 "quorum run finished in {:.2}s (voters={} succeeded={} total_turns={})",
                 run_started_at.elapsed().as_secs_f64(),
@@ -990,12 +992,12 @@ impl App {
             ),
         );
         Self::emit_phase_event(
-            &self.stream_handle_shared,
+            &self.stream.stream_handle_shared,
             "finalize",
             "transcript finalization + persistence",
             100,
         );
-        if let Some(handle) = &self.stream_handle {
+        if let Some(handle) = &self.stream.stream_handle {
             handle.send_done();
         }
         Ok(true)

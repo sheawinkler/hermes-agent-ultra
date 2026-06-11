@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use hermes_acp_server::server::AcpPipeServer;
 use hermes_agent::{AgentLoop, InterruptController};
 use hermes_config::GatewayConfig;
-use hermes_core::{AgentError, ToolSchema};
+use hermes_core::{AgentError, AgentResult, ToolSchema};
 use hermes_tools::ToolRegistry;
 
 use super::{App, PetSettings, UiTranscriptMessage};
@@ -41,6 +41,8 @@ pub trait SessionRuntime {
     fn undo_last(&mut self) -> Option<String>;
     fn undo_last_n(&mut self, user_turns: usize) -> Option<String>;
     fn sync_agent_runtime_session_id(&self, session_id: &str);
+    fn history_prev(&mut self) -> Option<&str>;
+    fn history_next(&mut self) -> Option<&str>;
 }
 
 /// Async session operations (compression, retry).
@@ -65,6 +67,8 @@ pub trait ModelRuntime {
 /// UI transcript overlay and composer helpers (TUI vs stdout).
 pub trait TranscriptRuntime {
     fn stream_attached(&self) -> bool;
+    fn stream_handle(&self) -> Option<&crate::tui::StreamHandle>;
+    fn set_stream_handle(&mut self, handle: Option<crate::tui::StreamHandle>);
     fn push_ui_message(&mut self, message: hermes_core::Message);
     fn push_ui_user(&mut self, text: String);
     fn push_ui_assistant(&mut self, text: String);
@@ -104,6 +108,9 @@ pub trait SessionSnapshotRuntime: SessionRuntime {
         &mut self,
         name: Option<&str>,
     ) -> Result<std::path::PathBuf, AgentError>;
+    fn apply_agent_result_and_persist(&mut self, result: AgentResult) -> Result<(), AgentError>;
+    fn flush_session_teardown(&self, interrupted: bool);
+    fn running_background_job_count(&self) -> usize;
 }
 
 /// TUI chrome: mouse, theme, image hints, companion pet.

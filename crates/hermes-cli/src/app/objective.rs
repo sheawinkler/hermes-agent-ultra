@@ -201,14 +201,14 @@ impl App {
         if should_override {
             crate::env_vars::set_var("CONTEXTLATTICE_TOPIC_PATH", &target_topic);
             Self::emit_lifecycle_event(
-                &self.stream_handle_shared,
+                &self.stream.stream_handle_shared,
                 format!(
                     "ContextLattice objective autopin set topic_path={} (objective_id={})",
                     target_topic, contract.id
                 ),
             );
             Self::emit_phase_event(
-                &self.stream_handle_shared,
+                &self.stream.stream_handle_shared,
                 "context",
                 "objective context autopin",
                 8,
@@ -256,7 +256,7 @@ impl App {
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| "runbooks/hermes".to_string());
         Self::emit_lifecycle_event(
-            &self.stream_handle_shared,
+            &self.stream.stream_handle_shared,
             format!("contextlattice preflight ping {} (topic={})", base, topic),
         );
         let client = match reqwest::Client::builder()
@@ -266,7 +266,7 @@ impl App {
             Ok(c) => c,
             Err(err) => {
                 Self::emit_lifecycle_event(
-                    &self.stream_handle_shared,
+                    &self.stream.stream_handle_shared,
                     format!("contextlattice client init failed: {}", err),
                 );
                 return;
@@ -287,14 +287,14 @@ impl App {
                         .unwrap_or(true);
                     let detail = if ok_flag { "connected" } else { "degraded" };
                     Self::emit_lifecycle_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         format!(
                             "contextlattice {} (service={} status={} endpoint={})",
                             detail, service, status_code, base
                         ),
                     );
                     Self::emit_phase_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         "context",
                         if ok_flag {
                             "contextlattice connected"
@@ -305,7 +305,7 @@ impl App {
                     );
                 } else {
                     Self::emit_lifecycle_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         format!(
                             "contextlattice status endpoint returned {} ({})",
                             status_code, url
@@ -315,7 +315,7 @@ impl App {
             }
             Err(err) => {
                 Self::emit_lifecycle_event(
-                    &self.stream_handle_shared,
+                    &self.stream.stream_handle_shared,
                     format!("contextlattice preflight failed: {} ({})", err, url),
                 );
             }

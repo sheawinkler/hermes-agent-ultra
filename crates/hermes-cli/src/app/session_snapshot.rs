@@ -109,13 +109,13 @@ impl App {
     }
     /// Flush POI buffer, memory providers, and plugin hooks before session teardown.
     pub fn flush_session_teardown(&self, interrupted: bool) {
-        let cfg = self.agent.config();
-        if !cfg.interest.enabled && self.messages.is_empty() && cfg.skip_memory {
+        let cfg = self.core.agent.config();
+        if !cfg.interest.enabled && self.session.messages.is_empty() && cfg.skip_memory {
             return;
         }
         hermes_agent::hooks::session_end_hooks(
-            &self.agent,
-            &self.messages,
+            &self.core.agent,
+            &self.session.messages,
             false,
             interrupted,
             0,
@@ -126,24 +126,30 @@ impl App {
     /// Create a new session, clearing all messages.
     pub fn new_session(&mut self) {
         self.flush_session_teardown(false);
-        let old_session_id = self.session_id.clone();
-        self.session_id = Uuid::new_v4().to_string();
-        self.agent.set_runtime_session_id(&self.session_id);
-        self.agent.reset_session_state(None, None, false);
-        self.agent.reset_session_db_flush_cursor();
-        self.agent.invalidate_cached_system_prompt();
-        self.notify_memory_session_switch(&self.session_id, &old_session_id, true, "new_session");
-        self.messages.clear();
-        self.ui_messages.clear();
-        self.pending_image_hint = None;
-        self.session_objective = None;
-        self.input_history.clear();
-        self.history_index = 0;
+        let old_session_id = self.session.session_id.clone();
+        self.session.session_id = Uuid::new_v4().to_string();
+        self.core
+            .agent
+            .set_runtime_session_id(&self.session.session_id);
+        self.core.agent.reset_session_state(None, None, false);
+        self.core.agent.reset_session_db_flush_cursor();
+        self.core.agent.invalidate_cached_system_prompt();
+        self.notify_memory_session_switch(
+            &self.session.session_id,
+            &old_session_id,
+            true,
+            "new_session",
+        );
+        self.session.messages.clear();
+        self.session.ui_messages.clear();
+        self.stream.pending_image_hint = None;
+        self.session.session_objective = None;
+        self.session.clear_input_history();
         self.ensure_session_stub_snapshot();
     }
     /// Apply the finalized messages returned by an agent run.
     pub fn apply_agent_result(&mut self, result: hermes_core::AgentResult) {
-        self.messages = result.messages;
+        self.session.messages = result.messages;
         self.prune_ui_after_current_messages();
     }
 
@@ -278,10 +284,10 @@ impl App {
     /// Get a serializable snapshot of the current session info.
     pub fn session_info(&self) -> SessionInfo {
         SessionInfo {
-            session_id: self.session_id.clone(),
-            model: self.current_model.clone(),
-            personality: self.current_personality.clone(),
-            message_count: self.messages.len(),
+            session_id: self.session.session_id.clone(),
+            model: self.model.current_model.clone(),
+            personality: self.model.current_personality.clone(),
+            message_count: self.session.messages.len(),
             created_at: chrono::Utc::now().to_rfc3339(),
         }
     }
@@ -305,11 +311,11 @@ impl App {
         let stem = name_override
             .map(str::trim)
             .filter(|name| !name.is_empty())
-            .unwrap_or(self.session_id.as_str());
+            .unwrap_or(self.session.session_id.as_str());
         let path = sessions_dir.join(format!("{stem}.json"));
         let payload = serde_json::json!({
             "session_info": self.session_info(),
-            "messages": self.messages.iter().map(|m| {
+            "messages": self.session.messages.iter().map(|m| {
                 serde_json::json!({
                     "role": format!("{:?}", m.role),
                     "content": m.content.as_deref().unwrap_or(""),

@@ -139,7 +139,7 @@ fn gateway_running_on_ac_power() -> bool {
 pub(crate) fn start_gateway_keepawake_guard() {}
 
 pub(crate) fn print_app_oneshot_result(app: &App) {
-    if let Some(reply) = app.messages.iter().rev().find_map(|message| {
+    if let Some(reply) = app.session.messages.iter().rev().find_map(|message| {
         if message.role == MessageRole::Assistant {
             message
                 .content

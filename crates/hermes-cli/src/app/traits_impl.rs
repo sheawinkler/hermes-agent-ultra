@@ -21,31 +21,31 @@ impl SessionRuntime for App {
     }
 
     fn session_id(&self) -> &str {
-        &self.session_id
+        &self.session.session_id
     }
 
     fn session_id_mut(&mut self) -> &mut String {
-        &mut self.session_id
+        &mut self.session.session_id
     }
 
     fn messages(&self) -> &[hermes_core::Message] {
-        &self.messages
+        &self.session.messages
     }
 
     fn messages_mut(&mut self) -> &mut Vec<hermes_core::Message> {
-        &mut self.messages
+        &mut self.session.messages
     }
 
     fn ui_messages(&self) -> &[UiTranscriptMessage] {
-        &self.ui_messages
+        &self.session.ui_messages
     }
 
     fn ui_messages_mut(&mut self) -> &mut Vec<UiTranscriptMessage> {
-        &mut self.ui_messages
+        &mut self.session.ui_messages
     }
 
     fn session_objective(&self) -> Option<&str> {
-        self.session_objective.as_deref()
+        self.session.session_objective.as_deref()
     }
 
     fn set_session_objective(&mut self, objective: Option<String>) {
@@ -53,15 +53,15 @@ impl SessionRuntime for App {
     }
 
     fn input_history(&self) -> &[String] {
-        &self.input_history
+        &self.session.input_history
     }
 
     fn input_history_mut(&mut self) -> &mut Vec<String> {
-        &mut self.input_history
+        &mut self.session.input_history
     }
 
     fn history_index_mut(&mut self) -> &mut usize {
-        &mut self.history_index
+        &mut self.session.history_index
     }
 
     fn notify_memory_session_switch(
@@ -91,7 +91,15 @@ impl SessionRuntime for App {
     }
 
     fn sync_agent_runtime_session_id(&self, session_id: &str) {
-        self.agent.set_runtime_session_id(session_id);
+        self.core.agent.set_runtime_session_id(session_id);
+    }
+
+    fn history_prev(&mut self) -> Option<&str> {
+        App::history_prev(self)
+    }
+
+    fn history_next(&mut self) -> Option<&str> {
+        App::history_next(self)
     }
 }
 
@@ -108,23 +116,23 @@ impl SessionRuntimeAsync for App {
 
 impl ModelRuntime for App {
     fn config(&self) -> &Arc<GatewayConfig> {
-        &self.config
+        &self.core.config
     }
 
     fn set_config(&mut self, config: Arc<GatewayConfig>) {
-        self.config = config;
+        self.core.config = config;
     }
 
     fn current_model(&self) -> &str {
-        &self.current_model
+        &self.model.current_model
     }
 
     fn current_model_mut(&mut self) -> &mut String {
-        &mut self.current_model
+        &mut self.model.current_model
     }
 
     fn current_personality(&self) -> Option<&str> {
-        self.current_personality.as_deref()
+        self.model.current_personality.as_deref()
     }
 
     fn switch_model(&mut self, provider_model: &str) {
@@ -142,7 +150,15 @@ impl ModelRuntime for App {
 
 impl TranscriptRuntime for App {
     fn stream_attached(&self) -> bool {
-        self.stream_handle.is_some()
+        self.stream.stream_attached()
+    }
+
+    fn stream_handle(&self) -> Option<&crate::tui::StreamHandle> {
+        self.stream.stream_handle.as_ref()
+    }
+
+    fn set_stream_handle(&mut self, handle: Option<crate::tui::StreamHandle>) {
+        App::set_stream_handle(self, handle);
     }
 
     fn push_ui_message(&mut self, message: hermes_core::Message) {
@@ -168,39 +184,39 @@ impl TranscriptRuntime for App {
 
 impl AgentCoordinator for App {
     fn agent(&self) -> &Arc<AgentLoop> {
-        &self.agent
+        &self.core.agent
     }
 
     fn tool_registry(&self) -> &Arc<ToolRegistry> {
-        &self.tool_registry
+        &self.core.tool_registry
     }
 
     fn tool_schemas(&self) -> &[ToolSchema] {
-        &self.tool_schemas
+        &self.core.tool_schemas
     }
 
     fn interrupt_controller(&self) -> &InterruptController {
-        &self.interrupt_controller
+        &self.core.interrupt_controller
     }
 
     fn interrupt_controller_mut(&mut self) -> &mut InterruptController {
-        &mut self.interrupt_controller
+        &mut self.core.interrupt_controller
     }
 
     fn running(&self) -> bool {
-        self.running
+        self.runtime.running
     }
 
     fn set_running(&mut self, running: bool) {
-        self.running = running;
+        self.runtime.running = running;
     }
 
     fn quorum_armed_once(&self) -> bool {
-        self.quorum_armed_once
+        self.runtime.quorum_armed_once
     }
 
     fn set_quorum_armed_once(&mut self, armed: bool) {
-        self.quorum_armed_once = armed;
+        self.runtime.quorum_armed_once = armed;
     }
 }
 
@@ -228,6 +244,21 @@ impl SessionSnapshotRuntime for App {
         name: Option<&str>,
     ) -> Result<std::path::PathBuf, AgentError> {
         App::persist_session_snapshot(self, name)
+    }
+
+    fn apply_agent_result_and_persist(
+        &mut self,
+        result: hermes_core::AgentResult,
+    ) -> Result<(), AgentError> {
+        App::apply_agent_result_and_persist(self, result)
+    }
+
+    fn flush_session_teardown(&self, interrupted: bool) {
+        App::flush_session_teardown(self, interrupted);
+    }
+
+    fn running_background_job_count(&self) -> usize {
+        App::running_background_job_count(self)
     }
 }
 
@@ -275,18 +306,18 @@ impl UiChromeRuntime for App {
 
 impl AcpServerRuntime for App {
     fn acp_server(&self) -> Option<&Arc<AcpPipeServer>> {
-        self.acp_server.as_ref()
+        self.acp.server.as_ref()
     }
 
     fn acp_server_mut(&mut self) -> &mut Option<Arc<AcpPipeServer>> {
-        &mut self.acp_server
+        &mut self.acp.server
     }
 
     fn acp_event_buffer(&self) -> Option<&Arc<std::sync::Mutex<Vec<String>>>> {
-        self.acp_event_buffer.as_ref()
+        self.acp.event_buffer.as_ref()
     }
 
     fn acp_event_buffer_mut(&mut self) -> &mut Option<Arc<std::sync::Mutex<Vec<String>>>> {
-        &mut self.acp_event_buffer
+        &mut self.acp.event_buffer
     }
 }

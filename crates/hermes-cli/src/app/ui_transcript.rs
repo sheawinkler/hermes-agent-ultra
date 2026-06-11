@@ -3,8 +3,8 @@ use super::{App, UiTranscriptMessage};
 impl App {
     /// Append a UI-only message anchored to the current conversation size.
     pub fn push_ui_message(&mut self, message: hermes_core::Message) {
-        self.ui_messages.push(UiTranscriptMessage {
-            insert_at: self.messages.len(),
+        self.session.ui_messages.push(UiTranscriptMessage {
+            insert_at: self.session.messages.len(),
             message,
         });
     }
@@ -24,20 +24,26 @@ impl App {
     /// This includes durable conversation history and UI-only events in
     /// chronological order, while preserving model-facing context purity.
     pub fn transcript_messages(&self) -> Vec<hermes_core::Message> {
-        let mut merged = Vec::with_capacity(self.messages.len() + self.ui_messages.len());
-        for idx in 0..=self.messages.len() {
-            for ui in self.ui_messages.iter().filter(|m| m.insert_at == idx) {
+        let mut merged =
+            Vec::with_capacity(self.session.messages.len() + self.session.ui_messages.len());
+        for idx in 0..=self.session.messages.len() {
+            for ui in self
+                .session
+                .ui_messages
+                .iter()
+                .filter(|m| m.insert_at == idx)
+            {
                 merged.push(ui.message.clone());
             }
-            if idx < self.messages.len() {
-                merged.push(self.messages[idx].clone());
+            if idx < self.session.messages.len() {
+                merged.push(self.session.messages[idx].clone());
             }
         }
         merged
     }
 
     pub(super) fn prune_ui_after_current_messages(&mut self) {
-        let cap = self.messages.len();
-        self.ui_messages.retain(|m| m.insert_at <= cap);
+        let cap = self.session.messages.len();
+        self.session.ui_messages.retain(|m| m.insert_at <= cap);
     }
 }

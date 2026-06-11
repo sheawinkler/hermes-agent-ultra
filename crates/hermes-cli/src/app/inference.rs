@@ -151,7 +151,7 @@ impl App {
     }
 
     pub(super) fn build_inference_messages(&self) -> (Vec<hermes_core::Message>, bool) {
-        let mut messages = self.messages.clone();
+        let mut messages = self.session.messages.clone();
         let Some(last_user_idx) = messages
             .iter()
             .rposition(|m| m.role == hermes_core::MessageRole::User)

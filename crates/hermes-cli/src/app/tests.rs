@@ -1,4 +1,4 @@
-﻿use super::provider::NoBackendProvider;
+use super::provider::NoBackendProvider;
 use super::provider::{allow_no_api_key, clear_provider_cache, provider_cache_key};
 use super::quorum::{QUORUM_DEFAULT_VOTER_PASSES, QUORUM_HINT_PREFIX};
 use super::*;
@@ -36,32 +36,25 @@ fn build_minimal_test_app() -> App {
     ));
     let agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
 
+    let stream_handle_shared = Arc::new(StdMutex::new(None));
     App {
         state_root: hermes_home_dir(),
-        config,
-        agent,
-        tool_registry,
-        tool_schemas: Vec::new(),
-        messages: Vec::new(),
-        ui_messages: Vec::new(),
-        session_id: "test-session".to_string(),
-        running: true,
-        current_model: "openai:gpt-4o".to_string(),
-        current_personality: None,
-        input_history: Vec::new(),
-        history_index: 0,
-        interrupt_controller: InterruptController::new(),
-        stream_handle: None,
-        stream_handle_shared: Arc::new(StdMutex::new(None)),
-        mouse_enabled: true,
-        pending_theme: None,
-        pending_image_hint: None,
-        session_objective: None,
-        pending_input_prefill: None,
-        quorum_armed_once: false,
-        pet_settings: PetSettings::default(),
-        acp_server: None,
-        acp_event_buffer: None,
+        core: AgentCore {
+            config,
+            agent,
+            tool_registry,
+            tool_schemas: Vec::new(),
+            interrupt_controller: InterruptController::new(),
+        },
+        session: SessionState::new("test-session".to_string()),
+        model: ModelState {
+            current_model: "openai:gpt-4o".to_string(),
+            current_personality: None,
+        },
+        stream: StreamState::new(stream_handle_shared, true),
+        runtime: RuntimeFlags::new(),
+        chrome: ChromeState::new(PetSettings::default()),
+        acp: AcpState::new(),
         snapshot_gate: SnapshotPersistGate::new(),
     }
 }
@@ -79,7 +72,7 @@ fn test_switch_model_updates_existing_session_db_row() {
     let persistence = SessionPersistence::new(tmp.path());
     persistence
         .persist_session(
-            &app.session_id,
+            &app.session.session_id,
             &[hermes_core::Message::user("hello")],
             &mut hermes_agent::session_persistence::SessionFlushCursor::new(),
             Some("openai:gpt-4o"),
@@ -92,7 +85,9 @@ fn test_switch_model_updates_existing_session_db_row() {
     app.switch_model("anthropic:claude-sonnet-4-6");
 
     assert_eq!(
-        persistence.get_session_model(&app.session_id).unwrap(),
+        persistence
+            .get_session_model(&app.session.session_id)
+            .unwrap(),
         Some("anthropic:claude-sonnet-4-6".to_string())
     );
 }
@@ -101,7 +96,7 @@ fn test_switch_model_updates_existing_session_db_row() {
 fn test_undo_last_n_soft_rewinds_and_sets_prefill() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());
-    app.messages = vec![
+    app.session.messages = vec![
         hermes_core::Message::system("sys"),
         hermes_core::Message::user("question 1"),
         hermes_core::Message::assistant("answer 1"),
@@ -113,8 +108,8 @@ fn test_undo_last_n_soft_rewinds_and_sets_prefill() {
     let persistence = SessionPersistence::new(tmp.path());
     persistence
         .persist_session(
-            &app.session_id,
-            &app.messages,
+            &app.session.session_id,
+            &app.session.messages,
             &mut hermes_agent::session_persistence::SessionFlushCursor::new(),
             None,
             Some("cli"),
@@ -131,15 +126,22 @@ fn test_undo_last_n_soft_rewinds_and_sets_prefill() {
         Some("question 2")
     );
     assert_eq!(
-        app.messages
+        app.session
+            .messages
             .iter()
             .filter_map(|m| m.content.as_deref())
             .collect::<Vec<_>>(),
         vec!["sys", "question 1", "answer 1"]
     );
-    assert_eq!(persistence.load_session(&app.session_id).unwrap().len(), 3);
+    assert_eq!(
+        persistence
+            .load_session(&app.session.session_id)
+            .unwrap()
+            .len(),
+        3
+    );
     let recent = persistence
-        .list_recent_user_messages(&app.session_id, 5)
+        .list_recent_user_messages(&app.session.session_id, 5)
         .unwrap();
     assert_eq!(
         recent
@@ -257,9 +259,9 @@ fn test_quorum_mode_armed_once_triggers_without_system_hint() {
     );
 
     let mut app = build_minimal_test_app();
-    app.messages = vec![hermes_core::Message::user("run quorum now")];
-    app.quorum_armed_once = true;
-    let has_hint = app.messages.iter().any(|message| {
+    app.session.messages = vec![hermes_core::Message::user("run quorum now")];
+    app.runtime.quorum_armed_once = true;
+    let has_hint = app.session.messages.iter().any(|message| {
         message.role == hermes_core::MessageRole::System
             && message
                 .content
@@ -268,6 +270,7 @@ fn test_quorum_mode_armed_once_triggers_without_system_hint() {
                 .starts_with(QUORUM_HINT_PREFIX)
     });
     let has_user_turn = app
+        .session
         .messages
         .iter()
         .any(|m| m.role == hermes_core::MessageRole::User);
@@ -276,7 +279,7 @@ fn test_quorum_mode_armed_once_triggers_without_system_hint() {
         app.quorum_mode_armed_for_turn().is_some(),
         "one-shot quorum arm should trigger fan-out without relying on stale system hints (enabled={}, armed_once={}, has_hint={}, has_user_turn={})",
         policy.enabled,
-        app.quorum_armed_once,
+        app.runtime.quorum_armed_once,
         has_hint,
         has_user_turn
     );
@@ -290,7 +293,7 @@ fn test_quorum_mode_armed_once_triggers_without_system_hint() {
 #[test]
 fn test_clear_quorum_system_hints_inplace_preserves_other_system_messages() {
     let mut app = build_minimal_test_app();
-    app.messages = vec![
+    app.session.messages = vec![
         hermes_core::Message::system("[QUORUM_MODE] quorum armed"),
         hermes_core::Message::system("normal system context"),
         hermes_core::Message::user("hello"),
@@ -298,8 +301,8 @@ fn test_clear_quorum_system_hints_inplace_preserves_other_system_messages() {
 
     app.clear_quorum_system_hints_inplace();
 
-    assert_eq!(app.messages.len(), 2);
-    assert!(app.messages.iter().all(|message| {
+    assert_eq!(app.session.messages.len(), 2);
+    assert!(app.session.messages.iter().all(|message| {
         !message
             .content
             .as_deref()
@@ -307,7 +310,8 @@ fn test_clear_quorum_system_hints_inplace_preserves_other_system_messages() {
             .starts_with("[QUORUM_MODE] ")
     }));
     assert!(
-        app.messages
+        app.session
+            .messages
             .iter()
             .any(|message| message.content.as_deref() == Some("normal system context"))
     );
@@ -332,11 +336,11 @@ fn test_run_agent_quorum_arm_persists_artifact_even_on_voter_failures() {
     .expect("set quorum policy");
 
     let mut app = build_minimal_test_app();
-    app.session_id = "quorum-test-session".to_string();
-    app.messages = vec![hermes_core::Message::user(
+    app.session.session_id = "quorum-test-session".to_string();
+    app.session.messages = vec![hermes_core::Message::user(
         "no tools, just verify quorum fan-out branch",
     )];
-    app.quorum_armed_once = true;
+    app.runtime.quorum_armed_once = true;
 
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
     let result = runtime.block_on(app.run_agent());
@@ -386,8 +390,8 @@ fn test_persist_session_snapshot_writes_default_session_file() {
     crate::env_vars::set_var("HERMES_HOME", tmp.path());
 
     let mut app = build_minimal_test_app();
-    app.session_id = "resume-test".to_string();
-    app.messages = vec![
+    app.session.session_id = "resume-test".to_string();
+    app.session.messages = vec![
         hermes_core::Message::system("[SESSION_OBJECTIVE] Preserve context"),
         hermes_core::Message::user("hello"),
         hermes_core::Message::assistant("world"),
@@ -427,8 +431,8 @@ fn test_persist_session_snapshot_respects_app_state_root() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut app = build_minimal_test_app();
     app.state_root = tmp.path().join("custom-state-root");
-    app.session_id = "state-root-test".to_string();
-    app.messages = vec![hermes_core::Message::user("ping")];
+    app.session.session_id = "state-root-test".to_string();
+    app.session.messages = vec![hermes_core::Message::user("ping")];
 
     let path = app
         .persist_session_snapshot(None)
@@ -446,7 +450,7 @@ fn test_apply_agent_result_and_persist_writes_updated_messages() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut app = build_minimal_test_app();
     app.state_root = tmp.path().join("custom-state-root");
-    app.session_id = "persist-after-run".to_string();
+    app.session.session_id = "persist-after-run".to_string();
 
     let result = hermes_core::AgentResult {
         messages: vec![
@@ -482,7 +486,7 @@ fn test_apply_agent_result_and_persist_writes_updated_messages() {
 async fn compress_conversation_context_rejects_short_transcript() {
     let _guard = env_test_lock();
     let mut app = build_minimal_test_app();
-    app.messages = vec![
+    app.session.messages = vec![
         hermes_core::Message::system("sys"),
         hermes_core::Message::user("hi"),
     ];
@@ -499,15 +503,15 @@ async fn test_new_session_persists_startup_stub_snapshot() {
     let mut app = build_minimal_test_app();
     app.state_root = tmp.path().join("custom-state-root");
     std::fs::create_dir_all(app.state_root.join("sessions")).expect("create sessions dir");
-    let old_session_id = app.session_id.clone();
+    let old_session_id = app.session.session_id.clone();
 
     app.new_session();
 
-    assert_ne!(app.session_id, old_session_id);
+    assert_ne!(app.session.session_id, old_session_id);
     let snapshot_path = app
         .state_root
         .join("sessions")
-        .join(format!("{}.json", app.session_id));
+        .join(format!("{}.json", app.session.session_id));
     assert!(snapshot_path.exists());
 
     let content = std::fs::read_to_string(&snapshot_path).expect("read snapshot");
@@ -535,8 +539,8 @@ fn test_persist_session_snapshot_prunes_old_files_by_count_limit() {
     crate::env_vars::set_var("HERMES_SESSION_SNAPSHOT_MIN_FREE_BYTES", "0");
 
     let mut app = build_minimal_test_app();
-    app.session_id = "snap-prune".to_string();
-    app.messages = vec![hermes_core::Message::user("snapshot payload")];
+    app.session.session_id = "snap-prune".to_string();
+    app.session.messages = vec![hermes_core::Message::user("snapshot payload")];
 
     let p1 = app
         .persist_session_snapshot(Some("older-1"))
@@ -1025,7 +1029,7 @@ fn test_build_inference_messages_injects_runtime_reformulation() {
     let contract = upsert_objective_contract("Grow SOL with controlled risk", true).expect("obj");
 
     let mut app = build_minimal_test_app();
-    app.messages.push(hermes_core::Message::user(
+    app.session.messages.push(hermes_core::Message::user(
         "provide 3 more ideas with contextlattice being one",
     ));
     let (messages, injected) = app.build_inference_messages();
@@ -1066,7 +1070,8 @@ fn test_runtime_reformulation_caps_long_prompt_preview_without_losing_user_messa
     let long_prompt =
         "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu".repeat(12);
     let mut app = build_minimal_test_app();
-    app.messages
+    app.session
+        .messages
         .push(hermes_core::Message::user(long_prompt.clone()));
 
     let (messages, injected) = app.build_inference_messages();
@@ -1117,7 +1122,8 @@ fn test_build_inference_messages_respects_reformulation_toggle_off() {
     let _lock = env_test_lock();
     crate::env_vars::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "off");
     let mut app = build_minimal_test_app();
-    app.messages
+    app.session
+        .messages
         .push(hermes_core::Message::user("plain request"));
     let (messages, injected) = app.build_inference_messages();
     assert!(!injected);
@@ -1145,7 +1151,7 @@ fn test_should_force_objective_continuation_for_mission_status_only_turn() {
     crate::env_vars::set_var("HERMES_OBJECTIVE_EXECUTION_ENFORCER", "1");
 
     let mut app = build_minimal_test_app();
-    app.messages.push(hermes_core::Message::user(
+    app.session.messages.push(hermes_core::Message::user(
         "Proceed with objective and improve outcomes continuously.",
     ));
     upsert_objective_contract(
@@ -1155,8 +1161,8 @@ fn test_should_force_objective_continuation_for_mission_status_only_turn() {
     .expect("set objective");
     set_objective_contract_behavior_mode("mission").expect("set mission mode");
 
-    let baseline_len = app.messages.len();
-    let mut result_messages = app.messages.clone();
+    let baseline_len = app.session.messages.len();
+    let mut result_messages = app.session.messages.clone();
     result_messages.push(hermes_core::Message::assistant(
         "I will proceed with the next steps and share updates shortly.",
     ));
@@ -1384,24 +1390,29 @@ fn test_resolve_quorum_catalog_candidate_preserves_version_pinned_miss() {
 #[test]
 fn test_set_session_objective_injects_replaces_and_clears_system_message() {
     let mut app = build_minimal_test_app();
-    app.messages
+    app.session
+        .messages
         .push(hermes_core::Message::user("hello before objective"));
 
     app.set_session_objective(Some(
         "Ship parity with upstream plus stronger UX".to_string(),
     ));
     assert_eq!(
-        app.session_objective.as_deref(),
+        app.session.session_objective.as_deref(),
         Some("Ship parity with upstream plus stronger UX")
     );
-    assert_eq!(app.messages.len(), 2);
-    assert_eq!(app.messages[0].role, hermes_core::MessageRole::System);
-    let system = app.messages[0].content.clone().unwrap_or_default();
+    assert_eq!(app.session.messages.len(), 2);
+    assert_eq!(
+        app.session.messages[0].role,
+        hermes_core::MessageRole::System
+    );
+    let system = app.session.messages[0].content.clone().unwrap_or_default();
     assert!(system.starts_with("[SESSION_OBJECTIVE] "));
     assert!(system.contains("Ship parity with upstream plus stronger UX"));
 
     app.set_session_objective(Some("Minimize latency regressions".to_string()));
     let system_count = app
+        .session
         .messages
         .iter()
         .filter(|m| {
@@ -1414,13 +1425,13 @@ fn test_set_session_objective_injects_replaces_and_clears_system_message() {
         .count();
     assert_eq!(system_count, 1);
     assert_eq!(
-        app.session_objective.as_deref(),
+        app.session.session_objective.as_deref(),
         Some("Minimize latency regressions")
     );
 
     app.set_session_objective(None);
-    assert!(app.session_objective.is_none());
-    assert!(app.messages.iter().all(|m| {
+    assert!(app.session.session_objective.is_none());
+    assert!(app.session.messages.iter().all(|m| {
         !m.content
             .as_deref()
             .unwrap_or_default()

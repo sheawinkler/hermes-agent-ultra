@@ -41,10 +41,25 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use hermes_auth::FileTokenStore;
 use hermes_core::{AgentError, AgentResult, Message, StreamChunk};
 
-use crate::app::App;
+use crate::app::{
+    AcpServerRuntime, AgentCoordinator, App, ModelRuntime, SessionRuntime, SessionSnapshotRuntime,
+    SlashCommandHost, TranscriptRuntime, UiChromeRuntime,
+};
 use crate::commands;
 use crate::theme::Theme;
 use crate::tool_preview::{build_tool_preview_from_value, tool_emoji};
+
+trait TuiReadHost:
+    SessionRuntime + ModelRuntime + TranscriptRuntime + UiChromeRuntime + AgentCoordinator
+{
+}
+impl<T> TuiReadHost for T where
+    T: SessionRuntime + ModelRuntime + TranscriptRuntime + UiChromeRuntime + AgentCoordinator
+{
+}
+
+trait TuiLoopHost: SlashCommandHost + SessionSnapshotRuntime + AcpServerRuntime {}
+impl<T> TuiLoopHost for T where T: SlashCommandHost + SessionSnapshotRuntime + AcpServerRuntime {}
 
 // ---------------------------------------------------------------------------
 // Event
@@ -1039,7 +1054,7 @@ impl TuiState {
         ));
     }
 
-    fn refresh_sticky_prompt(&mut self, app: &App) {
+    fn refresh_sticky_prompt(&mut self, app: &impl TranscriptRuntime) {
         if self.scroll_offset == 0 {
             self.sticky_prompt.clear();
             return;
@@ -1160,7 +1175,7 @@ impl TuiState {
     }
 
     /// Handle a key event and return whether the app should quit.
-    pub fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> bool {
+    pub fn handle_key(&mut self, key: KeyEvent, app: &mut impl SessionRuntime) -> bool {
         match self.mode {
             InputMode::Normal => self.handle_normal_key(key, app),
             InputMode::Insert => self.handle_insert_key(key, app),
@@ -1168,7 +1183,7 @@ impl TuiState {
         }
     }
 
-    fn handle_normal_key(&mut self, key: KeyEvent, _app: &mut App) -> bool {
+    fn handle_normal_key(&mut self, key: KeyEvent, _app: &mut impl SessionRuntime) -> bool {
         use crossterm::event::KeyCode;
         match key.code {
             KeyCode::PageUp => {
@@ -1199,7 +1214,7 @@ impl TuiState {
         false
     }
 
-    fn handle_insert_key(&mut self, key: KeyEvent, app: &mut App) -> bool {
+    fn handle_insert_key(&mut self, key: KeyEvent, app: &mut impl SessionRuntime) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
         let mods = key.modifiers;
         if mods.contains(KeyModifiers::CONTROL) {
@@ -1384,7 +1399,7 @@ impl TuiState {
             KeyCode::Char(c) if self.history_search_active => {
                 self.history_search_query.push(c);
                 if let Some(found) = app
-                    .input_history
+                    .input_history()
                     .iter()
                     .rev()
                     .find(|h| h.contains(&self.history_search_query))
@@ -1448,7 +1463,7 @@ impl TuiState {
         }
     }
 
-    fn handle_command_key(&mut self, key: KeyEvent, _app: &mut App) -> bool {
+    fn handle_command_key(&mut self, key: KeyEvent, _app: &mut impl SessionRuntime) -> bool {
         use crossterm::event::KeyCode;
         match key.code {
             KeyCode::Enter => {
@@ -1876,7 +1891,7 @@ fn find_anchor_line_index(
 }
 
 /// Render the full TUI frame.
-pub fn render(frame: &mut Frame, app: &App, state: &mut TuiState, theme: &Theme) {
+pub fn render(frame: &mut Frame, app: &impl TuiReadHost, state: &mut TuiState, theme: &Theme) {
     let resolved = theme.resolved_styles();
     let colors = theme.colors.to_ratatui_colors();
 
@@ -1961,7 +1976,11 @@ pub fn render(frame: &mut Frame, app: &App, state: &mut TuiState, theme: &Theme)
     render_status(frame, app, state, status_area, &colors);
 }
 
-fn draw_frame_now(tui: &mut Tui, app: &App, state: &mut TuiState) -> Result<(), AgentError> {
+fn draw_frame_now(
+    tui: &mut Tui,
+    app: &impl TuiReadHost,
+    state: &mut TuiState,
+) -> Result<(), AgentError> {
     state.refresh_sticky_prompt(app);
     let active_theme = tui.theme().clone();
     tui.terminal
@@ -2001,8 +2020,13 @@ fn should_route_prompt_via_managed_agent(quorum_armed_once: bool, messages: &[Me
     })
 }
 
-fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme::RatatuiColors) {
-    let session_short = &app.session_id[..8.min(app.session_id.len())];
+fn render_header(
+    frame: &mut Frame,
+    app: &impl SessionRuntime,
+    area: Rect,
+    colors: &crate::theme::RatatuiColors,
+) {
+    let session_short = &app.session_id()[..8.min(app.session_id().len())];
     let chrome = format!(
         "  •  session {}  •  Enter send  •  Shift+Enter/Ctrl+J newline  •  / commands  •  Ctrl+L lane  •  Ctrl+O cockpit  •  Ctrl+G refresh-tail",
         session_short
@@ -2038,7 +2062,7 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme
 
 fn render_live_details(
     frame: &mut Frame,
-    app: &App,
+    app: &impl TuiReadHost,
     state: &TuiState,
     area: Rect,
     colors: &crate::theme::RatatuiColors,
@@ -2088,7 +2112,7 @@ fn render_live_details(
                     .bg(colors.background),
             ),
             Span::styled(
-                truncate_chars(&app.current_model, area.width.saturating_sub(10) as usize),
+                truncate_chars(app.current_model(), area.width.saturating_sub(10) as usize),
                 Style::default()
                     .fg(colors.status_bar_text)
                     .bg(colors.background),
@@ -3631,7 +3655,7 @@ fn build_transcript_lines(
 
 fn render_messages(
     frame: &mut Frame,
-    app: &App,
+    app: &impl TranscriptRuntime,
     state: &mut TuiState,
     area: Rect,
     styles: &crate::theme::ResolvedStyles,
@@ -4302,7 +4326,7 @@ fn status_message_style(message: &str, colors: &crate::theme::RatatuiColors) -> 
 /// Render the status bar at the bottom of the screen.
 fn render_status(
     frame: &mut Frame,
-    app: &App,
+    app: &impl TuiReadHost,
     state: &TuiState,
     area: Rect,
     colors: &crate::theme::RatatuiColors,
@@ -4312,12 +4336,12 @@ fn render_status(
     } else {
         "✓".to_string()
     };
-    let model = &app.current_model;
-    let session = &app.session_id[..8.min(app.session_id.len())];
+    let model = app.current_model();
+    let session = &app.session_id()[..8.min(app.session_id().len())];
     let msg_count = state
         .transcript_cache
         .total_messages
-        .max(app.messages.len());
+        .max(app.messages().len());
     let scroll_hint = if state.scroll_offset > 0 {
         format!(" (history +{})", state.scroll_offset)
     } else {
@@ -4376,7 +4400,7 @@ fn render_status(
             truncate_chars(&state.sticky_prompt, 40)
         ));
     }
-    let usage = app.agent.session_usage_metrics();
+    let usage = app.agent().session_usage_metrics();
     if usage.api_calls > 0 {
         status_text.push_str(&format!(
             " | tok:{} calls:{}",
@@ -4872,7 +4896,7 @@ async fn disconnect_provider_credentials(provider: &str) -> Result<(bool, bool),
     Ok((removed_vault, removed_oauth))
 }
 
-async fn open_model_provider_modal(state: &mut TuiState, app: &App) {
+async fn open_model_provider_modal(state: &mut TuiState, app: &impl ModelRuntime) {
     let providers = crate::model_switch::curated_provider_slugs();
     let entries = crate::model_switch::provider_catalog_entries(&providers, 4).await;
     let token_store_providers = load_token_store_providers().await;
@@ -4904,9 +4928,9 @@ async fn open_model_provider_modal(state: &mut TuiState, app: &App) {
     }
     let mut modal = PickerModal::new(PickerKind::ModelProvider, "Select Provider", items);
     let (current_provider, _) = app
-        .current_model
+        .current_model()
         .split_once(':')
-        .unwrap_or(("openai", app.current_model.as_str()));
+        .unwrap_or(("openai", app.current_model()));
     if let Some(idx) = modal.filtered_indices.iter().position(|item_idx| {
         modal.items[*item_idx]
             .value
@@ -4917,7 +4941,7 @@ async fn open_model_provider_modal(state: &mut TuiState, app: &App) {
     state.open_modal(modal);
 }
 
-async fn open_provider_model_modal(state: &mut TuiState, app: &App, provider: &str) {
+async fn open_provider_model_modal(state: &mut TuiState, app: &impl ModelRuntime, provider: &str) {
     let models = crate::model_switch::provider_model_ids(provider).await;
     if models.is_empty() {
         state.status_message = format!("No models available for provider `{provider}`");
@@ -4939,9 +4963,9 @@ async fn open_provider_model_modal(state: &mut TuiState, app: &App, provider: &s
         items,
     );
     let (_, current_model_id) = app
-        .current_model
+        .current_model()
         .split_once(':')
-        .unwrap_or(("openai", app.current_model.as_str()));
+        .unwrap_or(("openai", app.current_model()));
     if let Some(idx) = modal.filtered_indices.iter().position(|item_idx| {
         modal.items[*item_idx]
             .value
@@ -4952,7 +4976,7 @@ async fn open_provider_model_modal(state: &mut TuiState, app: &App, provider: &s
     state.open_modal(modal);
 }
 
-fn open_personality_modal(state: &mut TuiState, app: &App) {
+fn open_personality_modal(state: &mut TuiState, app: &impl ModelRuntime) {
     let descriptions = hermes_agent::builtin_personality_descriptions();
     let mut items = Vec::with_capacity(descriptions.len());
     for (name, detail) in descriptions {
@@ -4963,7 +4987,7 @@ fn open_personality_modal(state: &mut TuiState, app: &App) {
         });
     }
     let mut modal = PickerModal::new(PickerKind::Personality, "Select Personality", items);
-    if let Some(current) = app.current_personality.as_deref() {
+    if let Some(current) = app.current_personality() {
         if let Some(idx) = modal
             .filtered_indices
             .iter()
@@ -5011,7 +5035,10 @@ fn open_interactive_question_modal(state: &mut TuiState, request: InteractiveQue
     state.open_modal(modal);
 }
 
-async fn process_modal_disconnect(state: &mut TuiState, app: &mut App) -> Result<(), AgentError> {
+async fn process_modal_disconnect(
+    state: &mut TuiState,
+    app: &mut (impl SlashCommandHost + ModelRuntime),
+) -> Result<(), AgentError> {
     let Some(modal) = state.modal.clone() else {
         return Ok(());
     };
@@ -5048,7 +5075,10 @@ async fn process_modal_disconnect(state: &mut TuiState, app: &mut App) -> Result
     Ok(())
 }
 
-async fn process_modal_confirm(state: &mut TuiState, app: &mut App) -> Result<(), AgentError> {
+async fn process_modal_confirm(
+    state: &mut TuiState,
+    app: &mut (impl SlashCommandHost + ModelRuntime + UiChromeRuntime),
+) -> Result<(), AgentError> {
     let Some(modal) = state.modal.clone() else {
         return Ok(());
     };
@@ -5097,7 +5127,7 @@ async fn process_modal_confirm(state: &mut TuiState, app: &mut App) -> Result<()
 }
 
 fn handle_agent_run_complete(
-    app: &mut App,
+    app: &mut (impl SessionSnapshotRuntime + TranscriptRuntime),
     state: &mut TuiState,
     result: Result<AgentResult, String>,
     elapsed_secs: f64,
@@ -5118,7 +5148,7 @@ fn handle_agent_run_complete(
                 elapsed_secs, total_turns
             ));
             if interrupted {
-                app.push_ui_assistant("[Agent execution interrupted]");
+                app.push_ui_assistant("[Agent execution interrupted]".to_string());
             } else if !finished_naturally {
                 state.push_activity("run stopped before natural finish".to_string());
             }
@@ -5503,7 +5533,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
     let mut active_agent_task: Option<JoinHandle<()>> = None;
 
     // Main event loop
-    while app.running {
+    while app.running() {
         tui.set_mouse_capture(app.mouse_enabled())
             .map_err(|e| AgentError::Config(e.to_string()))?;
 
@@ -5544,11 +5574,11 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         // emit interrupt first so in-progress tools can stop gracefully.
                         if is_ctrl_c(&key) {
                             if state.processing {
-                                app.interrupt_controller.interrupt(None);
+                                app.interrupt_controller_mut().interrupt(None);
                                 abort_and_join_task(&mut active_agent_task).await;
                                 tui.event_sender().send(Event::Interrupt).ok();
                             }
-                            app.running = false;
+                            app.set_running(false);
                             break;
                         }
 
@@ -5572,9 +5602,9 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
 
                         let should_quit = state.handle_key(key, &mut app);
                         if should_quit {
-                            app.interrupt_controller.interrupt(None);
+                            app.interrupt_controller_mut().interrupt(None);
                             abort_and_join_task(&mut active_agent_task).await;
-                            app.running = false;
+                            app.set_running(false);
                             break;
                         }
 
@@ -5680,14 +5710,14 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                         {
                                             app.push_ui_user(trimmed.clone());
                                             app.push_ui_assistant("Goodbye!");
-                                            app.running = false;
+                                            app.set_running(false);
                                             state.status_message.clear();
                                             state.completions.clear();
                                             state.completion_index = None;
                                             needs_redraw = true;
                                             continue;
                                         }
-                                        state.begin_processing_cycle(&app.current_model);
+                                        state.begin_processing_cycle(app.current_model());
                                         state.mark_blocking_action(format!(
                                             "running {command_name} command"
                                         ));
@@ -5720,8 +5750,8 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                     } else if !trimmed.is_empty() {
                                         let managed_turn_required =
                                             should_route_prompt_via_managed_agent(
-                                                app.quorum_armed_once,
-                                                &app.messages,
+                                                app.quorum_armed_once(),
+                                                app.messages(),
                                             );
                                         if managed_turn_required {
                                             // Quorum/system-hint turns must run through App::run_agent
@@ -5731,7 +5761,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                             // worker mutates/persists the final session state.
                                             let mut worker_app = app.clone();
                                             app.push_ui_user(trimmed.clone());
-                                            state.begin_processing_cycle(&app.current_model);
+                                            state.begin_processing_cycle(app.current_model());
                                             state.mark_blocking_action(
                                                 "running managed quorum/system turn",
                                             );
@@ -5756,21 +5786,21 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                         } else {
                                             // Non-slash prompts run in a background task so stream events
                                             // can be consumed/rendered live by this UI loop.
-                                            app.input_history.push(trimmed.clone());
-                                            app.history_index = app.input_history.len();
+                                            app.input_history_mut().push(trimmed.clone());
+                                            *app.history_index_mut() = app.input_history().len();
                                             let user_message = app.prepare_user_message(&trimmed);
-                                            app.messages.push(Message::user(user_message));
+                                            app.messages_mut().push(Message::user(user_message));
 
-                                            state.begin_processing_cycle(&app.current_model);
+                                            state.begin_processing_cycle(app.current_model());
                                             state.status_message = "Processing...".to_string();
 
                                             let stream_tx = tui.stream_sender();
-                                            let agent = app.agent.clone();
-                                            let stream_enabled = app.config.streaming.enabled;
-                                            let tool_schemas = app.tool_schemas.clone();
-                                            let messages = app.messages.clone();
-                                            let stream_handle = app.stream_handle.clone();
-                                            let task_id = Some(app.session_id.clone());
+                                            let agent = app.agent().clone();
+                                            let stream_enabled = app.config().streaming.enabled;
+                                            let tool_schemas = app.tool_schemas().to_vec();
+                                            let messages = app.messages().to_vec();
+                                            let stream_handle = app.stream_handle().cloned();
+                                            let task_id = Some(app.session_id().to_string());
 
                                             let task = tokio::spawn(async move {
                                                 let started = Instant::now();
@@ -5919,11 +5949,11 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         state.stream_muted = false;
                         state.stream_needs_break = false;
                         state.active_tools.clear();
-                        app.running = false;
+                        app.set_running(false);
                         break;
                     }
                     Some(Event::Shutdown) => {
-                        app.interrupt_controller.interrupt(None);
+                        app.interrupt_controller_mut().interrupt(None);
                         abort_and_join_task(&mut active_agent_task).await;
                         state.finish_processing_cycle("⏹ interrupted after");
                         state.stream_buffer.clear();
@@ -5931,7 +5961,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         state.stream_muted = false;
                         state.stream_needs_break = false;
                         state.active_tools.clear();
-                        app.running = false;
+                        app.set_running(false);
                         break;
                     }
                     Some(Event::StreamDelta(_)) | Some(Event::StreamChunk(_)) | Some(Event::AgentDone) => {
@@ -6007,7 +6037,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
         }
     }
 
-    app.interrupt_controller.interrupt(None);
+    app.interrupt_controller_mut().interrupt(None);
     abort_and_join_task(&mut active_agent_task).await;
     app.flush_session_teardown(false);
     shutdown_crossterm_event_pipeline(event_pipeline).await;

@@ -64,21 +64,21 @@ impl App {
             return false;
         }
         Self::emit_lifecycle_event(
-            &self.stream_handle_shared,
+            &self.stream.stream_handle_shared,
             format!("Nous OAuth re-auth required ({reason}); launching portal login flow"),
         );
         match login_nous_device_code(NousDeviceCodeOptions::default()).await {
             Ok(state) => match save_nous_auth_state(&state) {
                 Ok(path) => {
                     Self::emit_lifecycle_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         format!("Nous OAuth state refreshed: {}", path.display()),
                     );
                     true
                 }
                 Err(err) => {
                     Self::emit_lifecycle_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         format!("Nous OAuth state save failed: {}", err),
                     );
                     false
@@ -86,7 +86,7 @@ impl App {
             },
             Err(err) => {
                 Self::emit_lifecycle_event(
-                    &self.stream_handle_shared,
+                    &self.stream.stream_handle_shared,
                     format!("Nous OAuth interactive login failed: {}", err),
                 );
                 false
@@ -98,7 +98,8 @@ impl App {
         &mut self,
         force_refresh: bool,
     ) {
-        let (provider_name, _) = resolve_provider_and_model(&self.config, &self.current_model);
+        let (provider_name, _) =
+            resolve_provider_and_model(&self.core.config, &self.model.current_model);
         let provider = normalize_runtime_provider_name(provider_name.as_str());
         let mut rotated = false;
         let mut note: Option<String> = None;
@@ -137,7 +138,7 @@ impl App {
                             }
                             Err(cache_err) => {
                                 Self::emit_lifecycle_event(
-                                    &self.stream_handle_shared,
+                                    &self.stream.stream_handle_shared,
                                     format!(
                                         "warning: Nous cached credential hydration failed after refresh contention ({cache_err})"
                                     ),
@@ -166,7 +167,7 @@ impl App {
                             }
                             Err(err) => {
                                 Self::emit_lifecycle_event(
-                                    &self.stream_handle_shared,
+                                    &self.stream.stream_handle_shared,
                                     format!("warning: Nous credential refresh skipped ({err})"),
                                 );
                             }
@@ -174,7 +175,7 @@ impl App {
                     } else {
                         if !rotated && note.is_none() {
                             Self::emit_lifecycle_event(
-                                &self.stream_handle_shared,
+                                &self.stream.stream_handle_shared,
                                 format!("warning: Nous credential refresh skipped ({e})"),
                             );
                         }
@@ -202,7 +203,7 @@ impl App {
                 }
                 Err(e) => {
                     Self::emit_lifecycle_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         format!("warning: Qwen OAuth refresh skipped ({e})"),
                     );
                 }
@@ -220,7 +221,7 @@ impl App {
                     }
                     Err(e) => {
                         Self::emit_lifecycle_event(
-                            &self.stream_handle_shared,
+                            &self.stream.stream_handle_shared,
                             format!("warning: Gemini OAuth refresh skipped ({e})"),
                         );
                     }
@@ -230,10 +231,10 @@ impl App {
         }
 
         if rotated {
-            self.switch_model(&self.current_model.clone());
+            self.switch_model(&self.model.current_model.clone());
         }
         if let Some(msg) = note {
-            Self::emit_lifecycle_event(&self.stream_handle_shared, msg);
+            Self::emit_lifecycle_event(&self.stream.stream_handle_shared, msg);
         }
     }
 
@@ -263,12 +264,13 @@ impl App {
         };
         Ok(format!(
             "Auth verify\nprovider: {}\nmode: {}\ncredential: {}\nstate: {}\nmodel: {}",
-            provider, refresh_mode, status, changed, self.current_model
+            provider, refresh_mode, status, changed, self.model.current_model
         ))
     }
 
     pub(super) async fn force_auth_refresh_after_error(&mut self) -> bool {
-        let (provider_name, _) = resolve_provider_and_model(&self.config, &self.current_model);
+        let (provider_name, _) =
+            resolve_provider_and_model(&self.core.config, &self.model.current_model);
         let provider = normalize_runtime_provider_name(provider_name.as_str());
         let (notice, refreshed) = match provider.as_str() {
             "nous" => match resolve_nous_runtime_credentials(
@@ -282,7 +284,7 @@ impl App {
                 Ok(creds) => {
                     let changed = Self::apply_nous_runtime_credentials(&creds);
                     if changed {
-                        self.switch_model(&self.current_model.clone());
+                        self.switch_model(&self.model.current_model.clone());
                     }
                     (
                         Some("Nous auth auto-refresh succeeded; retrying request.".to_string()),
@@ -302,7 +304,7 @@ impl App {
                             Ok(creds) => {
                                 let changed = Self::apply_nous_runtime_credentials(&creds);
                                 if changed {
-                                    self.switch_model(&self.current_model.clone());
+                                    self.switch_model(&self.model.current_model.clone());
                                 }
                                 (
                                     Some(
@@ -336,7 +338,7 @@ impl App {
                             Ok(creds) => {
                                 let changed = Self::apply_nous_runtime_credentials(&creds);
                                 if changed {
-                                    self.switch_model(&self.current_model.clone());
+                                    self.switch_model(&self.model.current_model.clone());
                                 }
                                 (
                                     Some(
@@ -377,7 +379,7 @@ impl App {
                                 Self::set_env_if_changed("HERMES_QWEN_BASE_URL", &creds.base_url);
                         }
                         if changed {
-                            self.switch_model(&self.current_model.clone());
+                            self.switch_model(&self.model.current_model.clone());
                         }
                         (
                             Some(
@@ -401,7 +403,7 @@ impl App {
                         changed |= Self::set_env_if_changed("GOOGLE_API_KEY", &creds.api_key);
                         changed |= Self::set_env_if_changed("GEMINI_API_KEY", &creds.api_key);
                         if changed {
-                            self.switch_model(&self.current_model.clone());
+                            self.switch_model(&self.model.current_model.clone());
                         }
                         (
                             Some(
@@ -421,8 +423,8 @@ impl App {
         };
 
         if let Some(text) = notice {
-            Self::emit_lifecycle_event(&self.stream_handle_shared, &text);
-            if self.stream_handle.is_some() {
+            Self::emit_lifecycle_event(&self.stream.stream_handle_shared, &text);
+            if self.stream.stream_handle.is_some() {
                 self.push_ui_assistant(text);
             } else {
                 println!("{}", text);

@@ -23,12 +23,12 @@ impl App {
         stream_enabled: bool,
         include_tools: bool,
     ) -> Result<hermes_core::AgentResult, AgentError> {
-        let tool_schemas = include_tools.then(|| self.tool_schemas.clone());
-        let task_id = Some(self.session_id.clone());
+        let tool_schemas = include_tools.then(|| self.core.tool_schemas.clone());
+        let task_id = Some(self.session.session_id.clone());
         let (history, user_message) = split_messages_for_run_conversation(&messages)
             .ok_or_else(|| AgentError::Config("no user message in turn".into()))?;
-        if stream_enabled && self.config.streaming.enabled {
-            let stream_handle = self.stream_handle.clone();
+        if stream_enabled && self.core.config.streaming.enabled {
+            let stream_handle = self.stream.stream_handle.clone();
             let stream_cb: Option<Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>> =
                 stream_handle.map(|h| {
                     Box::new(move |chunk: hermes_core::StreamChunk| {
@@ -36,6 +36,7 @@ impl App {
                     }) as Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>
                 });
             let conv = self
+                .core
                 .agent
                 .run_conversation(RunConversationParams {
                     user_message,
@@ -50,6 +51,7 @@ impl App {
             Ok(conv.into_loop_result())
         } else {
             let conv = self
+                .core
                 .agent
                 .run_conversation(RunConversationParams {
                     user_message,
@@ -73,7 +75,7 @@ impl App {
         let run_started_at = Instant::now();
         self.maybe_autopin_contextlattice_topic_from_objective();
         Self::emit_phase_event(
-            &self.stream_handle_shared,
+            &self.stream.stream_handle_shared,
             "preflight",
             "runtime preflight + credential hydration",
             5,
@@ -85,14 +87,14 @@ impl App {
             .await;
         if force_refresh {
             Self::emit_lifecycle_event(
-                &self.stream_handle_shared,
+                &self.stream.stream_handle_shared,
                 format!("preflight auth refresh forced for provider {}", provider),
             );
         }
         if let Some(policy) = self.quorum_mode_armed_for_turn() {
-            self.quorum_armed_once = false;
+            self.runtime.quorum_armed_once = false;
             self.clear_quorum_system_hints_inplace();
-            self.interrupt_controller.clear_interrupt();
+            self.core.interrupt_controller.clear_interrupt();
             match self.run_quorum_fanout_turn(run_started_at, policy).await {
                 Ok(true) => return Ok(()),
                 Ok(false) => {}
@@ -100,12 +102,12 @@ impl App {
             }
         }
         Self::emit_phase_event(
-            &self.stream_handle_shared,
+            &self.stream.stream_handle_shared,
             "dispatch",
             "dispatching model request",
             15,
         );
-        self.interrupt_controller.clear_interrupt();
+        self.core.interrupt_controller.clear_interrupt();
         let mut remediation_attempted = false;
         let mut auth_refresh_attempts = 0usize;
         let auth_refresh_retry_limit = Self::auth_refresh_retry_limit();
@@ -115,24 +117,24 @@ impl App {
         let objective_continuation_limit = Self::objective_continuation_retry_limit();
         loop {
             Self::emit_lifecycle_event(
-                &self.stream_handle_shared,
+                &self.stream.stream_handle_shared,
                 format!(
                     "dispatching request to {} (messages={})",
-                    self.current_model,
-                    self.messages.len()
+                    self.model.current_model,
+                    self.session.messages.len()
                 ),
             );
             Self::emit_phase_event(
-                &self.stream_handle_shared,
+                &self.stream.stream_handle_shared,
                 "inference",
                 "model inference + tool execution",
                 35,
             );
-            let baseline_len = self.messages.len();
+            let baseline_len = self.session.messages.len();
             let (messages, reformulated) = self.build_inference_messages();
             if reformulated {
                 Self::emit_lifecycle_event(
-                    &self.stream_handle_shared,
+                    &self.stream.stream_handle_shared,
                     "runtime prompt reformulation injected (anti-scheming + context + tool routing + contradiction self-check)",
                 );
             }
@@ -147,14 +149,14 @@ impl App {
                         if let Some(reason) =
                             self.should_force_objective_continuation(&result, baseline_len)
                         {
-                            self.messages = result.messages;
-                            self.messages.push(hermes_core::Message::system(
+                            self.session.messages = result.messages;
+                            self.session.messages.push(hermes_core::Message::system(
                                 Self::objective_continuation_system_prompt(&reason),
                             ));
                             self.prune_ui_after_current_messages();
                             objective_continuation_attempts += 1;
                             Self::emit_lifecycle_event(
-                                &self.stream_handle_shared,
+                                &self.stream.stream_handle_shared,
                                 format!(
                                     "objective continuation enforcer triggered ({}/{}): {}",
                                     objective_continuation_attempts,
@@ -163,7 +165,7 @@ impl App {
                                 ),
                             );
                             Self::emit_phase_event(
-                                &self.stream_handle_shared,
+                                &self.stream.stream_handle_shared,
                                 "objective",
                                 "auto-continuing objective loop for concrete execution",
                                 50,
@@ -175,7 +177,7 @@ impl App {
                         tracing::warn!("session autosave skipped: {}", err);
                     }
                     Self::emit_lifecycle_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         format!(
                             "run finished in {:.2}s (total_turns={})",
                             run_started_at.elapsed().as_secs_f64(),
@@ -183,17 +185,17 @@ impl App {
                         ),
                     );
                     Self::emit_phase_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         "finalize",
                         "transcript finalization + persistence",
                         100,
                     );
-                    if let Some(handle) = &self.stream_handle {
+                    if let Some(handle) = &self.stream.stream_handle {
                         handle.send_done();
                     }
                     if interrupted {
                         tracing::info!("Agent loop returned interrupted=true (graceful stop)");
-                        if self.stream_handle.is_some() {
+                        if self.stream.stream_handle.is_some() {
                             self.push_ui_assistant("[Agent execution interrupted]");
                         } else {
                             println!("[Agent execution interrupted]");
@@ -207,15 +209,15 @@ impl App {
                     break;
                 }
                 Err(AgentError::Interrupted { message }) => {
-                    self.interrupt_controller.clear_interrupt();
+                    self.core.interrupt_controller.clear_interrupt();
                     Self::emit_lifecycle_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         format!(
                             "run interrupted after {:.2}s",
                             run_started_at.elapsed().as_secs_f64()
                         ),
                     );
-                    if let Some(handle) = &self.stream_handle {
+                    if let Some(handle) = &self.stream.stream_handle {
                         handle.send_done();
                     }
                     if let Some(redirect) = message {
@@ -223,7 +225,7 @@ impl App {
                     } else {
                         tracing::info!("Agent interrupted by user");
                     }
-                    if self.stream_handle.is_some() {
+                    if self.stream.stream_handle.is_some() {
                         self.push_ui_assistant("[Agent execution interrupted]");
                     } else {
                         println!("[Agent execution interrupted]");
@@ -232,7 +234,7 @@ impl App {
                 }
                 Err(e) => {
                     Self::emit_lifecycle_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         format!(
                             "run error after {:.2}s: {}",
                             run_started_at.elapsed().as_secs_f64(),
@@ -240,12 +242,12 @@ impl App {
                         ),
                     );
                     Self::emit_phase_event(
-                        &self.stream_handle_shared,
+                        &self.stream.stream_handle_shared,
                         "recovery",
                         "error handling + remediation",
                         60,
                     );
-                    if let Some(handle) = &self.stream_handle {
+                    if let Some(handle) = &self.stream.stream_handle {
                         handle.send_done();
                     }
                     if Self::is_provider_auth_or_session_error(&e) {
@@ -253,7 +255,7 @@ impl App {
                             if self.force_auth_refresh_after_error().await {
                                 auth_refresh_attempts += 1;
                                 Self::emit_lifecycle_event(
-                                    &self.stream_handle_shared,
+                                    &self.stream.stream_handle_shared,
                                     format!(
                                         "auth refresh retry {}/{}",
                                         auth_refresh_attempts, auth_refresh_retry_limit
@@ -263,7 +265,7 @@ impl App {
                             }
                         } else {
                             Self::emit_lifecycle_event(
-                                &self.stream_handle_shared,
+                                &self.stream.stream_handle_shared,
                                 format!(
                                     "auth refresh retries exhausted ({})",
                                     auth_refresh_retry_limit
@@ -279,7 +281,7 @@ impl App {
                             .saturating_mul(1_000)
                             .max(800);
                         Self::emit_lifecycle_event(
-                            &self.stream_handle_shared,
+                            &self.stream.stream_handle_shared,
                             format!(
                                 "transient runtime error retry {}/{} after {}ms: {}",
                                 transient_retry_attempts, transient_retry_limit, backoff_ms, e
@@ -294,16 +296,16 @@ impl App {
                         {
                             tracing::warn!(
                                 "Model auto-remediation triggered: {} -> {}",
-                                self.current_model,
+                                self.model.current_model,
                                 next_model
                             );
-                            if self.stream_handle.is_some() {
+                            if self.stream.stream_handle.is_some() {
                                 self.push_ui_assistant(notice.clone());
                             } else {
                                 println!("{notice}");
                             }
                             Self::emit_lifecycle_event(
-                                &self.stream_handle_shared,
+                                &self.stream.stream_handle_shared,
                                 format!("auto-remediation switching model to {}", next_model),
                             );
                             self.switch_model(&next_model);
@@ -410,9 +412,10 @@ impl App {
         }
 
         let (provider, current_model_id) = self
+            .model
             .current_model
             .split_once(':')
-            .unwrap_or(("openai", self.current_model.as_str()));
+            .unwrap_or(("openai", self.model.current_model.as_str()));
         let provider = provider.trim().to_ascii_lowercase();
         if provider.is_empty() {
             return None;
@@ -427,13 +430,13 @@ impl App {
             .or_else(|| catalog.first().cloned())?;
 
         let next_model = format!("{}:{}", provider, selected.trim());
-        if next_model.eq_ignore_ascii_case(&self.current_model) {
+        if next_model.eq_ignore_ascii_case(&self.model.current_model) {
             return None;
         }
         let close = Self::rank_catalog_candidates(current_model_id, &catalog, 3);
         let notice = format!(
             "Model catalog remediation: `{}` failed with not-found; switching to `{}` and retrying once. close matches: {}",
-            self.current_model,
+            self.model.current_model,
             next_model,
             if close.is_empty() {
                 "(none)".to_string()
