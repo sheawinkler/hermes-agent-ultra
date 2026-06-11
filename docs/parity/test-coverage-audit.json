@@ -4,19 +4,19 @@
       "kind": "nonzero_tree_drift",
       "message": "max_commits_behind remains nonzero in parity matrix",
       "metric": "max_commits_behind",
-      "value": 5696.0
+      "value": 5737.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_upstream_patch_missing remains nonzero in parity matrix",
       "metric": "max_upstream_patch_missing",
-      "value": 5495.0
+      "value": 5530.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_files_only_upstream remains nonzero in parity matrix",
       "metric": "max_files_only_upstream",
-      "value": 2253.0
+      "value": 2235.0
     }
   ],
   "audit_gate": {
@@ -61,7 +61,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-11T01:36:01.212066+00:00",
+  "generated_at_utc": "2026-06-11T07:59:41.324519+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -257,7 +257,7 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 45,
+      "direct_test_evidence_count": 46,
       "direct_test_evidence_sample": [
         "crates/hermes-agent/src/agent_loop.rs",
         "crates/hermes-agent/src/api_bridge.rs",
@@ -265,6 +265,7 @@
         "crates/hermes-agent/src/bedrock.rs",
         "crates/hermes-agent/src/budget.rs",
         "crates/hermes-agent/src/code_index.rs",
+        "crates/hermes-agent/src/coding_context.rs",
         "crates/hermes-agent/src/compression.rs",
         "crates/hermes-agent/src/context.rs",
         "crates/hermes-agent/src/context_files.rs",
@@ -282,10 +283,9 @@
         "crates/hermes-agent/src/memory_plugins/honcho.rs",
         "crates/hermes-agent/src/memory_plugins/mem0.rs",
         "crates/hermes-agent/src/memory_plugins/openviking.rs",
-        "crates/hermes-agent/src/memory_plugins/retaindb.rs",
-        "crates/hermes-agent/src/memory_plugins/supermemory.rs"
+        "crates/hermes-agent/src/memory_plugins/retaindb.rs"
       ],
-      "evidence_count": 49,
+      "evidence_count": 50,
       "evidence_sample": [
         "crates/hermes-agent/src/agent_loop.rs",
         "crates/hermes-agent/src/api_bridge.rs",
@@ -293,6 +293,7 @@
         "crates/hermes-agent/src/bedrock.rs",
         "crates/hermes-agent/src/budget.rs",
         "crates/hermes-agent/src/code_index.rs",
+        "crates/hermes-agent/src/coding_context.rs",
         "crates/hermes-agent/src/compression.rs",
         "crates/hermes-agent/src/context.rs",
         "crates/hermes-agent/src/context_files.rs",
@@ -310,8 +311,7 @@
         "crates/hermes-agent/src/memory_plugins/hindsight.rs",
         "crates/hermes-agent/src/memory_plugins/holographic.rs",
         "crates/hermes-agent/src/memory_plugins/honcho.rs",
-        "crates/hermes-agent/src/memory_plugins/mem0.rs",
-        "crates/hermes-agent/src/memory_plugins/mod.rs"
+        "crates/hermes-agent/src/memory_plugins/mem0.rs"
       ],
       "id": "agent-loop-and-runtime",
       "mapped": true,
@@ -545,9 +545,9 @@
     "divergence_unowned": 0,
     "missing_rust_test_refs": 0,
     "queue_pending": 0,
-    "queue_total": 5497,
-    "rust_test_files": 306,
-    "rust_test_functions": 3425,
+    "queue_total": 5532,
+    "rust_test_files": 307,
+    "rust_test_functions": 3452,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,

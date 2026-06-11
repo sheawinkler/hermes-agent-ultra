@@ -1,6 +1,6 @@
 # Test Coverage Audit
 
-Generated: `2026-06-11T01:36:01.212066+00:00`
+Generated: `2026-06-11T07:59:41.324519+00:00`
 
 ## Gate
 
@@ -15,13 +15,13 @@ Generated: `2026-06-11T01:36:01.212066+00:00`
 | `tracked_behavior_rows` | 415 |
 | `covered_behavior_rows` | 415 |
 | `tracked_behavior_coverage_ratio` | 1.0 |
-| `rust_test_files` | 306 |
-| `rust_test_functions` | 3425 |
+| `rust_test_files` | 307 |
+| `rust_test_functions` | 3452 |
 | `coverage_manifest_entries` | 405 |
 | `coverage_manifest_entries_with_valid_rust_tests` | 405 |
 | `missing_rust_test_refs` | 0 |
 | `queue_pending` | 0 |
-| `queue_total` | 5497 |
+| `queue_total` | 5532 |
 | `test_intents_total` | 10 |
 | `test_intents_mapped` | 10 |
 
@@ -40,7 +40,7 @@ Generated: `2026-06-11T01:36:01.212066+00:00`
 | `gateway-platform-behavior` | `direct_rust_test` | 25 | 22 |
 | `tool-runtime-behavior` | `direct_rust_test` | 91 | 82 |
 | `cli-command-surface` | `direct_rust_test` | 40 | 25 |
-| `agent-loop-and-runtime` | `direct_rust_test` | 49 | 45 |
+| `agent-loop-and-runtime` | `direct_rust_test` | 50 | 46 |
 | `acp-protocol-and-transport` | `direct_rust_test` | 9 | 8 |
 | `skills-management-contract` | `direct_rust_test` | 10 | 9 |
 | `cron-and-scheduler-runtime` | `direct_rust_test` | 9 | 6 |

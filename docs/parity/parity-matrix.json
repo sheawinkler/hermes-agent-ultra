@@ -1,30 +1,30 @@
 {
-  "generated_at_utc": "2026-06-11T00:16:36.371426+00:00",
+  "generated_at_utc": "2026-06-11T07:58:56.105247+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "ddd78abaf6d10e7bb43008762607955a65ae3fe9",
+    "local_sha": "3f22ae8045d7b278e8a58c9c127124dd298ac39c",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "d1383a6b1450c6c139720b1b01f8b99cc130453f",
+    "upstream_sha": "c94e93a6480f3cfdabe0624aac46f06670ffae36",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5696,
-    "commits_ahead": 1085,
-    "upstream_patch_missing": 5495,
+    "commits_behind": 5737,
+    "commits_ahead": 1090,
+    "upstream_patch_missing": 5530,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 886,
-    "files_only_upstream": 2253,
-    "files_only_local": 719,
-    "files_shared_identical": 1583,
-    "files_shared_different": 1122,
-    "tree_files_changed": 4020,
-    "tree_insertions": 971339,
-    "tree_deletions": 537641
+    "local_patch_unique": 889,
+    "files_only_upstream": 2235,
+    "files_only_local": 727,
+    "files_shared_identical": 1635,
+    "files_shared_different": 1096,
+    "tree_files_changed": 3984,
+    "tree_insertions": 966991,
+    "tree_deletions": 548686
   },
   "top_upstream_only": [
     {
       "path": "apps/desktop",
-      "count": 475
+      "count": 476
     },
     {
       "path": "website/i18n",
@@ -32,7 +32,7 @@
     },
     {
       "path": "tests/hermes_cli",
-      "count": 135
+      "count": 136
     },
     {
       "path": "web/src",
@@ -40,7 +40,7 @@
     },
     {
       "path": "tests/agent",
-      "count": 76
+      "count": 80
     },
     {
       "path": "tests/gateway",
@@ -72,7 +72,7 @@
     },
     {
       "path": "tests/plugins",
-      "count": 33
+      "count": 34
     },
     {
       "path": "ui-tui/src",
@@ -88,10 +88,6 @@
     },
     {
       "path": ".github/workflows",
-      "count": 17
-    },
-    {
-      "path": "plugins/platforms",
       "count": 17
     },
     {
@@ -143,10 +139,6 @@
       "count": 7
     },
     {
-      "path": "plugins/dashboard_auth",
-      "count": 6
-    },
-    {
       "path": "plugins/security-guidance",
       "count": 6
     },
@@ -180,6 +172,14 @@
     },
     {
       "path": "optional-skills/software-development",
+      "count": 3
+    },
+    {
+      "path": "plugins/platforms",
+      "count": 3
+    },
+    {
+      "path": "tests/hermes_state",
       "count": 3
     }
   ],
@@ -253,19 +253,7 @@
       "count": 7
     },
     {
-      "path": "optional-skills/creative",
-      "count": 6
-    },
-    {
-      "path": "optional-skills/productivity",
-      "count": 6
-    },
-    {
-      "path": "skills/github",
-      "count": 6
-    },
-    {
-      "path": "skills/productivity",
+      "path": "plugins/web",
       "count": 6
     },
     {
@@ -274,10 +262,6 @@
     },
     {
       "path": "plugins/teams_pipeline",
-      "count": 5
-    },
-    {
-      "path": "plugins/web",
       "count": 5
     },
     {
@@ -325,15 +309,11 @@
       "count": 3
     },
     {
-      "path": "skills/research",
+      "path": "skills/productivity",
       "count": 3
     },
     {
-      "path": "optional-skills/blockchain",
-      "count": 2
-    },
-    {
-      "path": "optional-skills/devops",
+      "path": "optional-skills/creative",
       "count": 2
     },
     {
@@ -342,6 +322,26 @@
     },
     {
       "path": "optional-skills/mlops",
+      "count": 2
+    },
+    {
+      "path": "plugins/disk-cleanup",
+      "count": 2
+    },
+    {
+      "path": "skills/autonomous-ai-agents",
+      "count": 2
+    },
+    {
+      "path": "skills/devops",
+      "count": 2
+    },
+    {
+      "path": "skills/research",
+      "count": 2
+    },
+    {
+      "path": "tests/e2e",
       "count": 2
     }
   ],
@@ -352,7 +352,7 @@
     },
     {
       "path": "crates/hermes-agent",
-      "count": 53
+      "count": 54
     },
     {
       "path": "crates/hermes-gateway",
@@ -360,27 +360,27 @@
     },
     {
       "path": "crates/hermes-cli",
-      "count": 45
+      "count": 46
+    },
+    {
+      "path": "docs/parity",
+      "count": 44
     },
     {
       "path": "skills/creative",
       "count": 44
     },
     {
-      "path": "docs/parity",
-      "count": 42
-    },
-    {
       "path": "crates/hermes-intelligence",
       "count": 37
     },
     {
-      "path": "website/docs",
-      "count": 21
+      "path": "crates/hermes-parity-tests",
+      "count": 23
     },
     {
-      "path": "crates/hermes-parity-tests",
-      "count": 19
+      "path": "website/docs",
+      "count": 21
     },
     {
       "path": "crates/hermes-config",
@@ -510,7 +510,7 @@
   "top_missing_from_local": [
     {
       "path": "apps/desktop",
-      "count": 475
+      "count": 476
     },
     {
       "path": "website/i18n",
@@ -518,7 +518,7 @@
     },
     {
       "path": "tests/hermes_cli",
-      "count": 135
+      "count": 136
     },
     {
       "path": "web/src",
@@ -526,7 +526,7 @@
     },
     {
       "path": "tests/agent",
-      "count": 76
+      "count": 80
     },
     {
       "path": "tests/gateway",
@@ -558,7 +558,7 @@
     },
     {
       "path": "tests/plugins",
-      "count": 33
+      "count": 34
     },
     {
       "path": "ui-tui/src",
@@ -574,10 +574,6 @@
     },
     {
       "path": ".github/workflows",
-      "count": 17
-    },
-    {
-      "path": "plugins/platforms",
       "count": 17
     },
     {
@@ -629,10 +625,6 @@
       "count": 7
     },
     {
-      "path": "plugins/dashboard_auth",
-      "count": 6
-    },
-    {
       "path": "plugins/security-guidance",
       "count": 6
     },
@@ -667,6 +659,14 @@
     {
       "path": "optional-skills/software-development",
       "count": 3
+    },
+    {
+      "path": "plugins/platforms",
+      "count": 3
+    },
+    {
+      "path": "tests/hermes_state",
+      "count": 3
     }
   ],
   "top_unique_to_local": [
@@ -676,7 +676,7 @@
     },
     {
       "path": "crates/hermes-agent",
-      "count": 53
+      "count": 54
     },
     {
       "path": "crates/hermes-gateway",
@@ -684,27 +684,27 @@
     },
     {
       "path": "crates/hermes-cli",
-      "count": 45
+      "count": 46
+    },
+    {
+      "path": "docs/parity",
+      "count": 44
     },
     {
       "path": "skills/creative",
       "count": 44
     },
     {
-      "path": "docs/parity",
-      "count": 42
-    },
-    {
       "path": "crates/hermes-intelligence",
       "count": 37
     },
     {
-      "path": "website/docs",
-      "count": 21
+      "path": "crates/hermes-parity-tests",
+      "count": 23
     },
     {
-      "path": "crates/hermes-parity-tests",
-      "count": 19
+      "path": "website/docs",
+      "count": 21
     },
     {
       "path": "crates/hermes-config",
@@ -836,7 +836,7 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 486,
+      "upstream_only": 492,
       "shared_different": 719,
       "local_only": 34,
       "risk": "critical",
@@ -846,9 +846,9 @@
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 959,
+      "upstream_only": 961,
       "shared_different": 12,
-      "local_only": 209,
+      "local_only": 213,
       "risk": "high",
       "effort": "XL"
     },
@@ -856,9 +856,9 @@
       "workstream": "WS5",
       "issue": 9,
       "name": "UX parity",
-      "upstream_only": 531,
+      "upstream_only": 527,
       "shared_different": 267,
-      "local_only": 102,
+      "local_only": 104,
       "risk": "high",
       "effort": "XL"
     },
@@ -866,8 +866,8 @@
       "workstream": "WS3",
       "issue": 7,
       "name": "Tools and adapters parity",
-      "upstream_only": 138,
-      "shared_different": 70,
+      "upstream_only": 116,
+      "shared_different": 71,
       "local_only": 120,
       "risk": "high",
       "effort": "L"
@@ -877,10 +877,10 @@
       "issue": 8,
       "name": "Skills parity",
       "upstream_only": 72,
-      "shared_different": 54,
+      "shared_different": 27,
       "local_only": 94,
       "risk": "medium",
-      "effort": "L"
+      "effort": "M"
     },
     {
       "workstream": "WS2",
@@ -888,7 +888,7 @@
       "name": "Core runtime parity",
       "upstream_only": 67,
       "shared_different": 0,
-      "local_only": 155,
+      "local_only": 157,
       "risk": "critical",
       "effort": "M"
     },
@@ -904,9 +904,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 5495,
+    "upstream_patch_missing": 5530,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 886,
+    "local_patch_unique": 889,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
@@ -960,7 +960,7 @@
       "6b69de4772eac5f982c097553dc6bcfeb60350e6"
     ],
     "intentional_divergence_items": 8,
-    "intentional_divergence_covered_files": 1062
+    "intentional_divergence_covered_files": 1035
   },
   "intentional_divergence": [
     {
@@ -1005,11 +1005,9 @@
       "status": "approved",
       "workstream": "WS4",
       "summary": "Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring).",
-      "matched_files": 220,
+      "matched_files": 193,
       "matched_sample": [
         "optional-skills/autonomous-ai-agents/honcho/SKILL.md",
-        "optional-skills/blockchain/hyperliquid/SKILL.md",
-        "optional-skills/blockchain/hyperliquid/scripts/hyperliquid_client.py",
         "optional-skills/creative/DESCRIPTION.md",
         "optional-skills/creative/baoyu-article-illustrator/references/styles.md",
         "optional-skills/creative/baoyu-comic/PORT_NOTES.md",
@@ -1026,7 +1024,9 @@
         "optional-skills/creative/baoyu-comic/references/character-template.md",
         "optional-skills/creative/baoyu-comic/references/layouts/cinematic.md",
         "optional-skills/creative/baoyu-comic/references/layouts/dense.md",
-        "optional-skills/creative/baoyu-comic/references/layouts/four-panel.md"
+        "optional-skills/creative/baoyu-comic/references/layouts/four-panel.md",
+        "optional-skills/creative/baoyu-comic/references/layouts/mixed.md",
+        "optional-skills/creative/baoyu-comic/references/layouts/splash.md"
       ]
     },
     {

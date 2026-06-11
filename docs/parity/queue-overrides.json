@@ -3111,6 +3111,10 @@
     "f38f7a387013": {
       "disposition": "superseded",
       "notes": "Desktop stale runtime session recovery for session.interrupt is superseded by Rust TUI/ACP interrupt architecture: active runs are in-process and keyed directly by the active session, with no desktop runtime-id versus stored-id split."
+    },
+    "04b3f195380f": {
+      "disposition": "superseded",
+      "notes": "Upstream session archive propagation targets Python hermes_state.py archived rows plus Electron sidebar archive UI. Hermes Agent Ultra has no Rust session-archive column or setSessionArchived surface; the Rust session_search backend already projects compression roots to their continuation tip, and CLI session deletion operates on saved JSON snapshots rather than soft-archiving SQLite rows."
     }
   },
   "subject_patterns": [

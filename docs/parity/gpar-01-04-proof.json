@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-11T00:16:41.787507+00:00",
+  "generated_at_utc": "2026-06-11T07:59:51.940287+00:00",
   "scope": {
     "labels": {
       "20": "GPAR-01 tests+CI parity",
@@ -17,23 +17,23 @@
   "summary": {
     "by_disposition": {
       "mirrored": 63,
-      "ported": 224,
-      "superseded": 3397
+      "ported": 230,
+      "superseded": 3413
     },
     "pass": true,
-    "total_commits": 3684,
+    "total_commits": 3706,
     "total_pending": 0
   },
   "ticket_breakdown": {
     "20": {
       "by_disposition": {
         "mirrored": 14,
-        "ported": 94,
-        "superseded": 2230
+        "ported": 100,
+        "superseded": 2241
       },
       "label": "GPAR-01 tests+CI parity",
       "pending": 0,
-      "total": 2338
+      "total": 2355
     },
     "21": {
       "by_disposition": {
@@ -49,11 +49,11 @@
       "by_disposition": {
         "mirrored": 21,
         "ported": 30,
-        "superseded": 786
+        "superseded": 791
       },
       "label": "GPAR-03 UX parity",
       "pending": 0,
-      "total": 837
+      "total": 842
     },
     "23": {
       "by_disposition": {
