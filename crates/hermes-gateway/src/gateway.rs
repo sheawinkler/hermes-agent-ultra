@@ -10,7 +10,7 @@
 //! Also integrates `StreamManager` for progressive message editing.
 
 use chrono::Utc;
-use futures::future::{AbortHandle, Abortable};
+
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex as TokioMutex, mpsc};
 use tokio::time::MissedTickBehavior;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::delivery_layer::{DeliveryLayer, TurnOutboundTracker};
 use crate::extension_bus::ExtensionBus;
@@ -79,20 +79,20 @@ const WEIXIN_TYPING_REFRESH_SECS_FALLBACK: u64 = 5;
 const WHATSAPP_TYPING_REFRESH_SECS: u64 = 5;
 
 /// Cancels a platform typing keepalive started by [`Gateway::spawn_route_typing`].
-struct RouteTypingGuard {
+pub(crate) struct RouteTypingGuard {
     cancel: Option<Arc<AtomicBool>>,
     join: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl RouteTypingGuard {
-    fn none() -> Self {
+    pub(crate) fn none() -> Self {
         Self {
             cancel: None,
             join: None,
         }
     }
 
-    async fn finish(self) {
+    pub(crate) async fn finish(self) {
         if let Some(cancel) = self.cancel {
             cancel.store(true, Ordering::Release);
         }
@@ -289,17 +289,17 @@ struct CompressionOutcome {
 /// facade that delegates to each and exposes the full public API.
 pub struct Gateway {
     /// Platform adapter registry, handler callbacks, and access policies.
-    router: MessageRouter,
+    pub(crate) router: MessageRouter,
     /// Session management, per-session runtime state, concurrency locks.
-    session: SessionLayer,
+    pub(crate) session: SessionLayer,
     /// Stream manager, outbound file tracking, live messaging context.
-    delivery: DeliveryLayer,
+    pub(crate) delivery: DeliveryLayer,
     /// Optional extensions: hooks, voice/STT, inbound preparer, clarify.
-    extensions: ExtensionBus,
-    config: GatewayConfig,
+    pub(crate) extensions: ExtensionBus,
+    pub(crate) config: GatewayConfig,
 }
 
-fn inbound_text_log_fields(text: &str) -> (usize, String, String) {
+pub(crate) fn inbound_text_log_fields(text: &str) -> (usize, String, String) {
     let trimmed = text.trim();
     let chars = trimmed.chars().count();
     let preview: String = trimmed
@@ -327,7 +327,7 @@ fn outbound_text_log_tail(text: &str, max_chars: usize) -> String {
 }
 
 impl Gateway {
-    fn route_correlation_id(incoming: &IncomingMessage, session_key: &str) -> String {
+    pub(crate) fn route_correlation_id(incoming: &IncomingMessage, session_key: &str) -> String {
         if let Some(mid) = incoming
             .message_id
             .as_deref()
@@ -365,7 +365,12 @@ impl Gateway {
         *self.extensions.clarify_dispatcher.write().await = Some(dispatcher);
     }
 
-    fn begin_turn_outbound_tracking(&self, session_key: &str, platform: &str, chat_id: &str) {
+    pub(crate) fn begin_turn_outbound_tracking(
+        &self,
+        session_key: &str,
+        platform: &str,
+        chat_id: &str,
+    ) {
         let mut guard = self
             .delivery
             .turn_outbound
@@ -377,7 +382,7 @@ impl Gateway {
         );
     }
 
-    fn clear_turn_outbound_tracking(&self, session_key: &str) {
+    pub(crate) fn clear_turn_outbound_tracking(&self, session_key: &str) {
         let mut guard = self
             .delivery
             .turn_outbound
@@ -420,7 +425,10 @@ impl Gateway {
     }
 
     /// Hold the per-session lock for the full `route_message` pipeline (agent + session writes).
-    async fn acquire_session_serial(&self, session_key: &str) -> tokio::sync::OwnedMutexGuard<()> {
+    pub(crate) async fn acquire_session_serial(
+        &self,
+        session_key: &str,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
         let mutex = {
             let mut map = self.session.session_serial.write().await;
             map.entry(session_key.to_string())
@@ -529,7 +537,7 @@ impl Gateway {
         hermes_tools::approval::clear_session(session_key);
     }
 
-    async fn should_apply_reaction_lifecycle(&self, incoming: &IncomingMessage) -> bool {
+    pub(crate) async fn should_apply_reaction_lifecycle(&self, incoming: &IncomingMessage) -> bool {
         if incoming.text.trim_start().starts_with('/') {
             return false;
         }
@@ -668,7 +676,10 @@ impl Gateway {
             .collect();
     }
 
-    async fn platform_access_policy(&self, platform: &str) -> Option<PlatformAccessPolicy> {
+    pub(crate) async fn platform_access_policy(
+        &self,
+        platform: &str,
+    ) -> Option<PlatformAccessPolicy> {
         let key = platform.trim().to_ascii_lowercase();
         self.router
             .platform_access_policies
@@ -733,7 +744,7 @@ impl Gateway {
     ///
     /// Discord: single `trigger_typing`. Weixin / WhatsApp: START immediately, refresh
     /// every ~5s, then STOP when [`RouteTypingGuard::finish`] is called.
-    fn spawn_route_typing(
+    pub(crate) fn spawn_route_typing(
         platform: &str,
         adapter: Arc<dyn PlatformAdapter>,
         chat_id: String,
@@ -793,464 +804,7 @@ impl Gateway {
     /// Route an incoming message through the full pipeline:
     /// DM check → session lookup → agent loop → response.
     pub async fn route_message(&self, incoming: &IncomingMessage) -> Result<(), GatewayError> {
-        let route_start = Instant::now();
-        if let Some(ctx) = self.delivery.messaging_session.read().await.as_ref() {
-            ctx.set(&incoming.platform, &incoming.chat_id);
-        }
-        let access_policy = self.platform_access_policy(&incoming.platform).await;
-        let is_slash_command = incoming.text.trim_start().starts_with('/');
-        if let Some(policy) = access_policy.as_ref() {
-            if !incoming.is_dm {
-                match policy.group_mode {
-                    GroupAccessMode::Disabled => {
-                        debug!(
-                            platform = incoming.platform,
-                            user_id = incoming.user_id,
-                            "Group traffic denied by platform policy"
-                        );
-                        return Ok(());
-                    }
-                    GroupAccessMode::Allowlist => {
-                        if !policy.is_user_allowed(&incoming.user_id, &incoming.role_ids) {
-                            debug!(
-                                platform = incoming.platform,
-                                user_id = incoming.user_id,
-                                "Group message denied: user not in allowlist"
-                            );
-                            return Ok(());
-                        }
-                    }
-                    GroupAccessMode::Open => {}
-                }
-            }
-            if is_slash_command
-                && policy.slash_requires_allowlist
-                && policy.has_allowlist()
-                && !policy.is_user_allowed(&incoming.user_id, &incoming.role_ids)
-            {
-                debug!(
-                    platform = incoming.platform,
-                    user_id = incoming.user_id,
-                    "Slash command denied: user not in platform allowlist"
-                );
-                return Ok(());
-            }
-        }
-
-        // 1. Check DM authorization if this is a direct message
-        if incoming.is_dm {
-            let dm_mode =
-                access_policy
-                    .as_ref()
-                    .map(|p| p.dm_mode)
-                    .unwrap_or_else(|| {
-                        match incoming.platform.trim().to_ascii_lowercase().as_str() {
-                            "wecom" | "weixin" | "qqbot" => DmAccessMode::Open,
-                            _ => DmAccessMode::Pairing,
-                        }
-                    });
-
-            if dm_mode == DmAccessMode::Disabled {
-                debug!(
-                    user_id = incoming.user_id,
-                    platform = incoming.platform,
-                    "DM denied: platform dm_policy is disabled"
-                );
-                return Ok(());
-            }
-
-            if dm_mode == DmAccessMode::Allowlist {
-                let allowed = access_policy
-                    .as_ref()
-                    .is_some_and(|p| p.is_user_allowed(&incoming.user_id, &incoming.role_ids));
-                if !allowed {
-                    debug!(
-                        user_id = incoming.user_id,
-                        platform = incoming.platform,
-                        "DM denied: user not in platform allowlist"
-                    );
-                    return Ok(());
-                }
-            } else if dm_mode != DmAccessMode::Open {
-                let pair_approved =
-                    self.router.pairing_store.lock().ok().is_some_and(|store| {
-                        store.is_approved(&incoming.platform, &incoming.user_id)
-                    });
-                if pair_approved {
-                    debug!(
-                        user_id = incoming.user_id,
-                        platform = incoming.platform,
-                        "DM authorized by pairing store"
-                    );
-                } else {
-                    let dm_manager = self.router.dm_manager.read().await;
-                    let decision = dm_manager
-                        .handle_dm(&incoming.user_id, &incoming.platform)
-                        .await;
-
-                    match decision {
-                        DmDecision::Allow => {}
-                        DmDecision::Pair { message } => {
-                            let pair_msg = self
-                            .router.pairing_store
-                            .lock()
-                            .ok()
-                            .and_then(|store| {
-                                store
-                                    .generate_code(
-                                        &incoming.platform,
-                                        &incoming.user_id,
-                                        &incoming.user_id,
-                                    )
-                                    .ok()
-                                    .flatten()
-                            })
-                            .map(|code| {
-                                format!(
-                                    "Hi~ I don't recognize you yet!\n\nHere's your pairing code: `{code}`\n\nAsk the bot owner to run:\n`hermes pairing approve {} {code}`",
-                                    incoming.platform
-                                )
-                            })
-                            .or(message);
-                            if let Some(msg) = pair_msg {
-                                warn!(
-                                    user_id = %incoming.user_id,
-                                    platform = %incoming.platform,
-                                    dm_mode = ?dm_mode,
-                                    "Sending DM pairing approval message"
-                                );
-                                self.send_incoming_reply(incoming, &msg, None).await?;
-                            }
-                            return Ok(());
-                        }
-                        DmDecision::Deny => {
-                            debug!(
-                                user_id = incoming.user_id,
-                                platform = incoming.platform,
-                                "DM denied for unauthorized user"
-                            );
-                            return Ok(());
-                        }
-                    }
-                }
-            }
-        }
-
-        let is_dm = Some(incoming.is_dm);
-        let session_key = crate::telegram_topic::compose_telegram_session_key(incoming)
-            .unwrap_or_else(|| {
-                self.session.session_manager.compose_session_key_with_dm(
-                    &incoming.platform,
-                    &incoming.chat_id,
-                    &incoming.user_id,
-                    is_dm,
-                )
-            });
-
-        if let Some(reply) = crate::telegram_topic::try_handle_topic_command(incoming) {
-            self.send_incoming_reply(incoming, &reply, None).await?;
-            return Ok(());
-        }
-
-        if let Some(reply) = crate::telegram_topic::telegram_lobby_reply(incoming) {
-            self.send_incoming_reply(incoming, &reply, None).await?;
-            return Ok(());
-        }
-
-        let route_id = Self::route_correlation_id(incoming, &session_key);
-        // Fast-path stop/cancel so it can interrupt an in-flight run without waiting
-        // for the per-session serial lock.
-        let stop_text = incoming.text.trim();
-        let stop_like_text = matches!(
-            stop_text,
-            "停止当前任务" | "停止当前任务。" | "停止任务" | "取消当前任务" | "取消任务"
-        );
-        if is_slash_command || stop_like_text {
-            let command = if stop_like_text {
-                GatewayCommandResult::StopAgent("⏹ Agent stopped.".to_string())
-            } else {
-                handle_command(&incoming.text)
-            };
-            if matches!(command, GatewayCommandResult::StopAgent(_)) {
-                self.apply_command_result(incoming, &session_key, command)
-                    .await?;
-                return Ok(());
-            }
-        }
-        if !is_slash_command {
-            if let Some(dispatcher) = self.extensions.clarify_dispatcher.read().await.as_ref() {
-                if dispatcher
-                    .try_fulfill_for_session(
-                        &session_key,
-                        &crate::tool_backends::extract_clarify_choice_token(&incoming.text),
-                    )
-                    .await
-                {
-                    debug!(
-                        session_key = %session_key,
-                        platform = %incoming.platform,
-                        chat_id = %incoming.chat_id,
-                        text_chars = incoming.text.chars().count(),
-                        "gateway clarify fast-path: inbound reply fulfilled active clarify wait"
-                    );
-                    return Ok(());
-                }
-            }
-        }
-        let _session_serial = self.acquire_session_serial(&session_key).await;
-
-        // 2. Get or create session
-        let existing_session = self.session.session_manager.get_session(&session_key).await;
-        let session = self
-            .session
-            .session_manager
-            .get_or_create_session_with_dm(
-                &incoming.platform,
-                &incoming.chat_id,
-                &incoming.user_id,
-                is_dm,
-            )
-            .await;
-        crate::telegram_topic::maybe_bind_new_topic_lane(incoming, &session_key, &session.id);
-        if let Some(bound_id) = crate::telegram_topic::bound_session_id(incoming) {
-            self.session
-                .session_manager
-                .apply_persisted_session_id(&session_key, &bound_id)
-                .await;
-        }
-        let session = self
-            .session
-            .session_manager
-            .get_session(&session_key)
-            .await
-            .unwrap_or(session);
-        trace!(
-            platform = %incoming.platform,
-            session_key = %session_key,
-            session_started = existing_session.is_none(),
-            "gateway session resolved"
-        );
-        #[cfg(feature = "discord")]
-        if incoming.platform == "discord" {
-            if let Some(adapter) = self.extensions.discord_adapter.read().await.clone() {
-                let _ = adapter
-                    .backfill_session_if_empty(
-                        &self.session.session_manager,
-                        &session_key,
-                        &incoming.chat_id,
-                    )
-                    .await;
-            }
-        }
-        let session_started = existing_session.is_none();
-        let session_auto_reset = existing_session
-            .as_ref()
-            .map(|s| s.created_at != session.created_at)
-            .unwrap_or(false);
-        if session_started || session_auto_reset {
-            self.emit_hook_event(
-                "session:start",
-                serde_json::json!({
-                    "platform": incoming.platform,
-                    "chat_id": incoming.chat_id,
-                    "user_id": incoming.user_id,
-                    "session_id": session_key,
-                    "reason": if session_started { "new" } else { "auto_reset" }
-                }),
-            )
-            .await;
-        }
-
-        // Slash commands are executed directly by the gateway command runtime.
-        if is_slash_command {
-            if self.execute_slash_command(incoming, &session_key).await? {
-                return Ok(());
-            }
-        }
-
-        let typing_guard = if let Some(adapter) = self.get_adapter(&incoming.platform).await {
-            Self::spawn_route_typing(&incoming.platform, adapter, incoming.chat_id.clone())
-        } else {
-            RouteTypingGuard::none()
-        };
-
-        let reaction_adapter = if self.should_apply_reaction_lifecycle(incoming).await {
-            self.get_adapter(&incoming.platform).await
-        } else {
-            None
-        };
-        if let (Some(adapter), Some(message_id)) =
-            (&reaction_adapter, incoming.message_id.as_deref())
-        {
-            if let Err(err) = adapter
-                .add_reaction(&incoming.chat_id, message_id, "eyes")
-                .await
-            {
-                debug!(
-                    platform = incoming.platform,
-                    chat_id = incoming.chat_id,
-                    message_id = message_id,
-                    "Failed to add start reaction: {}",
-                    err
-                );
-            }
-        }
-
-        let user_message = self
-            .prepare_inbound_user_message(incoming, &session_key)
-            .await;
-        let input_chars = user_message
-            .content
-            .as_deref()
-            .unwrap_or("")
-            .chars()
-            .count();
-
-        // 3–4. Append inbound user message and take a shared snapshot for the agent loop.
-        let messages = self
-            .session
-            .session_manager
-            .append_and_snapshot(&session_key, user_message)
-            .await;
-        self.bump_input_usage(&session_key, input_chars).await;
-        let session_transcript_chars: usize = messages
-            .iter()
-            .map(|m| m.content.as_deref().map(|c| c.chars().count()).unwrap_or(0))
-            .sum();
-        if incoming.platform.eq_ignore_ascii_case("discord") {
-            info!(
-                platform = %incoming.platform,
-                session_key = %session_key,
-                chat_id = %incoming.chat_id,
-                user_id = %incoming.user_id,
-                is_dm = incoming.is_dm,
-                message_count = messages.len(),
-                session_transcript_chars = session_transcript_chars,
-                inbound_text_chars = input_chars,
-                has_media = !incoming.media_urls.is_empty(),
-                "Discord session context snapshot before agent"
-            );
-        }
-
-        let (text_chars, text_preview, text_fp) = inbound_text_log_fields(&incoming.text);
-        info!(
-            route_id = %route_id,
-            platform = %incoming.platform,
-            chat_id = %incoming.chat_id,
-            user_id = %incoming.user_id,
-            session_key = %session_key,
-            is_dm = incoming.is_dm,
-            has_media = !incoming.media_urls.is_empty(),
-            text_chars = text_chars,
-            text_preview = %text_preview,
-            text_fp = %text_fp,
-            message_count = messages.len(),
-            "gateway route start"
-        );
-
-        // 5. Process through agent loop (streaming or non-streaming)
-        let prep_ms = route_start.elapsed().as_millis() as u64;
-        let process_start = Instant::now();
-        let supports_streaming = self.config.streaming_enabled
-            // 微信 iLink API 不支持消息编辑，streaming 模式会导致只显示 "..."
-            && !incoming.platform.eq_ignore_ascii_case("weixin")
-            // WhatsApp (wa-rs) 对 "..." 占位 + edit 流式不可靠，走一次性回复
-            && !incoming.platform.eq_ignore_ascii_case("whatsapp");
-        if incoming.platform.eq_ignore_ascii_case("wecom") {
-            info!(
-                route_id = %route_id,
-                chat_id = %incoming.chat_id,
-                session_key = %session_key,
-                streaming_enabled = self.config.streaming_enabled,
-                supports_streaming,
-                message_id = ?incoming.message_id,
-                "wecom route: streaming vs one-shot decision"
-            );
-        }
-        self.begin_turn_outbound_tracking(&session_key, &incoming.platform, &incoming.chat_id);
-        let route_future = async {
-            if supports_streaming {
-                self.route_streaming(&incoming, messages, &session_key, &route_id)
-                    .await
-            } else {
-                self.route_non_streaming(&incoming, messages, &session_key, &route_id)
-                    .await
-            }
-        };
-        let (abort_handle, abort_reg) = AbortHandle::new_pair();
-        self.session
-            .active_routes
-            .write()
-            .await
-            .insert(session_key.clone(), abort_handle);
-        let routed = Abortable::new(route_future, abort_reg).await;
-        self.session
-            .active_routes
-            .write()
-            .await
-            .remove(&session_key);
-        self.clear_turn_outbound_tracking(&session_key);
-        typing_guard.finish().await;
-        let processing_result = match routed {
-            Ok(result) => result,
-            Err(_) => {
-                info!(
-                    route_id = %route_id,
-                    session_key = %session_key,
-                    "gateway route aborted by stop command"
-                );
-                Ok(())
-            }
-        };
-        let processing_ms = process_start.elapsed().as_millis() as u64;
-        info!(
-            route_id = %route_id,
-            platform = %incoming.platform,
-            chat_id = %incoming.chat_id,
-            session_key = %session_key,
-            prep_ms = prep_ms,
-            processing_ms = processing_ms,
-            elapsed_ms = route_start.elapsed().as_millis() as u64,
-            success = processing_result.is_ok(),
-            "gateway route finished"
-        );
-
-        if let (Some(adapter), Some(message_id)) =
-            (&reaction_adapter, incoming.message_id.as_deref())
-        {
-            if let Err(err) = adapter
-                .remove_reaction(&incoming.chat_id, message_id, "eyes")
-                .await
-            {
-                debug!(
-                    platform = incoming.platform,
-                    chat_id = incoming.chat_id,
-                    message_id = message_id,
-                    "Failed to remove start reaction: {}",
-                    err
-                );
-            }
-            let emoji = if processing_result.is_ok() {
-                "white_check_mark"
-            } else {
-                "x"
-            };
-            if let Err(err) = adapter
-                .add_reaction(&incoming.chat_id, message_id, emoji)
-                .await
-            {
-                debug!(
-                    platform = incoming.platform,
-                    chat_id = incoming.chat_id,
-                    message_id = message_id,
-                    "Failed to add completion reaction: {}",
-                    err
-                );
-            }
-        }
-
-        processing_result?;
-        Ok(())
+        crate::inbound_pipeline::route_inbound(self, incoming).await
     }
 
     fn quick_command_key(raw: &str) -> String {
@@ -1436,7 +990,7 @@ impl Gateway {
         ))
     }
 
-    async fn execute_slash_command(
+    pub(crate) async fn execute_slash_command(
         &self,
         incoming: &IncomingMessage,
         session_key: &str,
@@ -1477,7 +1031,7 @@ impl Gateway {
         Ok(handled)
     }
 
-    async fn apply_command_result(
+    pub(crate) async fn apply_command_result(
         &self,
         incoming: &IncomingMessage,
         session_key: &str,
@@ -2211,7 +1765,7 @@ impl Gateway {
     }
 
     /// Non-streaming message routing: invoke agent, send complete response.
-    async fn route_non_streaming(
+    pub(crate) async fn route_non_streaming(
         &self,
         incoming: &IncomingMessage,
         messages: Arc<Vec<Message>>,
@@ -2376,7 +1930,7 @@ impl Gateway {
     }
 
     /// Streaming message routing: progressively edit messages as tokens arrive.
-    async fn route_streaming(
+    pub(crate) async fn route_streaming(
         &self,
         incoming: &IncomingMessage,
         messages: Arc<Vec<Message>>,
@@ -3126,7 +2680,7 @@ impl Gateway {
         }
     }
 
-    async fn bump_input_usage(&self, session_key: &str, chars: usize) {
+    pub(crate) async fn bump_input_usage(&self, session_key: &str, chars: usize) {
         let mut usage = self.session.usage_stats.write().await;
         let stat = usage.entry(session_key.to_string()).or_default();
         stat.user_messages += 1;
@@ -3981,7 +3535,7 @@ impl Gateway {
     }
 
     /// Prepare the user turn via the injected agent preparer (vision routing, etc.).
-    async fn prepare_inbound_user_message(
+    pub(crate) async fn prepare_inbound_user_message(
         &self,
         incoming: &IncomingMessage,
         session_key: &str,
