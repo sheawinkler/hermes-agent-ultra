@@ -41,13 +41,14 @@ use crate::gateway_main::{
     run_sessions_db_auto_maintenance, spawn_gateway_route,
 };
 use crate::gateway_process::{
-    cleanup_stale_gateway_metadata, gateway_pid_is_alive, gateway_pid_path_for_cli,
-    gateway_pid_terminate, gateway_service_status, install_gateway_service,
-    migrate_legacy_gateway_services, read_gateway_pid, try_restart_gateway_service,
-    try_start_gateway_service, try_stop_gateway_service, uninstall_gateway_service,
+    cleanup_stale_gateway_metadata, gateway_pid_is_alive, gateway_pid_terminate,
+    gateway_service_status, install_gateway_service, migrate_legacy_gateway_services,
+    read_gateway_pid, try_restart_gateway_service, try_start_gateway_service,
+    try_stop_gateway_service, uninstall_gateway_service,
 };
 use crate::oneshot::start_gateway_keepawake_guard;
 use crate::state_paths::hermes_state_root;
+use hermes_cli::paths::CliStateRoot;
 
 /// Handle `hermes gateway [action]`.
 #[allow(clippy::too_many_arguments)]
@@ -84,7 +85,7 @@ pub(crate) async fn run_gateway(
                 println!("Gateway service restarted.");
                 return Ok(());
             }
-            let pid_path = gateway_pid_path_for_cli(&hermes_state_root(&cli));
+            let pid_path = CliStateRoot::from_state_root(&hermes_state_root(&cli)).gateway_pid();
             if let Some(pid) = read_gateway_pid(&pid_path) {
                 if gateway_pid_is_alive(pid) {
                     let _ = gateway_pid_terminate(pid);
@@ -150,7 +151,7 @@ pub(crate) async fn run_gateway(
             drop(_p2);
 
             let _p3 = _metrics.phase("pid_check");
-            let pid_path = gateway_pid_path_for_cli(&hermes_state_root(&cli));
+            let pid_path = CliStateRoot::from_state_root(&hermes_state_root(&cli)).gateway_pid();
             if let Some(pid) = read_gateway_pid(&pid_path) {
                 if gateway_pid_is_alive(pid) {
                     println!(
@@ -413,7 +414,7 @@ pub(crate) async fn run_gateway(
             if let Some(service_state) = gateway_service_status()? {
                 println!("{service_state}");
             }
-            let pid_path = gateway_pid_path_for_cli(&hermes_state_root(&cli));
+            let pid_path = CliStateRoot::from_state_root(&hermes_state_root(&cli)).gateway_pid();
             if !pid_path.exists() {
                 println!(
                     "Gateway status: not running (no PID file; start with `hermes gateway start`)"
@@ -447,7 +448,7 @@ pub(crate) async fn run_gateway(
                 println!("Gateway service stopped.");
                 return Ok(());
             }
-            let pid_path = gateway_pid_path_for_cli(&hermes_state_root(&cli));
+            let pid_path = CliStateRoot::from_state_root(&hermes_state_root(&cli)).gateway_pid();
             let Some(pid) = read_gateway_pid(&pid_path) else {
                 println!("Gateway stop: no PID file (nothing to stop).");
                 return Ok(());

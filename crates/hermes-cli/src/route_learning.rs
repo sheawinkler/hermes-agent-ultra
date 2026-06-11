@@ -10,6 +10,7 @@ use crate::doctor::write_doctor_snapshot;
 use crate::hermes_state_root;
 use crate::provenance::sign_artifact_bytes;
 use crate::provenance::write_provenance_sidecar;
+use hermes_cli::paths::CliStateRoot;
 use hermes_core::AgentError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -67,26 +68,6 @@ pub(crate) const ROUTE_AUTOTUNE_ENV_KEYS: &[&str] = &[
     "HERMES_SMART_ROUTING_LEARNING_TTL_SECS",
     "HERMES_SMART_ROUTING_LEARNING_HALF_LIFE_SECS",
 ];
-
-// ---------------------------------------------------------------------------
-// Path helpers (all take `state_root: &Path` instead of `cli: &Cli`)
-// ---------------------------------------------------------------------------
-
-pub(crate) fn route_learning_state_path_for_cli(state_root: &Path) -> PathBuf {
-    hermes_cli::paths::CliStateRoot::from_state_root(state_root).route_learning_state()
-}
-
-pub(crate) fn route_health_state_path_for_cli(state_root: &Path) -> PathBuf {
-    hermes_cli::paths::CliStateRoot::from_state_root(state_root).route_health_state()
-}
-
-pub(crate) fn route_autotune_state_path_for_cli(state_root: &Path) -> PathBuf {
-    hermes_cli::paths::CliStateRoot::from_state_root(state_root).route_autotune_state()
-}
-
-pub(crate) fn route_autotune_env_path_for_cli(state_root: &Path) -> PathBuf {
-    hermes_cli::paths::CliStateRoot::from_state_root(state_root).route_autotune_env()
-}
 
 // ---------------------------------------------------------------------------
 // Route-learning helpers
@@ -355,7 +336,8 @@ pub(crate) fn build_route_autotune_plan(
         generated_at: chrono::Utc::now().to_rfc3339(),
         learning_path: learning_path.display().to_string(),
         health_report_path: report_path.display().to_string(),
-        env_path: route_autotune_env_path_for_cli(state_root)
+        env_path: CliStateRoot::from_state_root(state_root)
+            .route_autotune_env()
             .display()
             .to_string(),
         summary: summary.clone(),
@@ -398,7 +380,7 @@ pub(crate) fn parse_simple_env_file(path: &Path) -> HashMap<String, String> {
 }
 
 pub(crate) fn apply_route_autotune_env_overrides(state_root: &Path) -> Vec<String> {
-    let path = route_autotune_env_path_for_cli(state_root);
+    let path = CliStateRoot::from_state_root(state_root).route_autotune_env();
     if !path.exists() {
         return Vec::new();
     }
@@ -435,7 +417,7 @@ pub(crate) async fn run_route_learning(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "show".to_string());
     let state_root = hermes_state_root(&cli);
-    let path = route_learning_state_path_for_cli(&state_root);
+    let path = CliStateRoot::from_state_root(&state_root).route_learning_state();
     match action.as_str() {
         "reset" | "clear" => {
             if path.exists() {
@@ -546,7 +528,7 @@ pub(crate) async fn run_route_health(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "show".to_string());
     let state_root = hermes_state_root(&cli);
-    let report_path = route_health_state_path_for_cli(&state_root);
+    let report_path = CliStateRoot::from_state_root(&state_root).route_health_state();
 
     match action.as_str() {
         "reset" | "clear" => {
@@ -580,7 +562,7 @@ pub(crate) async fn run_route_health(
     }
 
     let state_root = hermes_state_root(&cli);
-    let learning_path = route_learning_state_path_for_cli(&state_root);
+    let learning_path = CliStateRoot::from_state_root(&state_root).route_learning_state();
     let state = load_route_learning_state_for_cli(&learning_path)?;
     let now_ms = chrono::Utc::now().timestamp_millis();
     let mut entries: Vec<RouteHealthEntry> = state
@@ -726,9 +708,9 @@ pub(crate) async fn run_route_autotune(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "show".to_string());
     let state_root = hermes_state_root(&cli);
-    let route_report_path = route_health_state_path_for_cli(&state_root);
-    let autotune_state_path = route_autotune_state_path_for_cli(&state_root);
-    let autotune_env_path = route_autotune_env_path_for_cli(&state_root);
+    let route_report_path = CliStateRoot::from_state_root(&state_root).route_health_state();
+    let autotune_state_path = CliStateRoot::from_state_root(&state_root).route_autotune_state();
+    let autotune_env_path = CliStateRoot::from_state_root(&state_root).route_autotune_env();
 
     match action.as_str() {
         "reset" | "clear" => {
@@ -770,7 +752,7 @@ pub(crate) async fn run_route_autotune(
     }
 
     let state_root = hermes_state_root(&cli);
-    let learning_path = route_learning_state_path_for_cli(&state_root);
+    let learning_path = CliStateRoot::from_state_root(&state_root).route_learning_state();
     let state = load_route_learning_state_for_cli(&learning_path)?;
     let now_ms = chrono::Utc::now().timestamp_millis();
     let mut entries: Vec<RouteHealthEntry> = state
@@ -1070,7 +1052,7 @@ mod tests {
             "status",
         ]);
         let state_root = crate::hermes_state_root(&cli);
-        let env_path = route_autotune_env_path_for_cli(&state_root);
+        let env_path = CliStateRoot::from_state_root(&state_root).route_autotune_env();
         if let Some(parent) = env_path.parent() {
             std::fs::create_dir_all(parent).expect("mkdir");
         }

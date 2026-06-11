@@ -27,11 +27,6 @@ pub(crate) struct ProvenanceVerification {
     pub(crate) reason: Option<String>,
 }
 
-/// Path to the provenance signing key file under a state root.
-pub(crate) fn provenance_key_path_for_cli(state_root: &Path) -> PathBuf {
-    hermes_cli::paths::CliStateRoot::from_state_root(state_root).provenance_key()
-}
-
 /// Parse raw provenance key material (hex, base64, or raw bytes).
 pub(crate) fn parse_provenance_key_material(raw: &str) -> Result<Vec<u8>, AgentError> {
     let s = raw.trim();
@@ -68,7 +63,7 @@ pub(crate) fn load_or_create_provenance_key(
         return Ok(bytes);
     }
 
-    let path = provenance_key_path_for_cli(state_root);
+    let path = hermes_cli::paths::CliStateRoot::from_state_root(state_root).provenance_key();
     if path.exists() {
         let raw = std::fs::read_to_string(&path)
             .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
@@ -399,7 +394,8 @@ mod tests {
         let new_key = load_or_create_provenance_key(&state_root, false).expect("load rotated key");
         assert_ne!(old_key, new_key, "rotation must change active key bytes");
 
-        let auth_dir = provenance_key_path_for_cli(&state_root)
+        let auth_dir = hermes_cli::paths::CliStateRoot::from_state_root(&state_root)
+            .provenance_key()
             .parent()
             .expect("key path parent")
             .to_path_buf();

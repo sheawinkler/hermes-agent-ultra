@@ -22,7 +22,7 @@ use crate::auth_main::{
     auth_verify_source, gateway_platform_provider_key, hydrate_provider_env_from_vault_for_cli,
     mask_secret, normalize_auth_provider, oauth_refresh_config_for_provider, provider_env_var,
     qqbot_connect_url, qqbot_decrypt_secret, qqbot_extract_i64, resolve_auth_type_for_provider,
-    secret_provider_aliases, secret_vault_path_for_cli, wecom_qr_page_url,
+    secret_provider_aliases, wecom_qr_page_url,
 };
 use crate::cli_setup::run_model;
 use crate::doctor::{
@@ -36,12 +36,12 @@ use crate::gateway_main::{
     gateway_agent_signature, gateway_requirement_issues, matrix_home_room_for_platform,
     register_gateway_adapters, run_sessions_db_auto_maintenance,
 };
-use crate::gateway_process::gateway_pid_path_for_cli;
 use crate::profile_main::{run_profile, validate_profile_name, write_active_profile_name};
 use crate::{
     gateway_platform_menu_label, hermes_state_root, infer_oauth_provider_from_error_message,
     oneshot_auth_is_refreshable, oneshot_auto_verify_oauth_provider, query_is_local_slash_command,
 };
+use hermes_cli::paths::CliStateRoot;
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -612,7 +612,7 @@ async fn hydrate_provider_env_from_vault_overrides_oauth_provider_env() {
         config_dir.to_str().expect("cfg path utf8"),
     ]);
 
-    let vault_path = secret_vault_path_for_cli(&hermes_state_root(&cli));
+    let vault_path = CliStateRoot::from_state_root(&hermes_state_root(&cli)).secret_vault();
     let store = FileTokenStore::new(vault_path).await.expect("vault store");
     let manager = AuthManager::new(store);
     manager
@@ -1206,7 +1206,7 @@ fn doctor_self_heal_removes_stale_gateway_pid_file() {
         cfg.to_str().expect("utf8 path"),
         "doctor",
     ]);
-    let pid_path = gateway_pid_path_for_cli(&hermes_state_root(&cli));
+    let pid_path = CliStateRoot::from_state_root(&hermes_state_root(&cli)).gateway_pid();
     if let Some(parent) = pid_path.parent() {
         std::fs::create_dir_all(parent).expect("mkdir pid dir");
     }

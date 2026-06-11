@@ -10,11 +10,12 @@ use hermes_config::{
 use hermes_core::AgentError;
 use hermes_tools::{default_tool_policy_counters_path, load_tool_policy_counters};
 
+use hermes_cli::paths::CliStateRoot;
+
 use crate::doctor::{
-    best_effort_sweep_expired_pending_pastes, collect_debug_report, debug_reports_dir_for_cli,
-    prune_old_debug_reports, record_pending_paste,
+    best_effort_sweep_expired_pending_pastes, collect_debug_report, prune_old_debug_reports,
+    record_pending_paste,
 };
-use crate::route_learning::route_health_state_path_for_cli;
 use crate::state_paths::hermes_state_root;
 
 pub(crate) async fn run_status(cli: Cli) -> Result<(), AgentError> {
@@ -79,7 +80,8 @@ pub(crate) async fn run_status(cli: Cli) -> Result<(), AgentError> {
         policy_counters.would_block,
     );
 
-    let route_health_path = route_health_state_path_for_cli(&hermes_state_root(&cli));
+    let route_health_path =
+        CliStateRoot::from_state_root(&hermes_state_root(&cli)).route_health_state();
     if route_health_path.exists() {
         match std::fs::read_to_string(&route_health_path)
             .ok()
@@ -254,7 +256,9 @@ pub(crate) async fn run_debug(
     expire: u32,
     local: bool,
 ) -> Result<(), AgentError> {
-    let reports_dir = debug_reports_dir_for_cli(&cli);
+    let reports_dir =
+        CliStateRoot::from_config_dir(cli.config_dir.as_deref().map(std::path::Path::new))
+            .debug_reports_dir();
     std::fs::create_dir_all(&reports_dir)
         .map_err(|e| AgentError::Io(format!("mkdir {}: {}", reports_dir.display(), e)))?;
     let now_unix = chrono::Utc::now().timestamp();

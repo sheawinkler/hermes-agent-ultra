@@ -3,7 +3,6 @@
 //!
 //! Extracted from the monolithic `main.rs` binary entry point.
 
-use hermes_cli::paths::CliStateRoot;
 use hermes_core::AgentError;
 
 #[cfg(target_os = "macos")]
@@ -14,18 +13,8 @@ use std::path::{Path, PathBuf};
 // PID file helpers
 // ---------------------------------------------------------------------------
 
-/// Returns the path to the gateway PID file within a given state root.
-pub(crate) fn gateway_pid_path_for_cli(state_root: &Path) -> PathBuf {
-    CliStateRoot::from_path(state_root.to_path_buf()).gateway_pid()
-}
-
 pub(crate) fn gateway_lock_path_for_pid_path(pid_path: &Path) -> PathBuf {
     pid_path.with_file_name("gateway.lock")
-}
-
-/// Returns the gateway lock path for a state root.
-pub(crate) fn gateway_lock_path_for_cli(state_root: &Path) -> PathBuf {
-    CliStateRoot::from_path(state_root.to_path_buf()).gateway_lock()
 }
 
 pub(crate) fn read_gateway_pid(path: &Path) -> Option<u32> {

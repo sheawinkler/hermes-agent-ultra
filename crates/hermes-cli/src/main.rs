@@ -41,11 +41,12 @@ pub(crate) use oneshot::{
 pub(crate) use state_paths::{hermes_state_root, log_legacy_home_env_hint};
 pub(crate) use status_main::{run_dashboard, run_debug, run_logs, run_status};
 
-use auth_main::{lookup_secret_from_vault, secret_vault_path_for_cli};
+use auth_main::lookup_secret_from_vault;
 use hermes_auth::FileTokenStore;
 use hermes_cli::App;
 use hermes_cli::app::provider_api_key_from_env;
 use hermes_cli::cli::Cli;
+use hermes_cli::paths::CliStateRoot;
 use hermes_config::load_config;
 use hermes_core::AgentError;
 use hermes_telemetry::init_telemetry_from_env;
@@ -159,7 +160,7 @@ pub(crate) async fn resolve_llm_login_token(
     if let Some(k) = provider_api_key_from_env(provider) {
         return Ok(k);
     }
-    let vault_path = secret_vault_path_for_cli(&hermes_state_root(cli));
+    let vault_path = CliStateRoot::from_state_root(&hermes_state_root(cli)).secret_vault();
     if vault_path.exists() {
         let store = FileTokenStore::new(vault_path).await?;
         if let Some((_provider, token)) = lookup_secret_from_vault(&store, provider).await {

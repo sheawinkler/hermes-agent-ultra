@@ -5,20 +5,17 @@
 
 use std::path::{Path, PathBuf};
 
+use hermes_cli::paths::CliStateRoot;
 use hermes_core::AgentError;
 use sha2::{Digest, Sha256};
 
-use crate::gateway_process::{
-    gateway_pid_is_alive, gateway_pid_path_for_cli, gateway_service_status, read_gateway_pid,
-};
+use crate::gateway_process::{gateway_pid_is_alive, gateway_service_status, read_gateway_pid};
 use crate::provenance::{
-    load_or_create_provenance_key, provenance_key_path_for_cli,
-    provenance_sidecar_path_for_artifact, sign_artifact_bytes, verify_artifact_provenance,
-    write_provenance_sidecar,
+    load_or_create_provenance_key, provenance_sidecar_path_for_artifact, sign_artifact_bytes,
+    verify_artifact_provenance, write_provenance_sidecar,
 };
 use crate::route_learning::{
-    load_route_learning_state_for_cli, route_health_state_path_for_cli,
-    route_learning_half_life_secs, route_learning_state_path_for_cli, route_learning_ttl_secs,
+    load_route_learning_state_for_cli, route_learning_half_life_secs, route_learning_ttl_secs,
 };
 
 // ---------------------------------------------------------------------------
@@ -27,7 +24,8 @@ use crate::route_learning::{
 
 pub(crate) fn build_elite_doctor_diagnostics(cli: &crate::Cli) -> serde_json::Value {
     let state_root = crate::hermes_state_root(cli);
-    let provenance_path = provenance_key_path_for_cli(&state_root);
+    let paths = CliStateRoot::from_state_root(&state_root);
+    let provenance_path = paths.provenance_key();
     let provenance_exists = provenance_path.exists();
     let provenance_key_id = if provenance_exists {
         load_or_create_provenance_key(&state_root, false)
@@ -41,13 +39,13 @@ pub(crate) fn build_elite_doctor_diagnostics(cli: &crate::Cli) -> serde_json::Va
         None
     };
 
-    let route_path = route_learning_state_path_for_cli(&state_root);
+    let route_path = paths.route_learning_state();
     let route_state = load_route_learning_state_for_cli(&route_path).ok();
     let route_entries = route_state
         .as_ref()
         .map(|state| state.entries.len())
         .unwrap_or(0usize);
-    let route_health_path = route_health_state_path_for_cli(&state_root);
+    let route_health_path = paths.route_health_state();
     let route_health_summary = std::fs::read_to_string(&route_health_path)
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
@@ -417,7 +415,7 @@ pub(crate) async fn run_doctor(
         }));
 
         let state_root = crate::hermes_state_root(&cli);
-        let pid_path = gateway_pid_path_for_cli(&state_root);
+        let pid_path = CliStateRoot::from_state_root(&state_root).gateway_pid();
         let pid = read_gateway_pid(&pid_path);
         let pid_alive = pid.map(gateway_pid_is_alive).unwrap_or(false);
         println!(
@@ -615,7 +613,7 @@ pub(crate) fn run_doctor_self_heal(cli: &crate::Cli) -> Vec<serde_json::Value> {
         }
     }
 
-    let pid_path = gateway_pid_path_for_cli(&crate::hermes_state_root(cli));
+    let pid_path = CliStateRoot::from_state_root(&crate::hermes_state_root(cli)).gateway_pid();
     if pid_path.exists() {
         match read_gateway_pid(&pid_path) {
             Some(pid) if !gateway_pid_is_alive(pid) => match std::fs::remove_file(&pid_path) {
@@ -643,7 +641,7 @@ pub(crate) fn run_doctor_self_heal(cli: &crate::Cli) -> Vec<serde_json::Value> {
         }
     }
 
-    let vault_path = crate::secret_vault_path_for_cli(&crate::hermes_state_root(cli));
+    let vault_path = CliStateRoot::from_state_root(&crate::hermes_state_root(cli)).secret_vault();
     if vault_path.exists() {
         #[cfg(unix)]
         {
@@ -889,7 +887,8 @@ pub(crate) fn build_doctor_support_bundle_with_options(
     output_path: Option<&Path>,
     deterministic: bool,
 ) -> Result<PathBuf, AgentError> {
-    let reports_dir = debug_reports_dir_for_cli(cli);
+    let reports_dir =
+        CliStateRoot::from_config_dir(cli.config_dir.as_deref().map(Path::new)).debug_reports_dir();
     std::fs::create_dir_all(&reports_dir)
         .map_err(|e| AgentError::Io(format!("mkdir {}: {}", reports_dir.display(), e)))?;
     let bundle_path = output_path.map(PathBuf::from).unwrap_or_else(|| {
@@ -1004,12 +1003,6 @@ fn build_doctor_support_bundle(
 // Debug report
 // ---------------------------------------------------------------------------
 
-pub(crate) fn debug_reports_dir_for_cli(cli: &crate::Cli) -> PathBuf {
-    hermes_cli::paths::CliStateRoot::from_config_dir(cli.config_dir.as_deref().map(Path::new))
-        .debug_reports_dir()
-}
-
-#[allow(unused)]
 pub(crate) fn prune_old_debug_reports(path: &Path, expire_days: u32) -> Result<usize, AgentError> {
     if !path.exists() {
         return Ok(0);
@@ -1291,7 +1284,7 @@ mod tests {
             tmp.path().to_str().unwrap(),
         ]);
         let state_root = crate::hermes_state_root(&cli);
-        let pid_path = gateway_pid_path_for_cli(&state_root);
+        let pid_path = CliStateRoot::from_state_root(&state_root).gateway_pid();
         if let Some(parent) = pid_path.parent() {
             std::fs::create_dir_all(parent).expect("mkdir");
         }

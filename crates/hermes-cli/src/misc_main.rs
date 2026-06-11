@@ -7,9 +7,7 @@ use hermes_core::AgentError;
 use sha2::{Digest, Sha256};
 
 use crate::auth_main::{mask_secret, run_auth};
-use crate::provenance::{
-    provenance_key_path_for_cli, provenance_sidecar_path_for_artifact, verify_artifact_provenance,
-};
+use crate::provenance::{provenance_sidecar_path_for_artifact, verify_artifact_provenance};
 use crate::state_paths::hermes_state_root;
 
 pub(crate) async fn run_dump(
@@ -275,7 +273,8 @@ pub(crate) async fn run_verify_provenance(
 }
 
 pub(crate) async fn run_rotate_provenance_key(cli: Cli, json: bool) -> Result<(), AgentError> {
-    let path = provenance_key_path_for_cli(&hermes_state_root(&cli));
+    let path =
+        hermes_cli::paths::CliStateRoot::from_state_root(&hermes_state_root(&cli)).provenance_key();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;

@@ -31,6 +31,7 @@ use hermes_cli::auth::{
     save_openai_auth_state, save_provider_auth_state,
 };
 use hermes_cli::env_vars;
+use hermes_cli::paths::CliStateRoot;
 use hermes_cli::providers::{OAUTH_CAPABLE_PROVIDERS, known_providers};
 use hermes_config::{
     GatewayConfig, PlatformConfig, hermes_home, load_config, load_user_config_file,
@@ -303,10 +304,6 @@ pub(crate) fn parse_unix_millis_utc(value: Option<i64>) -> Option<DateTime<Utc>>
     value.and_then(DateTime::from_timestamp_millis)
 }
 
-pub(crate) fn secret_vault_path_for_cli(state_root: &Path) -> PathBuf {
-    hermes_cli::paths::CliStateRoot::from_state_root(state_root).secret_vault()
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AuthPoolEntry {
     pub(crate) id: String,
@@ -326,10 +323,6 @@ pub(crate) struct AuthPoolEntry {
 pub(crate) struct AuthPoolStore {
     #[serde(default)]
     pub(crate) providers: BTreeMap<String, Vec<AuthPoolEntry>>,
-}
-
-pub(crate) fn auth_pool_path_for_cli(state_root: &Path) -> PathBuf {
-    hermes_cli::paths::CliStateRoot::from_state_root(state_root).auth_pool()
 }
 
 pub(crate) fn load_auth_pool_store(path: &Path) -> Result<AuthPoolStore, AgentError> {
@@ -378,7 +371,7 @@ pub(crate) async fn lookup_secret_from_vault(
 }
 
 pub(crate) async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentError> {
-    let path = secret_vault_path_for_cli(&hermes_state_root(cli));
+    let path = CliStateRoot::from_state_root(&hermes_state_root(cli)).secret_vault();
     if !path.exists() {
         return Ok(());
     }
@@ -2160,10 +2153,10 @@ pub(crate) async fn run_auth(
 ) -> Result<(), AgentError> {
     let provider = resolve_auth_provider(provider);
     let state_root = hermes_state_root(&cli);
-    let auth_store_path = secret_vault_path_for_cli(&state_root);
+    let auth_store_path = CliStateRoot::from_state_root(&state_root).secret_vault();
     let token_store = FileTokenStore::new(auth_store_path).await?;
     let manager = AuthManager::new(token_store.clone());
-    let pool_path = auth_pool_path_for_cli(&state_root);
+    let pool_path = CliStateRoot::from_state_root(&state_root).auth_pool();
     let mut pool_store = load_auth_pool_store(&pool_path)?;
     match action.as_deref().unwrap_or("status") {
         "add" => {
@@ -3335,7 +3328,7 @@ pub(crate) async fn run_secrets(
     value: Option<String>,
     show: bool,
 ) -> Result<(), AgentError> {
-    let path = secret_vault_path_for_cli(&hermes_state_root(&cli));
+    let path = CliStateRoot::from_state_root(&hermes_state_root(&cli)).secret_vault();
     let store = FileTokenStore::new(&path).await?;
     let manager = AuthManager::new(store.clone());
 
