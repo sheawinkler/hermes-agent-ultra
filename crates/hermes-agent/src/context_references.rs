@@ -293,7 +293,7 @@ async fn expand_file_reference(
             return (
                 Some(format!("{}: failed to read file ({e})", reference.raw)),
                 None,
-            )
+            );
         }
     };
     let selected = if let Some(start) = reference.line_start {
@@ -357,7 +357,7 @@ async fn expand_git_reference(
             return (
                 Some(format!("{}: git command failed ({e})", reference.raw)),
                 None,
-            )
+            );
         }
     };
     if !output.status.success() {
@@ -392,7 +392,7 @@ async fn expand_url_reference(reference: &ContextReference) -> (Option<String>, 
             return (
                 Some(format!("{}: failed to fetch URL ({e})", reference.raw)),
                 None,
-            )
+            );
         }
     };
     let status = response.status();
@@ -411,7 +411,7 @@ async fn expand_url_reference(reference: &ContextReference) -> (Option<String>, 
             return (
                 Some(format!("{}: failed to read URL body ({e})", reference.raw)),
                 None,
-            )
+            );
         }
     };
 
@@ -823,10 +823,12 @@ mod tests {
         assert!(result.expanded);
         assert!(!result.message.contains("```outside"));
         assert!(!result.message.contains("\noutside\n```"));
-        assert!(result
-            .warnings
-            .iter()
-            .any(|w| w.contains("outside the allowed workspace")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("outside the allowed workspace"))
+        );
     }
 
     #[tokio::test]
@@ -860,10 +862,12 @@ mod tests {
         assert!(result.expanded);
         assert!(!result.message.contains("API_KEY=secret"));
         assert!(!result.message.contains("PRIVATE-KEY"));
-        assert!(result
-            .warnings
-            .iter()
-            .any(|w| w.contains("sensitive credential")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("sensitive credential"))
+        );
     }
 
     #[tokio::test]
@@ -889,14 +893,18 @@ mod tests {
 
     #[test]
     fn parse_windows_absolute_path_line_range() {
-        let refs = parse_context_references(
-            r"@file:C:\Users\15059\hermes-agent-ultra\crates\hermes-core\src\types.rs:5-10",
-        );
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let root = manifest
+            .parent()
+            .expect("workspace")
+            .parent()
+            .expect("repo root")
+            .join("crates\\hermes-core\\src\\types.rs");
+        let path_str = root.to_string_lossy();
+        let msg = format!("@file:{}:5-10", path_str);
+        let refs = parse_context_references(&msg);
         assert_eq!(refs.len(), 1);
-        assert_eq!(
-            refs[0].target,
-            r"C:\Users\15059\hermes-agent-ultra\crates\hermes-core\src\types.rs"
-        );
+        assert_eq!(refs[0].target, path_str.as_ref());
         assert_eq!(refs[0].line_start, Some(5));
         assert_eq!(refs[0].line_end, Some(10));
     }
@@ -914,8 +922,7 @@ mod tests {
             "@hermes-go @file:{}\\crates\\hermes-core\\src\\types.rs:5-10 写了什么",
             root.display()
         );
-        let result =
-            preprocess_context_references_async(&msg, &root, 128_000, None).await;
+        let result = preprocess_context_references_async(&msg, &root, 128_000, None).await;
         assert!(result.expanded, "expected @file expansion");
         assert!(!result.blocked);
         assert!(result.message.contains("MessageRole"));
