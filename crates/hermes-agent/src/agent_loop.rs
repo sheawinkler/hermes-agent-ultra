@@ -906,6 +906,12 @@ pub struct AgentLoop {
     pub(crate) disable_streaming: Arc<AtomicBool>,
     /// Per-turn vision capability (Python `_vision_supported`; reset each `prepare_turn`).
     pub(crate) vision_supported: Arc<std::sync::atomic::AtomicBool>,
+    /// Plan-then-execute phase (read-only planning → approval → write execution).
+    plan_phase: Arc<Mutex<hermes_tools::PlanPhase>>,
+    /// Pending structured plan awaiting user approval.
+    pending_plan: Arc<Mutex<Option<String>>>,
+    /// Live `hermes_tools` registry to sync plan phase into dispatch gates.
+    synced_tools_registry: Option<Arc<hermes_tools::ToolRegistry>>,
 }
 
 /// Async tool execution hook (gateway: `hermes_tools::ToolRegistry::dispatch_async`).
@@ -1087,14 +1093,14 @@ impl AgentLoop {
             ctx,
             persist_user_idx,
             prefill_range,
-            LoopExit {
-                turn_exit_reason: "interrupted_by_user",
+            LoopExit::base(
+                "interrupted_by_user",
                 api_calls,
-                failed: false,
-                partial: false,
-                finished_naturally: false,
-                interrupted: true,
-            },
+                false,
+                false,
+                false,
+                true,
+            ),
             total_turns,
             tool_errors,
             accumulated_usage,
@@ -1209,6 +1215,8 @@ impl AgentLoop {
             provider: None,
             base_url: None,
             session_id: None,
+            plan_pending: exit.plan_pending,
+            plan_phase: exit.plan_phase,
         })
     }
 
@@ -1379,6 +1387,49 @@ impl AgentLoop {
             ),
             disable_streaming: Arc::new(AtomicBool::new(false)),
             vision_supported: Arc::new(AtomicBool::new(true)),
+            plan_phase: Arc::new(Mutex::new(hermes_tools::PlanPhase::Off)),
+            pending_plan: Arc::new(Mutex::new(None)),
+            synced_tools_registry: None,
+        }
+    }
+
+    /// Wire the live tools registry so plan phase gates apply to `dispatch_async`.
+    pub fn with_synced_tools_registry(
+        mut self,
+        registry: Arc<hermes_tools::ToolRegistry>,
+    ) -> Self {
+        registry.set_plan_phase(self.plan_phase());
+        self.synced_tools_registry = Some(registry);
+        self
+    }
+
+    /// Current plan mode phase.
+    pub fn plan_phase(&self) -> hermes_tools::PlanPhase {
+        self.plan_phase
+            .lock()
+            .map(|g| *g)
+            .unwrap_or(hermes_tools::PlanPhase::Off)
+    }
+
+    /// Update plan mode phase and propagate to the synced tools registry.
+    pub fn set_plan_phase(&self, phase: hermes_tools::PlanPhase) {
+        if let Ok(mut guard) = self.plan_phase.lock() {
+            *guard = phase;
+        }
+        if let Some(registry) = self.synced_tools_registry.as_ref() {
+            registry.set_plan_phase(phase);
+        }
+    }
+
+    /// Pending plan text awaiting approval.
+    pub fn pending_plan(&self) -> Option<String> {
+        self.pending_plan.lock().ok().and_then(|g| g.clone())
+    }
+
+    /// Store pending plan text.
+    pub fn set_pending_plan(&self, plan: Option<String>) {
+        if let Ok(mut guard) = self.pending_plan.lock() {
+            *guard = plan;
         }
     }
 
@@ -1604,6 +1655,9 @@ impl AgentLoop {
             ),
             disable_streaming: Arc::new(AtomicBool::new(false)),
             vision_supported: Arc::new(AtomicBool::new(true)),
+            plan_phase: Arc::new(Mutex::new(hermes_tools::PlanPhase::Off)),
+            pending_plan: Arc::new(Mutex::new(None)),
+            synced_tools_registry: None,
         }
     }
 

@@ -18,6 +18,7 @@ pub mod code_execution_stubs;
 pub mod dispatch;
 pub mod kanban;
 pub mod kanban_failure;
+pub mod plan_mode;
 pub mod task_cleanup;
 pub mod media_extract;
 pub mod register_builtins;
@@ -51,6 +52,7 @@ pub use toolset::{Toolset, ToolsetError, ToolsetManager};
 // Re-export dispatch
 pub use checkpoint_manager::{CheckpointManager, checkpoint_shadow_dir_id};
 pub use dispatch::{DispatchedResult, dispatch_single, dispatch_tools};
+pub use plan_mode::{PlanPhase, ToolRwClass, classify_tool, plan_allows_tool, plan_block_payload};
 pub use kanban::{KANBAN_TASK_ENV, kanban_block_reason, kanban_task_from_env};
 pub use kanban_failure::{
     record_iteration_budget_exhausted, record_task_failure, KanbanFailureOptions,

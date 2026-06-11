@@ -393,6 +393,12 @@ pub struct AgentResult {
     pub base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Structured plan text when loop pauses for user approval (`plan_awaiting_approval`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_pending: Option<String>,
+    /// Plan mode phase snapshot at loop exit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_phase: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

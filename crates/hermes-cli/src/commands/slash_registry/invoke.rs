@@ -96,6 +96,9 @@ pub async fn invoke_handler(
         SlashHandlerId::Agents => super::super::infra::handle_agents_command(host, args),
         SlashHandlerId::Kanban => super::super::kanban::handle_kanban_command(host, args),
         SlashHandlerId::Plan => super::super::plan::handle_plan_command(host, args),
+        SlashHandlerId::PlanMode => {
+            super::super::misc::handle_plan_mode_command(host, args).await
+        }
         SlashHandlerId::Lsp => super::super::infra::handle_lsp_command(host, args),
         SlashHandlerId::Graph => super::super::infra::handle_graph_command(host, args).await,
         SlashHandlerId::Qos => super::super::ops::handle_qos_command(host, args).await,

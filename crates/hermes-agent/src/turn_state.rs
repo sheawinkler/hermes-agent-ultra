@@ -373,14 +373,14 @@ async fn turn_guard(agent: &AgentLoop, tc: &mut TurnContext) -> TurnState {
                 &tc.ctx,
                 tc.persist_user_idx,
                 tc.prefill_range.clone(),
-                LoopExit {
-                    turn_exit_reason: "max_iterations_reached",
-                    api_calls: tc.api_call_count,
-                    failed: false,
-                    partial: false,
-                    finished_naturally: false,
-                    interrupted: false,
-                },
+                LoopExit::base(
+                    "max_iterations_reached",
+                    tc.api_call_count,
+                    false,
+                    false,
+                    false,
+                    false,
+                ),
                 tc.total_turns,
                 std::mem::take(&mut tc.tool_errors),
                 tc.accumulated_usage.take(),
@@ -432,6 +432,13 @@ async fn turn_prefetch(agent: &AgentLoop, tc: &mut TurnContext) -> TurnState {
         && (tc.total_turns - 1) % agent.config().checkpoint_interval_turns == 0
     {
         tc.last_checkpoint_messages = Some(tc.ctx.get_messages().to_vec());
+    }
+
+    if let Some(hint) = crate::prompt_builder::plan_mode_turn_hint(
+        agent.plan_phase(),
+        agent.pending_plan().as_deref(),
+    ) {
+        tc.ctx.add_message(Message::system(hint));
     }
 
     // Memory sync at flush interval
@@ -504,14 +511,14 @@ async fn turn_route(agent: &AgentLoop, tc: &mut TurnContext) -> TurnState {
             &tc.ctx,
             tc.persist_user_idx,
             tc.prefill_range.clone(),
-            LoopExit {
-                turn_exit_reason: "ollama_runtime_context_too_small",
-                api_calls: tc.api_call_count,
-                failed: true,
-                partial: false,
-                finished_naturally: false,
-                interrupted: false,
-            },
+            LoopExit::base(
+                "ollama_runtime_context_too_small",
+                tc.api_call_count,
+                true,
+                false,
+                false,
+                false,
+            ),
             tc.total_turns,
             std::mem::take(&mut tc.tool_errors),
             tc.accumulated_usage.take(),
@@ -909,14 +916,14 @@ async fn turn_process_output(agent: &AgentLoop, tc: &mut TurnContext) -> TurnSta
                 &tc.ctx,
                 tc.persist_user_idx,
                 tc.prefill_range.clone(),
-                LoopExit {
-                    turn_exit_reason: "max_iterations_reached",
-                    api_calls: tc.api_call_count,
-                    failed: false,
-                    partial: false,
-                    finished_naturally: false,
-                    interrupted: false,
-                },
+                LoopExit::base(
+                    "max_iterations_reached",
+                    tc.api_call_count,
+                    false,
+                    false,
+                    false,
+                    false,
+                ),
                 tc.total_turns,
                 std::mem::take(&mut tc.tool_errors),
                 tc.accumulated_usage.take(),
@@ -1216,6 +1223,46 @@ async fn turn_process_output(agent: &AgentLoop, tc: &mut TurnContext) -> TurnSta
             }
         }
 
+        if agent.plan_phase() == hermes_tools::PlanPhase::Planning {
+            if AgentLoop::assistant_visible_text_after_think_blocks(&assistant_msg) {
+                let plan_text = assistant_msg.content.clone().unwrap_or_default();
+                agent.set_pending_plan(Some(plan_text.clone()));
+                agent.set_plan_phase(hermes_tools::PlanPhase::AwaitingApproval);
+                hooks::emit_status(
+                    agent,
+                    "lifecycle",
+                    "Plan submitted; awaiting user approval (/plan-mode approve).",
+                );
+                return TurnState::Done(Ok(agent.seal_loop_result(
+                    &tc.ctx,
+                    tc.persist_user_idx,
+                    tc.prefill_range.clone(),
+                    LoopExit {
+                        turn_exit_reason: "plan_awaiting_approval",
+                        api_calls: tc.api_call_count,
+                        failed: false,
+                        partial: false,
+                        finished_naturally: false,
+                        interrupted: false,
+                        plan_pending: Some(plan_text),
+                        plan_phase: Some(
+                            hermes_tools::PlanPhase::AwaitingApproval.as_str().to_string(),
+                        ),
+                    },
+                    tc.total_turns,
+                    std::mem::take(&mut tc.tool_errors),
+                    tc.accumulated_usage.take(),
+                    tc.session_cost_usd,
+                    tc.session_started_hooks_fired,
+                )));
+            }
+        }
+
+        if agent.plan_phase() == hermes_tools::PlanPhase::Executing {
+            agent.set_plan_phase(hermes_tools::PlanPhase::Off);
+            agent.set_pending_plan(None);
+        }
+
         tracing::debug!("No tool calls in response, finishing naturally");
         if tc.file_mutation.has_failures() {
             let footer = tc.file_mutation.format_advisory_footer();
@@ -1288,14 +1335,14 @@ async fn turn_process_output(agent: &AgentLoop, tc: &mut TurnContext) -> TurnSta
             &tc.ctx,
             tc.persist_user_idx,
             tc.prefill_range.clone(),
-            LoopExit {
-                turn_exit_reason: "text_response",
-                api_calls: tc.api_call_count,
-                failed: false,
-                partial: false,
-                finished_naturally: true,
-                interrupted: false,
-            },
+            LoopExit::base(
+                "text_response",
+                tc.api_call_count,
+                false,
+                false,
+                true,
+                false,
+            ),
             tc.total_turns,
             std::mem::take(&mut tc.tool_errors),
             tc.accumulated_usage.take(),
@@ -1458,14 +1505,14 @@ async fn turn_execute_tools(agent: &AgentLoop, tc: &mut TurnContext) -> TurnStat
                 &tc.ctx,
                 tc.persist_user_idx,
                 tc.prefill_range.clone(),
-                LoopExit {
-                    turn_exit_reason: "invalid_tool_calls",
-                    api_calls: tc.api_call_count,
-                    failed: false,
-                    partial: true,
-                    finished_naturally: false,
-                    interrupted: false,
-                },
+                LoopExit::base(
+                    "invalid_tool_calls",
+                    tc.api_call_count,
+                    false,
+                    true,
+                    false,
+                    false,
+                ),
                 tc.total_turns,
                 std::mem::take(&mut tc.tool_errors),
                 tc.accumulated_usage.take(),
@@ -1659,14 +1706,14 @@ async fn turn_execute_tools(agent: &AgentLoop, tc: &mut TurnContext) -> TurnStat
                     &tc.ctx,
                     tc.persist_user_idx,
                     tc.prefill_range.clone(),
-                    LoopExit {
-                        turn_exit_reason: "guardrail_halt",
-                        api_calls: tc.api_call_count,
-                        failed: false,
-                        partial: false,
-                        finished_naturally: true,
-                        interrupted: false,
-                    },
+                    LoopExit::base(
+                        "guardrail_halt",
+                        tc.api_call_count,
+                        false,
+                        false,
+                        true,
+                        false,
+                    ),
                     tc.total_turns,
                     std::mem::take(&mut tc.tool_errors),
                     tc.accumulated_usage.take(),
@@ -1993,14 +2040,14 @@ async fn turn_post_tool(agent: &AgentLoop, tc: &mut TurnContext) -> TurnState {
                 &tc.ctx,
                 tc.persist_user_idx,
                 tc.prefill_range.clone(),
-                LoopExit {
-                    turn_exit_reason: "tool_loop_guard",
-                    api_calls: tc.api_call_count,
-                    failed: false,
-                    partial: false,
-                    finished_naturally: false,
-                    interrupted: false,
-                },
+                LoopExit::base(
+                    "tool_loop_guard",
+                    tc.api_call_count,
+                    false,
+                    false,
+                    false,
+                    false,
+                ),
                 tc.total_turns,
                 std::mem::take(&mut tc.tool_errors),
                 tc.accumulated_usage.take(),

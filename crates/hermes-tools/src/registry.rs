@@ -14,6 +14,7 @@ use hermes_core::{ToolHandler, ToolSchema};
 use serde_json::Value;
 use tracing::warn;
 
+use crate::plan_mode::{plan_allows_tool, plan_block_payload, PlanPhase};
 use crate::rtk_filter::{RawModeState, RtkFilterEngine};
 use crate::tool_policy::{
     ToolPolicyCounters, ToolPolicyDecision, ToolPolicyEngine, annotate_policy_audit,
@@ -72,6 +73,8 @@ pub struct ToolRegistryInner {
     pub rtk_raw_mode: bool,
     /// One-shot raw pass-through for the next tool call only.
     pub rtk_raw_once: bool,
+    /// Plan-then-execute phase gate (read-only during Planning).
+    pub plan_phase: PlanPhase,
 }
 
 /// Thread-safe wrapper around `ToolRegistryInner`.
@@ -93,6 +96,7 @@ impl ToolRegistry {
                 rtk_filter: RtkFilterEngine::from_env(),
                 rtk_raw_mode: false,
                 rtk_raw_once: false,
+                plan_phase: PlanPhase::Off,
             })),
         }
     }
@@ -109,8 +113,21 @@ impl ToolRegistry {
                 rtk_filter: RtkFilterEngine::from_env(),
                 rtk_raw_mode: false,
                 rtk_raw_once: false,
+                plan_phase: PlanPhase::Off,
             })),
         }
+    }
+
+    /// Set plan-then-execute phase for tool dispatch gating.
+    pub fn set_plan_phase(&self, phase: PlanPhase) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.plan_phase = phase;
+    }
+
+    /// Current plan mode phase.
+    pub fn plan_phase(&self) -> PlanPhase {
+        let inner = self.inner.lock().unwrap();
+        inner.plan_phase
     }
 
     /// Override active tool policy engine (used by tests/runtime tuning).
@@ -247,6 +264,7 @@ impl ToolRegistry {
             raw_bypassed,
             rewrite_applied,
             rtk_filter,
+            plan_phase,
         ) = {
             let mut inner = self.inner.lock().unwrap();
             let decision = inner.policy.evaluate(name, &params);
@@ -270,11 +288,15 @@ impl ToolRegistry {
                 raw_bypassed,
                 rewrite_applied,
                 inner.rtk_filter.clone(),
+                inner.plan_phase,
             )
         };
         self.record_policy_decision(&policy_decision);
         if !policy_decision.allow {
             return Self::tool_policy_error(name, &policy_decision);
+        }
+        if !plan_allows_tool(plan_phase, name, &effective_params) {
+            return plan_block_payload(name);
         }
         maybe_log_audit(name, &policy_decision);
 
@@ -327,6 +349,7 @@ impl ToolRegistry {
             rewrite_applied,
             rtk_filter,
             required_fields,
+            plan_phase,
         ) = {
             let mut inner = self.inner.lock().unwrap();
             let raw_bypassed = inner.rtk_raw_mode || inner.rtk_raw_once;
@@ -349,6 +372,7 @@ impl ToolRegistry {
                         rewrite_applied,
                         inner.rtk_filter.clone(),
                         required,
+                        inner.plan_phase,
                     )
                 }
                 None => return Self::tool_error(&format!("Tool not found: {}", name)),
@@ -357,6 +381,9 @@ impl ToolRegistry {
         self.record_policy_decision(&policy_decision);
         if !policy_decision.allow {
             return Self::tool_policy_error(name, &policy_decision);
+        }
+        if !plan_allows_tool(plan_phase, name, &effective_params) {
+            return plan_block_payload(name);
         }
         maybe_log_audit(name, &policy_decision);
 
@@ -894,6 +921,60 @@ mod tests {
         let defs = registry.get_definitions();
         assert_eq!(defs.len(), 1);
         assert!(defs[0].parameters.properties.is_some());
+    }
+
+    #[test]
+    fn test_dispatch_async_read_allowed_in_plan_mode() {
+        let registry = ToolRegistry::new();
+        let handler = Arc::new(EchoHandler);
+        let schema = handler.schema();
+        registry.register(
+            "read_file",
+            "test",
+            schema,
+            handler,
+            Arc::new(|| true),
+            vec![],
+            false,
+            "Read file",
+            "📄",
+            None,
+        );
+        registry.set_plan_phase(PlanPhase::Planning);
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let result = rt.block_on(async {
+            registry
+                .dispatch_async("read_file", json!({"path": "a.rs"}))
+                .await
+        });
+        let parsed: Value = serde_json::from_str(&result).expect("json output");
+        assert!(!parsed.get("plan").is_some(), "read should not plan_block: {result}");
+        assert!(result.contains("a.rs") || result.contains("path"));
+    }
+
+    #[test]
+    fn test_dispatch_async_blocked_by_plan_mode() {
+        let registry = ToolRegistry::new();
+        let handler = Arc::new(EchoHandler);
+        let schema = handler.schema();
+        registry.register(
+            "echo",
+            "test",
+            schema,
+            handler,
+            Arc::new(|| true),
+            vec![],
+            false,
+            "Echo",
+            "🔊",
+            None,
+        );
+        registry.set_plan_phase(PlanPhase::Planning);
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let result = rt.block_on(async { registry.dispatch_async("echo", json!({"k":"v"})).await });
+        let parsed: Value = serde_json::from_str(&result).expect("json output");
+        assert_eq!(parsed["plan"]["decision"], "plan_block");
+        assert_eq!(parsed["plan"]["code"], "plan_write_denied");
     }
 
     #[test]

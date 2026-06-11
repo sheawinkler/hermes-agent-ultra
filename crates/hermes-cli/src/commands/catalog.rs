@@ -230,6 +230,7 @@ const COMMAND_CATALOG_SECTIONS: &[CommandCatalogSection] = &[
             "/goal",
             "/subgoal",
             "/plan",
+            "/plan-mode",
             "/ask",
             "/steer",
             "/btw",

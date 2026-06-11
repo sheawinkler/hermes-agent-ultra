@@ -66,7 +66,8 @@ pub(crate) use misc::{
     handle_reasoning_command, handle_recap_command, handle_runbook_command, handle_status_command,
     handle_stop_command, handle_subconscious_command, handle_toolcards_command,
     handle_tools_command, handle_trigger_triage_command, handle_usage_command,
-    handle_verbose_command, handle_yolo_command, parse_reasoning_effort, read_json_file,
+    handle_plan_mode_command, handle_verbose_command, handle_yolo_command, parse_reasoning_effort,
+    read_json_file,
     replay_enabled_runtime, save_subconscious_state, triage_learning_bias,
     trigger_triage_learning_state_path,
 };

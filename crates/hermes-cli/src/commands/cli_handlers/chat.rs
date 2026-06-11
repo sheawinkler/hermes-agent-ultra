@@ -116,11 +116,12 @@ async fn query_mode_remediation_target(provider_model: &str) -> Option<(String, 
     Some((next, close))
 }
 
-/// Handle `hermes chat [--query ...] [--preload-skill ...] [--yolo]`.
+/// Handle `hermes chat [--query ...] [--preload-skill ...] [--yolo] [--plan]`.
 pub async fn handle_cli_chat(
     query: Option<String>,
     preload_skill: Option<String>,
     yolo: bool,
+    plan: bool,
     model_override: Option<String>,
     provider_override: Option<String>,
     allow_tools_flag: bool,
@@ -139,6 +140,9 @@ pub async fn handle_cli_chat(
     }
     if yolo {
         println!("[YOLO mode: tool confirmations disabled]");
+    }
+    if plan {
+        println!("[Plan mode: read-only planning until plan is approved]");
     }
 
     let mut config =
@@ -262,6 +266,9 @@ pub async fn handle_cli_chat(
             }
             apply_cli_chat_runtime_env(&active_model);
             let agent = build_query_agent(&active_model);
+            if plan {
+                agent.set_plan_phase(hermes_tools::PlanPhase::Planning);
+            }
             let result = match agent
                 .run_conversation(RunConversationParams {
                     user_message: q.clone(),
@@ -297,19 +304,29 @@ pub async fn handle_cli_chat(
                 }
             };
 
-            let reply = result
-                .messages
-                .iter()
-                .rev()
-                .find_map(|m| {
-                    if m.role == MessageRole::Assistant {
-                        m.content.clone()
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_else(|| "(no assistant reply)".to_string());
-            println!("{}", reply);
+            if result.turn_exit_reason == "plan_awaiting_approval" {
+                if let Some(plan_text) = result.plan_pending.as_deref() {
+                    println!("--- Plan (awaiting approval) ---\n{plan_text}\n---");
+                    println!(
+                        "Plan mode paused. In interactive mode use /plan-mode approve. \
+                         One-shot: re-run with approval context."
+                    );
+                }
+            } else {
+                let reply = result
+                    .messages
+                    .iter()
+                    .rev()
+                    .find_map(|m| {
+                        if m.role == MessageRole::Assistant {
+                            m.content.clone()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "(no assistant reply)".to_string());
+                println!("{}", reply);
+            }
         }
         None => {
             println!("Starting interactive chat session...");

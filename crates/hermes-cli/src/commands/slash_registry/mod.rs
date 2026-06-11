@@ -60,6 +60,7 @@ pub(crate) enum SlashHandlerId {
     Agents,
     Kanban,
     Plan,
+    PlanMode,
     Lsp,
     Graph,
     Qos,
@@ -319,6 +320,10 @@ static REGISTRY_ENTRIES: &[RegistryEntry] = &[
     RegistryEntry {
         id: SlashHandlerId::Plan,
         canonical: "/plan",
+    },
+    RegistryEntry {
+        id: SlashHandlerId::PlanMode,
+        canonical: "/plan-mode",
     },
     RegistryEntry {
         id: SlashHandlerId::Lsp,

@@ -269,6 +269,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/sb", "Alias for /statusbar"),
     ("/yolo", "Toggle auto-approve mode"),
     (
+        "/plan-mode",
+        "Plan-then-execute (`/plan-mode <task>` or on|approve|reject|edit)",
+    ),
+    (
         "/browser",
         "Manage local Chrome CDP bridge (`status|connect [ws/http-url]|disconnect`)",
     ),

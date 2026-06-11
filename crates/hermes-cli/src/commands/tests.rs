@@ -585,6 +585,18 @@ fn test_browser_command_is_registered_and_completable() {
 }
 
 #[test]
+fn test_plan_mode_command_registered() {
+    assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/plan-mode"));
+    assert!(autocomplete("/plan-m").contains(&"/plan-mode"));
+    assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/plan"));
+    assert_ne!(
+        canonical_command("/plan"),
+        canonical_command("/plan-mode"),
+        "/plan (planner queue) must stay distinct from /plan-mode"
+    );
+}
+
+#[test]
 fn test_p0_p1_surface_commands_registered_and_completable() {
     for command in [
         "/commands",

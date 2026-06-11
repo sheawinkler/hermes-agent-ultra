@@ -71,7 +71,7 @@ impl App {
     ///
     /// Sends all messages to the agent loop and appends the result.
     /// Checks the interrupt controller before running and clears it after.
-    pub(super) async fn run_agent(&mut self) -> Result<(), AgentError> {
+    pub(crate) async fn run_agent(&mut self) -> Result<(), AgentError> {
         let run_started_at = Instant::now();
         self.maybe_autopin_contextlattice_topic_from_objective();
         Self::emit_phase_event(
@@ -171,6 +171,21 @@ impl App {
                                 50,
                             );
                             continue;
+                        }
+                    }
+                    if result.turn_exit_reason == "plan_awaiting_approval" {
+                        if let Some(plan) = result.plan_pending.as_deref() {
+                            Self::emit_lifecycle_event(
+                                &self.stream_handle_shared,
+                                format!(
+                                    "Plan awaiting approval. Review the plan above, then: \
+                                     /plan-mode approve | reject [feedback] | edit <revised plan>"
+                                ),
+                            );
+                            tracing::info!(
+                                plan_chars = plan.chars().count(),
+                                "plan mode paused for user approval"
+                            );
                         }
                     }
                     if let Err(err) = self.apply_agent_result_and_persist(result) {

@@ -700,6 +700,8 @@ struct ChatArgs {
     preload_skill: Option<String>,
     #[arg(long)]
     yolo: bool,
+    #[arg(long, help = "Enable plan-then-execute mode (read-only planning until approved)")]
+    plan: bool,
 }
 
 pub fn parse_chat(args: &[OsString]) -> Result<CliCommand, clap::Error> {
@@ -707,6 +709,7 @@ pub fn parse_chat(args: &[OsString]) -> Result<CliCommand, clap::Error> {
         query: a.query,
         preload_skill: a.preload_skill,
         yolo: a.yolo,
+        plan: a.plan,
     })
 }
 

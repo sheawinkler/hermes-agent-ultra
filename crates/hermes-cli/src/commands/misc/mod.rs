@@ -6,6 +6,7 @@ mod about;
 mod config_cmd;
 mod curator;
 mod personality;
+mod plan_mode;
 mod provider_cmd;
 mod raw;
 mod reasoning;
@@ -21,6 +22,7 @@ pub(crate) use about::{discover_repo_root_for_about, handle_about_command, read_
 pub(crate) use config_cmd::handle_config_command;
 pub(crate) use curator::handle_curator_command;
 pub(crate) use personality::handle_personality_command;
+pub(crate) use plan_mode::handle_plan_mode_command;
 pub(crate) use provider_cmd::handle_provider_command;
 pub(crate) use raw::{handle_raw_command, replay_enabled_runtime};
 pub(crate) use reasoning::{handle_reasoning_command, parse_reasoning_effort};

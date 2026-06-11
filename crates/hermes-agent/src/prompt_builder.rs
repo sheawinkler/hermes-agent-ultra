@@ -59,9 +59,44 @@ Do NOT put these in MEMORY — use the correct store instead:\n\
 Write declarative facts, not instructions: 'Project uses cargo test -p hermes-parity-tests' ✓ — \
 'Run cargo test before every commit' ✗. Procedures and workflows belong in skills, not MEMORY.";
 
+/// Per-turn system hint when plan-then-execute mode is active.
+pub(crate) fn plan_mode_turn_hint(
+    phase: hermes_tools::PlanPhase,
+    pending_plan: Option<&str>,
+) -> Option<String> {
+    match phase {
+        hermes_tools::PlanPhase::Planning => Some(
+            "PLAN MODE (planning phase): Use ONLY read-only tools (read_file, search_files, \
+             web_search, session_search, skill_view, clarify, etc.). Do NOT call write_file, patch, \
+             terminal, delegate_task, or other mutating tools. When research is complete, output a \
+             structured plan with numbered steps, files to change, risks, and verification commands, \
+             then stop and wait for user approval.".to_string(),
+        ),
+        hermes_tools::PlanPhase::Executing => {
+            let plan = pending_plan.unwrap_or("(see prior assistant message)");
+            Some(format!(
+                "PLAN MODE (executing phase): The user approved your plan. Execute it now using \
+                 write tools as needed. Approved plan:\n{plan}"
+            ))
+        }
+        hermes_tools::PlanPhase::Off | hermes_tools::PlanPhase::AwaitingApproval => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_mode_hint_present_for_planning_and_executing() {
+        assert!(super::plan_mode_turn_hint(hermes_tools::PlanPhase::Planning, None).is_some());
+        assert!(super::plan_mode_turn_hint(
+            hermes_tools::PlanPhase::Executing,
+            Some("step 1")
+        )
+        .is_some());
+        assert!(super::plan_mode_turn_hint(hermes_tools::PlanPhase::Off, None).is_none());
+    }
 
     #[test]
     fn user_profile_guidance_targets_user_store_only() {

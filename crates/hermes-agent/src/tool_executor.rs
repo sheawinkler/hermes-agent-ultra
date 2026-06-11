@@ -40,6 +40,7 @@ impl AgentLoop {
         let active_task_id = self.current_task_id();
         let mut dedupe_search_seen: HashMap<String, String> = HashMap::new();
         let mut dedupe_search_dups: Vec<(String, String)> = Vec::new();
+        let plan_phase = self.plan_phase();
 
         // Run orchestrated `delegate_task` calls sequentially in the caller's
         // task - this keeps the inner AgentLoop future out of the Send-bound
@@ -175,6 +176,7 @@ impl AgentLoop {
             let parent_budget_remaining_usd = parent_budget_remaining_usd;
             let active_task_id = active_task_id.clone();
             let current_user_task = current_user_task.clone();
+            let plan_phase = plan_phase;
 
             join_set.spawn(async move {
                 let started = Instant::now();
@@ -197,6 +199,18 @@ impl AgentLoop {
                         active_task_id.as_deref(),
                         current_user_task.as_deref(),
                     );
+                    if !hermes_tools::plan_allows_tool(plan_phase, &tool_name, &params) {
+                        let block = hermes_tools::plan_block_payload(&tool_name);
+                        let msg = serde_json::from_str::<Value>(&block)
+                            .ok()
+                            .and_then(|v| {
+                                v.get("error")
+                                    .and_then(|e| e.as_str())
+                                    .map(str::to_string)
+                            })
+                            .unwrap_or(block);
+                        return ToolResult::err(&tool_call_id, msg);
+                    }
                     if tool_name == "delegate_task" {
                         if current_delegate_depth >= max_delegate_depth {
                             return ToolResult::err(
@@ -243,6 +257,18 @@ impl AgentLoop {
                                 active_task_id.as_deref(),
                                 current_user_task.as_deref(),
                             );
+                            if !hermes_tools::plan_allows_tool(plan_phase, &tool_name, &params) {
+                                let block = hermes_tools::plan_block_payload(&tool_name);
+                                let msg = serde_json::from_str::<Value>(&block)
+                                    .ok()
+                                    .and_then(|v| {
+                                        v.get("error")
+                                            .and_then(|e| e.as_str())
+                                            .map(str::to_string)
+                                    })
+                                    .unwrap_or(block);
+                                return ToolResult::err(&tool_call_id, msg);
+                            }
                             if tool_name == "delegate_task" {
                                 if current_delegate_depth >= max_delegate_depth {
                                     return ToolResult::err(

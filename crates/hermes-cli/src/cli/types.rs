@@ -203,6 +203,7 @@ pub enum CliCommand {
         query: Option<String>,
         preload_skill: Option<String>,
         yolo: bool,
+        plan: bool,
     },
     Skills {
         action: Option<String>,
