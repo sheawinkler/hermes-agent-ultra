@@ -7,6 +7,7 @@
 //! schedule, an agent prompt, and optional skill/model/deliver configurations.
 
 pub mod backend;
+pub mod blueprints;
 pub mod cli_support;
 pub mod completion;
 pub mod job;
@@ -16,6 +17,11 @@ pub mod scheduler;
 
 // Re-export primary types
 pub use backend::ScheduledCronjobBackend;
+pub use blueprints::{
+    catalog as blueprint_catalog, fill_blueprint, get_blueprint, resolve_blueprint_command,
+    AutomationBlueprint, BlueprintCommandAction, BlueprintFillError, BlueprintJobSpec,
+    BlueprintSlot, BlueprintSlotKind,
+};
 pub use cli_support::{cron_scheduler_for_data_dir, MinimalCronLlm};
 pub use completion::CronCompletionEvent;
 pub use job::{CronJob, DeliverConfig, DeliverTarget, JobStatus, ModelConfig};

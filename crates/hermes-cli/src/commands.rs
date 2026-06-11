@@ -22,6 +22,7 @@ use hermes_core::auth_gate::{
     oauth_runtime_gate_manifest_default, OAuthRuntimeGateManifest,
 };
 use hermes_core::AgentError;
+use hermes_cron::{BlueprintCommandAction, CronJob, DeliverConfig, DeliverTarget};
 use hermes_intelligence::model_metadata::{get_model_context_length, get_model_info};
 use hermes_intelligence::models_dev::default_client;
 use hermes_intelligence::{build_swarm_execution_plan, swarm_runtime_status, SwarmExecutionMode};
@@ -207,6 +208,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/reload-mcp", "Reload MCP server metadata"),
     ("/reload_mcp", "Alias for /reload-mcp"),
     ("/cron", "Show cron scheduler status"),
+    (
+        "/blueprint",
+        "Automation Blueprint catalog and creation (`<name> slot=value`, alias `/bp`)",
+    ),
     ("/scheduler", "Alias for /background"),
     (
         "/agents",
@@ -3498,6 +3503,7 @@ fn canonical_command(cmd: &str) -> &str {
         "/indicator" => "/statusbar",
         "/q" => "/queue",
         "/bg" => "/background",
+        "/bp" => "/blueprint",
         "/goal" => "/objective",
         "/swarms" => "/swarm",
         "/question" => "/ask",
@@ -3760,6 +3766,7 @@ async fn dispatch_slash_command(
             handle_reload_command(app, canonical_command(cmd))
         }
         "/cron" => handle_cron_command(app),
+        "/blueprint" => handle_blueprint_command(app, args).await,
         "/agents" => handle_agents_command(app, args),
         "/kanban" => handle_kanban_command(app, args),
         "/plan" => handle_plan_command(app, args),
@@ -14815,6 +14822,99 @@ fn handle_cron_command(app: &mut App) -> Result<CommandResult, AgentError> {
             count
         ),
     );
+    Ok(CommandResult::Handled)
+}
+
+fn blueprint_deliver_config(raw: &str) -> Option<DeliverConfig> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Some(DeliverConfig {
+            target: DeliverTarget::Origin,
+            platform: None,
+        });
+    }
+    let (target_raw, platform) = raw
+        .split_once(':')
+        .map(|(target, platform)| (target, Some(platform.trim().to_string())))
+        .unwrap_or((raw, None));
+    let normalized = target_raw
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', '_'], "");
+    let target = match normalized.as_str() {
+        "origin" => DeliverTarget::Origin,
+        "local" => DeliverTarget::Local,
+        "telegram" => DeliverTarget::Telegram,
+        "discord" => DeliverTarget::Discord,
+        "slack" => DeliverTarget::Slack,
+        "email" => DeliverTarget::Email,
+        "whatsapp" => DeliverTarget::WhatsApp,
+        "signal" => DeliverTarget::Signal,
+        "matrix" => DeliverTarget::Matrix,
+        "mattermost" => DeliverTarget::Mattermost,
+        "dingtalk" => DeliverTarget::DingTalk,
+        "feishu" => DeliverTarget::Feishu,
+        "wecom" => DeliverTarget::WeCom,
+        "weixin" | "wechat" | "wx" => DeliverTarget::Weixin,
+        "bluebubbles" | "imessage" => DeliverTarget::BlueBubbles,
+        "sms" => DeliverTarget::Sms,
+        "homeassistant" | "ha" => DeliverTarget::HomeAssistant,
+        "ntfy" => DeliverTarget::Ntfy,
+        _ => return None,
+    };
+    Some(DeliverConfig {
+        target,
+        platform: platform.filter(|value| !value.trim().is_empty()),
+    })
+}
+
+async fn handle_blueprint_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let raw = args.join(" ");
+    match hermes_cron::resolve_blueprint_command(&raw) {
+        Ok(BlueprintCommandAction::Catalog(text) | BlueprintCommandAction::Detail(text)) => {
+            emit_command_output(app, text);
+        }
+        Ok(BlueprintCommandAction::Filled(spec)) => {
+            let Some(deliver) = blueprint_deliver_config(&spec.deliver) else {
+                emit_command_output(
+                    app,
+                    format!(
+                        "Blueprint `{}` has unsupported deliver target `{}`.",
+                        spec.key, spec.deliver
+                    ),
+                );
+                return Ok(CommandResult::Handled);
+            };
+
+            let mut job = CronJob::new(spec.schedule.clone(), spec.prompt.clone());
+            job.name = Some(spec.title.clone());
+            if !spec.skills.is_empty() {
+                job.skills = Some(spec.skills.clone());
+            }
+            job.deliver = Some(deliver);
+            let job_id = app
+                .cron_scheduler
+                .create_job(job)
+                .await
+                .map_err(|e| AgentError::Config(format!("blueprint cron create: {e}")))?;
+            emit_command_output(
+                app,
+                format!(
+                    "Scheduled `{}` from blueprint `{}`.\nJob: {}\nSchedule: {}\nDeliver: {}\nManage it with `hermes cron list` or `/cron`.",
+                    spec.title, spec.key, job_id, spec.schedule, spec.deliver
+                ),
+            );
+        }
+        Err(err) => {
+            emit_command_output(
+                app,
+                format!("Blueprint error: {err}\nRun `/blueprint` to see the catalog."),
+            );
+        }
+    }
     Ok(CommandResult::Handled)
 }
 
@@ -27857,6 +27957,41 @@ mod tests {
             .expect("alias command");
 
         assert!(latest_ui_assistant_text(&app).contains("some args"));
+    }
+
+    #[tokio::test]
+    async fn blueprint_slash_command_creates_cron_job() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_slash_command(
+            &mut app,
+            "/bp",
+            &[
+                "custom-reminder",
+                "what=\"drink",
+                "water\"",
+                "time=10:15",
+                "recurrence=weekdays",
+                "deliver=local",
+            ],
+        )
+        .await
+        .expect("blueprint command");
+
+        assert_eq!(result, CommandResult::Handled);
+        let jobs = app.cron_scheduler.list_jobs().await;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].name.as_deref(), Some("Custom reminder"));
+        assert_eq!(jobs[0].schedule, "15 10 * * 1-5");
+        assert_eq!(jobs[0].prompt, "Remind the user: drink water");
+        assert_eq!(
+            jobs[0].deliver.as_ref().map(|d| &d.target),
+            Some(&DeliverTarget::Local)
+        );
+        assert!(latest_ui_assistant_text(&app).contains("Scheduled `Custom reminder`"));
     }
 
     #[tokio::test]

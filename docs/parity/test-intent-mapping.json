@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-11T07:59:40.943739+00:00",
+  "generated_at_utc": "2026-06-11T21:26:20.997601+00:00",
   "intent_unit": "domain_intent",
   "intents": [
     {
@@ -188,10 +188,11 @@
       ]
     },
     {
-      "evidence_count": 9,
+      "evidence_count": 10,
       "evidence_sample": [
         "crates/hermes-cli/src/commands.rs",
         "crates/hermes-cron/src/backend.rs",
+        "crates/hermes-cron/src/blueprints.rs",
         "crates/hermes-cron/src/cli_support.rs",
         "crates/hermes-cron/src/completion.rs",
         "crates/hermes-cron/src/job.rs",

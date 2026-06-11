@@ -1,14 +1,14 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-11T07:59:51.939256+00:00`_
+_Generated from source artifacts: `2026-06-11T21:26:35.694599+00:00`_
 
 ## Snapshot
 
-- Upstream target: `upstream/main` @ `c94e93a6480f3cfdabe0624aac46f06670ffae36`
-- Workstream snapshot generated: `2026-06-11T00:30:29-06:00`
-- Parity matrix generated: `2026-06-11T07:58:56.105247+00:00`
-- Queue snapshot generated: `2026-06-11T07:59:43.043695+00:00`
-- Proof snapshot generated: `2026-06-11T07:59:51.939256+00:00`
+- Upstream target: `upstream/main` @ `021ed6914162416522462b009de0bec1513c73a1`
+- Workstream snapshot generated: `2026-06-11T03:07:10-06:00`
+- Parity matrix generated: `2026-06-11T21:26:25.069080+00:00`
+- Queue snapshot generated: `2026-06-11T21:25:55.720011+00:00`
+- Proof snapshot generated: `2026-06-11T21:26:35.694599+00:00`
 
 ## Gate Status
 
@@ -17,7 +17,7 @@ _Generated from source artifacts: `2026-06-11T07:59:51.939256+00:00`_
 - Test coverage audit: **PASS**
 - SOTA harness matrix: **PASS**
 - Release gate failures: none
-- CI gate failures: max_commits_behind (actual=5737.0, limit=5500); max_upstream_patch_missing (actual=5530.0, limit=5000)
+- CI gate failures: max_commits_behind (actual=5801.0, limit=5500); max_upstream_patch_missing (actual=5591.0, limit=5000)
 
 ## Test Coverage Audit
 
@@ -26,7 +26,7 @@ _Generated from source artifacts: `2026-06-11T07:59:51.939256+00:00`_
 | Tracked behavior rows | 415 |
 | Covered behavior rows | 415 |
 | Tracked behavior coverage ratio | 1.0000 |
-| Rust test functions | 3452 |
+| Rust test functions | 3465 |
 | Missing Rust test refs | 0 |
 | Critical gaps | 0 |
 
@@ -45,24 +45,24 @@ _Generated from source artifacts: `2026-06-11T07:59:51.939256+00:00`_
 
 | Metric | Value |
 | --- | ---: |
-| Total commits in queue | 5532 |
+| Total commits in queue | 5593 |
 | Pending | 0 |
-| Ported | 262 |
-| Superseded | 5200 |
+| Ported | 266 |
+| Superseded | 5257 |
 
 ## Tree/Patch Drift
 
 | Metric | Value |
 | --- | ---: |
-| commits_behind | 5737 |
-| commits_ahead | 1090 |
-| upstream_patch_missing | 5530 |
+| commits_behind | 5801 |
+| commits_ahead | 1092 |
+| upstream_patch_missing | 5591 |
 | upstream_patch_represented | 2 |
-| local_patch_unique | 889 |
-| files_only_upstream | 2235 |
-| files_only_local | 727 |
-| files_shared_identical | 1635 |
-| files_shared_different | 1096 |
+| local_patch_unique | 890 |
+| files_only_upstream | 2281 |
+| files_only_local | 729 |
+| files_shared_identical | 1632 |
+| files_shared_different | 1098 |
 
 ## Workstream States
 

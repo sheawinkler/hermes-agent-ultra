@@ -3115,6 +3115,90 @@
     "04b3f195380f": {
       "disposition": "superseded",
       "notes": "Upstream session archive propagation targets Python hermes_state.py archived rows plus Electron sidebar archive UI. Hermes Agent Ultra has no Rust session-archive column or setSessionArchived surface; the Rust session_search backend already projects compression roots to their continuation tip, and CLI session deletion operates on saved JSON snapshots rather than soft-archiving SQLite rows."
+    },
+    "cedd9b6d475b": {
+      "disposition": "superseded",
+      "notes": "Upstream passive update fix avoids SSH origin fetches in Python banner and Electron desktop checks. Hermes Agent Ultra's Rust update command already uses the GitHub HTTPS releases API in crates/hermes-cli/src/update.rs with HERMES_UPDATE_REPO override support and never shells out to git fetch origin for update checks."
+    },
+    "0edeee14c6ce": {
+      "disposition": "superseded",
+      "notes": "Upstream adds Electron-only helper tests for official SSH remote detection. Hermes Agent Ultra has no Electron desktop update helper; the Rust update surface is the HTTPS GitHub release checker in crates/hermes-cli/src/update.rs, so the SSH-origin detection branch is not part of the local runtime."
+    },
+    "0d3e2cc53952": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop sidebar dedupe by compression lineage targets React mergeSessionPage. Hermes Agent Ultra has no React desktop sidebar store; Rust session_search already resolves logical compression roots to the visible continuation tip through logical_session_key_for_row and visible_session_id_for_row, with search_session_id_resolves_compression_root_to_tip coverage."
+    },
+    "e96ca1a0d35a": {
+      "disposition": "ported",
+      "notes": "Rust now drops empty sessions on session rotation and TUI shutdown through SessionPersistence::delete_session_if_empty plus App empty-stub cleanup. The port removes untitled message-free parentless SQLite rows and exact empty snapshots while preserving titled, child, message-bearing, or non-empty snapshot sessions; focused hermes-agent and hermes-cli tests cover the behavior."
+    },
+    "e372803554be": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop session model refresh targets Electron/React sidebar metadata. Rust App::switch_model already synchronizes runtime model env, rebuilds the active agent, and persists the active session model through SessionPersistence with regression coverage for the session DB row."
+    },
+    "b1af653bf6bd": {
+      "disposition": "superseded",
+      "notes": "Upstream local file tree hardening is an Electron desktop filesystem browser fix. Hermes Agent Ultra has no Electron file tree; Rust filesystem access is mediated by typed tool/workdir paths, terminal approval policy, and existing path normalization gates."
+    },
+    "db79e90130fe": {
+      "disposition": "superseded",
+      "notes": "Upstream filesystem routing facade is desktop/Electron backend routing. Hermes Agent Ultra has no desktop filesystem facade; local file operations remain Rust tool and terminal surfaces under approval/workspace policy."
+    },
+    "8878484f8519": {
+      "disposition": "superseded",
+      "notes": "Upstream remote filesystem browsing wires Electron desktop profile routes. Hermes Agent Ultra does not ship the Electron remote file tree; Rust remote/profile behavior is represented by ACP/gateway session metadata and explicit tool surfaces."
+    },
+    "56a0f48ba6d9": {
+      "disposition": "superseded",
+      "notes": "Upstream remote filesystem wiring tightening targets the desktop file tree route. The Rust runtime has no matching Electron bridge; file access remains native Rust tool execution with existing path and approval controls."
+    },
+    "9121834b3198": {
+      "disposition": "superseded",
+      "notes": "Upstream remote workspace defaults are Electron desktop profile defaults. Hermes Agent Ultra workspace/cwd state is carried by CLI, ACP, gateway session metadata, and terminal/workdir normalization rather than desktop remote workspace defaults."
+    },
+    "1593ca54066c": {
+      "disposition": "ported",
+      "notes": "Rust ports the Cron Recipes functional surface as Automation Blueprints: hermes-cron::blueprints defines typed slots/defaults/validation/rendering and fills normal CronJob specs, while the Rust CLI/TUI exposes /blueprint and /bp to create jobs through the live CronScheduler. Focused hermes-cron and hermes-cli tests cover catalog fill, quoted values, schedule rendering, typo rejection, and live scheduler creation."
+    },
+    "cb29e8a82e7e": {
+      "disposition": "ported",
+      "notes": "The upstream Cron Recipes rename is ported under the final Automation Blueprints naming: Rust uses /blueprint and /bp, hermes-cron::blueprints, and created jobs flow through the existing cron scheduler instead of a parallel recipe engine."
+    },
+    "021ed6914162": {
+      "disposition": "ported",
+      "notes": "The final upstream Automation Blueprints terminology cleanup is ported on the local website surface: guides/automation-blueprints replaces the stale automation-templates slug, the sidebar points at the new slug, and the Rust runtime/catalog already use Automation Blueprints naming. Upstream Python docstring/web-server wording is non-runtime for Hermes Agent Ultra's Rust-only implementation."
+    },
+    "8505e9d6691d": {
+      "disposition": "superseded",
+      "notes": "Upstream composer spellcheck is a desktop React/Electron input attribute fix. Hermes Agent Ultra uses the Rust Ratatui TUI/CLI composer and has no browser spellcheck attribute surface."
+    },
+    "93a2f680fd18": {
+      "disposition": "superseded",
+      "notes": "Upstream model visibility dialog hide-all persistence is a desktop settings UI fix. Rust model visibility is resolved through curated provider/model catalogs, config, and CLI/TUI model picker state rather than the Electron dialog store."
+    },
+    "743c55efa34f": {
+      "disposition": "superseded",
+      "notes": "Upstream HTML5 backend remount fix targets the desktop file tree drag/drop provider. Hermes Agent Ultra has no React DnD file tree runtime."
+    },
+    "020ef76cf16b": {
+      "disposition": "superseded",
+      "notes": "Upstream cancels discord.py _bot_task zombies after connect timeout. Hermes Agent Ultra's Rust Discord adapter has no discord.py background Bot.start task; start/stop only mark BasePlatformAdapter state and REST sends use reqwest, so the orphaned asyncio client failure mode is absent."
+    },
+    "08b1c44a5330": {
+      "disposition": "superseded",
+      "notes": "Upstream extends discord.py _bot_task cancellation to generic connect exceptions. The Rust Discord adapter has no Python asyncio bot task to cancel and no discord.py reconnect loop; failed sends surface as typed GatewayError values."
+    },
+    "5e5308d34d87": {
+      "disposition": "superseded",
+      "notes": "Upstream @types/node version pin is JavaScript/desktop tooling only. Hermes Agent Ultra's release/runtime gates are Rust Cargo based and do not consume the upstream Node type package for runtime behavior."
+    },
+    "c3464ecf453d": {
+      "disposition": "superseded",
+      "notes": "Upstream recovers from post-ready discord.py gateway task exits. Hermes Agent Ultra's Discord surface is Rust REST plus pure GatewaySession payload parsing; there is no long-lived discord.py task whose exit can leave the gateway split-brained, and platform_reconnect_watcher already restarts adapters whose Rust running state is false."
+    },
+    "484f484c25bc": {
+      "disposition": "superseded",
+      "notes": "Upstream sidebar nav drag-region carving targets Electron desktop titlebar behavior in apps/desktop. Hermes Agent Ultra uses the Rust Ratatui CLI/TUI and has no Electron draggable titlebar or React sidebar rows."
     }
   },
   "subject_patterns": [

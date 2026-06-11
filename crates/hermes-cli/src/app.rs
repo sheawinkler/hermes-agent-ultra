@@ -277,6 +277,9 @@ pub struct App {
     /// The tool registry (shared with the agent).
     pub tool_registry: Arc<ToolRegistry>,
 
+    /// Runtime cron scheduler used by slash commands and the cronjob tool.
+    pub cron_scheduler: Arc<CronScheduler>,
+
     /// Active tool schemas exposed to the model for this runtime.
     pub tool_schemas: Vec<ToolSchema>,
 
@@ -370,6 +373,7 @@ impl Clone for App {
             config: self.config.clone(),
             agent: self.agent.clone(),
             tool_registry: self.tool_registry.clone(),
+            cron_scheduler: self.cron_scheduler.clone(),
             tool_schemas: self.tool_schemas.clone(),
             messages: self.messages.clone(),
             ui_messages: self.ui_messages.clone(),
@@ -449,6 +453,90 @@ impl App {
         if let Err(err) = self.persist_session_snapshot(None) {
             tracing::warn!("session startup snapshot skipped: {}", err);
         }
+    }
+
+    fn snapshot_file_is_empty_session(path: &Path, session_id: &str) -> bool {
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            return false;
+        };
+        let Some(snapshot_session_id) = value
+            .get("session_info")
+            .and_then(|info| info.get("session_id"))
+            .and_then(|value| value.as_str())
+        else {
+            return false;
+        };
+        if snapshot_session_id != session_id {
+            return false;
+        }
+        value
+            .get("messages")
+            .and_then(|messages| messages.as_array())
+            .is_some_and(|messages| messages.is_empty())
+    }
+
+    fn remove_empty_snapshot_file(&self, session_id: &str) -> Result<bool, AgentError> {
+        let snapshot_path = self
+            .state_root
+            .join("sessions")
+            .join(format!("{session_id}.json"));
+        if !Self::snapshot_file_is_empty_session(&snapshot_path, session_id) {
+            return Ok(false);
+        }
+        std::fs::remove_file(&snapshot_path).map_err(|e| {
+            AgentError::Io(format!(
+                "Failed to remove empty session snapshot {}: {}",
+                snapshot_path.display(),
+                e
+            ))
+        })?;
+        Ok(true)
+    }
+
+    fn discard_session_if_empty(
+        &self,
+        session_id: &str,
+        message_count: usize,
+        has_session_objective: bool,
+    ) -> bool {
+        let session_id = session_id.trim();
+        if session_id.is_empty() {
+            return false;
+        }
+
+        let mut discarded = false;
+        match SessionPersistence::new(&self.state_root).delete_session_if_empty(session_id) {
+            Ok(deleted) => discarded |= deleted,
+            Err(err) => tracing::debug!(
+                session_id,
+                error = %err,
+                "failed to delete empty session db row"
+            ),
+        }
+
+        if message_count == 0 && !has_session_objective {
+            match self.remove_empty_snapshot_file(session_id) {
+                Ok(removed) => discarded |= removed,
+                Err(err) => tracing::debug!(
+                    session_id,
+                    error = %err,
+                    "failed to remove empty session snapshot"
+                ),
+            }
+        }
+
+        discarded
+    }
+
+    pub fn discard_current_session_if_empty(&self) -> bool {
+        self.discard_session_if_empty(
+            &self.session_id,
+            self.messages.len(),
+            self.session_objective.is_some(),
+        )
     }
 
     fn push_stream_extra_event(
@@ -2137,7 +2225,7 @@ impl App {
             .await
             .map_err(|e| AgentError::Config(format!("cron load: {e}")))?;
         cron_scheduler.start().await;
-        wire_cron_scheduler_backend(&tool_registry, cron_scheduler);
+        wire_cron_scheduler_backend(&tool_registry, cron_scheduler.clone());
         let agent_tool_registry = Arc::new(bridge_tool_registry(&tool_registry));
         let tool_schemas =
             crate::platform_toolsets::resolve_platform_tool_schemas(&config, "cli", &tool_registry);
@@ -2172,6 +2260,7 @@ impl App {
             config: Arc::new(config),
             agent,
             tool_registry,
+            cron_scheduler,
             tool_schemas,
             messages: Vec::new(),
             ui_messages: Vec::new(),
@@ -2523,7 +2612,14 @@ impl App {
     /// Create a new session, clearing all messages.
     pub fn new_session(&mut self) {
         let old_session_id = self.session_id.clone();
+        let old_message_count = self.messages.len();
+        let old_has_session_objective = self.session_objective.is_some();
         self.invoke_session_lifecycle_hook(HookType::OnSessionFinalize, &old_session_id);
+        self.discard_session_if_empty(
+            &old_session_id,
+            old_message_count,
+            old_has_session_objective,
+        );
         self.session_id = Uuid::new_v4().to_string();
         self.notify_memory_session_switch(&self.session_id, &old_session_id, false);
         self.messages.clear();
@@ -4086,6 +4182,14 @@ mod tests {
     fn build_minimal_test_app_with_state_root(state_root: PathBuf) -> App {
         let config = Arc::new(GatewayConfig::default());
         let tool_registry = Arc::new(ToolRegistry::new());
+        let cron_dir = state_root.join("cron");
+        std::fs::create_dir_all(&cron_dir).expect("create cron test dir");
+        let cron_scheduler = Arc::new(build_runtime_cron_scheduler(
+            config.as_ref(),
+            "openai:gpt-4o",
+            cron_dir,
+            &tool_registry,
+        ));
         let agent_tool_registry = Arc::new(bridge_tool_registry(&tool_registry));
         let session_id = "test-session".to_string();
         let mut agent_config = build_agent_config(config.as_ref(), "openai:gpt-4o");
@@ -4110,6 +4214,7 @@ mod tests {
             config,
             agent,
             tool_registry,
+            cron_scheduler,
             tool_schemas: Vec::new(),
             messages: Vec::new(),
             ui_messages: Vec::new(),
@@ -4807,6 +4912,63 @@ mod tests {
                 .map(|arr| arr.len()),
             Some(0)
         );
+    }
+
+    #[test]
+    fn new_session_discards_previous_empty_stub_snapshot() {
+        let _guard = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut app = build_minimal_test_app();
+        app.state_root = tmp.path().join("custom-state-root");
+        app.session_id = "old-empty".to_string();
+        app.messages.clear();
+        let old_path = app
+            .persist_session_snapshot(None)
+            .expect("persist old empty snapshot");
+        assert!(old_path.exists());
+
+        app.new_session();
+
+        assert!(!old_path.exists());
+        assert!(app
+            .state_root
+            .join("sessions")
+            .join(format!("{}.json", app.session_id))
+            .exists());
+    }
+
+    #[test]
+    fn new_session_keeps_previous_nonempty_snapshot() {
+        let _guard = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut app = build_minimal_test_app();
+        app.state_root = tmp.path().join("custom-state-root");
+        app.session_id = "old-nonempty".to_string();
+        app.messages = vec![hermes_core::Message::user("keep this")];
+        let old_path = app
+            .persist_session_snapshot(None)
+            .expect("persist old nonempty snapshot");
+
+        app.new_session();
+
+        assert!(old_path.exists());
+    }
+
+    #[test]
+    fn discard_current_session_if_empty_removes_current_stub_snapshot() {
+        let _guard = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut app = build_minimal_test_app();
+        app.state_root = tmp.path().join("custom-state-root");
+        app.session_id = "current-empty".to_string();
+        app.messages.clear();
+        let snapshot_path = app
+            .persist_session_snapshot(None)
+            .expect("persist current empty snapshot");
+
+        assert!(app.discard_current_session_if_empty());
+
+        assert!(!snapshot_path.exists());
     }
 
     #[test]
