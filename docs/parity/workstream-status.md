@@ -1,7 +1,7 @@
 # Workstream Status
 
-- Local HEAD: `e233c98cca45e8481853be3f8d0bfa881253e1a4`
-- Upstream: `upstream/main` (`689ef5e233980f5d5a32080e959f44c8991dd03a`)
+- Local HEAD: `ddd78abaf6d10e7bb43008762607955a65ae3fe9`
+- Upstream: `upstream/main` (`d1383a6b1450c6c139720b1b01f8b99cc130453f`)
 
 | Workstream | Title | State |
 | --- | --- | --- |
@@ -33,14 +33,14 @@
 - State: **complete**
 - Upstream skills catalogs audited against local tree.
 - Intentional divergence documented for skills and optional-skills vendoring.
-- Metrics: `{"divergence_documented": true, "local_skill_files": 796, "upstream_skill_files": 874}`
+- Metrics: `{"divergence_documented": true, "local_skill_files": 883, "upstream_skill_files": 861}`
 
 ## WS5 — UX parity
 
 - State: **complete**
 - Rust CLI/TUI runtime validated through e2e_cli and gateway e2e smoke tests.
 - Web/UI upstream trees classified as intentional divergence in Rust-first mode.
-- Metrics: `{"divergence_documented": true, "e2e_cli_tests": 8}`
+- Metrics: `{"divergence_documented": true, "e2e_cli_tests": 12}`
 
 ## WS6 — Tests and CI parity
 

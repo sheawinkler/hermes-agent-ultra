@@ -46,7 +46,13 @@ pub fn configured_platform_toolsets(config: &GatewayConfig, platform: &str) -> V
 }
 
 fn canonical_toolset_token(token: &str) -> String {
-    let token = token.trim().to_ascii_lowercase();
+    let mut token = token.trim().to_ascii_lowercase();
+    if let Some(stripped) = token
+        .strip_suffix("_tools")
+        .or_else(|| token.strip_suffix("-tools"))
+    {
+        token = stripped.to_string();
+    }
     match token.as_str() {
         "image-gen" | "imagegen" => "image_gen".to_string(),
         "video-gen" | "videogen" => "video_gen".to_string(),
@@ -426,6 +432,28 @@ mod tests {
             assert!(
                 names.contains(&expected.to_string()),
                 "alias resolution should include {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn platform_toolset_tokens_strip_legacy_tools_suffix() {
+        let mut cfg = GatewayConfig::default();
+        cfg.platform_toolsets.insert(
+            "cli".to_string(),
+            vec![
+                "homeassistant_tools".to_string(),
+                "web_tools".to_string(),
+                "terminal_tools".to_string(),
+            ],
+        );
+        let reg = registry_with_minimal_tools();
+        let names = resolve_platform_tool_names(&cfg, "cli", &reg);
+
+        for expected in ["ha_call_service", "web_search", "terminal"] {
+            assert!(
+                names.contains(&expected.to_string()),
+                "legacy _tools suffix should resolve {expected}"
             );
         }
     }

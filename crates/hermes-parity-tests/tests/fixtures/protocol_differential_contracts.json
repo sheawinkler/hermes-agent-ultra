@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "suite": "protocol_differential_contracts",
+  "description": "Normalized protocol contracts for ACP, MCP, and gateway command surfaces.",
+  "cases": [
+    {
+      "id": "acp-session-new-canonical",
+      "kind": "acp_method_alias",
+      "input": { "method": "session/new" },
+      "expected": { "canonical": "NewSession" }
+    },
+    {
+      "id": "acp-legacy-message-send-canonical",
+      "kind": "acp_method_alias",
+      "input": { "method": "message.send" },
+      "expected": { "canonical": "SendMessage" }
+    },
+    {
+      "id": "acp-success-response-envelope",
+      "kind": "acp_success_response",
+      "input": {
+        "id": 7,
+        "result": { "session_id": "s1", "ok": true }
+      },
+      "expected": {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "result": { "session_id": "s1", "ok": true }
+      }
+    },
+    {
+      "id": "mcp-initialize-capabilities",
+      "kind": "mcp_initialize",
+      "input": {},
+      "expected": {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {
+          "tools": { "listChanged": true },
+          "resources": {},
+          "prompts": {}
+        }
+      }
+    },
+    {
+      "id": "mcp-stringified-object-arguments",
+      "kind": "mcp_argument_coercion",
+      "input": { "arguments": "{\"path\":\"Cargo.toml\"}" },
+      "expected": { "path": "Cargo.toml" }
+    },
+    {
+      "id": "gateway-bot-mention-normalizes-command",
+      "kind": "gateway_command_canonicalization",
+      "input": { "command": "/reload-skills@HermesBot now" },
+      "expected": { "canonical": "reload_skills", "registered": true }
+    },
+    {
+      "id": "gateway-clear-alias-is-registered",
+      "kind": "gateway_command_canonicalization",
+      "input": { "command": "/clear" },
+      "expected": { "canonical": "clear", "registered": true }
+    }
+  ]
+}

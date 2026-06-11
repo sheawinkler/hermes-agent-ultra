@@ -49,6 +49,55 @@
         "fallback_calls": 0,
         "error_contains": "rate limit"
       }
+    },
+    {
+      "id": "connection_reset_then_success",
+      "seed": 1004,
+      "max_retries": 2,
+      "fallback_model": null,
+      "steps": [
+        { "kind": "connection_reset", "message": "connection reset by peer while reading response" },
+        { "kind": "success", "message": "ok-connection-reset-recovered" }
+      ],
+      "expected": {
+        "outcome": "success",
+        "attempts": 2,
+        "fallback_calls": 0,
+        "error_contains": null
+      }
+    },
+    {
+      "id": "auth_expired_fails_closed",
+      "seed": 1005,
+      "max_retries": 2,
+      "fallback_model": "openrouter:backup-model",
+      "steps": [
+        { "kind": "auth_expired", "message": "HTTP 401 Unauthorized: token expired" },
+        { "kind": "success", "message": "must-not-run-after-auth-expiry" }
+      ],
+      "expected": {
+        "outcome": "error",
+        "attempts": 1,
+        "fallback_calls": 0,
+        "error_contains": "401"
+      }
+    },
+    {
+      "id": "malformed_tool_payload_retried_without_tools",
+      "seed": 1006,
+      "max_retries": 0,
+      "fallback_model": null,
+      "include_tool_schema": true,
+      "steps": [
+        { "kind": "malformed_tool_payload", "message": "Provider returned error: This request is not valid because tools payload is invalid" },
+        { "kind": "success", "message": "ok-no-tools-retry-recovered" }
+      ],
+      "expected": {
+        "outcome": "success",
+        "attempts": 2,
+        "fallback_calls": 0,
+        "error_contains": null
+      }
     }
   ]
 }

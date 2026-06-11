@@ -1192,13 +1192,17 @@ impl TelegramAdapter {
         text: &str,
         parse_mode: Option<&str>,
     ) -> Result<(), GatewayError> {
+        let rendered_text = self.outgoing_text_for_parse_mode(text, parse_mode);
+        if rendered_text.chars().count() > MAX_MESSAGE_LENGTH {
+            return Err(GatewayError::SendFailed(format!(
+                "Telegram edit text exceeds {MAX_MESSAGE_LENGTH} characters; send as split messages instead"
+            )));
+        }
+
         let mut body = serde_json::json!({
             "chat_id": chat_id,
             "message_id": message_id.parse::<i64>().unwrap_or(0),
-            "text": self.outgoing_text_for_parse_mode(
-                &text[..text.len().min(MAX_MESSAGE_LENGTH)],
-                parse_mode,
-            ),
+            "text": rendered_text,
         });
 
         if let Some(pm) = parse_mode {
@@ -2463,6 +2467,17 @@ mod tests {
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].len(), 4096);
         assert_eq!(chunks[1].len(), 904);
+    }
+
+    #[tokio::test]
+    async fn edit_text_rejects_overflow_without_truncating() {
+        let adapter = test_adapter(test_config());
+        let text = "a".repeat(MAX_MESSAGE_LENGTH + 1);
+        let err = adapter
+            .edit_text("123", "456", &text, None)
+            .await
+            .expect_err("overflow edits must fail into caller fallback");
+        assert!(err.to_string().contains("exceeds 4096 characters"));
     }
 
     #[test]

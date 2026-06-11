@@ -38,6 +38,11 @@ def parse_args() -> argparse.Namespace:
         help="Test coverage audit JSON path relative to repo root",
     )
     parser.add_argument(
+        "--sota-harness-matrix",
+        default="docs/parity/sota-harness-matrix.json",
+        help="SOTA harness matrix JSON path relative to repo root",
+    )
+    parser.add_argument(
         "--output",
         default="docs/parity/PARITY_DASHBOARD.md",
         help="Output markdown path relative to repo root",
@@ -88,6 +93,7 @@ def render_dashboard(
     queue_json: dict[str, Any],
     proof_json: dict[str, Any],
     test_coverage_audit: dict[str, Any],
+    sota_harness_matrix: dict[str, Any],
 ) -> str:
     summary = parity_matrix.get("summary", {}) if isinstance(parity_matrix.get("summary"), dict) else {}
     queue_summary = queue_json.get("summary", {}) if isinstance(queue_json.get("summary"), dict) else {}
@@ -104,6 +110,16 @@ def render_dashboard(
     coverage_gate = (
         test_coverage_audit.get("audit_gate", {})
         if isinstance(test_coverage_audit.get("audit_gate"), dict)
+        else {}
+    )
+    harness_summary = (
+        sota_harness_matrix.get("summary", {})
+        if isinstance(sota_harness_matrix.get("summary"), dict)
+        else {}
+    )
+    harness_gate = (
+        sota_harness_matrix.get("gate", {})
+        if isinstance(sota_harness_matrix.get("gate"), dict)
         else {}
     )
 
@@ -140,6 +156,7 @@ def render_dashboard(
     lines.append(f"- Release gate: **{gate_status(release_gate.get('pass'))}**")
     lines.append(f"- CI/tree-drift gate: **{gate_status(ci_gate.get('pass'))}**")
     lines.append(f"- Test coverage audit: **{gate_status(coverage_gate.get('pass'))}**")
+    lines.append(f"- SOTA harness matrix: **{gate_status(harness_gate.get('pass'))}**")
     lines.append(f"- Release gate failures: {format_failed_checks(release_gate)}")
     lines.append(f"- CI gate failures: {format_failed_checks(ci_gate)}")
     lines.append("")
@@ -165,6 +182,24 @@ def render_dashboard(
     )
     lines.append(
         f"| Critical gaps | {int(coverage_gate.get('critical_gaps', 0) or 0)} |"
+    )
+    lines.append("")
+    lines.append("## SOTA Harness Matrix")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("| --- | ---: |")
+    lines.append(f"| Domains total | {int(harness_summary.get('domains_total', 0) or 0)} |")
+    lines.append(f"| Domains passing | {int(harness_summary.get('domains_passing', 0) or 0)} |")
+    lines.append(
+        "| Domain coverage ratio | "
+        f"{float(harness_summary.get('domain_coverage_ratio', 0.0) or 0.0):.4f} |"
+    )
+    lines.append(f"| Direct Rust tests | {int(harness_summary.get('direct_rust_tests', 0) or 0)} |")
+    lines.append(
+        f"| Critical gaps | {int(harness_gate.get('critical_gaps', 0) or 0)} |"
+    )
+    lines.append(
+        f"| Missing Rust test refs | {int(harness_gate.get('missing_rust_test_refs', 0) or 0)} |"
     )
     lines.append("")
     lines.append("## Queue Summary")
@@ -223,6 +258,7 @@ def render_dashboard(
     lines.append("- `docs/parity/upstream-missing-queue.json`")
     lines.append("- `docs/parity/global-parity-proof.json`")
     lines.append("- `docs/parity/test-coverage-audit.json`")
+    lines.append("- `docs/parity/sota-harness-matrix.json`")
     lines.append("")
     return "\n".join(lines)
 
@@ -236,6 +272,7 @@ def main() -> int:
     queue_json = load_json((repo_root / args.queue_json).resolve())
     proof_json = load_json((repo_root / args.proof_json).resolve())
     test_coverage_audit = load_json((repo_root / args.test_coverage_audit).resolve())
+    sota_harness_matrix = load_json((repo_root / args.sota_harness_matrix).resolve())
 
     output = (repo_root / args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +282,7 @@ def main() -> int:
         queue_json,
         proof_json,
         test_coverage_audit,
+        sota_harness_matrix,
     )
     output.write_text(dashboard + "\n", encoding="utf-8")
     print(f"Wrote parity dashboard: {output}")

@@ -1,6 +1,6 @@
 # Global Parity Proof
 
-Generated: `2026-06-10T08:53:14.867685+00:00`
+Generated: `2026-06-11T01:36:11.844835+00:00`
 
 ## Gate Status
 
@@ -13,15 +13,18 @@ Generated: `2026-06-10T08:53:14.867685+00:00`
 
 | Metric | Value |
 | --- | ---: |
-| `max_commits_behind` | 4494.0 |
-| `max_upstream_patch_missing` | 4374.0 |
-| `max_files_only_upstream` | 1493.0 |
+| `max_commits_behind` | 5696.0 |
+| `max_upstream_patch_missing` | 5495.0 |
+| `max_files_only_upstream` | 2253.0 |
 | `max_unowned_divergences` | 0.0 |
 | `max_divergence_review_overdue` | 0.0 |
 | `min_test_intent_mapping_ratio` | 1.0 |
 | `min_test_coverage_tracked_behavior_ratio` | 1.0 |
 | `max_test_coverage_audit_critical_gaps` | 0.0 |
 | `max_test_coverage_missing_rust_refs` | 0.0 |
+| `min_sota_harness_domain_coverage_ratio` | 1.0 |
+| `max_sota_harness_critical_gaps` | 0.0 |
+| `max_sota_harness_missing_rust_refs` | 0.0 |
 | `max_queue_pending_commits` | 0.0 |
 
 ## GPAR Ticket Completion
@@ -45,15 +48,23 @@ Generated: `2026-06-10T08:53:14.867685+00:00`
 - Critical gaps: `0`
 - Missing Rust test refs: `0`
 
+## SOTA Harness Matrix
+
+- Harness gate: **PASS**
+- Domain coverage ratio: `1.0`
+- Critical gaps: `0`
+- Missing Rust test refs: `0`
+- Direct Rust tests: `12`
+
 ## Queue Summary
 
-- Upstream missing commits tracked: `5375`.
+- Upstream missing commits tracked: `5497`.
 - By target ticket:
-  - `#20`: `2284`
-  - `#21`: `115`
-  - `#22`: `820`
-  - `#23`: `386`
+  - `#20`: `2338`
+  - `#21`: `118`
+  - `#22`: `837`
+  - `#23`: `391`
   - `#24`: `22`
-  - `#25`: `115`
-  - `#26`: `1633`
+  - `#25`: `120`
+  - `#26`: `1671`
 

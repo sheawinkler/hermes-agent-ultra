@@ -109,6 +109,20 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "optional-skills/creative",
+      "rationale": "Optional creative skill content is curated locally; current upstream drift is tracked through HERMES_HOME-aware helper skill sync and native Rust skill-loader contracts.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "optional-skills/devops",
+      "rationale": "Optional DevOps skill content is curated locally while runtime behavior is governed by Hermes Ultra's Rust skill loader and local tool gates.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "optional-skills/finance",
       "rationale": "Upstream optional-skills finance content is curated catalog material; Hermes Ultra tracks it through skill catalog governance while keeping runtime execution Rust-first.",
       "ticket": 25
@@ -132,6 +146,13 @@
       "owner": "sheawinkler",
       "path": "optional-skills/mlops",
       "rationale": "Upstream optional-skills MLOps content is curated catalog material; Hermes Ultra tracks it through skill catalog governance while keeping runtime execution Rust-first.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "optional-skills/productivity",
+      "rationale": "Optional productivity skill content is curated locally; upstream .env drift has been ported where applicable and runtime execution remains Rust-loader governed.",
       "ticket": 25
     },
     {
@@ -704,6 +725,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "skills/github",
+      "rationale": "GitHub skill content is curated locally; upstream HERMES_HOME .env resolution has been ported and runtime skill loading remains governed by Rust skill contracts.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "skills/productivity",
       "rationale": "Skill catalog content is curated locally while loader and execution contracts carry runtime parity.",
       "ticket": 25
@@ -713,6 +741,13 @@
       "owner": "sheawinkler",
       "path": "skills/research",
       "rationale": "Skill catalog content is curated locally while runtime skill contracts remain tracked separately.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "skills/software-development",
+      "rationale": "Software-development skill content is curated locally while Rust native skill catalog loading and execution contracts carry runtime parity.",
       "ticket": 25
     },
     {

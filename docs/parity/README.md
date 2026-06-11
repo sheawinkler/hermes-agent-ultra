@@ -34,6 +34,8 @@ By default this command fetches upstream directly from GitHub
 - `test-intent-mapping.md`: human-readable intent mapping table
 - `test-coverage-audit.json`: upstream behavior/test-intent coverage audit with Rust test-reference validation
 - `test-coverage-audit.md`: human-readable coverage audit, advisory gaps, and next harness moves
+- `sota-harness-matrix.json`: release-gated matrix for workflow replay, protocol differential contracts, and fault injection
+- `sota-harness-matrix.md`: human-readable SOTA harness domain summary
 - `adapter-feature-matrix.json`: platform adapter + memory plugin matrix
 - `adapter-feature-matrix.md`: human-readable adapter matrix
 - `divergence-validation.json`: ownership/review freshness and coverage checks for intentional divergences

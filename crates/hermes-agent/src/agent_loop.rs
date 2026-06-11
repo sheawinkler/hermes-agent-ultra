@@ -11011,6 +11011,8 @@ mod tests {
         seed: u64,
         max_retries: u32,
         fallback_model: Option<String>,
+        #[serde(default)]
+        include_tool_schema: bool,
         steps: Vec<ChaosHarnessStep>,
         expected: ChaosHarnessExpectation,
     }
@@ -11124,6 +11126,20 @@ mod tests {
                         "API error 429: synthetic rate limit".to_string()
                     })))
                 }
+                "connection_reset" => Err(AgentError::LlmApi(
+                    step.message
+                        .unwrap_or_else(|| "connection reset by peer".to_string()),
+                )),
+                "auth_expired" => Err(AgentError::AuthFailed(
+                    step.message
+                        .unwrap_or_else(|| "HTTP 401 Unauthorized: token expired".to_string()),
+                )),
+                "malformed_tool_payload" => Err(AgentError::LlmApi(
+                    step.message.unwrap_or_else(|| {
+                        "Provider returned error: This request is not valid because tools payload is invalid"
+                            .to_string()
+                    }),
+                )),
                 other => Err(AgentError::LlmApi(format!(
                     "unsupported chaos step '{}' in scenario '{}'",
                     other, self.scenario_id
@@ -11159,8 +11175,20 @@ mod tests {
             "chaos scenario {} seed {}",
             scenario.id, scenario.seed
         )));
+        let tool_schemas = if scenario.include_tool_schema {
+            vec![ToolSchema::new(
+                "sota_fault_probe",
+                "SOTA fault-injection probe tool",
+                hermes_core::JsonSchema::new("object"),
+            )]
+        } else {
+            Vec::new()
+        };
 
-        match agent.call_llm_with_retry_inner(&ctx, &[], None, None).await {
+        match agent
+            .call_llm_with_retry_inner(&ctx, &tool_schemas, None, None)
+            .await
+        {
             Ok(_) => ChaosHarnessRun {
                 outcome: "success",
                 attempts: provider.attempts(),

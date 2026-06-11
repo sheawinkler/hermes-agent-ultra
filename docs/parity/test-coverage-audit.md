@@ -1,6 +1,6 @@
 # Test Coverage Audit
 
-Generated: `2026-06-10T08:53:14.773456+00:00`
+Generated: `2026-06-11T01:36:01.212066+00:00`
 
 ## Gate
 
@@ -12,16 +12,16 @@ Generated: `2026-06-10T08:53:14.773456+00:00`
 
 | Metric | Value |
 | --- | ---: |
-| `tracked_behavior_rows` | 384 |
-| `covered_behavior_rows` | 384 |
+| `tracked_behavior_rows` | 415 |
+| `covered_behavior_rows` | 415 |
 | `tracked_behavior_coverage_ratio` | 1.0 |
-| `rust_test_files` | 302 |
-| `rust_test_functions` | 3409 |
-| `coverage_manifest_entries` | 374 |
-| `coverage_manifest_entries_with_valid_rust_tests` | 374 |
+| `rust_test_files` | 306 |
+| `rust_test_functions` | 3425 |
+| `coverage_manifest_entries` | 405 |
+| `coverage_manifest_entries_with_valid_rust_tests` | 405 |
 | `missing_rust_test_refs` | 0 |
 | `queue_pending` | 0 |
-| `queue_total` | 5375 |
+| `queue_total` | 5497 |
 | `test_intents_total` | 10 |
 | `test_intents_mapped` | 10 |
 
@@ -29,9 +29,9 @@ Generated: `2026-06-10T08:53:14.773456+00:00`
 
 | Manifest | Entries | Valid Rust-test entries | Referenced Rust tests | Missing refs |
 | --- | ---: | ---: | ---: | ---: |
-| `docs/parity/python-test-suite-coverage.json` | 174 | 174 | 91 | 0 |
-| `docs/parity/hermes-cli-test-coverage.json` | 113 | 113 | 61 | 0 |
-| `docs/parity/ui-tui-source-coverage.json` | 87 | 87 | 55 | 0 |
+| `docs/parity/python-test-suite-coverage.json` | 192 | 192 | 91 | 0 |
+| `docs/parity/hermes-cli-test-coverage.json` | 114 | 114 | 65 | 0 |
+| `docs/parity/ui-tui-source-coverage.json` | 99 | 99 | 55 | 0 |
 
 ## Test Intent Domains
 
@@ -39,7 +39,7 @@ Generated: `2026-06-10T08:53:14.773456+00:00`
 | --- | --- | ---: | ---: |
 | `gateway-platform-behavior` | `direct_rust_test` | 25 | 22 |
 | `tool-runtime-behavior` | `direct_rust_test` | 91 | 82 |
-| `cli-command-surface` | `direct_rust_test` | 40 | 24 |
+| `cli-command-surface` | `direct_rust_test` | 40 | 25 |
 | `agent-loop-and-runtime` | `direct_rust_test` | 49 | 45 |
 | `acp-protocol-and-transport` | `direct_rust_test` | 9 | 8 |
 | `skills-management-contract` | `direct_rust_test` | 10 | 9 |
@@ -60,8 +60,6 @@ Generated: `2026-06-10T08:53:14.773456+00:00`
 
 ## Next Sigma Harness Moves
 
-- **User-journey replay corpus**: Record CLI/TUI/gateway task journeys as deterministic fixtures so regressions are caught at the workflow level, not only at unit boundaries.
-- **Protocol differential contracts**: Run provider, MCP, ACP, and gateway request/response fixtures through normalized differential checks against upstream intent and Ultra policy.
-- **Fault-injection matrix**: Inject network stalls, partial streams, auth expiry, tool failures, and malformed model/tool payloads into the Rust runtime to prove recovery behavior.
-- **PTY and TUI golden snapshots**: Exercise real terminal input/output flows and snapshot critical UX states so command ergonomics and status rendering are protected.
 - **Coverage trend ledger**: Track behavior coverage over time so new upstream rows or local harness regressions create visible deltas before release prep.
+- **ContextLattice replay evidence index**: Index passing and failing replay artifacts into ContextLattice so agents can retrieve exact harness evidence instead of rediscovering it from scratch.
+- **Cross-version harness budget**: Record runtime and fixture-count budgets across releases so SOTA harness growth stays deterministic, bounded, and reviewable.

@@ -12183,6 +12183,42 @@ fn run_doctor_self_heal(cli: &Cli) -> Vec<serde_json::Value> {
         }
     }
 
+    let persistence = SessionPersistence::new(&state_root);
+    if let Some(reason) = persistence.db_health_error() {
+        if SessionPersistence::is_malformed_db_error_message(&reason) {
+            let report = persistence.repair_malformed_schema(true);
+            actions.push(serde_json::json!({
+                "ok": report.repaired,
+                "status": if report.repaired { "fixed" } else { "error" },
+                "detail": if report.repaired {
+                    format!(
+                        "repaired malformed sessions.db schema using {} (backup: {})",
+                        report.strategy.as_deref().unwrap_or("unknown"),
+                        report
+                            .backup_path
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "not created".to_string())
+                    )
+                } else {
+                    format!(
+                        "sessions.db schema repair failed: {}",
+                        report
+                            .error
+                            .as_deref()
+                            .unwrap_or("repair did not return a concrete error")
+                    )
+                },
+            }));
+        } else {
+            actions.push(serde_json::json!({
+                "ok": false,
+                "status": "warn",
+                "detail": format!("sessions.db does not open cleanly: {reason}"),
+            }));
+        }
+    }
+
     let pid_path = gateway_pid_path_for_cli(cli);
     if pid_path.exists() {
         match read_gateway_pid(&pid_path) {

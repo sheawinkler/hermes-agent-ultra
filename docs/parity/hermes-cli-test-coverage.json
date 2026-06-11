@@ -549,6 +549,34 @@
     {
       "coverage_kind": "rust_contract_or_documented_divergence",
       "coverage_tags": [
+        "general_cli",
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_banner.py",
+      "rationale": "Upstream banner behavior maps to Rust Ultra banner identity plus platform toolset normalization and disabled-tool filtering contracts.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/banner.rs",
+          "name": "startup_banner_names_ultra_runtime"
+        },
+        {
+          "file": "crates/hermes-cli/src/platform_toolsets.rs",
+          "name": "platform_toolset_tokens_strip_legacy_tools_suffix"
+        },
+        {
+          "file": "crates/hermes-cli/src/platform_toolsets.rs",
+          "name": "tools_config_disabled_removes_even_if_platform_enables"
+        },
+        {
+          "file": "crates/hermes-cli/tests/e2e_replay_suite.rs",
+          "name": "e2e_replay_suite_provider_auth_gateway_and_deterministic_manifest"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
         "general_cli"
       ],
       "path": "tests/hermes_cli/test_banner_git_state.py",
@@ -4123,7 +4151,7 @@
   "schema_version": 1,
   "source_backlog": "docs/parity/shared-diff-backlog.json",
   "summary": {
-    "covered_paths": 113,
+    "covered_paths": 114,
     "guard_test": "crates/hermes-parity-tests/tests/hermes_cli_test_coverage_contract.rs",
     "provider_api_mode_bridge_added": true,
     "required_backlog_classification_path": "tests/hermes_cli"

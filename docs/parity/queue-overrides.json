@@ -2831,6 +2831,226 @@
     "dde9c0d19d16": {
       "disposition": "ported",
       "notes": "Rust gateway tool-progress callbacks now emit explicit progress messages when enabled, and markdown-capable platforms render terminal commands as full bash fenced code blocks through build_gateway_tool_progress_message. Tests cover Telegram bash blocks, plain-platform compact fallback, and blank-command fallback."
+    },
+    "92dfd70d6a71": {
+      "disposition": "superseded",
+      "notes": "Upstream Photon gRPC iMessage hardening targets Python/Node optional plugin paths. Hermes Ultra's runtime messaging surface is Rust gateway adapters; no Photon sidecar is loaded by the Rust runtime."
+    },
+    "c6dc2fcd2153": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop profile-backend release-before-delete targets Electron and Python profile managers. Rust profile/session lifecycle is managed through typed config, App session state, and SessionPersistence."
+    },
+    "c4811c382fd5": {
+      "disposition": "superseded",
+      "notes": "Electron desktop icon padding changes do not affect the Rust CLI/gateway runtime or local parity gates."
+    },
+    "52f7e24a7496": {
+      "disposition": "superseded",
+      "notes": "Upstream React/TUI Plugins Hub overlay is superseded by Hermes Ultra's Rust skill/plugin governance surfaces and approved Rust CLI/TUI primary UX divergence."
+    },
+    "39b76d90137a": {
+      "disposition": "superseded",
+      "notes": "Python wheel/sdist optional-MCP packaging is not used by the Rust/Cargo runtime. Local MCP catalog and config handling are Rust-native."
+    },
+    "1febb0824000": {
+      "disposition": "ported",
+      "notes": "Rust Anthropic/OpenRouter request shaping covers modern thinking controls and strips unsupported fast-model controls in provider_profiles and provider.rs tests, including test_anthropic_strips_sampling_and_unsupported_fast_controls."
+    },
+    "ba44de06da10": {
+      "disposition": "superseded",
+      "notes": "Electron download self-heal is installer/desktop-only. Hermes Ultra's supported install and verification path is Rust/Cargo plus local parity gates."
+    },
+    "46fedef07fda": {
+      "disposition": "ported",
+      "notes": "Rust OpenRouterProvider::merge_extra_body strips local reasoning_effort and maps reasoning controls to the provider reasoning object with regression coverage in test_openrouter_merge_extra_body_strips_local_cache_fields."
+    },
+    "8d71c3891970": {
+      "disposition": "superseded",
+      "notes": "Electron websocket reconnect and Python tui_gateway session rebind paths are superseded by Rust gateway session state and agent cache rebind behavior."
+    },
+    "68a997fed4a1": {
+      "disposition": "superseded",
+      "notes": "README SEO website links are documentation/website metadata. Local README and parity release docs intentionally describe the Rust Ultra fork rather than mirroring upstream site links."
+    },
+    "4906dcfc256b": {
+      "disposition": "superseded",
+      "notes": "Desktop drag-drop remote workspace staging is an Electron UX path. Rust runtime attachment/file workflows are handled through gateway media and tool file surfaces."
+    },
+    "153060e206cd": {
+      "disposition": "superseded",
+      "notes": "Desktop optimistic base64 thumbnail rendering is React desktop UI only and is outside the Rust CLI/gateway runtime surface."
+    },
+    "72154ad879e2": {
+      "disposition": "superseded",
+      "notes": "Hosted GitHub CI uv-cache tuning is optional for this fork; local scripts and Rust gates are the authoritative CI/CD surface."
+    },
+    "891c9a682348": {
+      "disposition": "superseded",
+      "notes": "Desktop eager-upload race fixes target Electron composer stores. Rust gateway media/file handling is separate and locally gated."
+    },
+    "b021497bc84e": {
+      "disposition": "superseded",
+      "notes": "Desktop edit-composer staging spinner is React UI polish and not a Rust runtime parity requirement."
+    },
+    "29147afd637d": {
+      "disposition": "superseded",
+      "notes": "Desktop remote attachment toast copy is React desktop UX only. Rust gateway media limits and send errors are handled in platform adapters."
+    },
+    "218452b05019": {
+      "disposition": "ported",
+      "notes": "Rust SessionPersistence now detects malformed sessions.db schema, backs up raw DB sidecars, deduplicates sqlite_master, escalates to FTS schema drop and rebuild, auto-heals once during ensure_db, exposes hermes sessions repair, and has focused regression tests."
+    },
+    "59ea2f98e691": {
+      "disposition": "superseded",
+      "notes": "Desktop Manage-profiles overflow visibility is Electron/React UI only; Rust profile operations are exposed through CLI/config flows."
+    },
+    "93340fa3c1b8": {
+      "disposition": "ported",
+      "notes": "Rust terminal execution honors explicit workdir, task-scoped cwd, and non-local TERMINAL_CWD through TerminalHandler tests, covering the profile terminal.cwd behavior without Python tui_gateway."
+    },
+    "8b84d82227a3": {
+      "disposition": "superseded",
+      "notes": "Desktop live editor Enter handling is React composer state logic and not used by the Rust CLI/gateway runtime."
+    },
+    "8bb65295532c": {
+      "disposition": "superseded",
+      "notes": "Desktop sidebar CSS overlap fixes are Electron UI polish and outside the Rust runtime surface."
+    },
+    "ab5f1a1f1141": {
+      "disposition": "superseded",
+      "notes": "Desktop session switcher keybindings target Electron/React UI. Rust session switching and persistence are native CLI/TUI flows."
+    },
+    "258d24039fe5": {
+      "disposition": "superseded",
+      "notes": "Desktop thinking-disclosure pending state is React rendering state; Rust reasoning capture/display is handled in provider parsing and gateway/TUI status paths."
+    },
+    "b96bd4808dab": {
+      "disposition": "superseded",
+      "notes": "Opening chats in separate Electron windows is desktop-only and not part of the Rust CLI/gateway runtime."
+    },
+    "27a321157970": {
+      "disposition": "superseded",
+      "notes": "VS Code Marketplace theme installation is Electron desktop theming. Hermes Ultra does not load that desktop theme runtime."
+    },
+    "8f73d0d945d5": {
+      "disposition": "superseded",
+      "notes": "Desktop terminal pane resizing and palette polish targets React/Electron UI. Rust terminal backend behavior is covered by hermes-tools terminal tests."
+    },
+    "1770263cccf7": {
+      "disposition": "superseded",
+      "notes": "Desktop default project directory creation is Electron workspace boot logic. Rust CLI sessions derive cwd/workspace through terminal and context-reference paths."
+    },
+    "6b330522e1fb": {
+      "disposition": "superseded",
+      "notes": "Upstream AGENTS.md design-philosophy text is superseded by local Hermes Rust Parity Rules plus account-level engineering directives."
+    },
+    "833410e02bc3": {
+      "disposition": "superseded",
+      "notes": "Desktop ANSI palette and HUD styling is Electron/React UI polish and not used by Rust runtime surfaces."
+    },
+    "fdc90346eaa3": {
+      "disposition": "superseded",
+      "notes": "Unsafe red-team skill relocation is not imported into the Rust runtime defaults. Local skill catalog already tracks red-team and mlops skills under approved optional governance."
+    },
+    "45e1689c03b2": {
+      "disposition": "superseded",
+      "notes": "Desktop marketplace submenu HUD token changes are Electron/React styling only."
+    },
+    "7803cbfbb961": {
+      "disposition": "superseded",
+      "notes": "Desktop HUD surface styling is React/Electron-only and outside the Rust runtime contract."
+    },
+    "464276228940": {
+      "disposition": "superseded",
+      "notes": "Python Langfuse plugin base64 redaction is superseded by Rust telemetry/redaction surfaces and optional plugin divergence; Rust runtime does not emit through that Python plugin."
+    },
+    "702f4df194ff": {
+      "disposition": "superseded",
+      "notes": "Container stage2 cron ownership repair targets upstream Python container hooks. Hermes Ultra uses Rust cron persistence and local Docker/OrbStack verification policy."
+    },
+    "19c07c40379b": {
+      "disposition": "ported",
+      "notes": "Rust auxiliary client retries unsupported max_tokens responses with max_completion_tokens for newer OpenAI-family custom endpoints, covered by unsupported_max_tokens_retries_with_max_completion_tokens."
+    },
+    "311900842e88": {
+      "disposition": "superseded",
+      "notes": "Upstream Discord auto-disconnect behavior is Python adapter voice-state logic. Rust voice lifecycle is explicit join/leave state with VoiceManager tests and no Python reply-mode disconnect path."
+    },
+    "e5580f43c258": {
+      "disposition": "ported",
+      "notes": "Rust DiscordInteractionAuthPolicy includes allowed_role_ids and role matching for components, slash commands, autocomplete, and fail-closed paths."
+    },
+    "af978ecb17ef": {
+      "disposition": "superseded",
+      "notes": "Upstream expensive-model picker confirmation is superseded by Rust runtime cost accounting and configurable session spend guard; Hermes Ultra does not use the Python/Electron picker flow."
+    },
+    "243cada157ff": {
+      "disposition": "superseded",
+      "notes": "Typed gateway /model pricing lookups in upstream Python are superseded by Rust slash command parsing, typed model switching, usage pricing database, and session cost guard policy."
+    },
+    "e80754647c90": {
+      "disposition": "superseded",
+      "notes": "Desktop in-thread tool codicon styling is React UI only and not a Rust runtime behavior."
+    },
+    "c1308ebf3f0f": {
+      "disposition": "superseded",
+      "notes": "Desktop filled tool SVG glyphs are React UI styling and outside Rust runtime parity."
+    },
+    "38273676eab0": {
+      "disposition": "superseded",
+      "notes": "Desktop titlebar drag-region CSS is Electron UI polish and not used by the Rust CLI/gateway runtime."
+    },
+    "5d8c44a39341": {
+      "disposition": "superseded",
+      "notes": "Docker matrix dependency preinstall targets upstream image composition. Local Rust build/test gates and Docker policy are authoritative for this fork."
+    },
+    "183d86b3e04e": {
+      "disposition": "ported",
+      "notes": "Rust provider profile and model-switch code maps reasoning_effort into provider-specific Gemini/OpenRouter reasoning controls, with regression tests for Gemini thinking levels and OpenRouter reasoning objects."
+    },
+    "a5c32cdf3055": {
+      "disposition": "superseded",
+      "notes": "Interrupted Python venv self-heal is installer/runtime-specific to upstream Python; Hermes Ultra uses Rust/Cargo install and local shell gates."
+    },
+    "2c19208224de": {
+      "disposition": "superseded",
+      "notes": "Python Gemini audio tag rewrite is superseded by Rust TTS streaming sanitizer and MultiTtsBackend architecture; the Python tools/tts_tool path is not the runtime source."
+    },
+    "4c797d0e23c1": {
+      "disposition": "superseded",
+      "notes": "Windows console child hiding is Electron GUI process management and not part of the Rust CLI/gateway runtime."
+    },
+    "a72bb03757c0": {
+      "disposition": "superseded",
+      "notes": "Docker image-size tuning for upstream Python/Node layers is superseded by local Rust packaging and build policy."
+    },
+    "3bfbb3f2a025": {
+      "disposition": "superseded",
+      "notes": "TypeScript/React CI toolchain changes are hosted UI tooling only; local Rust runtime gates are authoritative and GitHub CI is optional."
+    },
+    "90f4b3040dcc": {
+      "disposition": "superseded",
+      "notes": "React compiler ESLint/concurrently updates target upstream JS tooling and do not affect the Rust runtime parity gate."
+    },
+    "d986bb0c6de6": {
+      "disposition": "superseded",
+      "notes": "Python web dashboard profile builder is superseded by Rust CLI/config/profile flows and approved website/dashboard divergence."
+    },
+    "6de3963e3769": {
+      "disposition": "ported",
+      "notes": "Rust App::switch_model syncs runtime provider/model env and persists the active model per session through SessionPersistence; tests cover session DB model updates and runtime env synchronization."
+    },
+    "590b3c0d7eae": {
+      "disposition": "ported",
+      "notes": "Rust Telegram edit_text now rejects overflow instead of truncating, forcing callers onto split-send fallback; send_message already splits Telegram output and edit_text_rejects_overflow_without_truncating covers the regression."
+    },
+    "0a593f132c41": {
+      "disposition": "ported",
+      "notes": "GitHub skills now resolve shared .env through HERMES_HOME with project fallback instead of hardcoded ~/.hermes."
+    },
+    "d1383a6b1450": {
+      "disposition": "ported",
+      "notes": "Sibling skills touched by upstream now use HERMES_HOME-aware .env resolution or docs, while Hermes-specific skill text keeps the local Rust runtime framing."
     }
   },
   "subject_patterns": [

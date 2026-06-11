@@ -25395,7 +25395,8 @@ fn sentrux_mcp_status(config_dir: &Path) -> (bool, bool, bool) {
     (command_on_path(SENTRUX_MCP_COMMAND), from_json, from_yaml)
 }
 
-const CLI_SESSIONS_ACTIONS: &str = "list, export, delete, prune, optimize, stats, rename, browse";
+const CLI_SESSIONS_ACTIONS: &str =
+    "list, export, delete, prune, optimize, repair, stats, rename, browse";
 
 fn file_size_mb(path: &Path) -> f64 {
     std::fs::metadata(path)
@@ -25580,6 +25581,54 @@ pub async fn handle_cli_sessions(
                 "Database size: {:.1} MB -> {:.1} MB (reclaimed {:.1} MB)",
                 before_mb, after_mb, reclaimed_mb
             );
+        }
+        "repair" => {
+            let persistence = SessionPersistence::new(hermes_config::hermes_home());
+            let db_path = persistence.db_path().to_path_buf();
+            if !db_path.exists() {
+                println!(
+                    "No session database at {} (nothing to repair).",
+                    db_path.display()
+                );
+                return Ok(());
+            }
+            match persistence.db_health_error() {
+                None => {
+                    println!("{} opens cleanly; no repair needed.", db_path.display());
+                }
+                Some(reason) if SessionPersistence::is_malformed_db_error_message(&reason) => {
+                    println!("{} has a malformed schema: {}", db_path.display(), reason);
+                    println!("Repairing with a raw backup first...");
+                    let report = persistence.repair_malformed_schema(true);
+                    if report.repaired {
+                        println!(
+                            "Repaired sessions.db (strategy: {}).",
+                            report.strategy.as_deref().unwrap_or("unknown")
+                        );
+                        if let Some(path) = report.backup_path {
+                            println!("Backup: {}", path.display());
+                        }
+                    } else {
+                        println!(
+                            "Repair failed: {}",
+                            report
+                                .error
+                                .as_deref()
+                                .unwrap_or("repair did not return a concrete error")
+                        );
+                        if let Some(path) = report.backup_path {
+                            println!("Backup preserved: {}", path.display());
+                        }
+                    }
+                }
+                Some(reason) => {
+                    println!(
+                        "{} does not open cleanly, but this is not the targeted malformed-schema repair class: {}",
+                        db_path.display(),
+                        reason
+                    );
+                }
+            }
         }
         "rename" => {
             let session_id = id.ok_or_else(|| {

@@ -1,6 +1,6 @@
 # Adapter Feature Matrix
 
-Generated: `2026-05-29T20:36:30.746412+00:00`
+Generated: `2026-06-11T00:16:37.870037+00:00`
 
 | Category | Name | Feature Flag | Status |
 | --- | --- | --- | --- |
@@ -25,6 +25,7 @@ Generated: `2026-05-29T20:36:30.746412+00:00`
 | platform_adapter | `ntfy` | `ntfy` | rust-native |
 | platform_adapter | `qqbot` | `qqbot` | rust-native |
 | platform_adapter | `signal` | `signal` | rust-native |
+| platform_adapter | `signal_rate_limit` | `signal` | rust-native |
 | platform_adapter | `slack` | `slack` | rust-native |
 | platform_adapter | `sms` | `sms` | rust-native |
 | platform_adapter | `telegram` | `telegram` | rust-native |
@@ -34,4 +35,4 @@ Generated: `2026-05-29T20:36:30.746412+00:00`
 | platform_adapter | `weixin` | `weixin` | rust-native |
 | platform_adapter | `whatsapp` | `whatsapp` | rust-native |
 
-- Platform adapters: `20`, memory plugins: `9`.
+- Platform adapters: `21`, memory plugins: `9`.
