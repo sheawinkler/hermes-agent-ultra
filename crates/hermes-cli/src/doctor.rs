@@ -744,7 +744,7 @@ fn sha256_file_hex(path: &Path) -> Option<String> {
     Some(digest.iter().map(|b| format!("{:02x}", b)).collect())
 }
 
-fn replay_integrity_for_file(path: &Path) -> ReplayIntegritySummary {
+pub(crate) fn replay_integrity_for_file(path: &Path) -> ReplayIntegritySummary {
     let mut events = 0usize;
     let mut invalid_lines = 0usize;
     let mut hash_chain_ok = true;
@@ -835,7 +835,7 @@ fn replay_integrity_summaries(replay_dir: &Path, limit: usize) -> Vec<ReplayInte
 }
 
 #[allow(unused)]
-fn replay_manifest_json(summaries: &[ReplayIntegritySummary]) -> serde_json::Value {
+pub(crate) fn replay_manifest_json(summaries: &[ReplayIntegritySummary]) -> serde_json::Value {
     let generated_at = if std::env::var("HERMES_DETERMINISTIC_ARTIFACTS")
         .ok()
         .map(|v| {
@@ -1041,14 +1041,14 @@ const DEBUG_PENDING_PASTES_FILE: &str = "pending-pastes.json";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DebugLogSnapshot {
-    tail_text: String,
-    full_text: Option<String>,
+    pub(crate) tail_text: String,
+    pub(crate) full_text: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct PendingPasteDelete {
-    url: String,
-    expires_at_unix: i64,
+    pub(crate) url: String,
+    pub(crate) expires_at_unix: i64,
 }
 
 pub(crate) fn debug_pending_pastes_path(reports_dir: &Path) -> PathBuf {

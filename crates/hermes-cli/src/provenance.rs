@@ -393,7 +393,7 @@ mod tests {
         let state_root = state_dir(cli.config_dir.as_deref().map(Path::new));
 
         let old_key = load_or_create_provenance_key(&state_root, true).expect("create key");
-        super::super::run_rotate_provenance_key(cli.clone(), true)
+        crate::misc_main::run_rotate_provenance_key(cli.clone(), true)
             .await
             .expect("rotate key");
         let new_key = load_or_create_provenance_key(&state_root, false).expect("load rotated key");

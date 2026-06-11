@@ -412,6 +412,12 @@ mod tests {
         // assert_eq!(whatsapp_gateway_menu_status(None), "paired, not enabled");
         assert_eq!(whatsapp_gateway_menu_status(None), "not configured");
         p.enabled = true;
+        assert_eq!(
+            whatsapp_gateway_menu_status(Some(&p)),
+            "not configured",
+            "enabled without pairing is not configured"
+        );
+        mark_paired(&whatsapp_session_path()).unwrap();
         assert_eq!(whatsapp_gateway_menu_status(Some(&p)), "configured");
     }
 

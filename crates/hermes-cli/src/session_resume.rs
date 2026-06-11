@@ -170,15 +170,11 @@ pub(crate) fn parse_resume_payload_file(
     })
 }
 
-/// Return the legacy `~/.hermes/sessions` directory, if `HOME` is set.
-pub(crate) fn legacy_sessions_dir() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .map(PathBuf::from)
-        .map(|home| home.join(".hermes").join("sessions"))
+fn legacy_session_dirs() -> Vec<PathBuf> {
+    hermes_config::legacy_hermes_home_candidates()
 }
 
-/// Resolve a session file, falling back to the legacy sessions directory.
+/// Resolve a session file, falling back to legacy sessions directories.
 pub(crate) fn resolve_resume_session_file_with_legacy_fallback(
     sessions_dir: &Path,
     requested: Option<&str>,
@@ -186,31 +182,35 @@ pub(crate) fn resolve_resume_session_file_with_legacy_fallback(
     match resolve_resume_session_file(sessions_dir, requested) {
         Ok(found) => Ok(found),
         Err(primary_err) => {
-            let Some(legacy_dir) = legacy_sessions_dir() else {
-                return Err(primary_err);
-            };
-            if legacy_dir == sessions_dir || !legacy_dir.exists() {
-                return Err(primary_err);
+            for legacy_dir in legacy_session_dirs() {
+                if legacy_dir == sessions_dir || !legacy_dir.exists() {
+                    continue;
+                }
+                if let Ok(found) = resolve_resume_session_file(&legacy_dir, requested) {
+                    return Ok(found);
+                }
             }
-            resolve_resume_session_file(&legacy_dir, requested).map_err(|_| primary_err)
+            Err(primary_err)
         }
     }
 }
 
-/// Resolve the latest non-empty session file, falling back to legacy.
+/// Resolve the latest non-empty session file, falling back to legacy directories.
 pub(crate) fn resolve_latest_nonempty_session_file_with_legacy_fallback(
     sessions_dir: &Path,
 ) -> Result<(String, PathBuf), AgentError> {
     match resolve_latest_nonempty_session_file(sessions_dir) {
         Ok(found) => Ok(found),
         Err(primary_err) => {
-            let Some(legacy_dir) = legacy_sessions_dir() else {
-                return Err(primary_err);
-            };
-            if legacy_dir == sessions_dir || !legacy_dir.exists() {
-                return Err(primary_err);
+            for legacy_dir in legacy_session_dirs() {
+                if legacy_dir == sessions_dir || !legacy_dir.exists() {
+                    continue;
+                }
+                if let Ok(found) = resolve_latest_nonempty_session_file(&legacy_dir) {
+                    return Ok(found);
+                }
             }
-            resolve_latest_nonempty_session_file(&legacy_dir).map_err(|_| primary_err)
+            Err(primary_err)
         }
     }
 }

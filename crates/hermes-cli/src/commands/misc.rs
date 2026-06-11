@@ -1429,6 +1429,25 @@ pub(crate) fn save_subconscious_state(state: &SubconsciousQueueState) -> Result<
     Ok(())
 }
 
+#[cfg(test)]
+pub(crate) fn subconscious_test_high_risk_state() -> SubconsciousQueueState {
+    let now = chrono::Utc::now().to_rfc3339();
+    SubconsciousQueueState {
+        tasks: vec![SubconsciousTask {
+            id: "sc-risky".to_string(),
+            source: "test".to_string(),
+            prompt: "rotate key and deploy to prod".to_string(),
+            score: 4.2,
+            risk: "high".to_string(),
+            requires_approval: false,
+            status: "pending".to_string(),
+            job_id: None,
+            created_at: now.clone(),
+            updated_at: now,
+        }],
+    }
+}
+
 fn score_subconscious_task(prompt: &str) -> f64 {
     let text = prompt.to_ascii_lowercase();
     let mut score = 1.0f64;

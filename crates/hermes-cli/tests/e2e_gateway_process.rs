@@ -8,8 +8,8 @@
 
 #[cfg(unix)]
 mod unix {
-    use assert_cmd::cargo::cargo_bin;
     use assert_cmd::Command;
+    use assert_cmd::cargo::cargo_bin;
     use std::fs;
     use std::path::Path;
     use std::process::{Command as SysCommand, Stdio};

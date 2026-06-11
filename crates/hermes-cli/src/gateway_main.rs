@@ -4,12 +4,10 @@
 //! logic, adapters registration, agent caching, and related helpers.
 //!
 //! Functions in this module access their parent (`super::`) for a few items:
-//! - `super::run_auth`
+//! - `crate::auth_main::run_auth`
 //! - `super::prompt_line`
-//! - `super::run_gateway_incoming_loop`
-//! - `super::run_telegram_poll_loop`
-//! - `super::run_api_server_inbound_loop`
-//! - `super::run_webhook_inbound_loop`
+//!
+//! Inbound message loops live in `crate::gateway_runtime`.
 
 use hermes_agent::AgentLoop;
 use hermes_agent::session_persistence::SessionPersistence;
@@ -1182,7 +1180,7 @@ pub(crate) async fn configure_gateway_platform(
 ) -> Result<(), AgentError> {
     match key {
         "weixin" => {
-            super::run_auth(
+            crate::auth_main::run_auth(
                 cli.clone(),
                 Some("login".to_string()),
                 Some("weixin".to_string()),
@@ -1270,7 +1268,7 @@ pub(crate) async fn configure_gateway_platform(
             }
         }
         "wecom" => {
-            super::run_auth(
+            crate::auth_main::run_auth(
                 cli.clone(),
                 Some("login".to_string()),
                 Some("wecom".to_string()),
@@ -1418,7 +1416,8 @@ pub(crate) async fn register_gateway_adapters(
                     .await;
                 let gw_clone = gateway.clone();
                 sidecar_tasks.push(tokio::spawn(async move {
-                    super::run_telegram_poll_loop(gw_clone, telegram_adapter).await;
+                    crate::gateway_runtime::run_telegram_poll_loop(gw_clone, telegram_adapter)
+                        .await;
                 }));
             } else {
                 println!(
@@ -1456,7 +1455,10 @@ pub(crate) async fn register_gateway_adapters(
                         gateway.register_adapter("weixin", adapter).await;
                         let gw_clone = gateway.clone();
                         sidecar_tasks.push(tokio::spawn(async move {
-                            super::run_gateway_incoming_loop(gw_clone, rx, "weixin").await;
+                            crate::gateway_runtime::run_gateway_incoming_loop(
+                                gw_clone, rx, "weixin",
+                            )
+                            .await;
                         }));
                     }
                     Err(e) => {
@@ -1482,7 +1484,10 @@ pub(crate) async fn register_gateway_adapters(
                         gateway.register_adapter("discord", adapter.clone()).await;
                         let gw_clone = gateway.clone();
                         sidecar_tasks.push(tokio::spawn(async move {
-                            super::run_gateway_incoming_loop(gw_clone, rx, "discord").await;
+                            crate::gateway_runtime::run_gateway_incoming_loop(
+                                gw_clone, rx, "discord",
+                            )
+                            .await;
                         }));
                     }
                     Err(e) => println!("Discord enabled but failed to initialize: {}", e),
@@ -1604,7 +1609,8 @@ pub(crate) async fn register_gateway_adapters(
                     gateway.register_adapter("whatsapp", adapter).await;
                     let gw_clone = gateway.clone();
                     sidecar_tasks.push(tokio::spawn(async move {
-                        super::run_gateway_incoming_loop(gw_clone, rx, "whatsapp").await;
+                        crate::gateway_runtime::run_gateway_incoming_loop(gw_clone, rx, "whatsapp")
+                            .await;
                     }));
                 }
                 Err(e) => println!("WhatsApp enabled but failed to initialize: {}", e),
@@ -1623,7 +1629,8 @@ pub(crate) async fn register_gateway_adapters(
                     gateway.register_adapter("dingtalk", adapter).await;
                     let gw_clone = gateway.clone();
                     sidecar_tasks.push(tokio::spawn(async move {
-                        super::run_gateway_incoming_loop(gw_clone, rx, "dingtalk").await;
+                        crate::gateway_runtime::run_gateway_incoming_loop(gw_clone, rx, "dingtalk")
+                            .await;
                     }));
                 }
                 Err(e) => println!("DingTalk enabled but failed to initialize: {}", e),
@@ -1672,7 +1679,10 @@ pub(crate) async fn register_gateway_adapters(
                         gateway.register_adapter("wecom", adapter).await;
                         let gw_clone = gateway.clone();
                         sidecar_tasks.push(tokio::spawn(async move {
-                            super::run_gateway_incoming_loop(gw_clone, rx, "wecom").await;
+                            crate::gateway_runtime::run_gateway_incoming_loop(
+                                gw_clone, rx, "wecom",
+                            )
+                            .await;
                         }));
                     }
                     Err(e) => println!("WeCom enabled but failed to initialize: {}", e),
@@ -1897,7 +1907,8 @@ pub(crate) async fn register_gateway_adapters(
                     gateway.register_adapter("ntfy", adapter).await;
                     let gw_clone = gateway.clone();
                     sidecar_tasks.push(tokio::spawn(async move {
-                        super::run_gateway_incoming_loop(gw_clone, rx, "ntfy").await;
+                        crate::gateway_runtime::run_gateway_incoming_loop(gw_clone, rx, "ntfy")
+                            .await;
                     }));
                 }
                 Err(e) => println!("ntfy enabled but failed to initialize: {}", e),
@@ -1920,7 +1931,7 @@ pub(crate) async fn register_gateway_adapters(
                 gateway.register_adapter("webhook", adapter).await;
                 let gw_clone = gateway.clone();
                 sidecar_tasks.push(tokio::spawn(async move {
-                    super::run_webhook_inbound_loop(gw_clone, rx).await;
+                    crate::gateway_runtime::run_webhook_inbound_loop(gw_clone, rx).await;
                 }));
             }
         }
@@ -1939,7 +1950,7 @@ pub(crate) async fn register_gateway_adapters(
             gateway.register_adapter("api_server", adapter).await;
             let gw_clone = gateway.clone();
             sidecar_tasks.push(tokio::spawn(async move {
-                super::run_api_server_inbound_loop(gw_clone, rx).await;
+                crate::gateway_runtime::run_api_server_inbound_loop(gw_clone, rx).await;
             }));
             println!(
                 "API server adapter enabled on {}:{}",

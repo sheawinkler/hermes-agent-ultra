@@ -726,7 +726,7 @@ fn walkthrough_state_path() -> PathBuf {
         .join("state.json")
 }
 
-fn walkthrough_events_path() -> PathBuf {
+pub(crate) fn walkthrough_events_path() -> PathBuf {
     hermes_config::hermes_home()
         .join("walkthrough")
         .join("events.jsonl")

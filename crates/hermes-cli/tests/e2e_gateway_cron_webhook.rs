@@ -14,7 +14,7 @@ mod unix {
     use std::process::{Command as SysCommand, Stdio};
     use std::thread;
     use std::time::{Duration as StdDuration, Instant};
-    use tokio::time::{sleep, Duration as TokioDuration};
+    use tokio::time::{Duration as TokioDuration, sleep};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

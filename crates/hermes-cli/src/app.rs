@@ -237,6 +237,48 @@ fn available_disk_space_bytes(_path: &Path) -> Option<u64> {
 }
 
 // ---------------------------------------------------------------------------
+// Session snapshot write coalescing (avoids disk churn during token streaming)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct SnapshotPersistGate {
+    last_persist: Instant,
+    pending_mutations: u32,
+    backoff_ms: u64,
+}
+
+impl SnapshotPersistGate {
+    const MIN_INTERVAL_MS: u64 = 500;
+    const MAX_BACKOFF_MS: u64 = 8_000;
+    const MUTATION_THRESHOLD: u32 = 3;
+
+    fn new() -> Self {
+        Self {
+            last_persist: Instant::now(),
+            pending_mutations: 0,
+            backoff_ms: Self::MIN_INTERVAL_MS,
+        }
+    }
+
+    fn record_mutation(&mut self) {
+        self.pending_mutations += 1;
+    }
+
+    fn should_persist(&self) -> bool {
+        let elapsed = self.last_persist.elapsed();
+        elapsed >= Duration::from_millis(Self::MIN_INTERVAL_MS)
+            || self.pending_mutations >= Self::MUTATION_THRESHOLD
+            || elapsed >= Duration::from_millis(self.backoff_ms)
+    }
+
+    fn mark_persisted(&mut self) {
+        self.last_persist = Instant::now();
+        self.pending_mutations = 0;
+        self.backoff_ms = (self.backoff_ms.saturating_mul(2)).min(Self::MAX_BACKOFF_MS);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
@@ -308,6 +350,8 @@ pub struct App {
     /// Accumulated ACP server lifecycle events (connect, prompt, disconnect).
     /// Printed when the user interacts with /acp_server commands.
     pub acp_event_buffer: Option<Arc<std::sync::Mutex<Vec<String>>>>,
+    /// Coalesces autosave writes between agent turns.
+    snapshot_gate: SnapshotPersistGate,
 }
 
 impl std::fmt::Debug for App {
@@ -358,6 +402,7 @@ impl Clone for App {
             pet_settings: self.pet_settings.clone(),
             acp_server: self.acp_server.clone(),
             acp_event_buffer: self.acp_event_buffer.clone(),
+            snapshot_gate: self.snapshot_gate.clone(),
         }
     }
 }
@@ -2148,6 +2193,7 @@ impl App {
             pet_settings: load_pet_settings(),
             acp_server: None,
             acp_event_buffer: None,
+            snapshot_gate: SnapshotPersistGate::new(),
         };
         app.ensure_session_stub_snapshot();
         Ok(app)
@@ -3316,8 +3362,24 @@ impl App {
         &mut self,
         result: hermes_core::AgentResult,
     ) -> Result<(), AgentError> {
+        let end_of_run = result.finished_naturally || result.interrupted;
         self.apply_agent_result(result);
-        self.persist_session_snapshot(None).map(|_| ())
+        self.snapshot_gate.record_mutation();
+        if end_of_run || self.snapshot_gate.should_persist() {
+            self.persist_session_snapshot(None).map(|_| ())?;
+            self.snapshot_gate.mark_persisted();
+        }
+        Ok(())
+    }
+
+    /// Force a pending autosave flush (e.g. before exit).
+    pub fn flush_session_snapshot(&mut self) -> Result<(), AgentError> {
+        if self.snapshot_gate.pending_mutations == 0 {
+            return Ok(());
+        }
+        self.persist_session_snapshot(None).map(|_| ())?;
+        self.snapshot_gate.mark_persisted();
+        Ok(())
     }
 
     /// Count background jobs currently queued/running.
@@ -3890,6 +3952,7 @@ mod tests {
             pet_settings: PetSettings::default(),
             acp_server: None,
             acp_event_buffer: None,
+            snapshot_gate: SnapshotPersistGate::new(),
         }
     }
 
@@ -4319,8 +4382,8 @@ mod tests {
         assert!(!compressed);
     }
 
-    #[test]
-    fn test_new_session_persists_startup_stub_snapshot() {
+    #[tokio::test]
+    async fn test_new_session_persists_startup_stub_snapshot() {
         let _guard = env_test_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let mut app = build_minimal_test_app();
@@ -4535,6 +4598,7 @@ mod tests {
 
     #[test]
     fn test_build_agent_config_maps_single_failover_model_from_env() {
+        let _guard = env_test_lock();
         crate::env_vars::remove_var("HERMES_FALLBACK_MODELS");
         crate::env_vars::set_var("HERMES_FALLBACK_MODEL", "anthropic:claude-3-5-sonnet");
         let cfg = GatewayConfig::default();

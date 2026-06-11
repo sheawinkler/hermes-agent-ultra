@@ -18,7 +18,6 @@ use hermes_agent::{
     RunConversationParams, plugins::PluginManifest, split_messages_for_run_conversation,
 };
 use hermes_core::AgentError;
-use hermes_intelligence::{SwarmExecutionMode, build_swarm_execution_plan, swarm_runtime_status};
 use hermes_skills;
 use hermes_tools::ToolPolicyEngine;
 use hermes_tools::tools::messaging::MessagingSessionContext;
@@ -35,25 +34,30 @@ use crate::alpha_runtime::{
     load_contextlattice_policy, load_last_trading_alpha_report, load_objective_contract,
     load_objective_dag, load_objective_ensemble_policy, load_objective_eval_trend,
     load_objective_learning_ledger, load_objective_profile, load_objective_simulation_policy,
-    load_quorum_policy, objective_lifecycle_is_active, objective_profile_specialized_for,
+    objective_lifecycle_is_active, objective_profile_specialized_for,
     recover_orphan_loop_events, refresh_trading_alpha_report, render_mission_board,
     render_trading_alpha_board, replay_loop_queue, reset_objective_profile_generalized,
     set_claim_verifier_enabled, set_contextlattice_policy_mode,
     set_objective_contract_behavior_mode, set_objective_contract_lifecycle_status,
     set_objective_ensemble_mode, set_objective_profile, set_objective_simulation_mode,
-    set_quorum_policy, summarize_objective_contract, upsert_objective_contract,
+    summarize_objective_contract, upsert_objective_contract,
     utility_terms_from_contract,
 };
 pub(crate) mod auth_cmd;
 pub(crate) mod background;
 pub(crate) mod browser;
 pub(crate) mod compress;
+pub(crate) mod infra;
+pub(crate) mod integrations;
 pub(crate) mod kanban;
 pub(crate) mod misc;
 pub(crate) mod model;
 pub(crate) mod objective;
 pub(crate) mod ops;
 pub(crate) mod policy;
+pub(crate) mod quorum;
+pub(crate) mod runtime_ui;
+pub(crate) mod swarm;
 pub(crate) mod session;
 pub mod skills;
 pub(crate) mod skills_infra;
@@ -85,7 +89,7 @@ use model::{
     unmet_model_requirements,
 };
 
-use crate::app::{App, PetDock, PetSettings};
+use crate::app::App;
 use crate::kanban::{
     KanbanActionInput, KanbanBoard, KanbanLane, NewKanbanTaskInput, add_task, archive_done,
     claim_task, create_or_select_board, ensure_board, find_task_mut, lane_counts, load_store,
@@ -93,7 +97,6 @@ use crate::kanban::{
 };
 use crate::model_switch::{curated_provider_slugs, normalize_provider_model, provider_model_ids};
 use crate::pairing_store::{PairingStatus, PairingStore};
-use crate::skin_engine::{BUILTIN_SKINS, canonical_skin_name};
 use hermes_config::{GatewayConfig, LlmProviderConfig};
 
 // ---------------------------------------------------------------------------
@@ -968,8 +971,8 @@ pub async fn handle_slash_command(
         "/evolve" => ops::handle_ops_evolve_command(app, args).await,
         "/objective" => objective::handle_objective_command(app, args),
         "/claims" => handle_claims_command(app, args),
-        "/quorum" => handle_quorum_command(app, args).await,
-        "/swarm" => handle_swarm_command(app, args).await,
+        "/quorum" => quorum::handle_quorum_command(app, args).await,
+        "/swarm" => swarm::handle_swarm_command(app, args).await,
         "/simulate" => ops::handle_simulate_command(app, args),
         "/specpatch" => handle_specpatch_command(app, args).await,
         "/heatmap" => handle_heatmap_command(app, args).await,
@@ -979,25 +982,25 @@ pub async fn handle_slash_command(
         "/auth" => auth_cmd::handle_auth_command(app, args).await,
         "/provider" => misc::handle_provider_command(app).await,
         "/personality" => misc::handle_personality_command(app, args),
-        "/profile" | "/whoami" => handle_profile_command(app),
+        "/profile" | "/whoami" => runtime_ui::handle_profile_command(app),
         "/fast" | "/skin" | "/voice" => {
-            handle_runtime_ui_mode_command(app, canonical_command(cmd), args)
+            runtime_ui::handle_runtime_ui_mode_command(app, canonical_command(cmd), args)
         }
-        "/pet" => handle_pet_command(app, args),
+        "/pet" => runtime_ui::handle_pet_command(app, args),
         "/skills" => skills::handle_skills_command(app, args).await,
         "/curator" => misc::handle_curator_command(app, args).await,
         "/tools" => misc::handle_tools_command(app, args),
         "/toolcards" => misc::handle_toolcards_command(app, args),
-        "/toolsets" => handle_toolsets_command(app),
-        "/plugins" => handle_plugins_command(app),
-        "/mcp" => handle_mcp_command(app),
-        "/reload" | "/reload-mcp" => handle_reload_command(app, canonical_command(cmd)),
-        "/cron" => handle_cron_command(app),
-        "/agents" => handle_agents_command(app, args),
+        "/toolsets" => infra::handle_toolsets_command(app),
+        "/plugins" => infra::handle_plugins_command(app),
+        "/mcp" => infra::handle_mcp_command(app),
+        "/reload" | "/reload-mcp" => infra::handle_reload_command(app, canonical_command(cmd)),
+        "/cron" => infra::handle_cron_command(app),
+        "/agents" => infra::handle_agents_command(app, args),
         "/kanban" => kanban::handle_kanban_command(app, args),
         "/plan" => handle_plan_command(app, args),
-        "/lsp" => handle_lsp_command(app, args),
-        "/graph" => handle_graph_command(app, args).await,
+        "/lsp" => infra::handle_lsp_command(app, args),
+        "/graph" => infra::handle_graph_command(app, args).await,
         "/qos" => ops::handle_qos_command(app, args).await,
         "/image" => handle_image_command(app, args),
         "/config" => misc::handle_config_command(app, args),
@@ -1016,8 +1019,8 @@ pub async fn handle_slash_command(
         "/autopilot" => ops::handle_ops_autopilot_command(app, args).await,
         "/mission" => background::handle_mission_command(app, args).await,
         "/dashboard" => ops::handle_dashboard_command(app, args).await,
-        "/platforms" => handle_platforms_command(app),
-        "/integrations" => handle_integrations_command(app, args).await,
+        "/platforms" => integrations::handle_platforms_command(app),
+        "/integrations" => integrations::handle_integrations_command(app, args).await,
         "/commands" => handle_commands_catalog_command(app, args),
         "/boot" => policy::handle_boot_command(app, args).await,
         "/walkthrough" => policy::handle_walkthrough_command(app, args),
@@ -1030,20 +1033,20 @@ pub async fn handle_slash_command(
         "/feedback" => handle_feedback_command(app, args),
         "/restart" => handle_restart_command(app, args),
         "/update" => handle_update_command(app, args).await,
-        "/redraw" => handle_redraw_command(app),
-        "/paste" => handle_paste_command(app, args),
+        "/redraw" => runtime_ui::handle_redraw_command(app),
+        "/paste" => runtime_ui::handle_paste_command(app, args),
         "/gquota" => handle_gquota_command(app, args).await,
         "/approve" => handle_approve_command(app, args),
         "/deny" => handle_deny_command(app, args),
-        "/copy" => handle_copy_command(app),
+        "/copy" => runtime_ui::handle_copy_command(app),
         "/save" => session::handle_save_command(app, args),
         "/load" => session::handle_load_command(app, args),
         "/resume" => session::handle_resume_command(app, args),
         "/sessions" => session::handle_sessions_command(app, args),
         "/background" => background::handle_background_command(app, args),
-        "/mouse" => handle_mouse_command(app, args),
+        "/mouse" => runtime_ui::handle_mouse_command(app, args),
         "/verbose" => misc::handle_verbose_command(app),
-        "/statusbar" => handle_statusbar_command(app),
+        "/statusbar" => runtime_ui::handle_statusbar_command(app),
         "/yolo" => misc::handle_yolo_command(app),
         "/browser" => browser::handle_browser_command(app, args).await,
         "/reasoning" => misc::handle_reasoning_command(app, args),
@@ -1191,485 +1194,6 @@ fn detect_repo_root_from_cwd() -> Option<PathBuf> {
         }
     }
     None
-}
-
-fn handle_profile_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    let home = hermes_config::hermes_home();
-    let selected = app.config.profile.current.as_deref().unwrap_or("default");
-    let mut out = String::new();
-    let _ = writeln!(out, "Active profile: {}", selected);
-    let _ = writeln!(out, "Hermes home: {}", home.display());
-    let _ = writeln!(out, "Session id: {}", app.session_id);
-    emit_command_output(app, out.trim_end());
-    Ok(CommandResult::Handled)
-}
-
-fn handle_runtime_ui_mode_command(
-    app: &mut App,
-    cmd: &str,
-    args: &[&str],
-) -> Result<CommandResult, AgentError> {
-    let msg = match cmd {
-        "/skin" => {
-            let first = args.first().copied().unwrap_or("status");
-            if first.eq_ignore_ascii_case("list") {
-                let active = std::env::var("HERMES_THEME").unwrap_or_else(|_| "ultra-neon".to_string());
-                let active_canonical = canonical_skin_name(&active).unwrap_or("ultra-neon");
-                let mut out = String::new();
-                let _ = writeln!(out, "Built-in skins (active: {}):", active_canonical);
-                for (name, detail) in BUILTIN_SKINS {
-                    let marker = if *name == active_canonical { "✓" } else { " " };
-                    let _ = writeln!(out, "  {} {:<30} {}", marker, name, detail);
-                }
-                let _ = writeln!(
-                    out,
-                    "\nUse `/skin <name>` or `/skin set <name>` to switch immediately."
-                );
-                out.trim_end().to_string()
-            } else if first.eq_ignore_ascii_case("status") || first.eq_ignore_ascii_case("show") {
-                let active = std::env::var("HERMES_THEME").unwrap_or_else(|_| "ultra-neon".to_string());
-                let active_canonical = canonical_skin_name(&active).unwrap_or("ultra-neon");
-                format!(
-                    "Current skin: {}\nUse `/skin list` to browse options.\nUse `/skin <name>` to switch now.",
-                    active_canonical
-                )
-            } else {
-                let requested = if first.eq_ignore_ascii_case("set") {
-                    args.get(1).copied().unwrap_or("")
-                } else {
-                    first
-                };
-                if requested.trim().is_empty() {
-                    "Usage: `/skin list` or `/skin <name>`".to_string()
-                } else if let Some(canonical) = canonical_skin_name(requested) {
-                    crate::env_vars::set_var("HERMES_THEME", canonical);
-                    app.request_theme_change(canonical);
-                    format!(
-                        "Skin switched to `{}`.\nApplied in this TUI session and exported as HERMES_THEME for child processes.",
-                        canonical
-                    )
-                } else {
-                    format!(
-                        "Unknown skin `{}`. Use `/skin list` for built-ins.",
-                        requested
-                    )
-                }
-            }
-        }
-        "/fast" => format!(
-            "Fast mode compatibility command received (`{}`).\nCurrent model: {}\nTip: switch to a lower-latency model via `/model`.",
-            args.first().copied().unwrap_or("status"),
-            app.current_model
-        ),
-        "/voice" => "Voice mode uses provider/platform capabilities; no separate TUI voice engine is active in this session.".to_string(),
-        _ => "Unsupported runtime UI mode command.".to_string(),
-    };
-    emit_command_output(app, msg);
-    Ok(CommandResult::Handled)
-}
-
-fn render_pet_status(settings: &PetSettings) -> String {
-    format!(
-        "Pet status:\n  - enabled: {}\n  - species: {}\n  - mood: {}\n  - dock: {}\n  - speed_ms: {}\n\nUse `/pet on`, `/pet off`, `/pet toggle`, `/pet set <species>`, `/pet mood <mood>`, `/pet dock <left|right>`, `/pet speed <ms>`, `/pet list`.",
-        if settings.enabled { "ON" } else { "OFF" },
-        settings.species,
-        settings.mood,
-        settings.dock.as_str(),
-        settings.tick_ms
-    )
-}
-
-fn parse_pet_species(value: &str) -> Option<String> {
-    let normalized = value.trim().to_ascii_lowercase();
-    PetSettings::species_catalog()
-        .iter()
-        .find(|candidate| **candidate == normalized)
-        .map(|candidate| (*candidate).to_string())
-}
-
-fn parse_pet_mood(value: &str) -> Option<String> {
-    let normalized = value.trim().to_ascii_lowercase();
-    PetSettings::mood_catalog()
-        .iter()
-        .find(|candidate| **candidate == normalized)
-        .map(|candidate| (*candidate).to_string())
-}
-
-fn parse_pet_dock(value: &str) -> Option<PetDock> {
-    let normalized = value.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "left" => Some(PetDock::Left),
-        "right" => Some(PetDock::Right),
-        _ => None,
-    }
-}
-
-fn handle_pet_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let action = args.first().copied().unwrap_or("status");
-    let mut settings = app.pet_settings().clone();
-
-    match action.to_ascii_lowercase().as_str() {
-        "status" => {
-            emit_command_output(app, render_pet_status(&settings));
-        }
-        "list" => {
-            emit_command_output(
-                app,
-                format!(
-                    "Available pets:\n  - species: {}\n  - moods: {}\n  - dock: left, right",
-                    PetSettings::species_catalog().join(", "),
-                    PetSettings::mood_catalog().join(", ")
-                ),
-            );
-        }
-        "on" | "off" | "toggle" | "wake" | "sleep" | "tuck" => {
-            let action_lc = action.to_ascii_lowercase();
-            let normalized_toggle = match action_lc.as_str() {
-                "wake" => Some("on"),
-                "sleep" | "tuck" => Some("off"),
-                other => Some(other),
-            };
-            match parse_toggle_arg(normalized_toggle, settings.enabled) {
-                Ok(enabled) => {
-                    settings.enabled = enabled;
-                    app.set_pet_settings(settings.clone())?;
-                    emit_command_output(
-                        app,
-                        format!(
-                            "Pet {}.\n{}",
-                            if settings.enabled {
-                                "enabled"
-                            } else {
-                                "hidden"
-                            },
-                            render_pet_status(&settings)
-                        ),
-                    );
-                }
-                Err(_) => emit_command_output(
-                    app,
-                    "Usage: /pet [status|on|off|toggle|wake|tuck|list|set <species>|mood <mood>|dock <left|right>|speed <ms>]",
-                ),
-            }
-        }
-        "set" | "species" => {
-            let Some(raw) = args.get(1).copied() else {
-                emit_command_output(
-                    app,
-                    format!(
-                        "Usage: /pet set <species>\nAvailable species: {}",
-                        PetSettings::species_catalog().join(", ")
-                    ),
-                );
-                return Ok(CommandResult::Handled);
-            };
-            if let Some(species) = parse_pet_species(raw) {
-                settings.species = species;
-                app.set_pet_settings(settings.clone())?;
-                emit_command_output(app, render_pet_status(&settings));
-            } else {
-                emit_command_output(
-                    app,
-                    format!(
-                        "Unknown species '{}'. Available: {}",
-                        raw,
-                        PetSettings::species_catalog().join(", ")
-                    ),
-                );
-            }
-        }
-        "mood" => {
-            let Some(raw) = args.get(1).copied() else {
-                emit_command_output(
-                    app,
-                    format!(
-                        "Usage: /pet mood <mood>\nAvailable moods: {}",
-                        PetSettings::mood_catalog().join(", ")
-                    ),
-                );
-                return Ok(CommandResult::Handled);
-            };
-            if let Some(mood) = parse_pet_mood(raw) {
-                settings.mood = mood;
-                app.set_pet_settings(settings.clone())?;
-                emit_command_output(app, render_pet_status(&settings));
-            } else {
-                emit_command_output(
-                    app,
-                    format!(
-                        "Unknown mood '{}'. Available: {}",
-                        raw,
-                        PetSettings::mood_catalog().join(", ")
-                    ),
-                );
-            }
-        }
-        "dock" => {
-            let Some(raw) = args.get(1).copied() else {
-                emit_command_output(app, "Usage: /pet dock <left|right>");
-                return Ok(CommandResult::Handled);
-            };
-            if let Some(dock) = parse_pet_dock(raw) {
-                settings.dock = dock;
-                app.set_pet_settings(settings.clone())?;
-                emit_command_output(app, render_pet_status(&settings));
-            } else {
-                emit_command_output(app, "Usage: /pet dock <left|right>");
-            }
-        }
-        "speed" => {
-            let Some(raw) = args.get(1).copied() else {
-                emit_command_output(app, "Usage: /pet speed <ms>");
-                return Ok(CommandResult::Handled);
-            };
-            match raw.trim().parse::<u64>() {
-                Ok(ms) => {
-                    settings.tick_ms = ms;
-                    app.set_pet_settings(settings.clone())?;
-                    emit_command_output(app, render_pet_status(&settings));
-                }
-                Err(_) => emit_command_output(app, "Usage: /pet speed <ms>"),
-            }
-        }
-        _ => emit_command_output(
-            app,
-            "Usage: /pet [status|on|off|toggle|wake|tuck|list|set <species>|mood <mood>|dock <left|right>|speed <ms>]",
-        ),
-    }
-
-    Ok(CommandResult::Handled)
-}
-
-fn handle_toolsets_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    if app.config.platform_toolsets.is_empty() {
-        emit_command_output(app, "No explicit platform toolsets configured.");
-        return Ok(CommandResult::Handled);
-    }
-    let mut rows: Vec<_> = app.config.platform_toolsets.iter().collect();
-    rows.sort_by(|a, b| a.0.cmp(b.0));
-    let mut out = String::from("Configured toolsets by platform:\n");
-    for (platform, toolsets) in rows {
-        let _ = writeln!(out, "  - {:<10} {}", platform, toolsets.join(", "));
-    }
-    emit_command_output(app, out.trim_end());
-    Ok(CommandResult::Handled)
-}
-
-fn handle_plugins_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    let rows = discover_plugin_surface(true);
-    if rows.is_empty() {
-        let plugins_dir = hermes_config::hermes_home().join("plugins");
-        emit_command_output(
-            app,
-            format!(
-                "No plugin bundles discovered.\nUser plugin dir: {}\nInstall with `hermes plugins install <owner/repo>`.",
-                plugins_dir.display()
-            ),
-        );
-    } else {
-        emit_command_output(
-            app,
-            format!(
-                "Plugin surface ({} entries):\n{}",
-                rows.len(),
-                render_plugin_surface_table(&rows)
-            ),
-        );
-    }
-    Ok(CommandResult::Handled)
-}
-
-fn handle_mcp_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    if app.config.mcp_servers.is_empty() {
-        emit_command_output(app, "No MCP servers configured in `config.yaml`.");
-        return Ok(CommandResult::Handled);
-    }
-    let mut out = String::from("Configured MCP servers:\n");
-    for server in &app.config.mcp_servers {
-        let endpoint = server
-            .url
-            .as_deref()
-            .filter(|u| !u.is_empty())
-            .unwrap_or("<stdio>");
-        let _ = writeln!(
-            out,
-            "  - {:<18} {}  [parallel_tool_calls:{}]",
-            server.name,
-            endpoint,
-            if server.supports_parallel_tool_calls {
-                "on"
-            } else {
-                "off"
-            }
-        );
-    }
-    emit_command_output(app, out.trim_end());
-    Ok(CommandResult::Handled)
-}
-
-fn handle_reload_command(app: &mut App, cmd: &str) -> Result<CommandResult, AgentError> {
-    if cmd == "/reload-mcp" {
-        emit_command_output(
-            app,
-            "MCP reload requested. Restart session/gateway for full connector renegotiation.",
-        );
-    } else {
-        hermes_config::loader::load_dotenv();
-        match hermes_config::load_config(app.state_root.to_str()) {
-            Ok(cfg) => {
-                app.config = Arc::new(cfg);
-                emit_command_output(
-                    app,
-                    "Reload complete: env + config rehydrated for this session.",
-                );
-            }
-            Err(err) => {
-                emit_command_output(
-                    app,
-                    format!(
-                        "Reload partially applied (.env refreshed), but config parse failed: {}",
-                        err
-                    ),
-                );
-            }
-        }
-    }
-    Ok(CommandResult::Handled)
-}
-
-fn handle_cron_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    let cron_data = hermes_config::cron_dir();
-    let jobs_file = cron_data.join("jobs.json");
-    let count = std::fs::read_to_string(&jobs_file)
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| {
-            v.get("jobs")
-                .and_then(|j| j.as_array())
-                .map(|arr| arr.len())
-                .or_else(|| v.as_array().map(|arr| arr.len()))
-        })
-        .unwrap_or_else(|| {
-            std::fs::read_dir(&cron_data)
-                .ok()
-                .map(|rd| {
-                    rd.flatten()
-                        .filter(|e| {
-                            e.path().extension().and_then(|x| x.to_str()) == Some("json")
-                                && e.file_name().to_string_lossy() != "jobs.json"
-                        })
-                        .count()
-                })
-                .unwrap_or(0)
-        });
-    emit_command_output(
-        app,
-        format!(
-            "Cron scheduler data dir: {}\nPersisted jobs: {}\nUse `hermes cron list` for full job table.",
-            cron_data.display(),
-            count
-        ),
-    );
-    Ok(CommandResult::Handled)
-}
-
-fn background_status_rows() -> Vec<String> {
-    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
-    let mut rows = Vec::new();
-    let Ok(read_dir) = std::fs::read_dir(&jobs_dir) else {
-        return rows;
-    };
-    for entry in read_dir.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("json") {
-            continue;
-        }
-        let Ok(raw) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
-            continue;
-        };
-        let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("unknown");
-        let status = v
-            .get("status")
-            .and_then(|x| x.as_str())
-            .unwrap_or("unknown");
-        let task = v
-            .get("task")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .replace('\n', " ");
-        rows.push(format!("{id}  [{status}]  {task}"));
-    }
-    rows.sort();
-    rows
-}
-
-fn env_truthy(raw: &str) -> bool {
-    matches!(
-        raw.trim().to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
-}
-
-fn handle_agents_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let sub = args.first().map(|s| s.trim().to_ascii_lowercase());
-
-    if matches!(sub.as_deref(), Some("pause")) {
-        crate::env_vars::set_var("HERMES_DELEGATION_PAUSED", "1");
-        emit_command_output(
-            app,
-            "Delegation spawning paused for this runtime.\nSet with `/agents resume`.\nStatus: `/agents status`.",
-        );
-        return Ok(CommandResult::Handled);
-    }
-    if matches!(sub.as_deref(), Some("resume" | "unpause")) {
-        crate::env_vars::set_var("HERMES_DELEGATION_PAUSED", "0");
-        emit_command_output(
-            app,
-            "Delegation spawning resumed for this runtime.\nStatus: `/agents status`.",
-        );
-        return Ok(CommandResult::Handled);
-    }
-    if matches!(sub.as_deref(), Some("doctor")) {
-        emit_command_output(
-            app,
-            "Agents doctor\n- queue manifest audit: `python3 scripts/audit_background_queue.py`\n- optional repair: `python3 scripts/audit_background_queue.py --repair`\n- delegation state: `/agents status`\n- spawn tree UI: `/agents` (TUI overlay)",
-        );
-        return Ok(CommandResult::Handled);
-    }
-
-    if matches!(sub.as_deref(), Some(other) if other != "status" && other != "list") {
-        emit_command_output(app, "Usage: /agents [status|pause|resume|doctor]");
-        return Ok(CommandResult::Handled);
-    }
-
-    let paused = std::env::var("HERMES_DELEGATION_PAUSED")
-        .ok()
-        .map(|raw| env_truthy(&raw))
-        .unwrap_or(false);
-    let rows = background_status_rows();
-    if rows.is_empty() {
-        emit_command_output(
-            app,
-            format!(
-                "Delegation spawning: {}\nBackground jobs: 0\n\nNo background jobs found.\nAudit/repair queue manifests with `python3 scripts/audit_background_queue.py [--repair]`.",
-                if paused { "paused" } else { "active" }
-            ),
-        );
-    } else {
-        let joined = rows.into_iter().take(20).collect::<Vec<_>>().join("\n");
-        emit_command_output(
-            app,
-            format!(
-                "Delegation spawning: {}\nBackground jobs (top 20):\n{}\n\nQueue audit: `python3 scripts/audit_background_queue.py`\nPause/resume: `/agents pause` or `/agents resume`",
-                if paused { "paused" } else { "active" },
-                joined,
-            ),
-        );
-    }
-    Ok(CommandResult::Handled)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1953,10 +1477,11 @@ fn handle_plan_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
             }
             "off" | "advisory" | "enforce" => {
                 if let Some(mode) = PlanCapabilityMode::parse(&next) {
-                    crate::env_vars::set_var("HERMES_PLAN_CAPABILITY_ROUTER", mode.as_str());
+                    let mode_label = mode.as_str();
+                    crate::env_vars::set_var("HERMES_PLAN_CAPABILITY_ROUTER", mode_label);
                     emit_command_output(
                         app,
-                        format!("planner capability router set to `{}`.", mode.as_str()),
+                        format!("planner capability router set to `{}`.", mode_label),
                     );
                 }
             }
@@ -2063,526 +1588,6 @@ fn handle_plan_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
     background::handle_background_command(app, args)
 }
 
-fn handle_lsp_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let sub = args
-        .first()
-        .map(|v| v.to_ascii_lowercase())
-        .unwrap_or_else(|| "status".to_string());
-    match sub.as_str() {
-        "status" | "show" => {
-            let cwd = std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| "<unavailable>".to_string());
-            let mut out = String::new();
-            let _ = writeln!(out, "LSP/code-index status");
-            let _ = writeln!(out, "  cwd: {}", cwd);
-            let _ = writeln!(
-                out,
-                "  code_index_enabled: {}",
-                yes_no(app.config.agent.code_index_enabled)
-            );
-            let _ = writeln!(
-                out,
-                "  code_index_max_files: {}",
-                app.config.agent.code_index_max_files
-            );
-            let _ = writeln!(
-                out,
-                "  code_index_max_symbols: {}",
-                app.config.agent.code_index_max_symbols
-            );
-            let _ = writeln!(
-                out,
-                "  lsp_context_enabled: {}",
-                yes_no(app.config.agent.lsp_context_enabled)
-            );
-            let _ = writeln!(
-                out,
-                "  lsp_context_max_chars: {}",
-                app.config.agent.lsp_context_max_chars
-            );
-            let _ = writeln!(
-                out,
-                "  tip: run `/plan map the repo architecture` to force a high-signal repo-map pass."
-            );
-            emit_command_output(app, out.trim_end());
-        }
-        "refresh" => {
-            emit_command_output(
-                app,
-                "Code index refresh is automatic while the agent executes tool calls. Queue a focused analysis with `/plan <task>` if you want a deliberate repo-map rebuild now.",
-            );
-        }
-        "help" => {
-            emit_command_output(
-                app,
-                "Usage: /lsp [status|refresh]\n  status   show code-index + LSP context configuration\n  refresh  explain how to trigger a fresh index pass",
-            );
-        }
-        _ => emit_command_output(app, "Usage: /lsp [status|refresh]"),
-    }
-    Ok(CommandResult::Handled)
-}
-
-fn collect_graph_candidate_files(
-    root: &Path,
-    max_files: usize,
-    out: &mut Vec<PathBuf>,
-) -> Result<(), AgentError> {
-    if out.len() >= max_files {
-        return Ok(());
-    }
-    let rd = std::fs::read_dir(root)
-        .map_err(|e| AgentError::Io(format!("read_dir {}: {}", root.display(), e)))?;
-    for entry in rd {
-        if out.len() >= max_files {
-            break;
-        }
-        let entry = match entry {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let path = entry.path();
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-        if path.is_dir() {
-            if matches!(
-                name,
-                ".git"
-                    | "target"
-                    | "node_modules"
-                    | ".venv"
-                    | "venv"
-                    | "__pycache__"
-                    | ".mypy_cache"
-                    | ".pytest_cache"
-            ) {
-                continue;
-            }
-            collect_graph_candidate_files(&path, max_files, out)?;
-            continue;
-        }
-        let ext = path
-            .extension()
-            .and_then(|v| v.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if matches!(ext.as_str(), "rs" | "py" | "ts" | "tsx" | "js" | "jsx") {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn extract_semantic_refs_for_file(ext: &str, content: &str) -> Vec<String> {
-    let mut refs = Vec::new();
-    match ext {
-        "rs" => {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("use ") {
-                    let target = rest.split(';').next().unwrap_or_default().trim();
-                    if !target.is_empty() {
-                        refs.push(target.to_string());
-                    }
-                }
-                if let Some(rest) = trimmed.strip_prefix("mod ") {
-                    let target = rest.split(';').next().unwrap_or_default().trim();
-                    if !target.is_empty() {
-                        refs.push(target.to_string());
-                    }
-                }
-            }
-        }
-        "py" => {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("import ") {
-                    for item in rest.split(',') {
-                        let target = item.split_whitespace().next().unwrap_or_default().trim();
-                        if !target.is_empty() {
-                            refs.push(target.to_string());
-                        }
-                    }
-                } else if let Some(rest) = trimmed.strip_prefix("from ") {
-                    let target = rest.split_whitespace().next().unwrap_or_default().trim();
-                    if !target.is_empty() {
-                        refs.push(target.to_string());
-                    }
-                }
-            }
-        }
-        "ts" | "tsx" | "js" | "jsx" => {
-            let re = Regex::new(r#"(?m)from\s+["']([^"']+)["']"#).expect("valid import regex");
-            for caps in re.captures_iter(content) {
-                if let Some(m) = caps.get(1) {
-                    refs.push(m.as_str().trim().to_string());
-                }
-            }
-            let re_req = Regex::new(r#"(?m)require\(\s*["']([^"']+)["']\s*\)"#)
-                .expect("valid require regex");
-            for caps in re_req.captures_iter(content) {
-                if let Some(m) = caps.get(1) {
-                    refs.push(m.as_str().trim().to_string());
-                }
-            }
-        }
-        _ => {}
-    }
-    refs
-}
-
-fn sanitize_graph_node(raw: &str) -> String {
-    raw.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-fn contextlattice_base_url_for_graph() -> String {
-    std::env::var("CONTEXTLATTICE_ORCHESTRATOR_URL")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .or_else(|| std::env::var("MEMMCP_ORCHESTRATOR_URL").ok())
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| "http://127.0.0.1:8075".to_string())
-}
-
-fn contextlattice_api_key_for_graph() -> Option<String> {
-    std::env::var("CONTEXTLATTICE_API_KEY")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .or_else(|| std::env::var("MEMMCP_API_KEY").ok())
-        .filter(|v| !v.trim().is_empty())
-}
-
-fn extract_json_path<'a>(
-    value: &'a serde_json::Value,
-    path: &[&str],
-) -> Option<&'a serde_json::Value> {
-    let mut cur = value;
-    for key in path {
-        cur = cur.get(*key)?;
-    }
-    Some(cur)
-}
-
-fn extract_embedding_diag_line(payload: &serde_json::Value) -> String {
-    let backend = [
-        &["backend"][..],
-        &["embedding_backend"][..],
-        &["embeddings", "backend"][..],
-        &["retrieval", "embedding_backend"][..],
-    ]
-    .into_iter()
-    .find_map(|path| extract_json_path(payload, path))
-    .and_then(|v| v.as_str())
-    .unwrap_or("unknown");
-    let dimension = [
-        &["dimension"][..],
-        &["embeddings", "dimension"][..],
-        &["retrieval", "embedding_dimension"][..],
-    ]
-    .into_iter()
-    .find_map(|path| extract_json_path(payload, path))
-    .and_then(|v| v.as_u64())
-    .map(|v| v.to_string())
-    .unwrap_or_else(|| "n/a".to_string());
-    let model = [
-        &["model"][..],
-        &["embeddings", "model"][..],
-        &["retrieval", "embedding_model"][..],
-    ]
-    .into_iter()
-    .find_map(|path| extract_json_path(payload, path))
-    .and_then(|v| v.as_str())
-    .unwrap_or("unknown");
-    format!(
-        "embedding_diagnostics: backend={} model={} dimension={}",
-        backend, model, dimension
-    )
-}
-
-async fn contextlattice_embedding_diagnostics_lines() -> Vec<String> {
-    let base_url = contextlattice_base_url_for_graph();
-    let mut lines = Vec::new();
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-    {
-        Ok(client) => client,
-        Err(err) => {
-            lines.push(format!("client_error: {}", err));
-            return lines;
-        }
-    };
-
-    let mut health_req = client.get(format!("{}/health", base_url.trim_end_matches('/')));
-    if let Some(key) = contextlattice_api_key_for_graph() {
-        health_req = health_req.header("x-api-key", key);
-    }
-    match health_req.send().await {
-        Ok(resp) => {
-            let code = resp.status().as_u16();
-            lines.push(format!("health_status: {}", code));
-        }
-        Err(err) => {
-            lines.push(format!("health_status: unreachable ({})", err));
-        }
-    }
-
-    let mut emb_req = client.get(format!(
-        "{}/telemetry/embeddings",
-        base_url.trim_end_matches('/')
-    ));
-    if let Some(key) = contextlattice_api_key_for_graph() {
-        emb_req = emb_req.header("x-api-key", key);
-    }
-    match emb_req.send().await {
-        Ok(resp) => {
-            let status = resp.status();
-            if status.is_success() {
-                match resp.json::<serde_json::Value>().await {
-                    Ok(payload) => lines.push(extract_embedding_diag_line(&payload)),
-                    Err(err) => {
-                        lines.push(format!("embedding_diagnostics: invalid_json ({})", err))
-                    }
-                }
-            } else {
-                lines.push(format!(
-                    "embedding_diagnostics: unavailable (telemetry/embeddings status={})",
-                    status.as_u16()
-                ));
-                lines.push("embedding_diagnostics: fallback=recall_telemetry".to_string());
-            }
-        }
-        Err(err) => {
-            lines.push(format!(
-                "embedding_diagnostics: unavailable (unreachable: {})",
-                err
-            ));
-            lines.push("embedding_diagnostics: fallback=recall_telemetry".to_string());
-        }
-    }
-
-    let mut recall_req = client.get(format!(
-        "{}/telemetry/recall",
-        base_url.trim_end_matches('/')
-    ));
-    if let Some(key) = contextlattice_api_key_for_graph() {
-        recall_req = recall_req.header("x-api-key", key);
-    }
-    match recall_req.send().await {
-        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
-            Ok(payload) => {
-                let qps = payload
-                    .get("query_per_sec")
-                    .or_else(|| payload.get("qps"))
-                    .and_then(|v| v.as_f64())
-                    .map(|v| format!("{:.3}", v))
-                    .unwrap_or_else(|| "n/a".to_string());
-                let hit_rate = payload
-                    .get("hit_rate")
-                    .or_else(|| payload.get("grounded_hit_rate"))
-                    .and_then(|v| v.as_f64())
-                    .map(|v| format!("{:.3}", v))
-                    .unwrap_or_else(|| "n/a".to_string());
-                lines.push(format!(
-                    "recall_telemetry: qps={} hit_rate={}",
-                    qps, hit_rate
-                ));
-            }
-            Err(err) => lines.push(format!("recall_telemetry: invalid_json ({})", err)),
-        },
-        Ok(resp) => lines.push(format!(
-            "recall_telemetry: endpoint_status={}",
-            resp.status()
-        )),
-        Err(err) => lines.push(format!("recall_telemetry: unreachable ({})", err)),
-    }
-
-    lines
-}
-
-async fn handle_graph_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let sub = args
-        .first()
-        .map(|v| v.to_ascii_lowercase())
-        .unwrap_or_else(|| "status".to_string());
-    match sub.as_str() {
-        "status" | "show" => {
-            let contextlattice_mcp = app.config.mcp_servers.iter().any(|entry| {
-                let name = entry.name.to_ascii_lowercase();
-                let url = entry
-                    .url
-                    .as_deref()
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
-                name.contains("contextlattice") || url.contains("contextlattice")
-            });
-            let policy = load_contextlattice_policy().ok();
-            let mut out = String::new();
-            let _ = writeln!(out, "Graph-memory status");
-            let _ = writeln!(out, "  contextlattice_mcp: {}", yes_no(contextlattice_mcp));
-            let diag = contextlattice_embedding_diagnostics_lines().await;
-            for row in &diag {
-                let _ = writeln!(out, "  {}", row);
-            }
-            if let Some(policy) = policy {
-                let _ = writeln!(
-                    out,
-                    "  retrieval_mode_hint: {}",
-                    policy.preferred_retrieval_mode
-                );
-                let _ = writeln!(out, "  preflight_required: {}", policy.preflight_required);
-                let _ = writeln!(
-                    out,
-                    "  include_grounding_required: {}",
-                    policy.include_grounding_required
-                );
-                let _ = writeln!(
-                    out,
-                    "  degradation_aware_planning: {}",
-                    policy.degradation_aware_planning
-                );
-            } else {
-                let _ = writeln!(out, "  contextlattice_policy: unavailable");
-            }
-            emit_command_output(app, out.trim_end());
-        }
-        "embeddings" | "embedding" | "diag" => {
-            let mut out = String::new();
-            let _ = writeln!(out, "ContextLattice embedding diagnostics");
-            let _ = writeln!(out, "base_url: {}", contextlattice_base_url_for_graph());
-            let lines = contextlattice_embedding_diagnostics_lines().await;
-            if lines.is_empty() {
-                out.push_str("no diagnostic lines returned.");
-            } else {
-                for line in lines {
-                    let _ = writeln!(out, "- {}", line);
-                }
-            }
-            out.push_str("\nIf endpoint support is partial, Hermes falls back to `/telemetry/recall` snapshots.");
-            emit_command_output(app, out.trim_end());
-        }
-        "repo" | "semantic" => {
-            let mut max_files = 220usize;
-            let mut repo_arg: Option<&str> = None;
-            let mut idx = 1usize;
-            while idx < args.len() {
-                if args[idx] == "--max-files" {
-                    if let Some(raw) = args.get(idx + 1).copied() {
-                        if let Ok(parsed) = raw.parse::<usize>() {
-                            max_files = parsed.clamp(20, 1500);
-                        }
-                        idx += 2;
-                        continue;
-                    }
-                }
-                repo_arg = Some(args[idx]);
-                idx += 1;
-            }
-            let repo_root = if let Some(raw) = repo_arg {
-                PathBuf::from(raw)
-            } else {
-                std::env::current_dir()
-                    .map_err(|e| AgentError::Io(format!("current_dir: {}", e)))?
-            };
-            if !repo_root.exists() {
-                emit_command_output(
-                    app,
-                    format!("Repo path does not exist: {}", repo_root.display()),
-                );
-                return Ok(CommandResult::Handled);
-            }
-
-            let mut files = Vec::new();
-            collect_graph_candidate_files(&repo_root, max_files, &mut files)?;
-            if files.is_empty() {
-                emit_command_output(
-                    app,
-                    format!(
-                        "No candidate source files found under {} (max_files={}).",
-                        repo_root.display(),
-                        max_files
-                    ),
-                );
-                return Ok(CommandResult::Handled);
-            }
-
-            let mut edges: HashMap<(String, String), usize> = HashMap::new();
-            let mut node_degree: HashMap<String, usize> = HashMap::new();
-            for path in &files {
-                let rel = path
-                    .strip_prefix(&repo_root)
-                    .ok()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|| path.to_string_lossy().to_string());
-                let ext = path
-                    .extension()
-                    .and_then(|v| v.to_str())
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
-                let content = std::fs::read_to_string(path).unwrap_or_default();
-                for rf in extract_semantic_refs_for_file(&ext, &content) {
-                    let key = (rel.clone(), rf.clone());
-                    *edges.entry(key).or_insert(0usize) += 1;
-                    *node_degree.entry(rel.clone()).or_insert(0usize) += 1;
-                    *node_degree.entry(rf).or_insert(0usize) += 1;
-                }
-            }
-
-            let mut degree_ranked: Vec<(String, usize)> = node_degree.into_iter().collect();
-            degree_ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-            let mut edge_ranked: Vec<((String, String), usize)> = edges.into_iter().collect();
-            edge_ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-
-            let mut out = String::new();
-            let _ = writeln!(out, "Semantic repo graph");
-            let _ = writeln!(out, "  repo_root={}", repo_root.display());
-            let _ = writeln!(out, "  files_scanned={} (cap={})", files.len(), max_files);
-            let _ = writeln!(out, "  semantic_edges={}", edge_ranked.len());
-            let _ = writeln!(out);
-            let _ = writeln!(out, "Top hubs (degree):");
-            for (idx, (node, degree)) in degree_ranked.iter().take(12).enumerate() {
-                let _ = writeln!(out, "  {}. {} ({})", idx + 1, node, degree);
-            }
-            let _ = writeln!(out);
-            let _ = writeln!(out, "Top semantic edges:");
-            for (idx, ((src, dst), weight)) in edge_ranked.iter().take(16).enumerate() {
-                let _ = writeln!(out, "  {}. {} -> {} ({})", idx + 1, src, dst, weight);
-            }
-            let _ = writeln!(out);
-            let _ = writeln!(out, "Mermaid preview:");
-            let _ = writeln!(out, "```mermaid");
-            let _ = writeln!(out, "graph LR");
-            for ((src, dst), _) in edge_ranked.iter().take(32) {
-                let src_n = sanitize_graph_node(src);
-                let dst_n = sanitize_graph_node(dst);
-                let _ = writeln!(out, "  {}[\"{}\"] --> {}[\"{}\"]", src_n, src, dst_n, dst);
-            }
-            let _ = writeln!(out, "```");
-            emit_command_output(app, out.trim_end());
-        }
-        "help" => emit_command_output(
-            app,
-            "Usage: /graph [status|embeddings|repo [path] [--max-files N]]",
-        ),
-        _ => emit_command_output(
-            app,
-            "Usage: /graph [status|embeddings|repo [path] [--max-files N]]",
-        ),
-    }
-    Ok(CommandResult::Handled)
-}
-
 fn handle_image_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if args.is_empty() {
         let status = app
@@ -2674,443 +1679,6 @@ fn handle_claims_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
             );
         }
         _ => emit_command_output(app, "Usage: /claims [status|on|off]"),
-    }
-    Ok(CommandResult::Handled)
-}
-
-fn clear_quorum_system_hints(app: &mut App) {
-    app.messages.retain(|m| {
-        if m.role != hermes_core::MessageRole::System {
-            return true;
-        }
-        !m.content
-            .as_deref()
-            .unwrap_or_default()
-            .starts_with("[QUORUM_MODE] ")
-    });
-}
-
-fn install_quorum_system_hint(app: &mut App, voters: usize, models: &[String]) {
-    clear_quorum_system_hints(app);
-    let model_hint = if models.is_empty() {
-        "current-model-only".to_string()
-    } else {
-        models.join(", ")
-    };
-    app.messages.push(hermes_core::Message::system(format!(
-        "[QUORUM_MODE] Quorum reasoning is enabled. For complex decisions, evaluate at least {} independent hypotheses and present: (1) strongest case, (2) strongest counter-case, (3) final synthesis with explicit confidence. Preferred voter models: {}.",
-        voters, model_hint
-    )));
-}
-
-async fn handle_quorum_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let sub = args
-        .first()
-        .copied()
-        .unwrap_or("status")
-        .trim()
-        .to_ascii_lowercase();
-    match sub.as_str() {
-        "status" => {
-            let policy = load_quorum_policy()?;
-            emit_command_output(
-                app,
-                format!(
-                    "Quorum policy\nenabled={}\nmode={}\nvoters={}\nmodels={}\narmed_once={}\nupdated_at={}\n\nQuorum is optional and off by default to control token cost.",
-                    policy.enabled,
-                    policy.mode,
-                    policy.voters,
-                    if policy.models.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        policy.models.join(", ")
-                    },
-                    app.quorum_armed_once,
-                    policy.updated_at
-                ),
-            );
-        }
-        "on" | "enable" | "true" | "1" => {
-            let policy = set_quorum_policy(true, None, None)?;
-            crate::env_vars::set_var("HERMES_QUORUM_ENABLED", "1");
-            install_quorum_system_hint(app, policy.voters, &policy.models);
-            app.quorum_armed_once = false;
-            emit_command_output(
-                app,
-                format!(
-                    "Quorum mode enabled (optional deep reasoning).\nvoters={}\nmodels={}",
-                    policy.voters,
-                    if policy.models.is_empty() {
-                        "(current model)".to_string()
-                    } else {
-                        policy.models.join(", ")
-                    }
-                ),
-            );
-        }
-        "off" | "disable" | "false" | "0" => {
-            let policy = set_quorum_policy(false, None, None)?;
-            crate::env_vars::set_var("HERMES_QUORUM_ENABLED", "0");
-            clear_quorum_system_hints(app);
-            app.quorum_armed_once = false;
-            emit_command_output(
-                app,
-                format!(
-                    "Quorum mode disabled.\nvoters={}\nmodels={}",
-                    policy.voters,
-                    if policy.models.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        policy.models.join(", ")
-                    }
-                ),
-            );
-        }
-        "voters" => {
-            let Some(raw) = args.get(1) else {
-                emit_command_output(app, "Usage: /quorum voters <2..8>");
-                return Ok(CommandResult::Handled);
-            };
-            let voters = raw.parse::<usize>().ok().unwrap_or(3).clamp(2, 8);
-            let current = load_quorum_policy()?;
-            let policy = set_quorum_policy(current.enabled, Some(voters), None)?;
-            if policy.enabled {
-                install_quorum_system_hint(app, policy.voters, &policy.models);
-            }
-            emit_command_output(app, format!("Quorum voters updated to {}.", policy.voters));
-        }
-        "models" => {
-            if args.len() < 2 {
-                emit_command_output(
-                    app,
-                    "Usage: /quorum models <provider:model[,provider:model,...]>",
-                );
-                return Ok(CommandResult::Handled);
-            }
-            let joined = args[1..].join(" ");
-            let parsed: Vec<String> = joined
-                .split(',')
-                .map(|m| m.trim().to_string())
-                .filter(|m| !m.is_empty())
-                .collect();
-            let (default_provider, _) = split_provider_model(&app.current_model);
-            let default_provider = default_provider.trim().to_ascii_lowercase();
-            let mut models: Vec<String> = Vec::new();
-            let mut notes: Vec<String> = Vec::new();
-            for raw in parsed {
-                let normalized = if raw.contains(':') {
-                    normalize_provider_model(raw.as_str())?
-                } else {
-                    normalize_provider_model(format!("{}:{}", default_provider, raw).as_str())?
-                };
-                let (provider, model_id) = split_provider_model(&normalized);
-                let provider = provider.trim().to_ascii_lowercase();
-                let model_id = model_id.trim();
-                if provider.is_empty() || model_id.is_empty() {
-                    continue;
-                }
-                let mut final_model = normalized.clone();
-                let catalog = provider_model_ids(&provider).await;
-                if !catalog.is_empty() {
-                    if let Some(candidate) = resolve_catalog_model_candidate(model_id, &catalog) {
-                        final_model = format!("{}:{}", provider, candidate.trim());
-                        if !final_model.eq_ignore_ascii_case(&normalized) {
-                            notes.push(format!("{} -> {}", normalized, final_model));
-                        }
-                    } else if let Some(fallback) = catalog.first() {
-                        let close = rank_catalog_model_candidates(model_id, &catalog, 3);
-                        final_model = format!("{}:{}", provider, fallback.trim());
-                        notes.push(format!(
-                            "{} -> {} (close: {})",
-                            normalized,
-                            final_model,
-                            if close.is_empty() {
-                                "(none)".to_string()
-                            } else {
-                                close.join(", ")
-                            }
-                        ));
-                    }
-                }
-                if !models
-                    .iter()
-                    .any(|existing| existing.eq_ignore_ascii_case(&final_model))
-                {
-                    models.push(final_model);
-                }
-            }
-            let current = load_quorum_policy()?;
-            let policy = set_quorum_policy(current.enabled, None, Some(models))?;
-            if policy.enabled {
-                install_quorum_system_hint(app, policy.voters, &policy.models);
-            }
-            emit_command_output(
-                app,
-                if notes.is_empty() {
-                    format!(
-                        "Quorum models updated: {}",
-                        if policy.models.is_empty() {
-                            "(none)".to_string()
-                        } else {
-                            policy.models.join(", ")
-                        }
-                    )
-                } else {
-                    format!(
-                        "Quorum models updated: {}\nCatalog remaps: {}",
-                        if policy.models.is_empty() {
-                            "(none)".to_string()
-                        } else {
-                            policy.models.join(", ")
-                        },
-                        notes.join(" | ")
-                    )
-                },
-            );
-        }
-        "run" => {
-            let policy = load_quorum_policy()?;
-            if !policy.enabled {
-                emit_command_output(
-                    app,
-                    "Quorum mode is OFF. Run `/quorum on` first (kept optional to control token cost).",
-                );
-                return Ok(CommandResult::Handled);
-            }
-            install_quorum_system_hint(app, policy.voters, &policy.models);
-            app.quorum_armed_once = true;
-            emit_command_output(
-                app,
-                "Quorum deep-reasoning armed for subsequent turns.\nNext user prompt will run multi-voter fan-out across configured models and return synthesis (plus persisted quorum artifact).",
-            );
-        }
-        _ => emit_command_output(
-            app,
-            "Usage: /quorum [status|on|off|voters <2..8>|models <a,b,c>|run]",
-        ),
-    }
-    Ok(CommandResult::Handled)
-}
-
-fn parse_swarm_mode(input: Option<&str>) -> SwarmExecutionMode {
-    match input
-        .unwrap_or("concurrent")
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "sequential" | "sequence" => SwarmExecutionMode::Sequential,
-        "graph" | "dag" => SwarmExecutionMode::Graph,
-        _ => SwarmExecutionMode::Concurrent,
-    }
-}
-
-fn read_swarm_pass_cap() -> usize {
-    let raw = std::env::var("HERMES_QUORUM_VOTER_PASSES").unwrap_or_else(|_| "6".to_string());
-    let normalized = raw.trim().to_ascii_lowercase();
-    if matches!(normalized.as_str(), "0" | "off" | "unlimited" | "infinite") {
-        return 64;
-    }
-    normalized.parse::<usize>().ok().unwrap_or(6).clamp(1, 64)
-}
-
-fn latest_quorum_artifact_path(app: &App) -> Option<PathBuf> {
-    let dir = app.state_root.join("quorum");
-    let entries = std::fs::read_dir(&dir).ok()?;
-    let mut best_session: Option<(SystemTime, PathBuf)> = None;
-    let mut best_any: Option<(SystemTime, PathBuf)> = None;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let modified = entry
-            .metadata()
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .unwrap_or(SystemTime::UNIX_EPOCH);
-        if let Some((best_time, _)) = &best_any {
-            if modified > *best_time {
-                best_any = Some((modified, path.clone()));
-            }
-        } else {
-            best_any = Some((modified, path.clone()));
-        }
-
-        let file_name = path
-            .file_name()
-            .and_then(|v| v.to_str())
-            .unwrap_or_default();
-        if !file_name.starts_with(&format!("{}-", app.session_id)) {
-            continue;
-        }
-        if let Some((best_time, _)) = &best_session {
-            if modified > *best_time {
-                best_session = Some((modified, path.clone()));
-            }
-        } else {
-            best_session = Some((modified, path.clone()));
-        }
-    }
-    best_session.or(best_any).map(|(_, path)| path)
-}
-
-async fn handle_swarm_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let sub = args
-        .first()
-        .copied()
-        .unwrap_or("status")
-        .trim()
-        .to_ascii_lowercase();
-
-    match sub.as_str() {
-        "status" => {
-            let policy = load_quorum_policy()?;
-            let runtime = swarm_runtime_status();
-            let artifact_path = latest_quorum_artifact_path(app)
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "(none yet)".to_string());
-            let mut out = String::new();
-            let _ = writeln!(out, "Swarm runtime");
-            let _ = writeln!(out, "engine={}", runtime.engine);
-            let _ = writeln!(out, "feature_enabled={}", runtime.feature_enabled);
-            let _ = writeln!(
-                out,
-                "supported_modes={}",
-                runtime
-                    .supported_modes
-                    .iter()
-                    .map(|m| m.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            let _ = writeln!(
-                out,
-                "quorum_policy=enabled:{} voters:{} models:{} armed_once:{}",
-                policy.enabled,
-                policy.voters,
-                if policy.models.is_empty() {
-                    "(current model)".to_string()
-                } else {
-                    policy.models.join(", ")
-                },
-                app.quorum_armed_once
-            );
-            let _ = writeln!(out, "latest_artifact={}", artifact_path);
-            if !runtime.notes.is_empty() {
-                let _ = writeln!(out, "notes:");
-                for note in runtime.notes {
-                    let _ = writeln!(out, "- {}", note);
-                }
-            }
-            emit_command_output(app, out.trim_end());
-        }
-        "plan" => {
-            let policy = load_quorum_policy()?;
-            let mode = parse_swarm_mode(args.get(1).copied());
-            let pass_cap = read_swarm_pass_cap();
-            let models = if policy.models.is_empty() {
-                vec![app.current_model.clone()]
-            } else {
-                policy.models.clone()
-            };
-            let plan = build_swarm_execution_plan(
-                mode,
-                policy.voters,
-                models,
-                app.session_objective.clone(),
-                pass_cap,
-            );
-            let pretty = serde_json::to_string_pretty(&plan)
-                .map_err(|e| AgentError::Config(format!("failed to render swarm plan: {e}")))?;
-            emit_command_output(
-                app,
-                format!(
-                    "Swarm execution plan\n{}\n\nUsage: /swarm run [passes] [mode]\nmode: concurrent|sequential|graph",
-                    pretty
-                ),
-            );
-        }
-        "run" => {
-            let pass_override = args
-                .get(1)
-                .and_then(|raw| raw.trim().parse::<usize>().ok())
-                .map(|v| v.clamp(1, 64));
-            let mode = if pass_override.is_some() {
-                parse_swarm_mode(args.get(2).copied())
-            } else {
-                parse_swarm_mode(args.get(1).copied())
-            };
-            if let Some(passes) = pass_override {
-                crate::env_vars::set_var("HERMES_QUORUM_VOTER_PASSES", passes.to_string());
-            }
-            let policy = load_quorum_policy()?;
-            if !policy.enabled {
-                emit_command_output(
-                    app,
-                    "Swarm run blocked: quorum policy is OFF.\nRun `/swarm on` (or `/quorum on`) first to keep cost explicit.",
-                );
-                return Ok(CommandResult::Handled);
-            }
-            install_quorum_system_hint(app, policy.voters, &policy.models);
-            app.quorum_armed_once = true;
-            emit_command_output(
-                app,
-                format!(
-                    "Swarm run armed.\nmode={}\npass_cap={}\nnext user prompt will execute multi-voter fan-out + synthesis and persist an artifact.",
-                    mode.as_str(),
-                    read_swarm_pass_cap(),
-                ),
-            );
-        }
-        "cancel" => {
-            app.quorum_armed_once = false;
-            clear_quorum_system_hints(app);
-            emit_command_output(
-                app,
-                "Swarm run canceled. Pending one-shot fan-out was disarmed.",
-            );
-        }
-        "artifact" => {
-            let Some(path) = latest_quorum_artifact_path(app) else {
-                emit_command_output(app, "No swarm/quorum artifact exists yet for this runtime.");
-                return Ok(CommandResult::Handled);
-            };
-            let summary = std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                .map(|v| {
-                    let session_id = v
-                        .get("session_id")
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("unknown");
-                    let saved_at = v
-                        .get("saved_at")
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("unknown");
-                    let voters = v
-                        .get("voters")
-                        .and_then(|x| x.as_array())
-                        .map(|arr| arr.len())
-                        .unwrap_or(0);
-                    format!("session_id={session_id}\nsaved_at={saved_at}\nvoters={voters}")
-                })
-                .unwrap_or_else(|| "(unable to parse artifact summary)".to_string());
-            emit_command_output(
-                app,
-                format!(
-                    "Latest swarm artifact\npath={}\n{}",
-                    path.display(),
-                    summary
-                ),
-            );
-        }
-        "on" | "off" | "enable" | "disable" | "true" | "false" | "1" | "0" | "voters"
-        | "models" => return handle_quorum_command(app, args).await,
-        _ => emit_command_output(
-            app,
-            "Usage: /swarm [status|plan [mode]|run [passes] [mode]|cancel|artifact|on|off|voters <2..8>|models <a,b,c>]",
-        ),
     }
     Ok(CommandResult::Handled)
 }
@@ -3627,265 +2195,6 @@ fn handle_insights_command(app: &mut App) -> Result<CommandResult, AgentError> {
     Ok(CommandResult::Handled)
 }
 
-fn handle_platforms_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    if app.config.platforms.is_empty() {
-        emit_command_output(
-            app,
-            "No explicit gateway platform adapters configured (running in local CLI mode).",
-        );
-        return Ok(CommandResult::Handled);
-    }
-    let mut entries: Vec<_> = app.config.platforms.keys().cloned().collect();
-    entries.sort();
-    let mut out = String::from("Configured gateway platforms:\n");
-    for p in entries {
-        let _ = writeln!(out, "  - {}", p);
-    }
-    emit_command_output(app, out.trim_end());
-    Ok(CommandResult::Handled)
-}
-
-fn integrations_snapshot_path(session_id: &str) -> PathBuf {
-    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
-    hermes_config::hermes_home().join("logs").join(format!(
-        "integrations-snapshot-{}-{}.json",
-        session_id, stamp
-    ))
-}
-
-fn render_integrations_repair_steps(
-    provider: &str,
-    auth_ok: bool,
-    oauth_gate: Option<(bool, String)>,
-    memory_probe: &str,
-) -> String {
-    let mut out = String::new();
-    out.push_str("Integrations repair plan\n");
-    out.push_str("------------------------\n");
-    let _ = writeln!(out, "provider: {}", provider);
-    if !auth_ok {
-        out.push_str("- auth: FAIL -> run `/auth status` then `/auth verify` (or `hermes-ultra auth add`).\n");
-    } else {
-        out.push_str("- auth: PASS\n");
-    }
-    if let Some((ok, detail)) = oauth_gate {
-        if ok {
-            let _ = writeln!(out, "- oauth runtime gate: PASS ({})", detail);
-        } else {
-            let _ = writeln!(
-                out,
-                "- oauth runtime gate: FAIL ({}) -> rebuild/install latest CLI binary.",
-                detail
-            );
-        }
-    }
-    if memory_probe.to_ascii_lowercase().starts_with("warn") {
-        let _ = writeln!(
-            out,
-            "- contextlattice probe: {} -> verify local orchestrator and env vars (CONTEXTLATTICE_ORCHESTRATOR_URL/MEMMCP_ORCHESTRATOR_URL).",
-            memory_probe
-        );
-    } else {
-        let _ = writeln!(out, "- contextlattice probe: {}", memory_probe);
-    }
-    out.push_str(
-        "- tools: run `/tools` and `/integrations status` to verify adapter registry health.\n",
-    );
-    out.push_str(
-        "- walkthrough: run `/walkthrough next` to continue operator recovery sequence.\n",
-    );
-    out
-}
-
-async fn handle_integrations_command(
-    app: &mut App,
-    args: &[&str],
-) -> Result<CommandResult, AgentError> {
-    let action = args
-        .first()
-        .copied()
-        .unwrap_or("status")
-        .to_ascii_lowercase();
-    let provider = app.current_runtime_provider();
-    let provider_cap = crate::providers::provider_capability_for(&provider);
-    let oauth_capable = provider_cap
-        .as_ref()
-        .map(|cap| cap.oauth_supported)
-        .unwrap_or(false);
-    let managed_tools = provider_cap
-        .as_ref()
-        .map(|cap| cap.managed_tools_supported)
-        .unwrap_or(false);
-    let credential_present = crate::app::provider_api_key_from_env(&provider).is_some();
-    let oauth_state_present = crate::auth::read_provider_auth_state(&provider)
-        .ok()
-        .flatten()
-        .is_some();
-    let auth_ok = credential_present || (oauth_capable && oauth_state_present);
-    let oauth_gate = policy::oauth_runtime_gate_for_provider(&provider);
-    let oauth_manifest_source = policy::oauth_min_version_for_provider(&provider)
-        .map(|(_, source)| source)
-        .unwrap_or_else(|| "n/a".to_string());
-
-    let memory_url = std::env::var("CONTEXTLATTICE_ORCHESTRATOR_URL")
-        .ok()
-        .or_else(|| std::env::var("MEMMCP_ORCHESTRATOR_URL").ok())
-        .unwrap_or_else(|| "http://127.0.0.1:8075".to_string());
-    let memory_probe = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-    {
-        Ok(client) => {
-            let health_url = format!("{}/health", memory_url.trim_end_matches('/'));
-            match client.get(&health_url).send().await {
-                Ok(resp) if resp.status().is_success() => format!("PASS ({})", health_url),
-                Ok(resp) => format!("WARN ({} status={})", health_url, resp.status()),
-                Err(err) => format!(
-                    "WARN ({} error={})",
-                    health_url,
-                    truncate_chars(&err.to_string(), 96)
-                ),
-            }
-        }
-        Err(err) => format!(
-            "WARN (client build failed: {})",
-            truncate_chars(&err.to_string(), 96)
-        ),
-    };
-
-    let tools_count = app.tool_registry.list_tools().len();
-    let plugins_count = discover_plugin_surface(true).len();
-    let mcp_count = app.config.mcp_servers.len();
-    let platforms_count = app.config.platforms.len();
-
-    if action == "repair" {
-        emit_command_output(
-            app,
-            render_integrations_repair_steps(&provider, auth_ok, oauth_gate.clone(), &memory_probe),
-        );
-        return Ok(CommandResult::Handled);
-    }
-
-    if action == "snapshot" {
-        let path = integrations_snapshot_path(&app.session_id);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                AgentError::Io(format!("Failed to create {}: {}", parent.display(), e))
-            })?;
-        }
-        let payload = serde_json::json!({
-            "captured_at": chrono::Utc::now().to_rfc3339(),
-            "session_id": app.session_id,
-            "provider": provider,
-            "model": app.current_model,
-            "auth": {
-                "oauth_capable": oauth_capable,
-                "managed_tools_supported": managed_tools,
-                "credential_present": credential_present,
-                "oauth_state_present": oauth_state_present,
-                "status": if auth_ok { "PASS" } else { "FAIL" },
-                "oauth_runtime_gate": oauth_gate.as_ref().map(|(ok, detail)| serde_json::json!({"ok": ok, "detail": detail})),
-            },
-            "panels": {
-                "providers_count": curated_provider_slugs().len(),
-                "platform_adapters": platforms_count,
-                "mcp_servers": mcp_count,
-                "plugins": plugins_count,
-                "toolsets": app.config.platform_toolsets.len(),
-                "registered_tools": tools_count,
-                "contextlattice_url": memory_url,
-                "memory_probe": memory_probe,
-            }
-        });
-        let json = serde_json::to_string_pretty(&payload)
-            .map_err(|e| AgentError::Io(format!("Failed to encode snapshot payload: {}", e)))?;
-        std::fs::write(&path, json)
-            .map_err(|e| AgentError::Io(format!("Failed to write {}: {}", path.display(), e)))?;
-        emit_command_output(
-            app,
-            format!(
-                "Integration snapshot exported:\n{}\nUse `/integrations repair` for remediation guidance.",
-                path.display()
-            ),
-        );
-        return Ok(CommandResult::Handled);
-    }
-
-    let mut out = String::new();
-    out.push_str("Integration Control Plane\n");
-    out.push_str("=========================\n");
-
-    if action == "status" || action == "all" || action == "auth" {
-        out.push_str("Auth panel\n----------\n");
-        let _ = writeln!(out, "provider: {}", provider);
-        let _ = writeln!(out, "model: {}", app.current_model);
-        let _ = writeln!(out, "oauth_capable: {}", oauth_capable);
-        let _ = writeln!(out, "managed_tools_supported: {}", managed_tools);
-        let _ = writeln!(out, "credential_present: {}", credential_present);
-        let _ = writeln!(out, "oauth_state_present: {}", oauth_state_present);
-        let _ = writeln!(out, "status: {}", if auth_ok { "PASS" } else { "FAIL" });
-        let _ = writeln!(out, "oauth_manifest: {}", oauth_manifest_source);
-        if let Some((gate_ok, gate_detail)) = oauth_gate.clone() {
-            let _ = writeln!(
-                out,
-                "oauth_runtime_gate: {} ({})",
-                if gate_ok { "PASS" } else { "FAIL" },
-                gate_detail
-            );
-            if !gate_ok {
-                out.push_str("remediation: upgrade runtime and retry auth.\n");
-            }
-        }
-        out.push('\n');
-    }
-
-    if action == "status" || action == "all" || action == "providers" {
-        let providers = curated_provider_slugs();
-        out.push_str("Providers panel\n---------------\n");
-        let _ = writeln!(out, "configured_providers: {}", providers.join(", "));
-        let _ = writeln!(out, "provider_count: {}", providers.len());
-        out.push('\n');
-    }
-
-    if action == "status" || action == "all" || action == "gateway" {
-        out.push_str("Gateway panel\n-------------\n");
-        let _ = writeln!(out, "platform_adapters: {}", platforms_count);
-        let _ = writeln!(out, "mcp_servers: {}", mcp_count);
-        let _ = writeln!(out, "plugins: {}", plugins_count);
-        let _ = writeln!(out, "toolsets: {}", app.config.platform_toolsets.len());
-        out.push('\n');
-    }
-
-    if action == "status" || action == "all" || action == "memory" {
-        out.push_str("Memory panel\n------------\n");
-        let _ = writeln!(out, "contextlattice_url: {}", memory_url);
-        let _ = writeln!(out, "probe: {}", memory_probe);
-        let _ = writeln!(out, "registered_tools: {}", tools_count);
-        out.push('\n');
-    }
-
-    if !matches!(
-        action.as_str(),
-        "status" | "all" | "auth" | "providers" | "gateway" | "memory" | "repair" | "snapshot"
-    ) {
-        emit_command_output(
-            app,
-            "Usage: /integrations [status|all|auth|providers|gateway|memory|repair|snapshot]",
-        );
-        return Ok(CommandResult::Handled);
-    }
-
-    out.push_str("Next actions:\n");
-    out.push_str("- `/boot` for startup readiness\n");
-    out.push_str("- `/auth verify` for runtime credential hydration\n");
-    out.push_str("- `/walkthrough next` for guided operator setup\n");
-    out.push_str(
-        "- `/integrations repair` for remediation plan and `/integrations snapshot` for export\n",
-    );
-    emit_command_output(app, out.trim_end());
-    Ok(CommandResult::Handled)
-}
-
 fn handle_log_command(app: &mut App) -> Result<CommandResult, AgentError> {
     let logs_dir = hermes_config::hermes_home().join("logs");
     let mut files = Vec::new();
@@ -4095,60 +2404,6 @@ async fn handle_update_command(app: &mut App, args: &[&str]) -> Result<CommandRe
     Ok(CommandResult::Handled)
 }
 
-fn handle_redraw_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    app.push_ui_assistant("↻ Repaint pulse requested.");
-    emit_command_output(
-        app,
-        "Repaint pulse sent.\nIf the screen still looks stale: press Ctrl+L (lane toggle) or resize the terminal once.",
-    );
-    Ok(CommandResult::Handled)
-}
-
-fn handle_paste_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let text = if let Some(mock) = std::env::var("HERMES_TEST_CLIPBOARD_TEXT")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-    {
-        mock
-    } else {
-        arboard::Clipboard::new()
-            .and_then(|mut cb| cb.get_text())
-            .map_err(|e| AgentError::Config(format!("Clipboard unavailable: {}", e)))?
-    };
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        emit_command_output(app, "Clipboard is empty.");
-        return Ok(CommandResult::Handled);
-    }
-    let pastes_dir = hermes_config::hermes_home().join("pastes");
-    std::fs::create_dir_all(&pastes_dir)
-        .map_err(|e| AgentError::Io(format!("Failed to create {}: {}", pastes_dir.display(), e)))?;
-    let file_name = format!("paste-{}.txt", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
-    let path = pastes_dir.join(file_name);
-    std::fs::write(&path, trimmed)
-        .map_err(|e| AgentError::Io(format!("Failed to write {}: {}", path.display(), e)))?;
-
-    let preview = if args.first().is_some_and(|v| v.eq_ignore_ascii_case("show")) {
-        trimmed.to_string()
-    } else {
-        truncate_chars(trimmed, 280)
-    };
-
-    let mut out = String::new();
-    let _ = writeln!(out, "Clipboard captured:");
-    let _ = writeln!(out, "  - chars: {}", trimmed.chars().count());
-    let _ = writeln!(out, "  - saved: {}", path.display());
-    let _ = writeln!(out, "  - preview: {}", preview);
-    let _ = writeln!(
-        out,
-        "Use `/background review {}` to process it in isolation.",
-        path.display()
-    );
-    emit_command_output(app, out.trim_end());
-    Ok(CommandResult::Handled)
-}
-
 async fn handle_gquota_command(app: &mut App, _args: &[&str]) -> Result<CommandResult, AgentError> {
     let provider = app
         .current_model
@@ -4315,107 +2570,6 @@ fn handle_deny_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
                 err
             ),
         ),
-    }
-    Ok(CommandResult::Handled)
-}
-
-fn handle_copy_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    let maybe_text = app.transcript_messages().into_iter().rev().find_map(|msg| {
-        if msg.role != hermes_core::MessageRole::Assistant {
-            return None;
-        }
-        let content = msg.content.unwrap_or_default();
-        let trimmed = content.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    });
-    let Some(text) = maybe_text else {
-        emit_command_output(
-            app,
-            "Copy skipped: no assistant message content available yet.",
-        );
-        return Ok(CommandResult::Handled);
-    };
-
-    match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text.clone())) {
-        Ok(()) => emit_command_output(
-            app,
-            format!(
-                "Copied latest assistant message ({} chars).",
-                text.chars().count()
-            ),
-        ),
-        Err(err) => emit_command_output(
-            app,
-            format!(
-                "Clipboard unavailable ({}). Copy directly from transcript as fallback.",
-                err
-            ),
-        ),
-    }
-    Ok(CommandResult::Handled)
-}
-
-fn handle_statusbar_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    emit_command_output(
-        app,
-        "Status bar is always enabled in the current TUI renderer.",
-    );
-    Ok(CommandResult::Handled)
-}
-
-fn parse_toggle_arg(raw: Option<&str>, current: bool) -> Result<bool, &'static str> {
-    let Some(raw) = raw else {
-        return Ok(!current);
-    };
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "" | "toggle" => Ok(!current),
-        "on" | "true" | "yes" | "1" => Ok(true),
-        "off" | "false" | "no" | "0" => Ok(false),
-        _ => Err("Usage: /mouse [on|off|toggle]"),
-    }
-}
-
-fn handle_mouse_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    if args.len() >= 2 && args[0].eq_ignore_ascii_case("set") {
-        match parse_toggle_arg(args.get(1).copied(), app.mouse_enabled()) {
-            Ok(next) => {
-                app.set_mouse_enabled(next);
-                crate::env_vars::set_var("HERMES_TUI_MOUSE", if next { "1" } else { "0" });
-                emit_command_output(
-                    app,
-                    format!("Mouse interactions: {}", if next { "ON" } else { "OFF" }),
-                );
-            }
-            Err(usage) => emit_command_output(app, usage),
-        }
-        return Ok(CommandResult::Handled);
-    }
-
-    if args.is_empty() || args[0].eq_ignore_ascii_case("status") {
-        emit_command_output(
-            app,
-            format!(
-                "Mouse interactions: {} (use `/mouse on` or `/mouse off`)",
-                if app.mouse_enabled() { "ON" } else { "OFF" }
-            ),
-        );
-        return Ok(CommandResult::Handled);
-    }
-
-    match parse_toggle_arg(args.first().copied(), app.mouse_enabled()) {
-        Ok(next) => {
-            app.set_mouse_enabled(next);
-            crate::env_vars::set_var("HERMES_TUI_MOUSE", if next { "1" } else { "0" });
-            emit_command_output(
-                app,
-                format!("Mouse interactions: {}", if next { "ON" } else { "OFF" }),
-            );
-        }
-        Err(usage) => emit_command_output(app, usage),
     }
     Ok(CommandResult::Handled)
 }
@@ -5134,7 +3288,7 @@ print(json.dumps({"entries": rows}))
     out
 }
 
-fn discover_plugin_surface(include_entrypoints: bool) -> Vec<PluginSurfaceEntry> {
+pub(crate) fn discover_plugin_surface(include_entrypoints: bool) -> Vec<PluginSurfaceEntry> {
     let mut rows = Vec::new();
     let user_root = hermes_config::hermes_home().join("plugins");
     rows.extend(scan_plugin_manifest_root(
@@ -5179,7 +3333,7 @@ fn resolve_local_plugin_path_by_name(name: &str) -> Option<PathBuf> {
         .next()
 }
 
-fn render_plugin_surface_table(rows: &[PluginSurfaceEntry]) -> String {
+pub(crate) fn render_plugin_surface_table(rows: &[PluginSurfaceEntry]) -> String {
     if rows.is_empty() {
         return "  (no plugins discovered)".to_string();
     }
@@ -9475,7 +7629,7 @@ mod tests {
         crate::env_vars::set_var("HERMES_TEST_CLIPBOARD_TEXT", "alpha clipboard payload");
         let mut app = build_test_app_with_stream(tmp.path()).await;
 
-        let result = handle_paste_command(&mut app, &[]).expect("paste command");
+        let result = runtime_ui::handle_paste_command(&mut app, &[]).expect("paste command");
         assert_eq!(result, CommandResult::Handled);
         let output = latest_ui_assistant_text(&app);
         assert!(output.contains("Clipboard captured:"));
@@ -9578,7 +7732,7 @@ mod tests {
         let _home_guard = TempHomeGuard::new(tmp.path());
         let mut app = build_test_app_with_stream(tmp.path()).await;
 
-        let result = handle_lsp_command(&mut app, &["status"]).expect("lsp status");
+        let result = infra::handle_lsp_command(&mut app, &["status"]).expect("lsp status");
         assert_eq!(result, CommandResult::Handled);
         let output = latest_ui_assistant_text(&app);
         assert!(output.contains("LSP/code-index status"));
@@ -10658,18 +8812,6 @@ install_command: "uv pip install -r requirements.txt"
     }
 
     #[test]
-    fn parse_toggle_arg_supports_status_and_explicit_values() {
-        assert_eq!(parse_toggle_arg(None, true).expect("toggle"), false);
-        assert_eq!(
-            parse_toggle_arg(Some("toggle"), false).expect("toggle"),
-            true
-        );
-        assert_eq!(parse_toggle_arg(Some("on"), false).expect("on"), true);
-        assert_eq!(parse_toggle_arg(Some("off"), true).expect("off"), false);
-        assert!(parse_toggle_arg(Some("bad-value"), true).is_err());
-    }
-
-    #[test]
     fn parse_reasoning_effort_accepts_levels_and_auto_clear() {
         assert_eq!(
             parse_reasoning_effort("minimal").expect("minimal"),
@@ -10687,21 +8829,6 @@ install_command: "uv pip install -r requirements.txt"
         );
         assert_eq!(parse_reasoning_effort("auto").expect("auto"), None);
         assert!(parse_reasoning_effort("turbo").is_err());
-    }
-
-    #[test]
-    fn parse_pet_species_and_mood_validate_catalog_entries() {
-        assert_eq!(parse_pet_species("fox").as_deref(), Some("fox"));
-        assert!(parse_pet_species("dragon").is_none());
-        assert_eq!(parse_pet_mood("ready").as_deref(), Some("ready"));
-        assert!(parse_pet_mood("sleeping-beauty").is_none());
-    }
-
-    #[test]
-    fn parse_pet_dock_accepts_left_or_right() {
-        assert_eq!(parse_pet_dock("left"), Some(PetDock::Left));
-        assert_eq!(parse_pet_dock("right"), Some(PetDock::Right));
-        assert_eq!(parse_pet_dock("center"), None);
     }
 
     #[test]

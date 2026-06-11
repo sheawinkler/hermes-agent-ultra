@@ -21,7 +21,7 @@ use hermes_cli::platform_toolsets::{
 };
 use hermes_cli::tool_preview::{build_tool_preview_from_value, tool_emoji};
 
-use crate::{
+use crate::gateway_main::{
     GatewayAgentCache, extract_last_assistant_reply, get_or_build_gateway_cached_agent,
     resolve_model_for_gateway, truncate_hook_tool_result,
 };

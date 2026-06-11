@@ -139,13 +139,13 @@ const SETUP_BEDROCK_ENV_KEYS: &[&str] = &[
 const HERMES_ENABLE_NOUS_MANAGED_TOOLS_ENV_KEY: &str = "HERMES_ENABLE_NOUS_MANAGED_TOOLS";
 
 #[derive(Clone, Copy)]
-struct SetupModelOption {
-    provider: &'static str,
-    model: &'static str,
+pub(crate) struct SetupModelOption {
+    pub(crate) provider: &'static str,
+    pub(crate) model: &'static str,
     label: &'static str,
 }
 
-const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
+pub(crate) const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
     SetupModelOption {
         provider: "nous",
         model: "nous:openai/gpt-5.5-pro",
@@ -1251,7 +1251,7 @@ pub(crate) async fn run_setup(cli: crate::Cli) -> Result<(), AgentError> {
         && crate::gateway_main::prompt_yes_no("\nConfigure optional setup sections now?", true)
             .await?
     {
-        crate::run_optional_setup_sections(&cli, &disk).await?;
+        crate::cli_setup::run_optional_setup_sections(&cli, &disk).await?;
     } else if !full_setup {
         println!("Skipped optional setup sections (quick setup mode).");
     }
