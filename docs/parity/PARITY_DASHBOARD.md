@@ -1,14 +1,14 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-11T00:12:34.113401+00:00`_
+_Generated from source artifacts: `2026-06-11T04:50:05.267928+00:00`_
 
 ## Snapshot
 
 - Upstream target: `upstream/main` @ `d1383a6b1450c6c139720b1b01f8b99cc130453f`
 - Workstream snapshot generated: `2026-06-10T03:46:53-06:00`
 - Parity matrix generated: `2026-06-11T00:16:36.371426+00:00`
-- Queue snapshot generated: `2026-06-11T00:16:40.663763+00:00`
-- Proof snapshot generated: `2026-06-11T00:12:34.113401+00:00`
+- Queue snapshot generated: `2026-06-11T05:38:09.408147+00:00`
+- Proof snapshot generated: `2026-06-11T04:50:05.267928+00:00`
 
 ## Gate Status
 
@@ -23,10 +23,10 @@ _Generated from source artifacts: `2026-06-11T00:12:34.113401+00:00`_
 
 | Metric | Value |
 | --- | ---: |
-| Tracked behavior rows | 384 |
-| Covered behavior rows | 384 |
+| Tracked behavior rows | 415 |
+| Covered behavior rows | 415 |
 | Tracked behavior coverage ratio | 1.0000 |
-| Rust test functions | 3423 |
+| Rust test functions | 3425 |
 | Missing Rust test refs | 0 |
 | Critical gaps | 0 |
 
@@ -45,10 +45,10 @@ _Generated from source artifacts: `2026-06-11T00:12:34.113401+00:00`_
 
 | Metric | Value |
 | --- | ---: |
-| Total commits in queue | 5497 |
+| Total commits in queue | 5522 |
 | Pending | 0 |
-| Ported | 249 |
-| Superseded | 5178 |
+| Ported | 262 |
+| Superseded | 5190 |
 
 ## Tree/Patch Drift
 

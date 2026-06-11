@@ -67,6 +67,23 @@ const QUORUM_DEFAULT_VOTER_PASSES: usize = 6;
 const RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS: usize = 1_600;
 const QUORUM_AGENT_CONTRACT_DEFAULT_PATH: &str =
     "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/QUORUM_AGENTS.md";
+const COMPOSER_DRAFTS_FILE: &str = "composer-drafts.json";
+const MAX_COMPOSER_DRAFTS: usize = 50;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ComposerDraftStore {
+    #[serde(default)]
+    version: u8,
+    #[serde(default)]
+    drafts: Vec<ComposerDraftRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ComposerDraftRecord {
+    session_id: String,
+    text: String,
+    updated_at: String,
+}
 
 #[derive(Debug, Clone)]
 struct SessionSnapshotEntry {
@@ -2256,6 +2273,132 @@ impl App {
         self.pending_input_prefill.take()
     }
 
+    fn composer_drafts_path(&self) -> PathBuf {
+        self.state_root.join(COMPOSER_DRAFTS_FILE)
+    }
+
+    fn composer_draft_key(&self) -> String {
+        let trimmed = self.session_id.trim();
+        if trimmed.is_empty() {
+            "__new__".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
+    fn load_composer_draft_store(&self) -> Result<ComposerDraftStore, AgentError> {
+        let path = self.composer_drafts_path();
+        let raw = match std::fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ComposerDraftStore {
+                    version: 1,
+                    drafts: Vec::new(),
+                });
+            }
+            Err(err) => {
+                return Err(AgentError::Io(format!(
+                    "Failed to read composer drafts {}: {}",
+                    path.display(),
+                    err
+                )));
+            }
+        };
+        let mut store: ComposerDraftStore = serde_json::from_str(&raw).map_err(|err| {
+            AgentError::Config(format!(
+                "Failed to parse composer drafts {}: {}",
+                path.display(),
+                err
+            ))
+        })?;
+        store.version = 1;
+        Ok(store)
+    }
+
+    fn write_composer_draft_store(&self, store: &ComposerDraftStore) -> Result<(), AgentError> {
+        let path = self.composer_drafts_path();
+        if store.drafts.is_empty() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => {
+                    return Err(AgentError::Io(format!(
+                        "Failed to remove composer drafts {}: {}",
+                        path.display(),
+                        err
+                    )));
+                }
+            }
+            return Ok(());
+        }
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| {
+                AgentError::Io(format!(
+                    "Failed to create composer draft dir {}: {}",
+                    parent.display(),
+                    err
+                ))
+            })?;
+        }
+        let raw = serde_json::to_string_pretty(store).map_err(|err| {
+            AgentError::Config(format!("Failed to serialize composer drafts: {err}"))
+        })?;
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, raw).map_err(|err| {
+            AgentError::Io(format!(
+                "Failed to write composer drafts {}: {}",
+                tmp_path.display(),
+                err
+            ))
+        })?;
+        std::fs::rename(&tmp_path, &path).map_err(|err| {
+            AgentError::Io(format!(
+                "Failed to replace composer drafts {}: {}",
+                path.display(),
+                err
+            ))
+        })?;
+        Ok(())
+    }
+
+    /// Load unsent composer text for the active session.
+    pub fn load_current_composer_draft(&self) -> Result<Option<String>, AgentError> {
+        let key = self.composer_draft_key();
+        let store = self.load_composer_draft_store()?;
+        Ok(store
+            .drafts
+            .into_iter()
+            .rev()
+            .find(|draft| draft.session_id == key && !draft.text.trim().is_empty())
+            .map(|draft| draft.text))
+    }
+
+    /// Persist unsent composer text for the active session.
+    pub fn persist_current_composer_draft(&self, text: &str) -> Result<(), AgentError> {
+        let key = self.composer_draft_key();
+        let mut store = self.load_composer_draft_store()?;
+        store.drafts.retain(|draft| draft.session_id != key);
+        if !text.trim().is_empty() {
+            store.drafts.push(ComposerDraftRecord {
+                session_id: key,
+                text: text.to_string(),
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            });
+        }
+        if store.drafts.len() > MAX_COMPOSER_DRAFTS {
+            let keep_from = store.drafts.len() - MAX_COMPOSER_DRAFTS;
+            store.drafts.drain(0..keep_from);
+        }
+        store.version = 1;
+        self.write_composer_draft_store(&store)
+    }
+
+    /// Clear unsent composer text for the active session.
+    pub fn clear_current_composer_draft(&self) -> Result<(), AgentError> {
+        self.persist_current_composer_draft("")
+    }
+
     /// Prepare outbound user text, consuming any queued image hint.
     pub fn prepare_user_message(&mut self, raw: &str) -> String {
         let base = raw.trim();
@@ -4061,6 +4204,60 @@ mod tests {
         assert_eq!(app.history_next(), None);
         assert_eq!(app.history_index, app.input_history.len());
         assert_eq!(app.history_next(), None);
+    }
+
+    #[test]
+    fn composer_drafts_persist_per_session_without_touching_messages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());
+        app.session_id = "session-a".to_string();
+
+        app.persist_current_composer_draft("alpha draft").unwrap();
+        app.session_id = "session-b".to_string();
+        app.persist_current_composer_draft("beta draft").unwrap();
+
+        assert_eq!(
+            app.load_current_composer_draft().unwrap().as_deref(),
+            Some("beta draft")
+        );
+        app.session_id = "session-a".to_string();
+        assert_eq!(
+            app.load_current_composer_draft().unwrap().as_deref(),
+            Some("alpha draft")
+        );
+
+        app.clear_current_composer_draft().unwrap();
+        assert_eq!(app.load_current_composer_draft().unwrap(), None);
+        app.session_id = "session-b".to_string();
+        assert_eq!(
+            app.load_current_composer_draft().unwrap().as_deref(),
+            Some("beta draft")
+        );
+
+        let persistence = SessionPersistence::new(tmp.path());
+        assert!(persistence.load_session("session-a").unwrap().is_empty());
+        assert!(persistence.load_session("session-b").unwrap().is_empty());
+    }
+
+    #[test]
+    fn composer_drafts_keep_mru_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());
+
+        for idx in 0..(MAX_COMPOSER_DRAFTS + 3) {
+            app.session_id = format!("session-{idx}");
+            app.persist_current_composer_draft(&format!("draft-{idx}"))
+                .unwrap();
+        }
+
+        let raw = std::fs::read_to_string(app.composer_drafts_path()).unwrap();
+        let store: ComposerDraftStore = serde_json::from_str(&raw).unwrap();
+        assert_eq!(store.drafts.len(), MAX_COMPOSER_DRAFTS);
+        assert_eq!(store.drafts.first().unwrap().session_id, "session-3");
+        assert_eq!(
+            store.drafts.last().unwrap().session_id,
+            format!("session-{}", MAX_COMPOSER_DRAFTS + 2)
+        );
     }
 
     #[test]
@@ -6595,6 +6792,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
             .map(str::to_string),
         skip_memory,
         skip_context_files,
+        coding_context: config.agent.coding_context.clone(),
         platform: Some("cli".to_string()),
         enabled_skills: config.skills.enabled.clone(),
         disabled_skills: config.skills.disabled.clone(),

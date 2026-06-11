@@ -1656,6 +1656,18 @@ impl AnthropicProvider {
                 }
                 MessageRole::Assistant => {
                     let mut content_blocks = Vec::new();
+                    if let Some(ordered_blocks) = msg
+                        .anthropic_content_blocks
+                        .as_deref()
+                        .map(Self::replay_anthropic_content_blocks)
+                        .filter(|blocks| !blocks.is_empty())
+                    {
+                        anthropic_messages.push(serde_json::json!({
+                            "role": "assistant",
+                            "content": ordered_blocks,
+                        }));
+                        continue;
+                    }
                     if is_kimi_endpoint
                         && msg
                             .tool_calls
@@ -1713,6 +1725,14 @@ impl AnthropicProvider {
         (system_text, anthropic_messages)
     }
 
+    fn replay_anthropic_content_blocks(blocks: &[Value]) -> Vec<Value> {
+        blocks
+            .iter()
+            .filter(|block| block.is_object())
+            .cloned()
+            .collect()
+    }
+
     /// Convert tool schemas to Anthropic tool format.
     fn convert_tools(tools: &[ToolSchema]) -> Vec<Value> {
         tools
@@ -1732,8 +1752,10 @@ impl AnthropicProvider {
         let mut content_text = String::new();
         let mut reasoning_content = String::new();
         let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut anthropic_content_blocks: Option<Vec<Value>> = None;
 
         if let Some(content_arr) = json.get("content").and_then(|c| c.as_array()) {
+            anthropic_content_blocks = Self::interleaved_anthropic_content_blocks(content_arr);
             for block in content_arr {
                 let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
                 match block_type {
@@ -1819,6 +1841,7 @@ impl AnthropicProvider {
             } else {
                 Some(reasoning_content)
             },
+            anthropic_content_blocks,
             cache_control: None,
         };
 
@@ -1828,6 +1851,19 @@ impl AnthropicProvider {
             model,
             finish_reason: stop_reason,
         })
+    }
+
+    fn interleaved_anthropic_content_blocks(content_arr: &[Value]) -> Option<Vec<Value>> {
+        let has_signed_thinking = content_arr.iter().any(|block| {
+            matches!(
+                block.get("type").and_then(Value::as_str),
+                Some("thinking" | "redacted_thinking")
+            ) && (block.get("signature").is_some() || block.get("data").is_some())
+        });
+        let has_tool_use = content_arr
+            .iter()
+            .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"));
+        (has_signed_thinking && has_tool_use).then(|| content_arr.to_vec())
     }
 }
 
@@ -2692,6 +2728,7 @@ fn parse_openai_response(json: &Value) -> Result<LlmResponse, AgentError> {
         tool_call_id: None,
         name: None,
         reasoning_content,
+        anthropic_content_blocks: None,
         cache_control: None,
     };
 
@@ -3764,6 +3801,7 @@ mod tests {
                 tool_call_id: None,
                 name: None,
                 reasoning_content: None,
+                anthropic_content_blocks: None,
                 cache_control: None,
             },
             Message::tool_result("tc_1", "file contents here"),
@@ -3782,6 +3820,68 @@ mod tests {
     }
 
     #[test]
+    fn test_anthropic_convert_messages_preserves_ordered_content_blocks() {
+        let ordered_blocks = vec![
+            serde_json::json!({"type": "thinking", "thinking": "first", "signature": "sig-1"}),
+            serde_json::json!({"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {"path": "a.py"}}),
+            serde_json::json!({"type": "thinking", "thinking": "second", "signature": "sig-2"}),
+            serde_json::json!({"type": "tool_use", "id": "toolu_2", "name": "read_file", "input": {"path": "b.py"}}),
+        ];
+        let messages = vec![Message {
+            role: MessageRole::Assistant,
+            content: None,
+            tool_calls: Some(vec![
+                ToolCall {
+                    id: "toolu_1".to_string(),
+                    function: FunctionCall {
+                        name: "read_file".to_string(),
+                        arguments: r#"{"path":"a.py"}"#.to_string(),
+                    },
+                    extra_content: None,
+                },
+                ToolCall {
+                    id: "toolu_2".to_string(),
+                    function: FunctionCall {
+                        name: "read_file".to_string(),
+                        arguments: r#"{"path":"b.py"}"#.to_string(),
+                    },
+                    extra_content: None,
+                },
+            ]),
+            tool_call_id: None,
+            name: None,
+            reasoning_content: Some("first\nsecond".to_string()),
+            anthropic_content_blocks: Some(ordered_blocks.clone()),
+            cache_control: None,
+        }];
+
+        let (_, msgs) = AnthropicProvider::convert_messages(&messages, None);
+        let content = msgs[0]["content"].as_array().unwrap();
+        let order: Vec<(&str, String)> = content
+            .iter()
+            .map(|block| {
+                let block_type = block.get("type").and_then(Value::as_str).unwrap_or("");
+                let key = block
+                    .get("signature")
+                    .or_else(|| block.get("id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                (block_type, key)
+            })
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                ("thinking", "sig-1".to_string()),
+                ("tool_use", "toolu_1".to_string()),
+                ("thinking", "sig-2".to_string()),
+                ("tool_use", "toolu_2".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn test_anthropic_convert_messages_kimi_tool_replay_preserves_reasoning_content() {
         let messages = vec![Message {
             role: MessageRole::Assistant,
@@ -3797,6 +3897,7 @@ mod tests {
             tool_call_id: None,
             name: None,
             reasoning_content: Some("provider scratchpad".to_string()),
+            anthropic_content_blocks: None,
             cache_control: None,
         }];
         let (_, msgs) =
@@ -3823,6 +3924,7 @@ mod tests {
             tool_call_id: None,
             name: None,
             reasoning_content: Some(String::new()),
+            anthropic_content_blocks: None,
             cache_control: None,
         }];
         let (_, msgs) =
@@ -3848,6 +3950,7 @@ mod tests {
             tool_call_id: None,
             name: None,
             reasoning_content: Some("scratchpad".to_string()),
+            anthropic_content_blocks: None,
             cache_control: None,
         }];
         let (_, msgs) =
@@ -4037,6 +4140,35 @@ mod tests {
         let resp = AnthropicProvider::parse_response(&json).unwrap();
         assert_eq!(resp.message.content.as_deref(), Some("answer"));
         assert_eq!(resp.message.reasoning_content.as_deref(), Some("step 1"));
+    }
+
+    #[test]
+    fn test_anthropic_parse_response_preserves_interleaved_content_blocks() {
+        let json = serde_json::json!({
+            "content": [
+                {"type": "thinking", "thinking": "first", "signature": "sig-1"},
+                {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {"path": "a.py"}},
+                {"type": "redacted_thinking", "data": "ciphertext"},
+                {"type": "tool_use", "id": "toolu_2", "name": "read_file", "input": {"path": "b.py"}}
+            ],
+            "model": "claude-opus-4-8",
+            "stop_reason": "tool_use",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+            }
+        });
+        let resp = AnthropicProvider::parse_response(&json).unwrap();
+        let blocks = resp
+            .message
+            .anthropic_content_blocks
+            .as_ref()
+            .expect("ordered blocks");
+        assert_eq!(blocks.len(), 4);
+        assert_eq!(blocks[0]["signature"], "sig-1");
+        assert_eq!(blocks[1]["id"], "toolu_1");
+        assert_eq!(blocks[2]["type"], "redacted_thinking");
+        assert_eq!(blocks[3]["id"], "toolu_2");
     }
 
     #[test]

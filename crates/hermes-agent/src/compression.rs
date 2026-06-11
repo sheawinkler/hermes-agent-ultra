@@ -600,6 +600,7 @@ Write only the summary body. Do not include any preamble or prefix."
                                 tool_call_id: Some(tc.id.clone()),
                                 name: None,
                                 reasoning_content: None,
+                                anthropic_content_blocks: None,
                                 cache_control: None,
                             });
                         }
@@ -855,6 +856,7 @@ Write only the summary body. Do not include any preamble or prefix."
                 tool_call_id: None,
                 name: None,
                 reasoning_content: None,
+                anthropic_content_blocks: None,
                 cache_control: None,
             });
         }
@@ -1034,6 +1036,7 @@ mod tests {
             tool_call_id: None,
             name: None,
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         }
     }
@@ -1046,6 +1049,7 @@ mod tests {
             tool_call_id: Some(call_id.into()),
             name: None,
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         }
     }
@@ -1065,6 +1069,7 @@ mod tests {
             tool_call_id: None,
             name: None,
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         }
     }
@@ -1118,6 +1123,7 @@ mod tests {
                     tool_call_id: None,
                     name: None,
                     reasoning_content: None,
+                    anthropic_content_blocks: None,
                     cache_control: None,
                 },
                 finish_reason: Some("stop".into()),
@@ -1217,6 +1223,7 @@ mod tests {
                         tool_call_id: None,
                         name: None,
                         reasoning_content: None,
+                        anthropic_content_blocks: None,
                         cache_control: None,
                     },
                     finish_reason: Some("stop".into()),

@@ -113,6 +113,37 @@ pub const TOOLSET_RL_TRAINING: &[&str] = &[
     "rl_list_runs",
     "rl_test_inference",
 ];
+/// Lean coding posture tools.
+pub const TOOLSET_CODING: &[&str] = &[
+    "web_search",
+    "web_extract",
+    "terminal",
+    "process",
+    "read_file",
+    "write_file",
+    "patch",
+    "search_files",
+    "vision_analyze",
+    "skills_list",
+    "skill_view",
+    "skill_manage",
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_scroll",
+    "browser_back",
+    "browser_press",
+    "browser_get_images",
+    "browser_vision",
+    "browser_console",
+    "todo",
+    "memory",
+    "session_search",
+    "clarify",
+    "execute_code",
+    "delegate_task",
+];
 
 // ---------------------------------------------------------------------------
 // Toolset
@@ -291,6 +322,10 @@ impl ToolsetManager {
             "rl_training",
             TOOLSET_RL_TRAINING.iter().map(|s| s.to_string()).collect(),
         ));
+        self.register(Toolset::new(
+            "coding",
+            TOOLSET_CODING.iter().map(|s| s.to_string()).collect(),
+        ));
 
         // Platform composite toolsets
         self.register(Toolset::with_includes(
@@ -339,6 +374,25 @@ impl ToolsetManager {
                 "cronjob",
                 "homeassistant",
                 "rl_training",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        ));
+        self.register(Toolset::with_includes(
+            "hermes-acp",
+            vec![
+                "web",
+                "terminal",
+                "file",
+                "browser",
+                "vision",
+                "skills",
+                "memory",
+                "session_search",
+                "todo",
+                "code_execution",
+                "delegation",
             ]
             .into_iter()
             .map(String::from)
@@ -807,6 +861,77 @@ mod tests {
             assert!(
                 !tools.contains(&excluded.to_string()),
                 "hermes-api-server should exclude {excluded}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_coding_toolset_is_lean_pairing_surface() {
+        let manager = ToolsetManager::new(empty_registry());
+        let tools = manager.resolve_toolset_unfiltered("coding").unwrap();
+        for expected in [
+            "web_search",
+            "web_extract",
+            "terminal",
+            "process",
+            "read_file",
+            "write_file",
+            "patch",
+            "search_files",
+            "skills_list",
+            "skill_view",
+            "skill_manage",
+            "todo",
+            "memory",
+            "session_search",
+            "clarify",
+            "execute_code",
+            "delegate_task",
+            "browser_navigate",
+            "browser_console",
+            "vision_analyze",
+        ] {
+            assert!(
+                tools.contains(&expected.to_string()),
+                "coding should include {expected}"
+            );
+        }
+        for excluded in [
+            "send_message",
+            "image_generate",
+            "video_generate",
+            "text_to_speech",
+            "spotify_playback",
+            "ha_call_service",
+            "cronjob",
+        ] {
+            assert!(
+                !tools.contains(&excluded.to_string()),
+                "coding should exclude {excluded}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_hermes_acp_toolset_is_registered() {
+        let manager = ToolsetManager::new(empty_registry());
+        let tools = manager.resolve_toolset_unfiltered("hermes-acp").unwrap();
+        for expected in [
+            "terminal",
+            "read_file",
+            "write_file",
+            "patch",
+            "search_files",
+        ] {
+            assert!(
+                tools.contains(&expected.to_string()),
+                "hermes-acp should include {expected}"
+            );
+        }
+        for excluded in ["send_message", "text_to_speech", "cronjob"] {
+            assert!(
+                !tools.contains(&excluded.to_string()),
+                "hermes-acp should exclude {excluded}"
             );
         }
     }

@@ -138,6 +138,8 @@ pub struct Message {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anthropic_content_blocks: Option<Vec<serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_control: Option<CacheControl>,
 }
 
@@ -151,6 +153,7 @@ impl Message {
             tool_call_id: None,
             name: None,
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         }
     }
@@ -164,6 +167,7 @@ impl Message {
             tool_call_id: None,
             name: None,
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         }
     }
@@ -177,6 +181,7 @@ impl Message {
             tool_call_id: None,
             name: None,
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         }
     }
@@ -190,6 +195,7 @@ impl Message {
             tool_call_id: None,
             name: None,
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         }
     }
@@ -203,6 +209,7 @@ impl Message {
             tool_call_id: Some(tool_call_id.into()),
             name: None,
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         }
     }
@@ -221,6 +228,7 @@ impl Message {
             tool_call_id: Some(tool_call_id.into()),
             name: (!name.trim().is_empty()).then_some(name),
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         }
     }

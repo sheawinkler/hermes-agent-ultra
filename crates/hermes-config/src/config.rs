@@ -702,6 +702,9 @@ fn default_sessions_min_interval_hours() -> u32 {
 pub fn default_platform_toolsets() -> HashMap<String, Vec<String>> {
     let mut map = HashMap::new();
     map.insert("cli".to_string(), vec!["hermes-cli".to_string()]);
+    map.insert("tui".to_string(), vec!["hermes-cli".to_string()]);
+    map.insert("desktop".to_string(), vec!["hermes-cli".to_string()]);
+    map.insert("acp".to_string(), vec!["hermes-acp".to_string()]);
     map.insert("telegram".to_string(), vec!["hermes-telegram".to_string()]);
     map.insert("discord".to_string(), vec!["hermes-discord".to_string()]);
     map.insert("whatsapp".to_string(), vec!["hermes-whatsapp".to_string()]);
@@ -726,6 +729,13 @@ pub struct AgentLoopBehaviorConfig {
     /// Useful for batch-style runs where personalized instructions would pollute trajectories.
     #[serde(default = "default_agent_skip_context_files")]
     pub skip_context_files: bool,
+    /// Coding posture activation: auto/focus/on/off.
+    ///
+    /// `auto` injects prompt-only coding guidance on interactive coding surfaces
+    /// in a code workspace. `focus` also collapses tools to the lean coding
+    /// toolset. `on` forces prompt-only posture; `off` disables it.
+    #[serde(default = "default_agent_coding_context")]
+    pub coding_context: String,
     /// When true (default), spawn the extra LLM pass for memory/skill review — Python has no master off-switch.
     #[serde(default = "default_agent_background_review_enabled")]
     pub background_review_enabled: bool,
@@ -774,6 +784,10 @@ fn default_agent_skip_context_files() -> bool {
     false
 }
 
+fn default_agent_coding_context() -> String {
+    "auto".to_string()
+}
+
 fn default_agent_background_review_enabled() -> bool {
     true
 }
@@ -804,6 +818,7 @@ impl Default for AgentLoopBehaviorConfig {
             memory_nudge_interval: default_agent_memory_nudge_interval(),
             skill_creation_nudge_interval: default_agent_skill_nudge_interval(),
             skip_context_files: default_agent_skip_context_files(),
+            coding_context: default_agent_coding_context(),
             background_review_enabled: default_agent_background_review_enabled(),
             code_index_enabled: default_agent_code_index_enabled(),
             code_index_max_files: default_agent_code_index_max_files(),

@@ -288,6 +288,7 @@ impl CodexProvider {
             tool_call_id: None,
             name: None,
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         };
 
@@ -603,6 +604,7 @@ mod tests {
                 tool_call_id: None,
                 name: None,
                 reasoning_content: None,
+                anthropic_content_blocks: None,
                 cache_control: None,
             },
             Message::tool_result("call_1", "file contents"),

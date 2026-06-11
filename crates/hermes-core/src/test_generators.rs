@@ -97,6 +97,7 @@ pub fn arb_message() -> impl Strategy<Value = Message> {
                     tool_call_id,
                     name,
                     reasoning_content,
+                    anthropic_content_blocks: None,
                     cache_control,
                 }
             },

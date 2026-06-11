@@ -35,6 +35,7 @@ use crate::bedrock::{
 };
 use crate::budget;
 use crate::code_index::CodeIndex;
+use crate::coding_context::resolve_runtime_mode;
 use crate::context::{
     load_builtin_memory_snapshot, load_soul_md, resolve_personality, ContextManager,
     SystemPromptBuilder,
@@ -484,6 +485,10 @@ pub struct AgentConfig {
     #[serde(default)]
     pub skip_context_files: bool,
 
+    /// Coding-context posture mode: auto/focus/on/off.
+    #[serde(default = "default_coding_context")]
+    pub coding_context: String,
+
     /// Optional cheap-vs-strong per-turn routing.
     #[serde(default)]
     pub smart_model_routing: SmartModelRoutingConfig,
@@ -807,6 +812,10 @@ fn default_lsp_context_max_chars() -> usize {
     2_800
 }
 
+fn default_coding_context() -> String {
+    "auto".to_string()
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -833,6 +842,7 @@ impl Default for AgentConfig {
             hermes_home: None,
             skip_memory: false,
             skip_context_files: false,
+            coding_context: default_coding_context(),
             smart_model_routing: SmartModelRoutingConfig::default(),
             provider: None,
             platform: None,
@@ -2621,14 +2631,35 @@ impl AgentLoop {
         }
     }
 
-    fn skills_system_prompt(&self, tool_names: &HashSet<&str>) -> Option<String> {
+    fn skills_system_prompt(
+        &self,
+        tool_names: &HashSet<&str>,
+        hidden_categories: &[&str],
+    ) -> Option<String> {
         let has_skills_tools = ["skills_list", "skill_view", "skill_manage"]
             .iter()
             .any(|t| tool_names.contains(*t));
         if !has_skills_tools {
             return None;
         }
-        let mut orch = SkillOrchestrator::default_dir();
+        let skills_dir = self
+            .config
+            .hermes_home
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var("HERMES_HOME")
+                    .ok()
+                    .map(std::path::PathBuf::from)
+            })
+            .map(|home| home.join("skills"))
+            .unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join(".hermes")
+                    .join("skills")
+            });
+        let mut orch = SkillOrchestrator::new(skills_dir.clone());
         orch.set_enabled_disabled(&self.config.enabled_skills, &self.config.disabled_skills);
         let commands = orch.scan_skill_commands();
         if commands.is_empty() {
@@ -2642,6 +2673,20 @@ impl AgentLoop {
         let mut rows: Vec<_> = commands
             .iter()
             .filter(|(cmd, info)| {
+                if let Some(category) = info
+                    .skill_dir
+                    .strip_prefix(&skills_dir)
+                    .ok()
+                    .and_then(|relative| relative.components().next())
+                    .and_then(|component| component.as_os_str().to_str())
+                {
+                    if hidden_categories
+                        .iter()
+                        .any(|hidden| category.eq_ignore_ascii_case(hidden))
+                    {
+                        return false;
+                    }
+                }
                 if bypass || tier == "open" {
                     return true;
                 }
@@ -2666,6 +2711,12 @@ impl AgentLoop {
             if bypass { "on" } else { "off" },
             filtered
         ));
+        if !hidden_categories.is_empty() {
+            body.push_str(&format!(
+                "<skills_prompt_pruned hidden_categories=\"{}\" disclosure=\"full catalog remains available through skills_list and skill_view\" />\n",
+                hidden_categories.join(",")
+            ));
+        }
         for (cmd, info) in rows.into_iter().take(80) {
             body.push_str(&format!(
                 "- {}: {} ({})\n",
@@ -3854,6 +3905,31 @@ impl AgentLoop {
         {
             builder = builder.with_block(CONTEXTLATTICE_OPERATIONAL_GUIDANCE);
         }
+        let runtime_mode = resolve_runtime_mode(
+            self.config.platform.as_deref(),
+            None,
+            Some(&self.config.coding_context),
+            Some(model_for_prompt),
+        );
+        let has_coding_tools = [
+            "terminal",
+            "read_file",
+            "write_file",
+            "patch",
+            "search_files",
+        ]
+        .iter()
+        .any(|tool| tool_names.contains(tool));
+        let hidden_skill_categories = if has_coding_tools {
+            runtime_mode.hidden_skill_categories()
+        } else {
+            &[]
+        };
+        if has_coding_tools {
+            for block in runtime_mode.system_blocks() {
+                builder = builder.with_block(&block);
+            }
+        }
 
         if let Some(ref personality) = self.config.personality {
             let requested = personality.trim();
@@ -3896,7 +3972,8 @@ impl AgentLoop {
             builder = builder.with_memory_context(&mem_block);
         }
 
-        if let Some(skills_prompt) = self.skills_system_prompt(&tool_names) {
+        if let Some(skills_prompt) = self.skills_system_prompt(&tool_names, hidden_skill_categories)
+        {
             builder = builder.with_skills_prompt(&skills_prompt);
         }
 
@@ -12163,6 +12240,253 @@ mod tests {
         assert!(with_tools.contains(STEER_CHANNEL_NOTE));
         assert!(with_tools.contains(crate::steer::STEER_MARKER_OPEN));
         assert!(with_tools.contains(crate::steer::STEER_MARKER_CLOSE));
+    }
+
+    #[test]
+    fn coding_context_prompt_injected_for_cli_workspace_with_tools() {
+        use futures::stream::BoxStream;
+        use hermes_core::JsonSchema;
+
+        let _lock = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname='x'\nversion='0.1.0'\n",
+        )
+        .expect("write manifest");
+        let _cwd = EnvVarGuard::set("TERMINAL_CWD", tmp.path().to_str().unwrap());
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig {
+            platform: Some("cli".to_string()),
+            coding_context: "auto".to_string(),
+            skip_memory: true,
+            skip_context_files: true,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let tools = vec![
+            ToolSchema::new("terminal", "Terminal", JsonSchema::new("object")),
+            ToolSchema::new("read_file", "Read", JsonSchema::new("object")),
+            ToolSchema::new("write_file", "Write", JsonSchema::new("object")),
+            ToolSchema::new("patch", "Patch", JsonSchema::new("object")),
+            ToolSchema::new("search_files", "Search", JsonSchema::new("object")),
+        ];
+        let prompt = agent.build_system_prompt("", &tools, "openai/gpt-5.4");
+        assert!(
+            prompt.contains("You are a coding agent pairing with the user inside their codebase")
+        );
+        assert!(prompt.contains("Workspace"));
+        assert!(prompt.contains("Cargo.toml"));
+        assert!(prompt.contains("cargo test"));
+        assert!(prompt.contains("mode='patch'"));
+
+        let without_tools = agent.build_system_prompt("", &[], "openai/gpt-5.4");
+        assert!(!without_tools.contains("You are a coding agent pairing"));
+    }
+
+    #[test]
+    fn coding_context_prompt_respects_platform_and_off_mode() {
+        use futures::stream::BoxStream;
+        use hermes_core::JsonSchema;
+
+        let _lock = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname='x'\nversion='0.1.0'\n",
+        )
+        .expect("write manifest");
+        let _cwd = EnvVarGuard::set("TERMINAL_CWD", tmp.path().to_str().unwrap());
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let tools = vec![ToolSchema::new(
+            "terminal",
+            "Terminal",
+            JsonSchema::new("object"),
+        )];
+        for config in [
+            AgentConfig {
+                platform: Some("telegram".to_string()),
+                coding_context: "auto".to_string(),
+                skip_memory: true,
+                skip_context_files: true,
+                ..AgentConfig::default()
+            },
+            AgentConfig {
+                platform: Some("cli".to_string()),
+                coding_context: "off".to_string(),
+                skip_memory: true,
+                skip_context_files: true,
+                ..AgentConfig::default()
+            },
+        ] {
+            let agent = AgentLoop::new(
+                config,
+                Arc::new(ToolRegistry::new()),
+                Arc::new(DummyProvider),
+            );
+            let prompt = agent.build_system_prompt("", &tools, "openai/gpt-5.4");
+            assert!(!prompt.contains("You are a coding agent pairing"));
+        }
+    }
+
+    #[test]
+    fn coding_context_prunes_non_coding_skill_categories_in_prompt_only() {
+        use futures::stream::BoxStream;
+        use hermes_core::JsonSchema;
+
+        let _lock = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname='x'\nversion='0.1.0'\n",
+        )
+        .expect("write manifest");
+        let home = tmp.path().join("home");
+        let social = home.join("skills").join("social-media").join("tweet-stuff");
+        let github = home.join("skills").join("github").join("pr-review");
+        std::fs::create_dir_all(&social).expect("social skill dir");
+        std::fs::create_dir_all(&github).expect("github skill dir");
+        std::fs::write(
+            social.join("SKILL.md"),
+            "---\nname: tweet-stuff\ndescription: Draft social posts\n---\nBody",
+        )
+        .expect("write social skill");
+        std::fs::write(
+            github.join("SKILL.md"),
+            "---\nname: pr-review\ndescription: Review pull requests\n---\nBody",
+        )
+        .expect("write github skill");
+        let _cwd = EnvVarGuard::set("TERMINAL_CWD", tmp.path().to_str().unwrap());
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig {
+            platform: Some("cli".to_string()),
+            coding_context: "auto".to_string(),
+            hermes_home: Some(home.to_string_lossy().to_string()),
+            skip_memory: true,
+            skip_context_files: true,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let tools = vec![
+            ToolSchema::new("terminal", "Terminal", JsonSchema::new("object")),
+            ToolSchema::new("skills_list", "List skills", JsonSchema::new("object")),
+            ToolSchema::new("skill_view", "View skill", JsonSchema::new("object")),
+        ];
+        let prompt = agent.build_system_prompt("", &tools, "anthropic/claude-sonnet-4");
+        assert!(prompt.contains("pr-review"));
+        assert!(!prompt.contains("tweet-stuff"));
+        assert!(prompt.contains("skills_prompt_pruned"));
+        assert!(
+            prompt.contains("full catalog remains available through skills_list and skill_view")
+        );
+        assert!(prompt.contains("mode='replace'"));
     }
 
     #[tokio::test]

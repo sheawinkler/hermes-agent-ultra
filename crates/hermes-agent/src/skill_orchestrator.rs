@@ -355,6 +355,17 @@ impl SkillOrchestrator {
         &self.commands
     }
 
+    /// Return the top-level category folder for a discovered skill.
+    pub fn skill_category(&self, info: &SkillCommandInfo) -> Option<String> {
+        info.skill_dir
+            .strip_prefix(&self.skills_dir)
+            .ok()
+            .and_then(|relative| relative.components().next())
+            .and_then(|component| component.as_os_str().to_str())
+            .map(str::to_string)
+            .filter(|category| !category.trim().is_empty())
+    }
+
     /// Resolve a user-typed `/command` to its canonical key.
     ///
     /// Hyphens and underscores are treated interchangeably.

@@ -1064,6 +1064,7 @@ pub fn parse_bedrock_response(json: &Value, model: &str) -> Result<LlmResponse, 
             } else {
                 Some(reasoning_parts.join("\n"))
             },
+            anthropic_content_blocks: None,
             cache_control: None,
         },
         usage,
@@ -1184,6 +1185,7 @@ pub fn parse_bedrock_stream_events(json: &Value, model: &str) -> Result<LlmRespo
             } else {
                 Some(reasoning)
             },
+            anthropic_content_blocks: None,
             cache_control: None,
         },
         usage,
@@ -1674,6 +1676,7 @@ fn parse_openai_like_response(json: &Value, fallback_model: &str) -> Option<LlmR
                 .or_else(|| message_obj.get("reasoning_content"))
                 .and_then(Value::as_str)
                 .map(str::to_string),
+            anthropic_content_blocks: None,
             cache_control: None,
         },
         usage,

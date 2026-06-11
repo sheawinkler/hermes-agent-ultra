@@ -1,5 +1,33 @@
 {
   "sha": {
+    "fe54960142d1": {
+      "disposition": "superseded",
+      "notes": "Upstream desktop React trigger-popover text wrapping has no matching Rust runtime file. Hermes Agent Ultra renders slash completions through the Rust Ratatui popup in crates/hermes-cli/src/tui.rs, so the TS/CSS truncation fix is superseded by the local TUI surface."
+    },
+    "3ffbdfbcc0dc": {
+      "disposition": "ported",
+      "notes": "Rust port covers the functional slash-command delta: TUI completions now use live App state for /handoff platforms and /tools enable|disable candidates, /personality completions list built-ins, and CLI slash /tools enable|disable persists tools_config plus refreshes active tool schemas. Upstream desktop registry/picker UI and Python tui_gateway context-manager changes are superseded by this Rust-only TUI/CLI/gateway architecture."
+    },
+    "e0e25717116c": {
+      "disposition": "ported",
+      "notes": "Rust web tools now support Parallel search/extract through crates/hermes-tools/src/backends/web.rs: keyed PARALLEL_API_KEY uses v1 REST /search and /extract payloads, keyless default uses the hosted Search MCP handshake, result normalization preserves local Rust tool shapes, and tests cover resolver priority, generic MCP identity, SSE/plain JSON parsing, and keyed REST payloads."
+    },
+    "0a5762c78d11": {
+      "disposition": "ported",
+      "notes": "Rust Parallel keyless Search MCP client uses the neutral mcp-web-client identity in User-Agent, clientInfo, and per-call session ids, matching upstream telemetry policy without third-party Hermes attribution."
+    },
+    "aaccaada282b": {
+      "disposition": "ported",
+      "notes": "Rust Anthropic provider now carries ordered signed thinking/tool_use content blocks in-memory on parsed responses and replays them before reconstructing from reasoning_content/tool_calls. Regression tests cover interleaved block preservation in parse_response and convert_messages."
+    },
+    "efcbbde48c38": {
+      "disposition": "ported",
+      "notes": "Rust keeps anthropic_content_blocks in-memory only on hermes_core::Message and deliberately does not persist them through SessionPersistence, matching upstream's final no-state-db-column decision while leaving fallback reconstruction for reloaded sessions."
+    },
+    "3e74f75e41ec": {
+      "disposition": "ported",
+      "notes": "Rust port implements upstream coding-context posture through crates/hermes-agent/src/coding_context.rs, AgentConfig/GatewayConfig agent.coding_context, prompt injection with workspace/verify facts, model-family edit-format guidance, prompt-only non-coding skill pruning, a lean coding toolset, ACP default toolset registration, and focus-mode platform tool collapse with live MCP inclusion. Tests cover detection, prompt gating, skill pruning, coding/hermes-acp toolsets, and platform focus behavior."
+    },
     "e9c47c70422d": {
       "disposition": "ported",
       "notes": "Rust CLI/TUI launch model overrides are represented by resolve_cli_chat_provider_model, apply_cli_chat_runtime_env, App::new startup resolution, and sync_runtime_model_env tests covering HERMES_MODEL/HERMES_INFERENCE_MODEL plus provider env synchronization."
@@ -3051,6 +3079,34 @@
     "d1383a6b1450": {
       "disposition": "ported",
       "notes": "Sibling skills touched by upstream now use HERMES_HOME-aware .env resolution or docs, while Hermes-specific skill text keeps the local Rust runtime framing."
+    },
+    "18d61bd06e06": {
+      "disposition": "ported",
+      "notes": "Upstream desktop composer draft persistence is ported into the Rust TUI as state-root backed per-session composer drafts that restore on restart, clear on submit, and stay separate from message persistence."
+    },
+    "3d14f01fd674": {
+      "disposition": "ported",
+      "notes": "Rust TUI composer drafts persist on actual input changes instead of conversation/session lifecycle, covering the upstream debounce/write-volume fix without adding a desktop React runtime."
+    },
+    "65ddc7c4a1dc": {
+      "disposition": "ported",
+      "notes": "Rust TUI composer drafts are scoped by session id and guarded from programmatic session history; this runtime has no desktop attachment composer to port."
+    },
+    "fdc0d1956636": {
+      "disposition": "ported",
+      "notes": "Rust TUI draft wiring restores at startup, clears on submit, and reloads after session-switching slash commands, matching the upstream draft lifecycle fix in the local composer surface."
+    },
+    "c710868fbca9": {
+      "disposition": "ported",
+      "notes": "Rust TUI draft storage is decoupled from App session lifecycle and message persistence; session reset/new session do not write unsent text into conversation state."
+    },
+    "292192f7d726": {
+      "disposition": "ported",
+      "notes": "Rust TUI composer draft helpers centralize load/save/clear behavior and keep best-effort IO warnings out of the typing path."
+    },
+    "d7d281fa37e4": {
+      "disposition": "ported",
+      "notes": "Strict per-thread drafts are implemented for the Rust TUI through per-session draft keys, MRU capped persistence, startup restore, submit clearing, and regression tests."
     }
   },
   "subject_patterns": [

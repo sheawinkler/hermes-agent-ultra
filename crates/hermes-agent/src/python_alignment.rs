@@ -231,6 +231,7 @@ mod tests {
             tool_call_id: Some("1".into()),
             name: None,
             reasoning_content: None,
+            anthropic_content_blocks: None,
             cache_control: None,
         }];
         strip_budget_warnings_from_messages(&mut messages);

@@ -1336,6 +1336,7 @@ impl SessionPersistence {
                     tool_call_id,
                     name,
                     reasoning_content,
+                    anthropic_content_blocks: None,
                     cache_control: None,
                 })
             })
