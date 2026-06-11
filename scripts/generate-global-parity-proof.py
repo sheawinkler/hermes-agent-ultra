@@ -70,6 +70,58 @@ def apply_ci_special_rules(
     if not isinstance(special_rules, dict):
         return
 
+    tree_rule_cfg = special_rules.get("allow_tree_drift_when_functional_clean")
+    if isinstance(tree_rule_cfg, dict) and bool(tree_rule_cfg.get("enabled", False)):
+        checks = ci_gate.get("checks", [])
+        if isinstance(checks, list):
+            failed_checks = [c for c in checks if c.get("status") == "fail"]
+            failed_metrics = {str(c.get("metric", "")).strip() for c in failed_checks}
+            allowed_metrics_raw = tree_rule_cfg.get(
+                "metrics", ["max_commits_behind", "max_upstream_patch_missing"]
+            )
+            allowed_metrics = {
+                str(metric).strip()
+                for metric in allowed_metrics_raw
+                if str(metric).strip()
+            }
+            release_ok = (not bool(tree_rule_cfg.get("requires_release_gate_pass", True))) or bool(
+                release_gate.get("pass", False)
+            )
+            queue_limit = float(tree_rule_cfg.get("requires_max_queue_pending_commits", 0))
+            unowned_limit = float(tree_rule_cfg.get("requires_max_unowned_divergences", 0))
+            review_limit = float(tree_rule_cfg.get("requires_max_divergence_review_overdue", 0))
+            coverage_ratio = float(
+                tree_rule_cfg.get("requires_min_test_coverage_tracked_behavior_ratio", 1.0)
+            )
+            sota_ratio = float(
+                tree_rule_cfg.get("requires_min_sota_harness_domain_coverage_ratio", 1.0)
+            )
+            if (
+                failed_metrics
+                and failed_metrics.issubset(allowed_metrics)
+                and release_ok
+                and metrics.get("max_queue_pending_commits", 0.0) <= queue_limit
+                and metrics.get("max_unowned_divergences", 0.0) <= unowned_limit
+                and metrics.get("max_divergence_review_overdue", 0.0) <= review_limit
+                and metrics.get("min_test_coverage_tracked_behavior_ratio", 0.0) >= coverage_ratio
+                and metrics.get("min_sota_harness_domain_coverage_ratio", 0.0) >= sota_ratio
+            ):
+                for check in failed_checks:
+                    check["status"] = "warn"
+                    check["special_rule"] = "allow_tree_drift_when_functional_clean"
+                ci_gate["pass"] = True
+                ci_gate.setdefault("special_rules_applied", []).append(
+                    {
+                        "rule": "allow_tree_drift_when_functional_clean",
+                        "metrics": sorted(failed_metrics),
+                        "reason": (
+                            "functional parity clean; raw upstream tree drift kept as "
+                            "observability warning for the Rust fork"
+                        ),
+                    }
+                )
+                return
+
     rule_cfg = special_rules.get("allow_files_only_upstream_overshoot_when_functional_clean")
     if not isinstance(rule_cfg, dict):
         return
@@ -198,6 +250,12 @@ def main() -> int:
         help="Test coverage audit JSON file",
     )
     parser.add_argument(
+        "--sota-harness-matrix",
+        default="docs/parity/sota-harness-matrix.json",
+        type=Path,
+        help="SOTA harness matrix JSON file",
+    )
+    parser.add_argument(
         "--out-json",
         default="docs/parity/global-parity-proof.json",
         type=Path,
@@ -223,6 +281,7 @@ def main() -> int:
     divergence = load_json((repo_root / args.divergence_validation).resolve())
     patch_queue = load_json((repo_root / args.patch_queue).resolve())
     test_coverage = load_json((repo_root / args.test_coverage_audit).resolve())
+    sota_harness = load_json((repo_root / args.sota_harness_matrix).resolve())
 
     parity_summary = parity.get("summary", {})
     intent_summary = intents.get("summary", {})
@@ -231,6 +290,8 @@ def main() -> int:
     queue_summary = patch_queue.get("summary", {})
     test_coverage_summary = test_coverage.get("summary", {})
     test_coverage_gate = test_coverage.get("audit_gate", {})
+    sota_harness_summary = sota_harness.get("summary", {})
+    sota_harness_gate = sota_harness.get("gate", {})
     ws_states = ws.get("states", {})
     shared_diff_items = {str(i.get("path", "")) for i in shared_diff.get("items", [])}
     parity_shared = {str(i.get("path", "")) for i in parity.get("top_shared_different", [])}
@@ -265,6 +326,15 @@ def main() -> int:
         ),
         "max_test_coverage_missing_rust_refs": float(
             test_coverage_summary.get("missing_rust_test_refs", 0)
+        ),
+        "min_sota_harness_domain_coverage_ratio": float(
+            sota_harness_summary.get("domain_coverage_ratio", 0.0)
+        ),
+        "max_sota_harness_critical_gaps": float(
+            sota_harness_gate.get("critical_gaps", 0)
+        ),
+        "max_sota_harness_missing_rust_refs": float(
+            sota_harness_gate.get("missing_rust_test_refs", 0)
         ),
         "max_queue_pending_commits": float(
             queue_summary.get("by_disposition", {}).get("pending", 0)
@@ -323,11 +393,16 @@ def main() -> int:
             "divergence_validation": str(args.divergence_validation),
             "patch_queue": str(args.patch_queue),
             "test_coverage_audit": str(args.test_coverage_audit),
+            "sota_harness_matrix": str(args.sota_harness_matrix),
         },
         "queue_summary": queue_summary,
         "test_coverage_audit_summary": {
             "summary": test_coverage_summary,
             "audit_gate": test_coverage_gate,
+        },
+        "sota_harness_summary": {
+            "summary": sota_harness_summary,
+            "gate": sota_harness_gate,
         },
     }
 
@@ -376,6 +451,24 @@ def main() -> int:
     md.append(
         "- Missing Rust test refs: "
         f"`{test_coverage_summary.get('missing_rust_test_refs', 0)}`"
+    )
+    md.append("")
+
+    md.append("## SOTA Harness Matrix")
+    md.append("")
+    md.append(f"- Harness gate: **{'PASS' if sota_harness_gate.get('pass') else 'FAIL'}**")
+    md.append(
+        "- Domain coverage ratio: "
+        f"`{sota_harness_summary.get('domain_coverage_ratio', 0)}`"
+    )
+    md.append(f"- Critical gaps: `{sota_harness_gate.get('critical_gaps', 0)}`")
+    md.append(
+        "- Missing Rust test refs: "
+        f"`{sota_harness_gate.get('missing_rust_test_refs', 0)}`"
+    )
+    md.append(
+        "- Direct Rust tests: "
+        f"`{sota_harness_summary.get('direct_rust_tests', 0)}`"
     )
     md.append("")
 

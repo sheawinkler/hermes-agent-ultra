@@ -63,6 +63,34 @@ fn test_coverage_audit_gate_passes() {
 }
 
 #[test]
+fn test_sota_harness_matrix_gate_passes() {
+    let payload = read_json("docs/parity/sota-harness-matrix.json");
+    assert_eq!(
+        payload["gate"]["pass"].as_bool(),
+        Some(true),
+        "SOTA harness matrix gate must pass"
+    );
+    assert_eq!(
+        payload["gate"]["critical_gaps"].as_u64(),
+        Some(0),
+        "SOTA harness matrix must have zero critical gaps"
+    );
+    assert_eq!(
+        payload["gate"]["missing_rust_test_refs"].as_u64(),
+        Some(0),
+        "SOTA harness matrix must have zero missing Rust test refs"
+    );
+    let ratio = payload["summary"]["domain_coverage_ratio"]
+        .as_f64()
+        .expect("domain_coverage_ratio should be number");
+    assert!(
+        ratio >= 1.0,
+        "SOTA harness domain coverage ratio below gate: {}",
+        ratio
+    );
+}
+
+#[test]
 fn test_adapter_matrix_has_no_placeholder_status() {
     let payload = read_json("docs/parity/adapter-feature-matrix.json");
     let non_native = payload["summary"]["non_rust_native"]

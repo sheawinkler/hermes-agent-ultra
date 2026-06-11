@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-05-30T18:15:34.743249+00:00",
+  "generated_at_utc": "2026-06-11T00:16:38.789710+00:00",
   "items": [
     {
       "errors": [],
@@ -58,7 +58,7 @@
       "errors": [],
       "id": "rust-skills-catalog-governance",
       "last_reviewed": "2026-04-21",
-      "matched_files": 888,
+      "matched_files": 955,
       "matched_sample": [
         "optional-skills/DESCRIPTION.md",
         "optional-skills/autonomous-ai-agents/DESCRIPTION.md",
@@ -68,8 +68,6 @@
         "optional-skills/autonomous-ai-agents/grok/SKILL.md",
         "optional-skills/autonomous-ai-agents/honcho/SKILL.md",
         "optional-skills/autonomous-ai-agents/openhands/SKILL.md",
-        "optional-skills/blockchain/base/SKILL.md",
-        "optional-skills/blockchain/base/scripts/base_client.py",
         "optional-skills/blockchain/evm/SKILL.md",
         "optional-skills/blockchain/evm/scripts/evm_client.py",
         "optional-skills/blockchain/hyperliquid/SKILL.md",
@@ -79,7 +77,9 @@
         "optional-skills/communication/DESCRIPTION.md",
         "optional-skills/communication/one-three-one-rule/SKILL.md",
         "optional-skills/creative/DESCRIPTION.md",
-        "optional-skills/creative/blender-mcp/SKILL.md"
+        "optional-skills/creative/baoyu-article-illustrator/PORT_NOTES.md",
+        "optional-skills/creative/baoyu-article-illustrator/SKILL.md",
+        "optional-skills/creative/baoyu-article-illustrator/prompts/system.md"
       ],
       "overdue": false,
       "owner": "sheawinkler",
@@ -136,22 +136,22 @@
       "errors": [],
       "id": "upstream-s6-plan-doc-archive",
       "last_reviewed": "2026-05-26",
-      "matched_files": 1,
-      "matched_sample": [
-        "docs/plans/2026-05-07-s6-overlay-dynamic-subagent-gateways.md"
-      ],
+      "matched_files": 0,
+      "matched_sample": [],
       "overdue": false,
       "owner": "sheawinkler",
       "review_date": "2026-08-26",
       "status": "approved",
       "ticket": 26,
-      "warnings": []
+      "warnings": [
+        "no paths currently matched in local/upstream trees"
+      ]
     },
     {
       "errors": [],
       "id": "rust-cli-tui-primary-ux-surface",
       "last_reviewed": "2026-04-21",
-      "matched_files": 1178,
+      "matched_files": 1213,
       "matched_sample": [
         "ui-tui/.gitignore",
         "ui-tui/.prettierrc",
@@ -171,8 +171,8 @@
         "ui-tui/packages/hermes-ink/src/hooks/use-stdout.ts",
         "ui-tui/packages/hermes-ink/src/ink/Ansi.tsx",
         "ui-tui/packages/hermes-ink/src/ink/app-mouse.test.ts",
-        "ui-tui/packages/hermes-ink/src/ink/bidi.ts",
-        "ui-tui/packages/hermes-ink/src/ink/cache-eviction.ts"
+        "ui-tui/packages/hermes-ink/src/ink/app-rawmode-mouse.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/bidi.ts"
       ],
       "overdue": false,
       "owner": "sheawinkler",
@@ -185,10 +185,10 @@
   "summary": {
     "errors": 0,
     "items": 8,
-    "local_paths": 3293,
+    "local_paths": 3424,
     "review_overdue": 0,
     "unowned": 0,
-    "upstream_paths": 4212,
-    "warnings": 0
+    "upstream_paths": 4958,
+    "warnings": 1
   }
 }

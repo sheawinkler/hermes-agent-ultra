@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "suite": "sota_workflow_replay",
+  "description": "Deterministic operator workflow replay corpus for CLI and terminal-facing snapshots.",
+  "workflows": [
+    {
+      "id": "operator_status_triage",
+      "purpose": "Exercise the operator's first diagnostic path across model, tools, auth, gateway, and non-TTY fallback surfaces.",
+      "steps": [
+        {
+          "id": "model_status",
+          "args": ["model"],
+          "snapshot_role": "cli_status",
+          "expected_stdout_contains": ["Current model"]
+        },
+        {
+          "id": "tools_list",
+          "args": ["tools", "list"],
+          "snapshot_role": "tool_registry",
+          "expected_stdout_contains": ["send_message", "clarify"]
+        },
+        {
+          "id": "auth_status_nous",
+          "args": ["auth", "status", "nous"],
+          "snapshot_role": "auth_status",
+          "expected_stdout_contains": ["Auth status", "provider='nous'"]
+        },
+        {
+          "id": "gateway_status",
+          "args": ["gateway", "status"],
+          "snapshot_role": "gateway_status",
+          "expected_stdout_contains": ["Gateway status"]
+        }
+      ]
+    },
+    {
+      "id": "non_tty_recovery_guidance",
+      "purpose": "Protect terminal/PTY ergonomics for accidental interactive startup without a TTY.",
+      "steps": [
+        {
+          "id": "interactive_without_tty",
+          "args": [],
+          "expect_success": false,
+          "snapshot_role": "pty_diagnostic",
+          "expected_stderr_contains": [
+            "interactive Hermes requires a terminal (TTY)",
+            "hermes-ultra chat --query",
+            "hermes-ultra doctor --deep --snapshot --bundle"
+          ]
+        }
+      ]
+    }
+  ]
+}

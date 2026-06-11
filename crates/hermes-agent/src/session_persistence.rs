@@ -6,7 +6,11 @@
 //! Corresponds to Python `run_agent.py`'s `_persist_session`, `_save_session_log`,
 //! and `_save_trajectory` methods.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
+};
 
 use chrono::{Duration as ChronoDuration, Utc};
 use hermes_core::{AgentError, Message, MessageRole};
@@ -73,8 +77,44 @@ pub struct UserMessageRef {
     pub content: Option<String>,
 }
 
+/// Result of a malformed `sessions.db` schema repair attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaRepairReport {
+    pub repaired: bool,
+    pub strategy: Option<String>,
+    pub backup_path: Option<PathBuf>,
+    pub error: Option<String>,
+}
+
+static SCHEMA_REPAIR_ATTEMPTS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+
 impl SessionPersistence {
     const FTS_TABLES: &'static [&'static str] = &["messages_fts", "messages_fts_trigram"];
+
+    pub fn is_malformed_db_error_message(message: &str) -> bool {
+        let lower = message.to_ascii_lowercase();
+        lower.contains("malformed database schema")
+            || lower.contains("database disk image is malformed")
+    }
+
+    fn is_malformed_sqlite_error(error: &rusqlite::Error) -> bool {
+        Self::is_malformed_db_error_message(&error.to_string())
+    }
+
+    fn is_malformed_agent_error(error: &AgentError) -> bool {
+        Self::is_malformed_db_error_message(&error.to_string())
+    }
+
+    fn claim_schema_repair_attempt(db_path: &Path) -> bool {
+        let key = db_path
+            .canonicalize()
+            .unwrap_or_else(|_| db_path.to_path_buf());
+        let attempts = SCHEMA_REPAIR_ATTEMPTS.get_or_init(|| Mutex::new(HashSet::new()));
+        let Ok(mut attempts) = attempts.lock() else {
+            return false;
+        };
+        attempts.insert(key)
+    }
 
     fn is_fts5_unavailable_message(message: &str) -> bool {
         let lower = message.to_ascii_lowercase();
@@ -173,6 +213,18 @@ impl SessionPersistence {
         }
     }
 
+    fn rebuild_primary_fts_index(conn: &rusqlite::Connection) -> Result<(), AgentError> {
+        if !Self::fts_table_exists(conn)? {
+            return Ok(());
+        }
+        conn.execute(
+            "INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
+            [],
+        )
+        .map(|_| ())
+        .map_err(|e| AgentError::Io(format!("Failed to rebuild messages_fts: {e}")))
+    }
+
     fn delete_fts_rows_for_session(
         conn: &rusqlite::Connection,
         session_id: &str,
@@ -250,6 +302,208 @@ impl SessionPersistence {
         &self.db_path
     }
 
+    fn copy_if_exists(src: &Path, dst: &Path) -> std::io::Result<bool> {
+        if !src.exists() {
+            return Ok(false);
+        }
+        std::fs::copy(src, dst)?;
+        Ok(true)
+    }
+
+    fn backup_db_file(db_path: &Path) -> Option<PathBuf> {
+        let stamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let backup_path = db_path.with_file_name(format!(
+            "{}.malformed-backup-{stamp}",
+            db_path.file_name()?.to_string_lossy()
+        ));
+        if let Err(err) = std::fs::copy(db_path, &backup_path) {
+            tracing::warn!(
+                "could not back up malformed sessions db {}: {}",
+                db_path.display(),
+                err
+            );
+            return None;
+        }
+
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = db_path.with_file_name(format!(
+                "{}{suffix}",
+                db_path.file_name().unwrap_or_default().to_string_lossy()
+            ));
+            let backup_sidecar = backup_path.with_file_name(format!(
+                "{}{suffix}",
+                backup_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            ));
+            if let Err(err) = Self::copy_if_exists(&sidecar, &backup_sidecar) {
+                tracing::warn!(
+                    "could not back up sessions db sidecar {}: {}",
+                    sidecar.display(),
+                    err
+                );
+            }
+        }
+
+        Some(backup_path)
+    }
+
+    fn db_opens_cleanly_path(db_path: &Path) -> Option<String> {
+        let conn = match rusqlite::Connection::open(db_path) {
+            Ok(conn) => conn,
+            Err(err) => return Some(err.to_string()),
+        };
+
+        if let Err(err) = conn.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0)) {
+            return Some(err.to_string());
+        }
+
+        let mut stmt = match conn.prepare("PRAGMA integrity_check") {
+            Ok(stmt) => stmt,
+            Err(err) => return Some(err.to_string()),
+        };
+        let rows = match stmt.query_map([], |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows,
+            Err(err) => return Some(err.to_string()),
+        };
+        let mut problems = Vec::new();
+        for row in rows {
+            match row {
+                Ok(value) if value.eq_ignore_ascii_case("ok") => {}
+                Ok(value) => problems.push(value),
+                Err(err) => return Some(err.to_string()),
+            }
+            if problems.len() >= 3 {
+                break;
+            }
+        }
+        if !problems.is_empty() {
+            return Some(problems.join("; "));
+        }
+
+        match conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| {
+            row.get::<_, i64>(0)
+        }) {
+            Ok(_) => None,
+            Err(err) => Some(err.to_string()),
+        }
+    }
+
+    pub fn db_health_error(&self) -> Option<String> {
+        if !self.db_path.exists() {
+            return None;
+        }
+        Self::db_opens_cleanly_path(&self.db_path)
+    }
+
+    fn repair_schema_dedup_pass(db_path: &Path) -> Result<(), AgentError> {
+        let conn = rusqlite::Connection::open(db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open malformed sessions db: {e}")))?;
+        conn.execute_batch("PRAGMA writable_schema=ON")
+            .map_err(|e| AgentError::Io(format!("Failed to enable writable_schema: {e}")))?;
+        {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT type, name, MIN(rowid) AS keep
+                     FROM sqlite_master
+                     GROUP BY type, name
+                     HAVING COUNT(*) > 1",
+                )
+                .map_err(|e| AgentError::Io(format!("Failed to inspect sqlite_master: {e}")))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(|e| AgentError::Io(format!("Failed to query sqlite_master: {e}")))?;
+            for row in rows {
+                let (object_type, name, keep_rowid) =
+                    row.map_err(|e| AgentError::Io(format!("Failed to read schema row: {e}")))?;
+                conn.execute(
+                    "DELETE FROM sqlite_master
+                     WHERE type = ?1 AND name = ?2 AND rowid <> ?3",
+                    rusqlite::params![object_type, name, keep_rowid],
+                )
+                .map_err(|e| AgentError::Io(format!("Failed to deduplicate sqlite_master: {e}")))?;
+            }
+        }
+        conn.execute_batch("PRAGMA writable_schema=OFF")
+            .map_err(|e| AgentError::Io(format!("Failed to disable writable_schema: {e}")))?;
+        Ok(())
+    }
+
+    fn repair_schema_drop_fts_pass(&self) -> Result<(), AgentError> {
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open malformed sessions db: {e}")))?;
+        conn.execute_batch("PRAGMA writable_schema=ON")
+            .map_err(|e| AgentError::Io(format!("Failed to enable writable_schema: {e}")))?;
+        conn.execute(
+            "DELETE FROM sqlite_master
+             WHERE name LIKE 'messages_fts%'
+                OR tbl_name LIKE 'messages_fts%'
+                OR sql LIKE '%messages_fts%'",
+            [],
+        )
+        .map_err(|e| AgentError::Io(format!("Failed to drop FTS schema objects: {e}")))?;
+        conn.execute_batch("PRAGMA writable_schema=OFF")
+            .map_err(|e| AgentError::Io(format!("Failed to disable writable_schema: {e}")))?;
+        conn.execute_batch("VACUUM")
+            .map_err(|e| AgentError::Io(format!("Failed to vacuum repaired sessions db: {e}")))?;
+        drop(conn);
+
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to reopen repaired sessions db: {e}")))?;
+        Self::ensure_fts_schema(&conn, &self.db_path)?;
+        Self::rebuild_primary_fts_index(&conn)
+    }
+
+    pub fn repair_malformed_schema(&self, backup: bool) -> SchemaRepairReport {
+        let mut report = SchemaRepairReport {
+            repaired: false,
+            strategy: None,
+            backup_path: None,
+            error: None,
+        };
+
+        if !self.db_path.exists() {
+            report.error = Some(format!("{} does not exist", self.db_path.display()));
+            return report;
+        }
+
+        if backup {
+            report.backup_path = Self::backup_db_file(&self.db_path);
+        }
+
+        if let Err(err) = Self::repair_schema_dedup_pass(&self.db_path) {
+            tracing::warn!("sessions db schema dedup repair failed: {}", err);
+        } else if Self::db_opens_cleanly_path(&self.db_path).is_none() {
+            report.repaired = true;
+            report.strategy = Some("dedup_schema".to_string());
+            return report;
+        }
+
+        match self.repair_schema_drop_fts_pass() {
+            Ok(()) => {
+                let reason = Self::db_opens_cleanly_path(&self.db_path);
+                if reason.is_none() {
+                    report.repaired = true;
+                    report.strategy = Some("drop_fts_rebuild".to_string());
+                } else {
+                    report.error = reason;
+                }
+            }
+            Err(err) => {
+                report.error = Some(err.to_string());
+            }
+        }
+
+        report
+    }
+
     /// Number of queryable FTS indexes in the session database.
     pub fn fts_index_count(&self) -> Result<u32, AgentError> {
         self.ensure_db()?;
@@ -290,8 +544,40 @@ impl SessionPersistence {
         }
     }
 
-    /// Ensure the SQLite database and tables exist.
     pub fn ensure_db(&self) -> Result<(), AgentError> {
+        match self.ensure_db_inner() {
+            Ok(()) => Ok(()),
+            Err(err)
+                if Self::is_malformed_agent_error(&err)
+                    && Self::claim_schema_repair_attempt(&self.db_path) =>
+            {
+                tracing::error!(
+                    "sessions db schema is malformed ({}); attempting one automatic repair",
+                    err
+                );
+                let report = self.repair_malformed_schema(true);
+                if !report.repaired {
+                    return Err(AgentError::Io(format!(
+                        "sessions db malformed and repair failed: {}; backup: {}",
+                        report
+                            .error
+                            .as_deref()
+                            .unwrap_or("repair did not return a concrete error"),
+                        report
+                            .backup_path
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "not created".to_string())
+                    )));
+                }
+                self.ensure_db_inner()
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Ensure the SQLite database and tables exist.
+    fn ensure_db_inner(&self) -> Result<(), AgentError> {
         if let Some(parent) = self.db_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| AgentError::Io(format!("Failed to create db directory: {e}")))?;
@@ -299,6 +585,14 @@ impl SessionPersistence {
 
         let conn = rusqlite::Connection::open(&self.db_path)
             .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+
+        if let Err(err) = conn.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0)) {
+            if Self::is_malformed_sqlite_error(&err) {
+                return Err(AgentError::Io(format!(
+                    "sessions db schema malformed before initialization: {err}"
+                )));
+            }
+        }
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS sessions (
@@ -1131,6 +1425,127 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap()
+    }
+
+    fn persist_searchable_session(sp: &SessionPersistence) {
+        let messages = vec![
+            Message::user("hello world"),
+            Message::assistant("reply about pizza"),
+            Message::user("second turn"),
+            Message::assistant("more pizza details"),
+        ];
+        sp.persist_session("schema-repair", &messages, Some("gpt-4o"), None, None, None)
+            .unwrap();
+        assert_eq!(fts_match_rows(sp, "pizza").len(), 2);
+    }
+
+    fn corrupt_duplicate_fts_schema(sp: &SessionPersistence) {
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        conn.execute_batch("PRAGMA writable_schema=ON").unwrap();
+        conn.execute(
+            "INSERT INTO sqlite_master (type, name, tbl_name, rootpage, sql)
+             SELECT type, name, tbl_name, rootpage, sql
+             FROM sqlite_master
+             WHERE name = 'messages_fts'",
+            [],
+        )
+        .unwrap();
+        let _ = conn.execute_batch("PRAGMA writable_schema=OFF");
+        drop(conn);
+    }
+
+    #[test]
+    fn malformed_schema_error_classifier_matches_expected_sqlite_messages() {
+        assert!(SessionPersistence::is_malformed_db_error_message(
+            "malformed database schema (messages_fts) - table messages_fts already exists"
+        ));
+        assert!(SessionPersistence::is_malformed_db_error_message(
+            "database disk image is malformed"
+        ));
+        assert!(!SessionPersistence::is_malformed_db_error_message(
+            "database is locked"
+        ));
+    }
+
+    #[test]
+    fn duplicate_fts_schema_makes_first_statement_fail() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        persist_searchable_session(&sp);
+        corrupt_duplicate_fts_schema(&sp);
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let err = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))
+            .unwrap_err();
+        assert!(SessionPersistence::is_malformed_sqlite_error(&err));
+    }
+
+    #[test]
+    fn repair_malformed_schema_preserves_sessions_messages_and_search() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        persist_searchable_session(&sp);
+        corrupt_duplicate_fts_schema(&sp);
+
+        let report = sp.repair_malformed_schema(true);
+        assert!(report.repaired, "{report:?}");
+        assert_eq!(report.strategy.as_deref(), Some("dedup_schema"));
+        assert!(report.backup_path.as_ref().is_some_and(|p| p.exists()));
+        assert!(sp.db_health_error().is_none());
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let session_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        let message_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(session_count, 1);
+        assert_eq!(message_count, 4);
+        drop(conn);
+        assert_eq!(fts_match_rows(&sp, "pizza").len(), 2);
+    }
+
+    #[test]
+    fn ensure_db_auto_heals_duplicate_fts_schema_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        persist_searchable_session(&sp);
+        corrupt_duplicate_fts_schema(&sp);
+
+        sp.ensure_db().unwrap();
+        assert!(sp.db_health_error().is_none());
+        assert_eq!(fts_match_rows(&sp, "pizza").len(), 2);
+    }
+
+    #[test]
+    fn drop_fts_repair_rebuilds_search_from_canonical_messages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        persist_searchable_session(&sp);
+        corrupt_duplicate_fts_schema(&sp);
+
+        sp.repair_schema_drop_fts_pass().unwrap();
+        assert!(sp.db_health_error().is_none());
+        assert_eq!(fts_match_rows(&sp, "pizza").len(), 2);
+    }
+
+    #[test]
+    fn unrepairable_sessions_db_fails_safely_with_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        std::fs::create_dir_all(tmp.path()).unwrap();
+        std::fs::write(
+            &sp.db_path,
+            b"SQLite format 3\0not actually a valid database",
+        )
+        .unwrap();
+
+        let report = sp.repair_malformed_schema(true);
+        assert!(!report.repaired);
+        assert!(report.error.as_deref().is_some_and(|e| !e.is_empty()));
+        assert!(report.backup_path.as_ref().is_some_and(|p| p.exists()));
     }
 
     #[test]

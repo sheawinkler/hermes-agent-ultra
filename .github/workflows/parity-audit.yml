@@ -57,6 +57,8 @@ jobs:
             docs/parity/test-intent-mapping.md
             docs/parity/test-coverage-audit.json
             docs/parity/test-coverage-audit.md
+            docs/parity/sota-harness-matrix.json
+            docs/parity/sota-harness-matrix.md
             docs/parity/adapter-feature-matrix.json
             docs/parity/adapter-feature-matrix.md
             docs/parity/divergence-validation.json

@@ -429,24 +429,16 @@ def main() -> int:
         "advisory_gaps": advisory_gaps,
         "next_sigma_harness_moves": [
             {
-                "title": "User-journey replay corpus",
-                "rationale": "Record CLI/TUI/gateway task journeys as deterministic fixtures so regressions are caught at the workflow level, not only at unit boundaries.",
-            },
-            {
-                "title": "Protocol differential contracts",
-                "rationale": "Run provider, MCP, ACP, and gateway request/response fixtures through normalized differential checks against upstream intent and Ultra policy.",
-            },
-            {
-                "title": "Fault-injection matrix",
-                "rationale": "Inject network stalls, partial streams, auth expiry, tool failures, and malformed model/tool payloads into the Rust runtime to prove recovery behavior.",
-            },
-            {
-                "title": "PTY and TUI golden snapshots",
-                "rationale": "Exercise real terminal input/output flows and snapshot critical UX states so command ergonomics and status rendering are protected.",
-            },
-            {
                 "title": "Coverage trend ledger",
                 "rationale": "Track behavior coverage over time so new upstream rows or local harness regressions create visible deltas before release prep.",
+            },
+            {
+                "title": "ContextLattice replay evidence index",
+                "rationale": "Index passing and failing replay artifacts into ContextLattice so agents can retrieve exact harness evidence instead of rediscovering it from scratch.",
+            },
+            {
+                "title": "Cross-version harness budget",
+                "rationale": "Record runtime and fixture-count budgets across releases so SOTA harness growth stays deterministic, bounded, and reviewable.",
             },
         ],
     }

@@ -1964,15 +1964,21 @@ dependencies = [
 name = "hermes-parity-tests"
 version = "0.17.0"
 dependencies = [
+ "async-trait",
  "clap",
+ "hermes-acp",
  "hermes-cli",
  "hermes-core",
+ "hermes-gateway",
  "hermes-intelligence",
+ "hermes-mcp",
+ "hermes-tools",
  "regex",
  "serde",
  "serde_json",
  "sha2",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

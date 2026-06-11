@@ -4,19 +4,19 @@
       "kind": "nonzero_tree_drift",
       "message": "max_commits_behind remains nonzero in parity matrix",
       "metric": "max_commits_behind",
-      "value": 4494.0
+      "value": 5696.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_upstream_patch_missing remains nonzero in parity matrix",
       "metric": "max_upstream_patch_missing",
-      "value": 4374.0
+      "value": 5495.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_files_only_upstream remains nonzero in parity matrix",
       "metric": "max_files_only_upstream",
-      "value": 1493.0
+      "value": 2253.0
     }
   ],
   "audit_gate": {
@@ -27,41 +27,41 @@
   "audit_unit": "upstream_behavior_or_test_intent",
   "coverage_manifests": [
     {
-      "entries": 174,
+      "entries": 192,
       "missing_rust_test_refs": [],
       "missing_rust_tests_entries": [],
       "path": "docs/parity/python-test-suite-coverage.json",
       "referenced_rust_tests": 91,
       "status_counts": {
-        "covered_by_rust_test_suite_contracts": 174
+        "covered_by_rust_test_suite_contracts": 192
       },
-      "valid_entries_with_rust_tests": 174
+      "valid_entries_with_rust_tests": 192
     },
     {
-      "entries": 113,
+      "entries": 114,
       "missing_rust_test_refs": [],
       "missing_rust_tests_entries": [],
       "path": "docs/parity/hermes-cli-test-coverage.json",
-      "referenced_rust_tests": 61,
+      "referenced_rust_tests": 65,
       "status_counts": {
-        "covered_by_rust_contracts": 113
+        "covered_by_rust_contracts": 114
       },
-      "valid_entries_with_rust_tests": 113
+      "valid_entries_with_rust_tests": 114
     },
     {
-      "entries": 87,
+      "entries": 99,
       "missing_rust_test_refs": [],
       "missing_rust_tests_entries": [],
       "path": "docs/parity/ui-tui-source-coverage.json",
       "referenced_rust_tests": 55,
       "status_counts": {
-        "covered_by_rust_primary_tui_contracts": 87
+        "covered_by_rust_primary_tui_contracts": 99
       },
-      "valid_entries_with_rust_tests": 87
+      "valid_entries_with_rust_tests": 99
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-10T08:53:14.773456+00:00",
+  "generated_at_utc": "2026-06-11T01:36:01.212066+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -192,11 +192,12 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 24,
+      "direct_test_evidence_count": 25,
       "direct_test_evidence_sample": [
         "crates/hermes-cli/src/alpha_runtime.rs",
         "crates/hermes-cli/src/app.rs",
         "crates/hermes-cli/src/auth.rs",
+        "crates/hermes-cli/src/banner.rs",
         "crates/hermes-cli/src/checklist.rs",
         "crates/hermes-cli/src/claw_migrate.rs",
         "crates/hermes-cli/src/cli.rs",
@@ -511,24 +512,16 @@
   ],
   "next_sigma_harness_moves": [
     {
-      "rationale": "Record CLI/TUI/gateway task journeys as deterministic fixtures so regressions are caught at the workflow level, not only at unit boundaries.",
-      "title": "User-journey replay corpus"
-    },
-    {
-      "rationale": "Run provider, MCP, ACP, and gateway request/response fixtures through normalized differential checks against upstream intent and Ultra policy.",
-      "title": "Protocol differential contracts"
-    },
-    {
-      "rationale": "Inject network stalls, partial streams, auth expiry, tool failures, and malformed model/tool payloads into the Rust runtime to prove recovery behavior.",
-      "title": "Fault-injection matrix"
-    },
-    {
-      "rationale": "Exercise real terminal input/output flows and snapshot critical UX states so command ergonomics and status rendering are protected.",
-      "title": "PTY and TUI golden snapshots"
-    },
-    {
       "rationale": "Track behavior coverage over time so new upstream rows or local harness regressions create visible deltas before release prep.",
       "title": "Coverage trend ledger"
+    },
+    {
+      "rationale": "Index passing and failing replay artifacts into ContextLattice so agents can retrieve exact harness evidence instead of rediscovering it from scratch.",
+      "title": "ContextLattice replay evidence index"
+    },
+    {
+      "rationale": "Record runtime and fixture-count budgets across releases so SOTA harness growth stays deterministic, bounded, and reviewable.",
+      "title": "Cross-version harness budget"
     }
   ],
   "schema_version": 1,
@@ -544,21 +537,21 @@
     "upstream_missing_queue": "docs/parity/upstream-missing-queue.json"
   },
   "summary": {
-    "coverage_manifest_entries": 374,
-    "coverage_manifest_entries_with_valid_rust_tests": 374,
-    "covered_behavior_rows": 384,
+    "coverage_manifest_entries": 405,
+    "coverage_manifest_entries_with_valid_rust_tests": 405,
+    "covered_behavior_rows": 415,
     "divergence_errors": 0,
     "divergence_review_overdue": 0,
     "divergence_unowned": 0,
     "missing_rust_test_refs": 0,
     "queue_pending": 0,
-    "queue_total": 5375,
-    "rust_test_files": 302,
-    "rust_test_functions": 3409,
+    "queue_total": 5497,
+    "rust_test_files": 306,
+    "rust_test_functions": 3425,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,
     "tracked_behavior_coverage_ratio": 1.0,
-    "tracked_behavior_rows": 384
+    "tracked_behavior_rows": 415
   }
 }

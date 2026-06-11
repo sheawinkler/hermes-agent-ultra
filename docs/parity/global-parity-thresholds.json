@@ -15,6 +15,9 @@
       "min_test_coverage_tracked_behavior_ratio": 1.0,
       "max_test_coverage_audit_critical_gaps": 0,
       "max_test_coverage_missing_rust_refs": 0,
+      "min_sota_harness_domain_coverage_ratio": 1.0,
+      "max_sota_harness_critical_gaps": 0,
+      "max_sota_harness_missing_rust_refs": 0,
       "max_queue_pending_commits": 0
     },
     "required_workstreams_complete": [
@@ -40,8 +43,24 @@
     "min_test_coverage_tracked_behavior_ratio": 1.0,
     "max_test_coverage_audit_critical_gaps": 0,
     "max_test_coverage_missing_rust_refs": 0,
+    "min_sota_harness_domain_coverage_ratio": 1.0,
+    "max_sota_harness_critical_gaps": 0,
+    "max_sota_harness_missing_rust_refs": 0,
     "max_queue_pending_commits": 100,
     "special_rules": {
+      "allow_tree_drift_when_functional_clean": {
+        "enabled": true,
+        "metrics": [
+          "max_commits_behind",
+          "max_upstream_patch_missing"
+        ],
+        "requires_release_gate_pass": true,
+        "requires_max_queue_pending_commits": 0,
+        "requires_max_unowned_divergences": 0,
+        "requires_max_divergence_review_overdue": 0,
+        "requires_min_test_coverage_tracked_behavior_ratio": 1.0,
+        "requires_min_sota_harness_domain_coverage_ratio": 1.0
+      },
       "allow_files_only_upstream_overshoot_when_functional_clean": {
         "enabled": true,
         "max_overshoot": 500,

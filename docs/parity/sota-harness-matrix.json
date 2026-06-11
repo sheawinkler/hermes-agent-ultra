@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-06-10T23:45:00Z",
+  "gate": {
+    "pass": true,
+    "critical_gaps": 0,
+    "missing_rust_test_refs": 0
+  },
+  "summary": {
+    "domains_total": 3,
+    "domains_passing": 3,
+    "domain_coverage_ratio": 1.0,
+    "direct_rust_tests": 12,
+    "workflow_replay_steps": 5,
+    "protocol_cases": 7,
+    "fault_scenarios": 6,
+    "required_fault_classes": 7,
+    "covered_fault_classes": 7
+  },
+  "domains": [
+    {
+      "id": "workflow-replay-and-terminal-snapshots",
+      "title": "User workflow replay and terminal snapshots",
+      "why": "Protects operator journeys by replaying real CLI commands and normalized terminal-facing diagnostics.",
+      "status": "covered_by_rust_contracts",
+      "fixtures": [
+        "crates/hermes-parity-tests/tests/fixtures/sota_workflow_replay.json"
+      ],
+      "required_capabilities": [
+        "cli workflow replay",
+        "normalized stdout snapshots",
+        "non-TTY/PTY diagnostic snapshot"
+      ],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/tests/e2e_sota_workflow_replay.rs",
+          "name": "sota_workflow_replay_fixture_is_well_formed"
+        },
+        {
+          "file": "crates/hermes-cli/tests/e2e_sota_workflow_replay.rs",
+          "name": "sota_workflow_replay_executes_cli_journey_snapshots"
+        }
+      ]
+    },
+    {
+      "id": "protocol-differential-contracts",
+      "title": "Protocol differential contracts",
+      "why": "Normalizes ACP, MCP, and gateway protocol surfaces against fixture expectations before transport-specific details hide regressions.",
+      "status": "covered_by_rust_contracts",
+      "fixtures": [
+        "crates/hermes-parity-tests/tests/fixtures/protocol_differential_contracts.json"
+      ],
+      "required_capabilities": [
+        "ACP method alias normalization",
+        "ACP JSON-RPC response serialization",
+        "MCP initialize capability envelope",
+        "MCP argument coercion",
+        "gateway slash-command normalization"
+      ],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-parity-tests/tests/protocol_differential_contracts.rs",
+          "name": "protocol_differential_fixture_is_complete_and_unique"
+        },
+        {
+          "file": "crates/hermes-parity-tests/tests/protocol_differential_contracts.rs",
+          "name": "protocol_differential_fixture_matches_runtime_serialization"
+        }
+      ]
+    },
+    {
+      "id": "fault-injection-matrix",
+      "title": "Fault-injection matrix",
+      "why": "Exercises retry, failover, fail-closed auth, stream recovery, and malformed tool-payload recovery behavior in the Rust runtime.",
+      "status": "covered_by_rust_contracts",
+      "fixtures": [
+        "crates/hermes-agent/src/testdata/adapter_chaos_profiles.json"
+      ],
+      "required_capabilities": [
+        "timeout recovery",
+        "HTTP 5xx failover",
+        "rate limit exhaustion",
+        "connection reset recovery",
+        "auth expiry fail-closed",
+        "malformed tool payload retry without tools",
+        "partial stream drop recovery"
+      ],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "chaos_harness_fixture_is_seeded_and_unique"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "chaos_harness_profiles_verify_retry_and_fallback"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "classify_error_plain_disconnect_stays_retryable"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "maybe_nous_401_diagnostic_returns_hint_for_nous_auth_failures"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "tool_payload_validation_error_detector_matches_known_provider_signatures"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "stream_mid_tool_call_silent_retry_recovers_tool_call"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "stream_text_only_drop_does_not_retry"
+        },
+        {
+          "file": "crates/hermes-parity-tests/tests/sota_harness_contracts.rs",
+          "name": "fault_injection_matrix_covers_required_classes"
+        }
+      ]
+    }
+  ]
+}
