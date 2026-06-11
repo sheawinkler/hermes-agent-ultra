@@ -1,4 +1,4 @@
-﻿//! Application state management for the interactive CLI.
+//! Application state management for the interactive CLI.
 //!
 //! The `App` struct owns the configuration, agent loop, tool registry,
 //! and conversation message history. It coordinates input handling,
@@ -39,6 +39,8 @@ mod runtime_env;
 mod session_snapshot;
 mod snapshot_policy;
 mod stream_events;
+pub mod traits;
+mod traits_impl;
 mod ui_transcript;
 
 #[cfg(test)]
@@ -48,6 +50,10 @@ pub use pet::{PetDock, PetSettings};
 pub use provider::{
     async_tool_dispatch_for, bridge_tool_registry, build_agent_config, build_provider,
     provider_api_key_from_env,
+};
+pub use traits::{
+    AgentCoordinator, AgentDriver, AuthRuntime, ModelRuntime, SessionRuntime, SessionRuntimeAsync,
+    SlashCommandHost, TranscriptRuntime,
 };
 
 use pet::{load_pet_settings, persist_pet_settings};
@@ -479,8 +485,8 @@ impl App {
         self.history_index = self.input_history.len();
 
         if trimmed.starts_with('/') {
-            if self.stream_handle.is_some() {
-                self.push_ui_user(trimmed);
+            if self.stream_attached() {
+                self.push_ui_user(trimmed.to_string());
             }
             // Parse the slash command and its arguments
             let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
@@ -492,13 +498,14 @@ impl App {
 
             let result = crate::commands::handle_slash_command(self, cmd, &args).await?;
             if result == crate::commands::CommandResult::Quit {
-                self.running = false;
+                self.set_running(false);
             }
         } else {
             // Regular user message
             let user_message = self.prepare_user_message(trimmed);
-            self.messages.push(hermes_core::Message::user(user_message));
-            self.run_agent().await?;
+            self.messages_mut()
+                .push(hermes_core::Message::user(user_message));
+            self.run_agent_turn().await?;
         }
 
         Ok(())
@@ -519,8 +526,8 @@ impl App {
             return self.handle_input(&format!("/{}", trimmed)).await;
         };
 
-        if self.stream_handle.is_some() {
-            self.push_ui_user(trimmed);
+        if self.stream_attached() {
+            self.push_ui_user(trimmed.to_string());
         }
 
         let args: Vec<&str> = parts
@@ -530,7 +537,7 @@ impl App {
 
         let result = crate::commands::handle_slash_command(self, slash_cmd, &args).await?;
         if result == crate::commands::CommandResult::Quit {
-            self.running = false;
+            self.set_running(false);
         }
         Ok(())
     }

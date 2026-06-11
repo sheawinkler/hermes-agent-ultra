@@ -107,10 +107,13 @@ pub(crate) fn mask_secret_value(secret: &str) -> String {
     )
 }
 
-pub(crate) fn emit_command_output(app: &mut crate::app::App, text: impl Into<String>) {
+pub(crate) fn emit_command_output(
+    host: &mut impl crate::app::TranscriptRuntime,
+    text: impl Into<String>,
+) {
     let rendered = text.into();
-    if app.stream_handle.is_some() {
-        app.push_ui_assistant(rendered);
+    if host.stream_attached() {
+        host.push_ui_assistant(rendered);
     } else {
         println!("{}", rendered);
     }

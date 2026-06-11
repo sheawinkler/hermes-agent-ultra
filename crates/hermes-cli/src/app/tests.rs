@@ -1,4 +1,4 @@
-use super::provider::NoBackendProvider;
+﻿use super::provider::NoBackendProvider;
 use super::provider::{allow_no_api_key, clear_provider_cache, provider_cache_key};
 use super::quorum::{QUORUM_DEFAULT_VOTER_PASSES, QUORUM_HINT_PREFIX};
 use super::*;
@@ -1461,6 +1461,12 @@ fn test_objective_context_autopin_sets_topic_for_default_path() {
         Some(v) => crate::env_vars::set_var("HERMES_HOME", v),
         None => crate::env_vars::remove_var("HERMES_HOME"),
     }
+}
+
+#[test]
+fn app_implements_slash_command_host_trait_bundle() {
+    fn assert_host<T: traits::SlashCommandHost>() {}
+    assert_host::<App>();
 }
 
 #[test]

@@ -9,6 +9,7 @@ use super::catalog::{
 };
 use super::{CommandResult, emit_command_output};
 use crate::app::App;
+use crate::app::traits::{ModelRuntime, SessionRuntime, SessionRuntimeAsync};
 
 /// Handle a slash command.
 ///
@@ -20,7 +21,7 @@ pub async fn handle_slash_command(
     args: &[&str],
 ) -> Result<CommandResult, AgentError> {
     let (resolved_cmd, arg_storage) =
-        match expand_quick_alias_command(&app.config.quick_commands, cmd, args) {
+        match expand_quick_alias_command(&app.config().quick_commands, cmd, args) {
             Ok(expanded) => expanded,
             Err(message) => {
                 emit_command_output(app, message);
@@ -34,9 +35,9 @@ pub async fn handle_slash_command(
         "/new" => {
             app.new_session();
             let msg = if cmd.eq_ignore_ascii_case("/reset") {
-                format!("[Session reset: {}]", app.session_id)
+                format!("[Session reset: {}]", app.session_id())
             } else {
-                format!("[New session started: {}]", app.session_id)
+                format!("[New session started: {}]", app.session_id())
             };
             emit_command_output(app, msg);
             Ok(CommandResult::Handled)
@@ -53,7 +54,9 @@ pub async fn handle_slash_command(
         "/history" => super::misc::handle_history_command(app),
         "/recap" => super::misc::handle_recap_command(app, args),
         "/context" => super::misc::handle_context_command(app, args).await,
-        "/title" => super::session::handle_session_compat_command(app, canonical_command(cmd), args),
+        "/title" => {
+            super::session::handle_session_compat_command(app, canonical_command(cmd), args)
+        }
         "/branch" => super::session::handle_branch_command(app, args),
         "/timetravel" => super::session::handle_timetravel_command(app, args),
         "/snapshot" => super::session::handle_snapshot_command(app, args),
