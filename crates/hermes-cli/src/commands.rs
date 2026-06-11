@@ -3021,6 +3021,28 @@ pub fn autocomplete(partial: &str) -> Vec<&'static str> {
 /// Unlike [`autocomplete`], this understands command argument position and can
 /// suggest nested values like `/swarm run <passes> <mode>`.
 pub fn autocomplete_contextual(partial: &str) -> Vec<String> {
+    autocomplete_contextual_with_runtime(partial, None)
+}
+
+pub fn autocomplete_contextual_for_app(partial: &str, app: &App) -> Vec<String> {
+    autocomplete_contextual_with_runtime(
+        partial,
+        Some(CompletionRuntime {
+            config: app.config.as_ref(),
+            tool_registry: app.tool_registry.as_ref(),
+        }),
+    )
+}
+
+struct CompletionRuntime<'a> {
+    config: &'a GatewayConfig,
+    tool_registry: &'a hermes_tools::ToolRegistry,
+}
+
+fn autocomplete_contextual_with_runtime(
+    partial: &str,
+    runtime: Option<CompletionRuntime<'_>>,
+) -> Vec<String> {
     let trimmed_start = partial.trim_start();
     if !trimmed_start.starts_with('/') {
         return Vec::new();
@@ -3063,11 +3085,7 @@ pub fn autocomplete_contextual(partial: &str) -> Vec<String> {
         (args.len() - 1, args[args.len() - 1])
     };
 
-    let candidates = if arg_position == 0 {
-        command_subcommand_candidates(&cmd)
-    } else {
-        command_nested_candidates(&cmd, args[0], arg_position)
-    };
+    let candidates = command_argument_candidates(&cmd, &args, arg_position, runtime.as_ref());
 
     if candidates.is_empty() {
         return Vec::new();
@@ -3096,6 +3114,93 @@ pub fn autocomplete_contextual(partial: &str) -> Vec<String> {
             out.push(suggestion);
         }
     }
+    out
+}
+
+fn command_argument_candidates(
+    cmd: &str,
+    args: &[&str],
+    arg_position: usize,
+    runtime: Option<&CompletionRuntime<'_>>,
+) -> Vec<String> {
+    match (cmd, arg_position) {
+        ("/personality", 0) => personality_completion_candidates(),
+        ("/handoff", 0) => handoff_completion_candidates(runtime),
+        ("/tools", 0) => ["list", "trust", "enable", "disable"]
+            .iter()
+            .map(|v| (*v).to_string())
+            .collect(),
+        ("/tools", 1) => args
+            .first()
+            .map(|sub| tool_completion_candidates(runtime, sub))
+            .unwrap_or_default(),
+        _ if arg_position == 0 => command_subcommand_candidates(cmd),
+        _ => command_nested_candidates(cmd, args[0], arg_position),
+    }
+}
+
+fn personality_completion_candidates() -> Vec<String> {
+    let mut out = vec!["list".to_string(), "none".to_string()];
+    out.extend(
+        hermes_agent::builtin_personality_names()
+            .iter()
+            .map(|v| (*v).to_string()),
+    );
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn handoff_completion_candidates(runtime: Option<&CompletionRuntime<'_>>) -> Vec<String> {
+    let Some(runtime) = runtime else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = runtime
+        .config
+        .platforms
+        .iter()
+        .filter(|(_, platform)| platform.enabled)
+        .map(|(name, _)| name.clone())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn tool_completion_candidates(
+    runtime: Option<&CompletionRuntime<'_>>,
+    subcommand: &str,
+) -> Vec<String> {
+    let Some(runtime) = runtime else {
+        return Vec::new();
+    };
+    let action = subcommand.trim().to_ascii_lowercase();
+    if action != "enable" && action != "disable" {
+        return Vec::new();
+    }
+
+    let disabled: HashSet<&str> = runtime
+        .config
+        .tools_config
+        .disabled
+        .iter()
+        .map(String::as_str)
+        .collect();
+
+    let mut out: Vec<String> = runtime
+        .tool_registry
+        .list_tools()
+        .into_iter()
+        .filter_map(|tool| {
+            let active = !disabled.contains(tool.name.as_str());
+            match (action.as_str(), active) {
+                ("enable", false) | ("disable", true) => Some(tool.name),
+                _ => None,
+            }
+        })
+        .collect();
+    out.sort();
+    out.dedup();
     out
 }
 
@@ -5545,6 +5650,12 @@ async fn handle_skills_command(app: &mut App, args: &[&str]) -> Result<CommandRe
 }
 
 fn handle_tools_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args.first().is_some_and(|sub| {
+        sub.eq_ignore_ascii_case("enable") || sub.eq_ignore_ascii_case("disable")
+    }) {
+        return handle_tools_toggle_command(app, args);
+    }
+
     if args
         .first()
         .is_some_and(|sub| sub.eq_ignore_ascii_case("trust"))
@@ -5613,13 +5724,88 @@ fn handle_tools_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
     if tools.is_empty() {
         emit_command_output(app, "No tools registered.");
     } else {
+        let disabled: HashSet<&str> = app
+            .config
+            .tools_config
+            .disabled
+            .iter()
+            .map(String::as_str)
+            .collect();
         let mut out = format!("Registered tools ({}):\n", tools.len());
         for tool in &tools {
-            out.push_str(&format!("- `{}` — {}\n", tool.name, tool.description));
+            let state = if disabled.contains(tool.name.as_str()) {
+                "disabled"
+            } else {
+                "enabled"
+            };
+            out.push_str(&format!(
+                "- `{}` [{}] — {}\n",
+                tool.name, state, tool.description
+            ));
         }
-        out.push_str("\n\nUse `/tools trust` for a risk/score summary.");
+        out.push_str(
+            "\n\nUse `/tools trust` for a risk/score summary, `/tools enable <name>` to enable, or `/tools disable <name>` to disable.",
+        );
         emit_command_output(app, out.trim_end());
     }
+    Ok(CommandResult::Handled)
+}
+
+fn handle_tools_toggle_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let action = args[0].to_ascii_lowercase();
+    let tool_name = args.get(1..).unwrap_or_default().join(" ");
+    let tool_name = tool_name.trim();
+    if tool_name.is_empty() {
+        emit_command_output(
+            app,
+            "Usage: /tools [list] [filter] | /tools enable <name> | /tools disable <name>",
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    let cfg_path = app.state_root.join("config.yaml");
+    let mut disk = hermes_config::load_user_config_file(&cfg_path)
+        .map_err(|e| AgentError::Config(e.to_string()))?;
+    match action.as_str() {
+        "enable" => {
+            if !disk.tools_config.enabled.iter().any(|t| t == tool_name) {
+                disk.tools_config.enabled.push(tool_name.to_string());
+            }
+            disk.tools_config.disabled.retain(|t| t != tool_name);
+        }
+        "disable" => {
+            if !disk.tools_config.disabled.iter().any(|t| t == tool_name) {
+                disk.tools_config.disabled.push(tool_name.to_string());
+            }
+            disk.tools_config.enabled.retain(|t| t != tool_name);
+        }
+        _ => unreachable!("validated tools action"),
+    }
+    hermes_config::save_config_yaml(&cfg_path, &disk)
+        .map_err(|e| AgentError::Config(e.to_string()))?;
+
+    {
+        let config = Arc::make_mut(&mut app.config);
+        config.tools_config = disk.tools_config.clone();
+    }
+    app.tool_schemas = crate::platform_toolsets::resolve_platform_tool_schemas(
+        &app.config,
+        "cli",
+        &app.tool_registry,
+    );
+
+    let state = if action == "enable" {
+        "Enabled"
+    } else {
+        "Disabled"
+    };
+    emit_command_output(
+        app,
+        format!(
+            "{state} tool `{tool_name}` for this session and saved it to {}.",
+            cfg_path.display()
+        ),
+    );
     Ok(CommandResult::Handled)
 }
 
@@ -27564,6 +27750,13 @@ mod tests {
         assert!(results.contains(&"/objective behavior sigma ".to_string()));
     }
 
+    #[test]
+    fn test_contextual_autocomplete_personality_candidates() {
+        let results = autocomplete_contextual("/personality ");
+        assert!(results.contains(&"/personality coder ".to_string()));
+        assert!(results.contains(&"/personality none ".to_string()));
+    }
+
     #[tokio::test]
     async fn version_slash_command_renders_shared_version_label() {
         let _guard = env_test_lock();
@@ -27664,6 +27857,71 @@ mod tests {
             .expect("alias command");
 
         assert!(latest_ui_assistant_text(&app).contains("some args"));
+    }
+
+    #[tokio::test]
+    async fn app_contextual_autocomplete_and_tools_toggle_use_runtime_state() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        {
+            let config = Arc::make_mut(&mut app.config);
+            config.platforms.insert(
+                "telegram".to_string(),
+                hermes_config::PlatformConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+            );
+            config.tools_config.disabled.push("read_file".to_string());
+        }
+        app.tool_schemas = crate::platform_toolsets::resolve_platform_tool_schemas(
+            &app.config,
+            "cli",
+            &app.tool_registry,
+        );
+
+        let handoff = autocomplete_contextual_for_app("/handoff ", &app);
+        assert!(handoff.contains(&"/handoff telegram ".to_string()));
+        let enable = autocomplete_contextual_for_app("/tools enable ", &app);
+        assert!(enable.contains(&"/tools enable read_file ".to_string()));
+        let disable = autocomplete_contextual_for_app("/tools disable ", &app);
+        assert!(disable.contains(&"/tools disable write_file ".to_string()));
+        assert!(!app
+            .tool_schemas
+            .iter()
+            .any(|schema| schema.name == "read_file"));
+
+        handle_slash_command(&mut app, "/tools", &["enable", "read_file"])
+            .await
+            .expect("enable tool");
+        assert!(latest_ui_assistant_text(&app).contains("Enabled tool `read_file`"));
+        assert!(app
+            .config
+            .tools_config
+            .enabled
+            .iter()
+            .any(|name| name == "read_file"));
+        assert!(app
+            .tool_schemas
+            .iter()
+            .any(|schema| schema.name == "read_file"));
+
+        handle_slash_command(&mut app, "/tools", &["disable", "read_file"])
+            .await
+            .expect("disable tool");
+        assert!(latest_ui_assistant_text(&app).contains("Disabled tool `read_file`"));
+        assert!(app
+            .config
+            .tools_config
+            .disabled
+            .iter()
+            .any(|name| name == "read_file"));
+        assert!(!app
+            .tool_schemas
+            .iter()
+            .any(|schema| schema.name == "read_file"));
     }
 
     #[tokio::test]

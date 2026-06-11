@@ -1115,13 +1115,13 @@ impl TuiState {
             KeyCode::Enter if mods.contains(KeyModifiers::SHIFT) => {
                 self.insert_newline_at_cursor();
                 self.selection_anchor = None;
-                self.refresh_completions();
+                self.refresh_completions_for_app(Some(app));
                 false
             }
             KeyCode::Char('j') if mods.contains(KeyModifiers::CONTROL) => {
                 self.insert_newline_at_cursor();
                 self.selection_anchor = None;
-                self.refresh_completions();
+                self.refresh_completions_for_app(Some(app));
                 false
             }
             // Submit shortcuts are handled in the run-loop after key handling.
@@ -1166,7 +1166,7 @@ impl TuiState {
                     self.input = prev.to_string();
                     self.cursor_position = self.input.len();
                 }
-                self.refresh_completions();
+                self.refresh_completions_for_app(Some(app));
                 false
             }
             KeyCode::Down
@@ -1176,7 +1176,7 @@ impl TuiState {
                     self.input = next.to_string();
                     self.cursor_position = self.input.len();
                 }
-                self.refresh_completions();
+                self.refresh_completions_for_app(Some(app));
                 false
             }
             KeyCode::Esc => {
@@ -1202,7 +1202,7 @@ impl TuiState {
             _ => {
                 self.apply_textarea_input(key);
                 self.selection_anchor = None;
-                self.refresh_completions();
+                self.refresh_completions_for_app(Some(app));
                 false
             }
         }
@@ -1316,9 +1316,17 @@ impl TuiState {
     }
 
     /// Update auto-completion suggestions based on current input.
+    #[cfg(test)]
     fn update_completions(&mut self) {
+        self.update_completions_for_app(None);
+    }
+
+    fn update_completions_for_app(&mut self, app: Option<&App>) {
         if self.input.starts_with('/') {
-            self.completions = commands::autocomplete_contextual(&self.input);
+            self.completions = match app {
+                Some(app) => commands::autocomplete_contextual_for_app(&self.input, app),
+                None => commands::autocomplete_contextual(&self.input),
+            };
             self.completion_index = None;
         } else {
             self.completions.clear();
@@ -1327,8 +1335,12 @@ impl TuiState {
     }
 
     fn refresh_completions(&mut self) {
+        self.refresh_completions_for_app(None);
+    }
+
+    fn refresh_completions_for_app(&mut self, app: Option<&App>) {
         if self.input.starts_with('/') {
-            self.update_completions();
+            self.update_completions_for_app(app);
         } else {
             self.completions.clear();
             self.completion_index = None;
@@ -1765,6 +1777,35 @@ fn should_render_completions_popup(state: &TuiState) -> bool {
         && !state.input.contains('\n')
         && !state.history_search_active
         && !state.completions.is_empty()
+}
+
+fn restore_tui_composer_draft(app: &App, state: &mut TuiState) -> bool {
+    match app.load_current_composer_draft() {
+        Ok(Some(draft)) if !draft.trim().is_empty() => {
+            state.input = draft;
+            state.cursor_position = state.input.len();
+            state.refresh_completions_for_app(Some(app));
+            state.status_message = "Restored unsent composer draft for this session.".to_string();
+            true
+        }
+        Ok(_) => false,
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to restore composer draft");
+            false
+        }
+    }
+}
+
+fn persist_tui_composer_draft(app: &App, state: &TuiState) {
+    if let Err(err) = app.persist_current_composer_draft(&state.input) {
+        tracing::warn!(error = %err, "failed to persist composer draft");
+    }
+}
+
+fn clear_tui_composer_draft(app: &App) {
+    if let Err(err) = app.clear_current_composer_draft() {
+        tracing::warn!(error = %err, "failed to clear composer draft");
+    }
 }
 
 fn should_route_prompt_via_managed_agent(quorum_armed_once: bool, messages: &[Message]) -> bool {
@@ -4713,7 +4754,7 @@ async fn process_modal_confirm(state: &mut TuiState, app: &mut App) -> Result<()
             state.cursor_position = state.input.len();
             state.close_modal();
             state.status_message = "Interactive answer inserted. Press Enter to send.".to_string();
-            state.refresh_completions();
+            state.refresh_completions_for_app(Some(app));
         }
     }
     Ok(())
@@ -5099,6 +5140,7 @@ fn process_stream_lane_event(app: &mut App, state: &mut TuiState, event: Event) 
 pub async fn run(mut app: App) -> Result<(), AgentError> {
     let mut tui = Tui::new().map_err(|e| AgentError::Config(e.to_string()))?;
     let mut state = TuiState::default();
+    restore_tui_composer_draft(&app, &mut state);
     let mut last_jobs_refresh = Instant::now()
         .checked_sub(Duration::from_secs(2))
         .unwrap_or_else(Instant::now);
@@ -5209,6 +5251,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         } else {
                             let line_count = text.lines().count().max(1);
                             state.insert_paste_at_cursor(&text);
+                            persist_tui_composer_draft(&app, &state);
                             state.status_message = format!("Pasted {} line(s)", line_count);
                         }
                         needs_redraw = true;
@@ -5234,7 +5277,11 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                     state.status_message = "Picker closed".to_string();
                                 }
                                 ModalAction::Confirm => {
+                                    let input_before_confirm = state.input.clone();
                                     process_modal_confirm(&mut state, &mut app).await?;
+                                    if state.input != input_before_confirm {
+                                        persist_tui_composer_draft(&app, &state);
+                                    }
                                 }
                                 ModalAction::DisconnectProvider => {
                                     process_modal_disconnect(&mut state, &mut app).await?;
@@ -5245,6 +5292,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                             continue;
                         }
 
+                        let input_before_key = state.input.clone();
                         let should_quit = state.handle_key(key, &mut app);
                         if should_quit {
                             app.interrupt_controller.interrupt(None);
@@ -5252,6 +5300,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                             app.running = false;
                             break;
                         }
+                        let input_changed_by_key = state.input != input_before_key;
 
                         let is_submit = is_submit_shortcut(&key, &state.input);
 
@@ -5269,6 +5318,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                             state.completions.clear();
                             state.completion_index = None;
                             state.jump_to_latest();
+                            clear_tui_composer_draft(&app);
 
                             if !input.is_empty() {
                                 let mut handled_by_tui = false;
@@ -5365,6 +5415,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                         state.status_message =
                                             format!("Running {command_name}…");
                                         draw_frame_now(&mut tui, &app, &mut state)?;
+                                        let session_before_command = app.session_id.clone();
                                         match app.handle_input(&input).await {
                                             Ok(_) => {
                                                 state.finish_processing_cycle("✔ completed in");
@@ -5372,12 +5423,19 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                                     app.take_pending_input_prefill()
                                                 {
                                                     state.input = prefill;
-                                                    state.cursor_position =
-                                                        state.input.chars().count();
+                                                    state.cursor_position = state.input.len();
+                                                    persist_tui_composer_draft(&app, &state);
                                                     state.status_message =
                                                         "Prompt restored for editing. Press Enter to send.".to_string();
                                                 } else {
-                                                    state.status_message.clear();
+                                                    let restored_after_session_switch =
+                                                        app.session_id != session_before_command
+                                                            && restore_tui_composer_draft(
+                                                                &app, &mut state,
+                                                            );
+                                                    if !restored_after_session_switch {
+                                                        state.status_message.clear();
+                                                    }
                                                 }
                                             }
                                             Err(e) => {
@@ -5481,6 +5539,9 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                     }
                                 }
                             }
+                        }
+                        else if input_changed_by_key {
+                            persist_tui_composer_draft(&app, &state);
                         }
                         needs_redraw = true;
                     }

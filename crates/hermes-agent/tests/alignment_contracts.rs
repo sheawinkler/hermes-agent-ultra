@@ -54,6 +54,7 @@ fn strip_budget_tool_message_matches_python_fixture() {
         tool_call_id: Some("t1".into()),
         name: None,
         reasoning_content: None,
+        anthropic_content_blocks: None,
         cache_control: None,
     }];
     python_alignment::strip_budget_warnings_from_messages(&mut messages);

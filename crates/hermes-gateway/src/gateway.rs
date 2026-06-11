@@ -4649,6 +4649,7 @@ mod tests {
                         tool_call_id: None,
                         name: None,
                         reasoning_content: None,
+                        anthropic_content_blocks: None,
                         cache_control: None,
                     },
                 )

@@ -10,6 +10,7 @@ pub mod auxiliary_builder;
 pub mod bedrock;
 pub mod budget;
 pub mod code_index;
+pub mod coding_context;
 pub mod compression;
 pub mod context;
 pub mod context_files;

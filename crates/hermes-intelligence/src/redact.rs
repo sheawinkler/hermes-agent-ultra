@@ -569,6 +569,7 @@ impl Redactor {
             tool_call_id: message.tool_call_id.clone(),
             name: message.name.clone(),
             reasoning_content: message.reasoning_content.as_ref().map(|c| self.redact(c)),
+            anthropic_content_blocks: message.anthropic_content_blocks.clone(),
             cache_control: message.cache_control.clone(),
         }
     }

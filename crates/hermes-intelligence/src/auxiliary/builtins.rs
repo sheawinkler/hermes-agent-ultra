@@ -18,6 +18,7 @@ fn system(text: impl Into<String>) -> Message {
         tool_call_id: None,
         name: None,
         reasoning_content: None,
+        anthropic_content_blocks: None,
         cache_control: None,
     }
 }
@@ -30,6 +31,7 @@ fn user(text: impl Into<String>) -> Message {
         tool_call_id: None,
         name: None,
         reasoning_content: None,
+        anthropic_content_blocks: None,
         cache_control: None,
     }
 }

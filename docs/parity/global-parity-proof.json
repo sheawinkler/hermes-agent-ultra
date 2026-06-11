@@ -95,7 +95,7 @@
       }
     ]
   },
-  "generated_at_utc": "2026-06-11T01:36:11.844835+00:00",
+  "generated_at_utc": "2026-06-11T05:38:20.593903+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -131,21 +131,21 @@
   "queue_summary": {
     "by_disposition": {
       "mirrored": 70,
-      "ported": 249,
-      "superseded": 5178
+      "ported": 262,
+      "superseded": 5190
     },
     "by_target_ticket": {
-      "20": 2338,
+      "20": 2350,
       "21": 118,
-      "22": 837,
+      "22": 841,
       "23": 391,
       "24": 22,
       "25": 120,
-      "26": 1671
+      "26": 1680
     },
     "overrides_path": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/queue-overrides.json",
     "patch_equivalent_count": 2,
-    "total_commits": 5497
+    "total_commits": 5522
   },
   "release_gate": {
     "checks": [

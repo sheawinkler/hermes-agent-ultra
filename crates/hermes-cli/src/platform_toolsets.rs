@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use hermes_agent::coding_context::coding_toolset_selection;
 use hermes_config::GatewayConfig;
 use hermes_core::ToolSchema;
 use hermes_tools::{ToolRegistry, ToolsetManager};
@@ -21,6 +22,9 @@ pub fn normalize_platform_key(platform: &str) -> String {
 pub fn default_platform_toolsets() -> HashMap<String, Vec<String>> {
     let mut map = HashMap::new();
     map.insert("cli".to_string(), vec!["hermes-cli".to_string()]);
+    map.insert("tui".to_string(), vec!["hermes-cli".to_string()]);
+    map.insert("desktop".to_string(), vec!["hermes-cli".to_string()]);
+    map.insert("acp".to_string(), vec!["hermes-acp".to_string()]);
     map.insert("telegram".to_string(), vec!["hermes-telegram".to_string()]);
     map.insert("discord".to_string(), vec!["hermes-discord".to_string()]);
     map.insert("whatsapp".to_string(), vec!["hermes-whatsapp".to_string()]);
@@ -65,6 +69,7 @@ fn canonical_toolset_token(token: &str) -> String {
         "browser-use" | "browser_use" => "browser".to_string(),
         "voice-mode" | "voice_mode" => "voice".to_string(),
         "hermes_cli" => "hermes-cli".to_string(),
+        "hermes_acp" => "hermes-acp".to_string(),
         "hermes_api_server" => "hermes-api-server".to_string(),
         "hermes_telegram" => "hermes-telegram".to_string(),
         "hermes_discord" => "hermes-discord".to_string(),
@@ -74,14 +79,54 @@ fn canonical_toolset_token(token: &str) -> String {
     }
 }
 
+fn platform_has_custom_toolsets(config: &GatewayConfig, key: &str) -> bool {
+    let Some(configured) = config.platform_toolsets.get(key) else {
+        return false;
+    };
+    if configured.is_empty() {
+        return false;
+    }
+    match default_platform_toolsets().get(key) {
+        Some(defaults) => configured != defaults,
+        None => true,
+    }
+}
+
+fn coding_focus_toolsets(
+    config: &GatewayConfig,
+    platform: &str,
+    manager: &ToolsetManager,
+) -> Option<Vec<String>> {
+    let key = normalize_platform_key(platform);
+    if platform_has_custom_toolsets(config, &key) {
+        return None;
+    }
+    coding_toolset_selection(Some(&key), None, Some(&config.agent.coding_context))?;
+
+    let mut requested = vec!["coding".to_string()];
+    let mut live_mcp: Vec<String> = manager
+        .list_toolsets()
+        .into_iter()
+        .filter(|name| name.starts_with("mcp-"))
+        .collect();
+    live_mcp.sort();
+    for name in live_mcp {
+        if !requested.contains(&name) {
+            requested.push(name);
+        }
+    }
+    Some(requested)
+}
+
 /// Resolve tool names allowed for this platform based on configured toolsets.
 pub fn resolve_platform_tool_names(
     config: &GatewayConfig,
     platform: &str,
     registry: &Arc<ToolRegistry>,
 ) -> Vec<String> {
-    let requested = configured_platform_toolsets(config, platform);
     let manager = ToolsetManager::new(Arc::clone(registry));
+    let requested = coding_focus_toolsets(config, platform, &manager)
+        .unwrap_or_else(|| configured_platform_toolsets(config, platform));
 
     let mut names: HashSet<String> = HashSet::new();
     for token in requested {
@@ -183,13 +228,43 @@ pub fn tool_definition_summary(defs: &[ToolSchema]) -> Vec<serde_json::Value> {
 mod tests {
     use super::*;
 
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
     use async_trait::async_trait;
     use hermes_core::{tool_schema, JsonSchema, ToolError};
 
     struct NoopTool {
         schema: ToolSchema,
+    }
+
+    fn env_test_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env test lock poisoned")
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(old) = &self.old {
+                std::env::set_var(self.key, old);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
     }
 
     #[async_trait]
@@ -265,6 +340,8 @@ mod tests {
         register(&reg, "browser_get_images", "browser");
         register(&reg, "browser_vision", "browser");
         register(&reg, "browser_console", "browser");
+        register(&reg, "browser_cdp", "browser");
+        register(&reg, "browser_dialog", "browser");
         register(&reg, "video_analyze", "vision");
         register(&reg, "video_generate", "video_gen");
         register(&reg, "mixture_of_agents", "mixture_of_agents");
@@ -303,6 +380,26 @@ mod tests {
         assert!(names.contains(&"integrations_snapshot".to_string()));
         assert!(names.contains(&"objective_snapshot".to_string()));
         assert!(names.contains(&"mission_snapshot".to_string()));
+    }
+
+    #[test]
+    fn acp_default_resolves_editor_toolset() {
+        let cfg = GatewayConfig::default();
+        let reg = registry_with_minimal_tools();
+        let names = resolve_platform_tool_names(&cfg, "acp", &reg);
+        for expected in [
+            "terminal",
+            "read_file",
+            "write_file",
+            "patch",
+            "search_files",
+        ] {
+            assert!(
+                names.contains(&expected.to_string()),
+                "acp should include {expected}"
+            );
+        }
+        assert!(!names.contains(&"send_message".to_string()));
     }
 
     #[test]
@@ -374,6 +471,73 @@ mod tests {
         let reg = registry_with_minimal_tools();
         let names = resolve_platform_tool_names(&cfg, "cli", &reg);
         assert!(!names.contains(&"terminal".to_string()));
+    }
+
+    #[test]
+    fn coding_focus_collapses_default_cli_toolset_and_keeps_live_mcp() {
+        let _lock = env_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname='x'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        let _cwd = EnvGuard::set("TERMINAL_CWD", tmp.path().to_str().unwrap());
+        let mut cfg = GatewayConfig::default();
+        cfg.agent.coding_context = "focus".to_string();
+        let reg = registry_with_minimal_tools();
+        let schema = tool_schema(
+            "mcp_lattice_search",
+            "ContextLattice search",
+            JsonSchema::new("object"),
+        );
+        reg.register(
+            "mcp_lattice_search",
+            "mcp-lattice",
+            schema.clone(),
+            Arc::new(NoopTool { schema }),
+            Arc::new(|| true),
+            Vec::new(),
+            true,
+            "ContextLattice search",
+            "x",
+            None,
+        );
+
+        let names = resolve_platform_tool_names(&cfg, "cli", &reg);
+        assert!(names.contains(&"terminal".to_string()));
+        assert!(names.contains(&"read_file".to_string()));
+        assert!(names.contains(&"mcp_lattice_search".to_string()));
+        assert!(!names.contains(&"send_message".to_string()));
+        assert!(!names.contains(&"image_generate".to_string()));
+    }
+
+    #[test]
+    fn coding_auto_is_prompt_only_and_custom_toolset_wins_over_focus() {
+        let _lock = env_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname='x'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        let _cwd = EnvGuard::set("TERMINAL_CWD", tmp.path().to_str().unwrap());
+        let reg = registry_with_minimal_tools();
+
+        let mut auto_cfg = GatewayConfig::default();
+        auto_cfg.agent.coding_context = "auto".to_string();
+        let auto_names = resolve_platform_tool_names(&auto_cfg, "cli", &reg);
+        assert!(auto_names.contains(&"send_message".to_string()));
+        assert!(auto_names.contains(&"image_generate".to_string()));
+
+        let mut custom_focus = GatewayConfig::default();
+        custom_focus.agent.coding_context = "focus".to_string();
+        custom_focus
+            .platform_toolsets
+            .insert("cli".to_string(), vec!["web".to_string()]);
+        let custom_names = resolve_platform_tool_names(&custom_focus, "cli", &reg);
+        assert!(custom_names.contains(&"web_search".to_string()));
+        assert!(!custom_names.contains(&"terminal".to_string()));
     }
 
     #[test]
