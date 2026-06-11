@@ -3107,6 +3107,10 @@
     "d7d281fa37e4": {
       "disposition": "ported",
       "notes": "Strict per-thread drafts are implemented for the Rust TUI through per-session draft keys, MRU capped persistence, startup restore, submit clearing, and regression tests."
+    },
+    "f38f7a387013": {
+      "disposition": "superseded",
+      "notes": "Desktop stale runtime session recovery for session.interrupt is superseded by Rust TUI/ACP interrupt architecture: active runs are in-process and keyed directly by the active session, with no desktop runtime-id versus stored-id split."
     }
   },
   "subject_patterns": [
