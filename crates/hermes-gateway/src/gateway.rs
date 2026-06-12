@@ -1136,10 +1136,10 @@ impl Gateway {
     // -----------------------------------------------------------------------
 
     pub(crate) fn execute_curator_status(&self) -> String {
-        let skills_dir = hermes_config::hermes_home().join("skills");
-        let state = hermes_skills::load_curator_state(&skills_dir);
+        let store = hermes_skills::UsageStore::new();
+        let state = hermes_skills::load_curator_state(&store);
         let config = &self.config.curator;
-        let report = hermes_skills::agent_created_report(&skills_dir);
+        let report = store.agent_created_report();
 
         let status = if state.paused {
             "PAUSED"
@@ -1177,9 +1177,9 @@ impl Gateway {
     }
 
     pub(crate) fn execute_curator_run(&self, dry_run: bool) -> String {
-        let skills_dir = hermes_config::hermes_home().join("skills");
+        let store = hermes_skills::UsageStore::new();
         let config = &self.config.curator;
-        let result = hermes_skills::apply_automatic_transitions(&skills_dir, config);
+        let result = hermes_skills::apply_automatic_transitions(&store, config);
 
         let mut lines = vec![];
         if dry_run {
@@ -1193,14 +1193,14 @@ impl Gateway {
         lines.push(format!("  reactivated: {}", result.reactivated));
 
         if !dry_run {
-            let mut state = hermes_skills::load_curator_state(&skills_dir);
+            let mut state = hermes_skills::load_curator_state(&store);
             state.last_run_at = Some(chrono::Utc::now().to_rfc3339());
             state.run_count += 1;
             state.last_run_summary = Some(format!(
                 "auto: {} checked, {} stale, {} archived, {} reactivated",
                 result.checked, result.marked_stale, result.archived, result.reactivated
             ));
-            let _ = hermes_skills::save_curator_state(&skills_dir, &state);
+            let _ = hermes_skills::save_curator_state(&store, &state);
             lines.push("State updated.".to_string());
         }
 
@@ -1208,8 +1208,8 @@ impl Gateway {
     }
 
     pub(crate) fn execute_curator_pause_resume(&self, pause: bool) -> String {
-        let skills_dir = hermes_config::hermes_home().join("skills");
-        match hermes_skills::set_paused(&skills_dir, pause) {
+        let store = hermes_skills::UsageStore::new();
+        match hermes_skills::set_paused(&store, pause) {
             Ok(()) => {
                 if pause {
                     "✓ Curator paused.".to_string()
@@ -1229,8 +1229,8 @@ impl Gateway {
                 "Usage: /curator unpin <skill-name>".to_string()
             };
         }
-        let skills_dir = hermes_config::hermes_home().join("skills");
-        match hermes_skills::set_pinned(&skills_dir, name, pin) {
+        let store = hermes_skills::UsageStore::new();
+        match store.set_pinned(name, pin) {
             Ok(()) => {
                 if pin {
                     format!("✓ {name} pinned.")
@@ -1246,8 +1246,8 @@ impl Gateway {
         if name.is_empty() {
             return "Usage: /curator archive <skill-name>".to_string();
         }
-        let skills_dir = hermes_config::hermes_home().join("skills");
-        match hermes_skills::archive_skill(&skills_dir, name) {
+        let store = hermes_skills::UsageStore::new();
+        match store.archive_skill(name) {
             Ok((true, msg)) => format!("✓ {msg}"),
             Ok((false, msg)) => format!("✗ {msg}"),
             Err(e) => format!("Failed: {e}"),
@@ -1258,8 +1258,8 @@ impl Gateway {
         if name.is_empty() {
             return "Usage: /curator restore <skill-name>".to_string();
         }
-        let skills_dir = hermes_config::hermes_home().join("skills");
-        match hermes_skills::restore_skill(&skills_dir, name) {
+        let store = hermes_skills::UsageStore::new();
+        match store.restore_skill(name) {
             Ok((true, msg)) => format!("✓ {msg}"),
             Ok((false, msg)) => format!("✗ {msg}"),
             Err(e) => format!("Failed: {e}"),
@@ -1267,8 +1267,8 @@ impl Gateway {
     }
 
     pub(crate) fn execute_curator_list_archived(&self) -> String {
-        let skills_dir = hermes_config::hermes_home().join("skills");
-        let archive_dir = skills_dir.join(".archive");
+        let store = hermes_skills::UsageStore::new();
+        let archive_dir = store.dir().join(".archive");
         let mut names = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&archive_dir) {
             for entry in entries.flatten() {

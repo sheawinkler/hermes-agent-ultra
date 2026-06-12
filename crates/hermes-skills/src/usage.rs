@@ -1,4 +1,7 @@
 //! Skill usage sidecar and curator provenance filters.
+//!
+//! Centralised via [`UsageStore`] — all `.usage.json` I/O resolves to a single
+//! canonical skills directory so callers never need to guess the right path.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -16,6 +19,8 @@ use crate::skill::SkillError;
 pub const STATE_ACTIVE: &str = "active";
 pub const STATE_STALE: &str = "stale";
 pub const STATE_ARCHIVED: &str = "archived";
+
+// ── Data types ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillUsageRecord {
@@ -79,13 +84,50 @@ fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
 
-pub fn usage_file(skills_dir: &Path) -> PathBuf {
-    skills_dir.join(".usage.json")
+// ── UsageStore ───────────────────────────────────────────────────────────
+
+/// Centralised store for `.usage.json` operations.
+///
+/// All `.usage.json` I/O resolves to a single skills directory — callers no
+/// longer need to pass a `skills_dir` parameter and can never accidentally
+/// write to a legacy / wrong location.
+///
+/// # Construction
+///
+/// * `UsageStore::new()` — canonical directory (`hermes_config::skills_dir()`).
+/// * `UsageStore::with_dir(path)` — explicit directory (useful for tests).
+#[derive(Debug, Clone)]
+pub struct UsageStore {
+    skills_dir: PathBuf,
 }
 
-fn usage_lock_file(skills_dir: &Path) -> PathBuf {
-    skills_dir.join(".usage.lock")
+impl UsageStore {
+    /// Create a store rooted at the canonical skills directory.
+    pub fn new() -> Self {
+        Self {
+            skills_dir: hermes_config::skills_dir(),
+        }
+    }
+
+    /// Create a store rooted at an explicit directory (e.g. a temp dir in
+    /// tests).
+    pub fn with_dir(skills_dir: PathBuf) -> Self {
+        Self { skills_dir }
+    }
+
+    /// The skills directory this store operates on.
+    pub fn dir(&self) -> &Path {
+        &self.skills_dir
+    }
 }
+
+impl Default for UsageStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Internal helpers ────────────────────────────────────────────────────
 
 struct UsageLock {
     path: PathBuf,
@@ -97,182 +139,318 @@ impl Drop for UsageLock {
     }
 }
 
-fn acquire_usage_lock(skills_dir: &Path) -> Result<UsageLock, SkillError> {
-    fs::create_dir_all(skills_dir)?;
-    let path = usage_lock_file(skills_dir);
-    let start = Instant::now();
-    let mut stale_cleaned = false;
-    loop {
-        match fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&path)
-        {
-            Ok(mut file) => {
-                let _ = writeln!(file, "pid={}", std::process::id());
-                return Ok(UsageLock { path });
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                // If we have been waiting long enough, try to clean a stale lock
-                // (the owning process likely crashed without running Drop).
-                if !stale_cleaned && start.elapsed() > Duration::from_secs(2) {
-                    let _ = fs::remove_file(&path);
-                    stale_cleaned = true;
-                    continue;
-                }
-                if start.elapsed() > Duration::from_secs(20) {
-                    // One more attempt to remove before giving up.
-                    let _ = fs::remove_file(&path);
-                    return Err(SkillError::Io(format!(
-                        "Timed out waiting for usage sidecar lock: {}",
-                        path.display()
-                    )));
-                }
-                thread::sleep(Duration::from_millis(15));
-            }
-            Err(err) => return Err(err.into()),
-        }
+impl UsageStore {
+    fn usage_file(&self) -> PathBuf {
+        self.skills_dir.join(".usage.json")
     }
-}
 
-pub fn load_usage(skills_dir: &Path) -> BTreeMap<String, SkillUsageRecord> {
-    let path = usage_file(skills_dir);
-    let Ok(raw) = fs::read_to_string(path) else {
-        return BTreeMap::new();
-    };
-    serde_json::from_str::<BTreeMap<String, SkillUsageRecord>>(&raw).unwrap_or_default()
-}
+    fn usage_lock_file(&self) -> PathBuf {
+        self.skills_dir.join(".usage.lock")
+    }
 
-pub fn save_usage(
-    skills_dir: &Path,
-    usage: &BTreeMap<String, SkillUsageRecord>,
-) -> Result<(), SkillError> {
-    fs::create_dir_all(skills_dir)?;
-    let path = usage_file(skills_dir);
-    let tmp = skills_dir.join(format!(".usage_{}.tmp", std::process::id()));
-    let body = serde_json::to_string_pretty(usage)
-        .map_err(|e| SkillError::Parse(format!("Failed to encode usage sidecar: {e}")))?;
-    fs::write(&tmp, body)?;
-    // On Windows, rename can transiently fail if an antivirus scanner or file
-    // indexer is holding the target file open.  Retry a few times.
-    let mut last_err = None;
-    for attempt in 0..5u32 {
-        match fs::rename(&tmp, &path) {
-            Ok(()) => return Ok(()),
-            Err(e) => {
-                last_err = Some(e);
-                if attempt < 4 {
-                    thread::sleep(Duration::from_millis(50 * (attempt as u64 + 1)));
+    fn acquire_usage_lock(&self) -> Result<UsageLock, SkillError> {
+        fs::create_dir_all(&self.skills_dir)?;
+        let path = self.usage_lock_file();
+        let start = Instant::now();
+        let mut stale_cleaned = false;
+        loop {
+            match fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&path)
+            {
+                Ok(mut file) => {
+                    let _ = writeln!(file, "pid={}", std::process::id());
+                    return Ok(UsageLock { path });
                 }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // If we have been waiting long enough, try to clean a stale lock
+                    // (the owning process likely crashed without running Drop).
+                    if !stale_cleaned && start.elapsed() > Duration::from_secs(2) {
+                        let _ = fs::remove_file(&path);
+                        stale_cleaned = true;
+                        continue;
+                    }
+                    if start.elapsed() > Duration::from_secs(20) {
+                        let _ = fs::remove_file(&path);
+                        return Err(SkillError::Io(format!(
+                            "Timed out waiting for usage sidecar lock: {}",
+                            path.display()
+                        )));
+                    }
+                    thread::sleep(Duration::from_millis(15));
+                }
+                Err(err) => return Err(err.into()),
             }
         }
     }
-    // Final fallback: try a plain copy + remove (works even when rename fails).
-    if let Ok(()) = fs::copy(&tmp, &path).map(|_| ()) {
-        let _ = fs::remove_file(&tmp);
-        return Ok(());
+
+    fn mutate_usage<F>(&self, skill_name: &str, mut f: F) -> Result<(), SkillError>
+    where
+        F: FnMut(&mut SkillUsageRecord),
+    {
+        let name = skill_name.trim();
+        if name.is_empty() {
+            return Ok(());
+        }
+        if is_protected_skill(&self.skills_dir, name) {
+            tracing::debug!(
+                skill = %name,
+                skills_dir = %self.skills_dir.display(),
+                "skipping usage mutation for protected skill"
+            );
+            return Ok(());
+        }
+        let _lock = self.acquire_usage_lock()?;
+        let mut usage = self.load_usage();
+        let rec = usage.entry(name.to_string()).or_default();
+        f(rec);
+        self.save_usage(&usage)
     }
-    Err(last_err
-        .map(|e| SkillError::Io(format!("Failed to rename usage sidecar: {e}")))
-        .unwrap_or_else(|| SkillError::Io("Failed to save usage sidecar".into())))
 }
 
-fn mutate_usage<F>(skills_dir: &Path, skill_name: &str, mut f: F) -> Result<(), SkillError>
-where
-    F: FnMut(&mut SkillUsageRecord),
-{
-    let name = skill_name.trim();
-    if name.is_empty() {
-        return Ok(());
-    }
-    if is_protected_skill(skills_dir, name) {
-        tracing::debug!(
-            skill = %name,
-            skills_dir = %skills_dir.display(),
-            "skipping usage mutation for protected skill"
-        );
-        return Ok(());
-    }
-    let _lock = acquire_usage_lock(skills_dir)?;
-    let mut usage = load_usage(skills_dir);
-    let rec = usage.entry(name.to_string()).or_default();
-    f(rec);
-    save_usage(skills_dir, &usage)
-}
+// ── Core I/O ─────────────────────────────────────────────────────────────
 
-pub fn get_record(skills_dir: &Path, skill_name: &str) -> SkillUsageRecord {
-    load_usage(skills_dir)
-        .get(skill_name)
-        .cloned()
-        .unwrap_or_default()
-}
-
-pub fn bump_view(skills_dir: &Path, skill_name: &str) -> Result<(), SkillError> {
-    mutate_usage(skills_dir, skill_name, |rec| {
-        rec.view_count += 1;
-        rec.last_viewed_at = Some(now_iso());
-    })
-}
-
-pub fn bump_use(skills_dir: &Path, skill_name: &str) -> Result<(), SkillError> {
-    mutate_usage(skills_dir, skill_name, |rec| {
-        rec.use_count += 1;
-        rec.last_used_at = Some(now_iso());
-    })
-}
-
-pub fn bump_patch(skills_dir: &Path, skill_name: &str) -> Result<(), SkillError> {
-    mutate_usage(skills_dir, skill_name, |rec| {
-        rec.patch_count += 1;
-        rec.last_patched_at = Some(now_iso());
-    })
-}
-
-/// Mark a skill as agent-created. This bypasses the `is_protected_skill` guard
-/// because the agent explicitly just created this skill — it is definitionally
-/// agent-created regardless of name collisions with bundled/hub skills.
-pub fn mark_agent_created(skills_dir: &Path, skill_name: &str) -> Result<(), SkillError> {
-    let name = skill_name.trim();
-    if name.is_empty() {
-        return Ok(());
-    }
-    let _lock = acquire_usage_lock(skills_dir)?;
-    let mut usage = load_usage(skills_dir);
-    let rec = usage.entry(name.to_string()).or_default();
-    rec.agent_created = true;
-    save_usage(skills_dir, &usage)
-}
-
-pub fn set_state(skills_dir: &Path, skill_name: &str, state: &str) -> Result<(), SkillError> {
-    if !matches!(state, STATE_ACTIVE | STATE_STALE | STATE_ARCHIVED) {
-        return Ok(());
-    }
-    mutate_usage(skills_dir, skill_name, |rec| {
-        rec.state = state.to_string();
-        rec.archived_at = if state == STATE_ARCHIVED {
-            Some(now_iso())
-        } else {
-            None
+impl UsageStore {
+    /// Load the entire `.usage.json` map, returning empty on any error.
+    pub fn load_usage(&self) -> BTreeMap<String, SkillUsageRecord> {
+        let path = self.usage_file();
+        let Ok(raw) = fs::read_to_string(path) else {
+            return BTreeMap::new();
         };
-    })
-}
-
-pub fn set_pinned(skills_dir: &Path, skill_name: &str, pinned: bool) -> Result<(), SkillError> {
-    mutate_usage(skills_dir, skill_name, |rec| {
-        rec.pinned = pinned;
-    })
-}
-
-pub fn forget(skills_dir: &Path, skill_name: &str) -> Result<(), SkillError> {
-    let name = skill_name.trim();
-    if name.is_empty() {
-        return Ok(());
+        serde_json::from_str::<BTreeMap<String, SkillUsageRecord>>(&raw).unwrap_or_default()
     }
-    let _lock = acquire_usage_lock(skills_dir)?;
-    let mut usage = load_usage(skills_dir);
-    usage.remove(name);
-    save_usage(skills_dir, &usage)
+
+    /// Atomically persist the usage map.
+    pub fn save_usage(
+        &self,
+        usage: &BTreeMap<String, SkillUsageRecord>,
+    ) -> Result<(), SkillError> {
+        fs::create_dir_all(&self.skills_dir)?;
+        let path = self.usage_file();
+        let tmp = self
+            .skills_dir
+            .join(format!(".usage_{}.tmp", std::process::id()));
+        let body = serde_json::to_string_pretty(usage)
+            .map_err(|e| SkillError::Parse(format!("Failed to encode usage sidecar: {e}")))?;
+        fs::write(&tmp, body)?;
+        // On Windows, rename can transiently fail if an antivirus scanner or file
+        // indexer is holding the target file open.  Retry a few times.
+        let mut last_err = None;
+        for attempt in 0..5u32 {
+            match fs::rename(&tmp, &path) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    last_err = Some(e);
+                    if attempt < 4 {
+                        thread::sleep(Duration::from_millis(50 * (attempt as u64 + 1)));
+                    }
+                }
+            }
+        }
+        // Final fallback: try a plain copy + remove (works even when rename fails).
+        if let Ok(()) = fs::copy(&tmp, &path).map(|_| ()) {
+            let _ = fs::remove_file(&tmp);
+            return Ok(());
+        }
+        Err(last_err
+            .map(|e| SkillError::Io(format!("Failed to rename usage sidecar: {e}")))
+            .unwrap_or_else(|| SkillError::Io("Failed to save usage sidecar".into())))
+    }
 }
+
+// ── Record helpers ───────────────────────────────────────────────────────
+
+impl UsageStore {
+    pub fn get_record(&self, skill_name: &str) -> SkillUsageRecord {
+        self.load_usage()
+            .get(skill_name)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn bump_view(&self, skill_name: &str) -> Result<(), SkillError> {
+        self.mutate_usage(skill_name, |rec| {
+            rec.view_count += 1;
+            rec.last_viewed_at = Some(now_iso());
+        })
+    }
+
+    pub fn bump_use(&self, skill_name: &str) -> Result<(), SkillError> {
+        self.mutate_usage(skill_name, |rec| {
+            rec.use_count += 1;
+            rec.last_used_at = Some(now_iso());
+        })
+    }
+
+    pub fn bump_patch(&self, skill_name: &str) -> Result<(), SkillError> {
+        self.mutate_usage(skill_name, |rec| {
+            rec.patch_count += 1;
+            rec.last_patched_at = Some(now_iso());
+        })
+    }
+
+    /// Mark a skill as agent-created. This bypasses the `is_protected_skill`
+    /// guard because the agent explicitly just created this skill — it is
+    /// definitionally agent-created regardless of name collisions with
+    /// bundled/hub skills.
+    pub fn mark_agent_created(&self, skill_name: &str) -> Result<(), SkillError> {
+        let name = skill_name.trim();
+        if name.is_empty() {
+            return Ok(());
+        }
+        let _lock = self.acquire_usage_lock()?;
+        let mut usage = self.load_usage();
+        let rec = usage.entry(name.to_string()).or_default();
+        rec.agent_created = true;
+        self.save_usage(&usage)
+    }
+
+    pub fn set_state(&self, skill_name: &str, state: &str) -> Result<(), SkillError> {
+        if !matches!(state, STATE_ACTIVE | STATE_STALE | STATE_ARCHIVED) {
+            return Ok(());
+        }
+        self.mutate_usage(skill_name, |rec| {
+            rec.state = state.to_string();
+            rec.archived_at = if state == STATE_ARCHIVED {
+                Some(now_iso())
+            } else {
+                None
+            };
+        })
+    }
+
+    pub fn set_pinned(&self, skill_name: &str, pinned: bool) -> Result<(), SkillError> {
+        self.mutate_usage(skill_name, |rec| {
+            rec.pinned = pinned;
+        })
+    }
+
+    pub fn forget(&self, skill_name: &str) -> Result<(), SkillError> {
+        let name = skill_name.trim();
+        if name.is_empty() {
+            return Ok(());
+        }
+        let _lock = self.acquire_usage_lock()?;
+        let mut usage = self.load_usage();
+        usage.remove(name);
+        self.save_usage(&usage)
+    }
+}
+
+// ── Agent-created queries ────────────────────────────────────────────────
+
+impl UsageStore {
+    pub fn list_agent_created_skill_names(&self) -> Vec<String> {
+        let usage = self.load_usage();
+        tracing::debug!(
+            skills_dir = %self.skills_dir.display(),
+            usage_entries = usage.len(),
+            "loading agent-created skill names"
+        );
+        let mut names: Vec<String> = usage
+            .iter()
+            .filter_map(|(name, rec)| {
+                if rec.agent_created {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    pub fn agent_created_report(&self) -> Vec<SkillUsageReportRow> {
+        let usage = self.load_usage();
+        let mut rows = Vec::new();
+        for name in self.list_agent_created_skill_names() {
+            let rec = usage.get(&name).cloned().unwrap_or_default();
+            let last_activity_at = [
+                rec.last_used_at.clone(),
+                rec.last_viewed_at.clone(),
+                rec.last_patched_at.clone(),
+            ]
+            .into_iter()
+            .flatten()
+            .max();
+            rows.push(SkillUsageReportRow {
+                name,
+                use_count: rec.use_count,
+                view_count: rec.view_count,
+                patch_count: rec.patch_count,
+                activity_count: rec.use_count + rec.view_count + rec.patch_count,
+                state: rec.state,
+                pinned: rec.pinned,
+                archived_at: rec.archived_at,
+                last_activity_at,
+            });
+        }
+        rows
+    }
+}
+
+// ── Skill lifecycle (archive / restore) ─────────────────────────────────
+
+impl UsageStore {
+    pub fn archive_skill(
+        &self,
+        skill_name: &str,
+    ) -> Result<(bool, String), SkillError> {
+        let name = skill_name.trim();
+        if name.is_empty() {
+            return Ok((false, "Skill name is required.".to_string()));
+        }
+        if is_protected_skill(&self.skills_dir, name) {
+            return Ok((
+                false,
+                format!("Skill '{name}' is bundled or hub-installed and cannot be archived."),
+            ));
+        }
+        let Some(src) = find_skill_dir(&self.skills_dir, name) else {
+            return Ok((false, format!("Skill '{name}' not found.")));
+        };
+        let archive_root = self.skills_dir.join(".archive");
+        fs::create_dir_all(&archive_root)?;
+        let mut dest = archive_root.join(name);
+        if dest.exists() {
+            dest = archive_root.join(format!("{}-{}", name, Utc::now().format("%Y%m%d%H%M%S")));
+        }
+        fs::rename(&src, &dest)?;
+        self.set_state(name, STATE_ARCHIVED)?;
+        Ok((true, format!("Skill '{name}' archived.")))
+    }
+
+    pub fn restore_skill(
+        &self,
+        skill_name: &str,
+    ) -> Result<(bool, String), SkillError> {
+        let name = skill_name.trim();
+        if name.is_empty() {
+            return Ok((false, "Skill name is required.".to_string()));
+        }
+        if is_protected_skill(&self.skills_dir, name)
+            || find_skill_dir(&self.skills_dir, name).is_some()
+        {
+            return Ok((
+                false,
+                format!(
+                    "Refusing to restore '{name}' because it would shadow an existing bundled, hub, or local skill."
+                ),
+            ));
+        }
+        let Some(src) = find_archived_skill_dir(&self.skills_dir, name) else {
+            return Ok((false, format!("Archived skill '{name}' not found.")));
+        };
+        let dest = self.skills_dir.join(name);
+        fs::rename(&src, &dest)?;
+        self.set_state(name, STATE_ACTIVE)?;
+        Ok((true, format!("Skill '{name}' restored.")))
+    }
+}
+
+// ── File-system helpers (independent of UsageStore) ─────────────────────
 
 pub(crate) fn read_skill_name_from_file(path: &Path, fallback: &str) -> String {
     let Ok(raw) = fs::read_to_string(path) else {
@@ -429,84 +607,6 @@ fn find_skill_dir(skills_dir: &Path, skill_name: &str) -> Option<PathBuf> {
     None
 }
 
-pub fn list_agent_created_skill_names(skills_dir: &Path) -> Vec<String> {
-    let usage = load_usage(skills_dir);
-    tracing::debug!(
-        skills_dir = %skills_dir.display(),
-        usage_entries = usage.len(),
-        "loading agent-created skill names"
-    );
-    let mut names: Vec<String> = usage
-        .iter()
-        .filter_map(|(name, rec)| {
-            if rec.agent_created {
-                // The usage file is the source of truth for agent_created.
-                // We only exclude the skill if it was later overwritten by a
-                // bundled/hub install AND the skill directory no longer exists
-                // in its agent-created form.
-                Some(name.clone())
-            } else {
-                None
-            }
-        })
-        .collect();
-    names.sort();
-    names
-}
-
-pub fn agent_created_report(skills_dir: &Path) -> Vec<SkillUsageReportRow> {
-    let usage = load_usage(skills_dir);
-    let mut rows = Vec::new();
-    for name in list_agent_created_skill_names(skills_dir) {
-        let rec = usage.get(&name).cloned().unwrap_or_default();
-        let last_activity_at = [
-            rec.last_used_at.clone(),
-            rec.last_viewed_at.clone(),
-            rec.last_patched_at.clone(),
-        ]
-        .into_iter()
-        .flatten()
-        .max();
-        rows.push(SkillUsageReportRow {
-            name,
-            use_count: rec.use_count,
-            view_count: rec.view_count,
-            patch_count: rec.patch_count,
-            activity_count: rec.use_count + rec.view_count + rec.patch_count,
-            state: rec.state,
-            pinned: rec.pinned,
-            archived_at: rec.archived_at,
-            last_activity_at,
-        });
-    }
-    rows
-}
-
-pub fn archive_skill(skills_dir: &Path, skill_name: &str) -> Result<(bool, String), SkillError> {
-    let name = skill_name.trim();
-    if name.is_empty() {
-        return Ok((false, "Skill name is required.".to_string()));
-    }
-    if is_protected_skill(skills_dir, name) {
-        return Ok((
-            false,
-            format!("Skill '{name}' is bundled or hub-installed and cannot be archived."),
-        ));
-    }
-    let Some(src) = find_skill_dir(skills_dir, name) else {
-        return Ok((false, format!("Skill '{name}' not found.")));
-    };
-    let archive_root = skills_dir.join(".archive");
-    fs::create_dir_all(&archive_root)?;
-    let mut dest = archive_root.join(name);
-    if dest.exists() {
-        dest = archive_root.join(format!("{}-{}", name, Utc::now().format("%Y%m%d%H%M%S")));
-    }
-    fs::rename(&src, &dest)?;
-    set_state(skills_dir, name, STATE_ARCHIVED)?;
-    Ok((true, format!("Skill '{name}' archived.")))
-}
-
 fn find_archived_skill_dir(skills_dir: &Path, skill_name: &str) -> Option<PathBuf> {
     let archive_root = skills_dir.join(".archive");
     let mut stack = vec![archive_root];
@@ -536,30 +636,16 @@ fn find_archived_skill_dir(skills_dir: &Path, skill_name: &str) -> Option<PathBu
     None
 }
 
-pub fn restore_skill(skills_dir: &Path, skill_name: &str) -> Result<(bool, String), SkillError> {
-    let name = skill_name.trim();
-    if name.is_empty() {
-        return Ok((false, "Skill name is required.".to_string()));
-    }
-    if is_protected_skill(skills_dir, name) || find_skill_dir(skills_dir, name).is_some() {
-        return Ok((
-            false,
-            format!("Refusing to restore '{name}' because it would shadow an existing bundled, hub, or local skill."),
-        ));
-    }
-    let Some(src) = find_archived_skill_dir(skills_dir, name) else {
-        return Ok((false, format!("Archived skill '{name}' not found.")));
-    };
-    let dest = skills_dir.join(name);
-    fs::rename(&src, &dest)?;
-    set_state(skills_dir, name, STATE_ACTIVE)?;
-    Ok((true, format!("Skill '{name}' restored.")))
-}
+// ── Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn make_store(dir: &tempfile::TempDir) -> UsageStore {
+        UsageStore::with_dir(dir.path().to_path_buf())
+    }
 
     fn write_skill(skills_dir: &Path, name: &str, category: Option<&str>) -> PathBuf {
         let dir = category
@@ -577,8 +663,8 @@ mod tests {
     #[test]
     fn save_load_and_missing_defaults() {
         let dir = tempdir().unwrap();
-        let skills = dir.path();
-        assert!(load_usage(skills).is_empty());
+        let store = make_store(&dir);
+        assert!(store.load_usage().is_empty());
         let mut data = BTreeMap::new();
         data.insert(
             "skill-a".to_string(),
@@ -587,12 +673,11 @@ mod tests {
                 ..Default::default()
             },
         );
-        save_usage(skills, &data).unwrap();
-        assert_eq!(get_record(skills, "skill-a").use_count, 3);
-        assert_eq!(get_record(skills, "missing").state, STATE_ACTIVE);
-        assert!(!usage_file(skills)
-            .parent()
-            .unwrap()
+        store.save_usage(&data).unwrap();
+        assert_eq!(store.get_record("skill-a").use_count, 3);
+        assert_eq!(store.get_record("missing").state, STATE_ACTIVE);
+        assert!(!store
+            .skills_dir
             .join(".usage_")
             .exists());
     }
@@ -600,23 +685,24 @@ mod tests {
     #[test]
     fn bump_counters_and_forget() {
         let dir = tempdir().unwrap();
-        let skills = dir.path();
-        bump_view(skills, "x").unwrap();
-        bump_use(skills, "x").unwrap();
-        bump_patch(skills, "x").unwrap();
-        let rec = get_record(skills, "x");
+        let store = make_store(&dir);
+        store.bump_view("x").unwrap();
+        store.bump_use("x").unwrap();
+        store.bump_patch("x").unwrap();
+        let rec = store.get_record("x");
         assert_eq!(rec.view_count, 1);
         assert_eq!(rec.use_count, 1);
         assert_eq!(rec.patch_count, 1);
         assert!(rec.last_viewed_at.is_some());
-        forget(skills, "x").unwrap();
-        assert!(load_usage(skills).is_empty());
+        store.forget("x").unwrap();
+        assert!(store.load_usage().is_empty());
     }
 
     #[test]
     fn protected_skills_do_not_get_usage_records() {
         let dir = tempdir().unwrap();
         let skills = dir.path();
+        let store = make_store(&dir);
         fs::create_dir_all(skills.join(".hub")).unwrap();
         fs::write(skills.join(".bundled_manifest"), "bundled:abc\n").unwrap();
         fs::write(
@@ -625,10 +711,10 @@ mod tests {
         )
         .unwrap();
 
-        bump_view(skills, "bundled").unwrap();
-        bump_use(skills, "hubbed").unwrap();
-        set_state(skills, "bundled", STATE_ARCHIVED).unwrap();
-        assert!(load_usage(skills).is_empty());
+        store.bump_view("bundled").unwrap();
+        store.bump_use("hubbed").unwrap();
+        store.set_state("bundled", STATE_ARCHIVED).unwrap();
+        assert!(store.load_usage().is_empty());
         assert!(!is_agent_created(skills, "bundled"));
         assert!(!is_agent_created(skills, "hubbed"));
         assert!(is_agent_created(skills, "mine"));
@@ -659,15 +745,16 @@ mod tests {
     fn agent_created_report_requires_marker_and_excludes_protected() {
         let dir = tempdir().unwrap();
         let skills = dir.path();
+        let store = make_store(&dir);
         write_skill(skills, "mine", None);
         write_skill(skills, "manual", None);
-        mark_agent_created(skills, "mine").unwrap();
-        bump_view(skills, "mine").unwrap();
-        bump_view(skills, "manual").unwrap();
+        store.mark_agent_created("mine").unwrap();
+        store.bump_view("mine").unwrap();
+        store.bump_view("manual").unwrap();
 
-        let names = list_agent_created_skill_names(skills);
+        let names = store.list_agent_created_skill_names();
         assert_eq!(names, vec!["mine"]);
-        let report = agent_created_report(skills);
+        let report = store.agent_created_report();
         assert_eq!(report.len(), 1);
         assert_eq!(report[0].view_count, 1);
         assert_eq!(report[0].activity_count, 1);
@@ -677,11 +764,12 @@ mod tests {
     fn archive_restore_and_collision_suffix() {
         let dir = tempdir().unwrap();
         let skills = dir.path();
+        let store = make_store(&dir);
         write_skill(skills, "dup", None);
-        let (ok, _) = archive_skill(skills, "dup").unwrap();
+        let (ok, _) = store.archive_skill("dup").unwrap();
         assert!(ok);
         write_skill(skills, "dup", None);
-        let (ok, _) = archive_skill(skills, "dup").unwrap();
+        let (ok, _) = store.archive_skill("dup").unwrap();
         assert!(ok);
         let archived = fs::read_dir(skills.join(".archive"))
             .unwrap()
@@ -691,7 +779,7 @@ mod tests {
         assert!(archived.iter().any(|name| name == "dup"));
         assert!(archived.iter().any(|name| name.starts_with("dup-")));
 
-        let (ok, _) = restore_skill(skills, "dup").unwrap();
+        let (ok, _) = store.restore_skill("dup").unwrap();
         assert!(ok);
         assert!(skills.join("dup").join("SKILL.md").exists());
     }
@@ -700,14 +788,15 @@ mod tests {
     fn archive_refuses_protected_and_restore_refuses_shadowing() {
         let dir = tempdir().unwrap();
         let skills = dir.path();
+        let store = make_store(&dir);
         write_skill(skills, "shared", None);
-        archive_skill(skills, "shared").unwrap();
+        store.archive_skill("shared").unwrap();
         write_skill(skills, "shared", None);
         fs::write(skills.join(".bundled_manifest"), "shared:abc\n").unwrap();
-        let (ok, msg) = restore_skill(skills, "shared").unwrap();
+        let (ok, msg) = store.restore_skill("shared").unwrap();
         assert!(!ok);
         assert!(msg.contains("shadow"));
-        let (ok, _) = archive_skill(skills, "shared").unwrap();
+        let (ok, _) = store.archive_skill("shared").unwrap();
         assert!(!ok);
     }
 }

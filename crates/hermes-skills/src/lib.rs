@@ -52,10 +52,9 @@ pub use sync::{
     SkillSyncResult, NO_BUNDLED_SKILLS_MARKER,
 };
 pub use usage::{
-    agent_created_report, archive_skill, bump_patch, bump_use, bump_view, forget, get_record,
-    is_agent_created, is_protected_skill, list_agent_created_skill_names, load_usage,
-    mark_agent_created, restore_skill, save_usage, set_pinned, set_state, usage_file,
-    SkillUsageRecord, SkillUsageReportRow, STATE_ACTIVE, STATE_ARCHIVED, STATE_STALE,
+    UsageStore, SkillUsageRecord, SkillUsageReportRow,
+    is_agent_created, is_protected_skill,
+    STATE_ACTIVE, STATE_ARCHIVED, STATE_STALE,
 };
 pub use version::{compare_versions, compute_version, track_change, SkillChange, SkillVersion};
 pub use curator::{

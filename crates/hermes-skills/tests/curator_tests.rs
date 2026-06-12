@@ -27,11 +27,10 @@ use std::fs;
 
 use chrono::Utc;
 use hermes_skills::{
-    CuratorConfig, CuratorRunCounts, CuratorRunReport, CuratorState, TransitionResult,
+    UsageStore, CuratorConfig, CuratorRunCounts, CuratorRunReport, CuratorState, TransitionResult,
     apply_automatic_transitions, build_curator_prompt, is_paused, load_curator_state,
     maybe_run_curator, save_curator_state, set_paused, should_run_now, write_curator_report,
     SkillUsageRecord, STATE_ACTIVE, STATE_ARCHIVED, STATE_STALE,
-    load_usage, save_usage,
 };
 use tempfile::tempdir;
 
@@ -40,15 +39,17 @@ use tempfile::tempdir;
 // ---------------------------------------------------------------------------
 
 /// Create a temporary skills directory with a `.usage.json` containing the
-/// given records. Returns the dir handle (which cleans up on drop).
-fn setup_skills_dir(records: Vec<(&str, SkillUsageRecord)>) -> tempfile::TempDir {
+/// given records. Returns the dir handle (which cleans up on drop) and a
+/// UsageStore rooted at the temp dir.
+fn setup_skills_dir(records: Vec<(&str, SkillUsageRecord)>) -> (tempfile::TempDir, UsageStore) {
     let dir = tempdir().expect("tempdir");
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
     let usage: std::collections::BTreeMap<String, SkillUsageRecord> = records
         .into_iter()
         .map(|(name, rec)| (name.to_string(), rec))
         .collect();
-    save_usage(dir.path(), &usage).expect("save_usage");
-    dir
+    store.save_usage(&usage).expect("save_usage");
+    (dir, store)
 }
 
 /// Create a SkillUsageRecord with given state and optional activity timestamp.
@@ -70,7 +71,8 @@ fn make_record(state: &str, last_used_at: Option<&str>, pinned: bool) -> SkillUs
 #[test]
 fn curator_state_default_on_missing_file() {
     let dir = tempdir().expect("tempdir");
-    let state = load_curator_state(dir.path());
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
+    let state = load_curator_state(&store);
     assert!(!state.paused);
     assert_eq!(state.run_count, 0);
     assert!(state.last_run_at.is_none());
@@ -79,6 +81,7 @@ fn curator_state_default_on_missing_file() {
 #[test]
 fn curator_state_roundtrip_save_load() {
     let dir = tempdir().expect("tempdir");
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
     let mut expected = CuratorState::default();
     expected.paused = true;
     expected.run_count = 42;
@@ -86,8 +89,8 @@ fn curator_state_roundtrip_save_load() {
     expected.last_run_summary = Some("test summary".to_string());
     expected.last_report_path = Some("/tmp/report".to_string());
 
-    save_curator_state(dir.path(), &expected).expect("save");
-    let loaded = load_curator_state(dir.path());
+    save_curator_state(&store, &expected).expect("save");
+    let loaded = load_curator_state(&store);
     assert_eq!(loaded.paused, true);
     assert_eq!(loaded.run_count, 42);
     assert_eq!(loaded.last_run_at, expected.last_run_at);
@@ -98,10 +101,11 @@ fn curator_state_roundtrip_save_load() {
 #[test]
 fn curator_state_corrupt_json_recovers() {
     let dir = tempdir().expect("tempdir");
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
     let state_path = dir.path().join(".curator_state");
     fs::write(&state_path, "{not valid json!!!").expect("write");
 
-    let state = load_curator_state(dir.path());
+    let state = load_curator_state(&store);
     // Should fall back to default
     assert!(!state.paused);
     assert_eq!(state.run_count, 0);
@@ -110,18 +114,20 @@ fn curator_state_corrupt_json_recovers() {
 #[test]
 fn curator_state_persists_empty_state() {
     let dir = tempdir().expect("tempdir");
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
     let state = CuratorState::default();
-    save_curator_state(dir.path(), &state).expect("save");
+    save_curator_state(&store, &state).expect("save");
     assert!(dir.path().join(".curator_state").exists());
-    let loaded = load_curator_state(dir.path());
+    let loaded = load_curator_state(&store);
     assert!(!loaded.paused);
 }
 
 #[test]
 fn curator_state_atomic_write_no_corruption() {
     let dir = tempdir().expect("tempdir");
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
     let state = CuratorState::default();
-    save_curator_state(dir.path(), &state).expect("save");
+    save_curator_state(&store, &state).expect("save");
 
     // Verify no .tmp files left behind
     let tmp_files: Vec<_> = fs::read_dir(dir.path())
@@ -143,43 +149,45 @@ fn curator_state_atomic_write_no_corruption() {
 
 #[test]
 fn should_run_now_disabled_returns_false() {
-    let dir = setup_skills_dir(vec![]);
+    let (_dir, store) = setup_skills_dir(vec![]);
     let config = CuratorConfig {
         enabled: false,
         ..Default::default()
     };
-    assert!(!should_run_now(dir.path(), &config));
+    assert!(!should_run_now(&store, &config));
 }
 
 #[test]
 fn should_run_now_paused_returns_false() {
-    let dir = setup_skills_dir(vec![]);
+    let (_dir, store) = setup_skills_dir(vec![]);
     let config = CuratorConfig {
         enabled: true,
         ..Default::default()
     };
-    set_paused(dir.path(), true).expect("set_paused");
-    assert!(!should_run_now(dir.path(), &config));
+    set_paused(&store, true).expect("set_paused");
+    assert!(!should_run_now(&store, &config));
 }
 
 #[test]
 fn should_run_now_first_run_seeds_and_defers() {
     let dir = tempdir().expect("tempdir");
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
     let config = CuratorConfig {
         enabled: true,
         interval_hours: 168,
         ..Default::default()
     };
     // No state file → first run: should seed and return false
-    assert!(!should_run_now(dir.path(), &config));
+    assert!(!should_run_now(&store, &config));
     // State file should now exist with last_run_at seeded
-    let state = load_curator_state(dir.path());
+    let state = load_curator_state(&store);
     assert!(state.last_run_at.is_some(), "first run should seed last_run_at");
 }
 
 #[test]
 fn should_run_now_within_interval_returns_false() {
     let dir = tempdir().expect("tempdir");
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
     let config = CuratorConfig {
         enabled: true,
         interval_hours: 24,
@@ -189,14 +197,15 @@ fn should_run_now_within_interval_returns_false() {
     // Simulate just-now run
     let mut state = CuratorState::default();
     state.last_run_at = Some(Utc::now().to_rfc3339());
-    save_curator_state(dir.path(), &state).expect("save");
+    save_curator_state(&store, &state).expect("save");
 
-    assert!(!should_run_now(dir.path(), &config), "just ran, should not run again");
+    assert!(!should_run_now(&store, &config), "just ran, should not run again");
 }
 
 #[test]
 fn should_run_now_after_interval_returns_true() {
     let dir = tempdir().expect("tempdir");
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
     let config = CuratorConfig {
         enabled: true,
         interval_hours: 1, // 1 hour
@@ -207,9 +216,9 @@ fn should_run_now_after_interval_returns_true() {
     let mut state = CuratorState::default();
     let past = Utc::now() - chrono::Duration::seconds(7200);
     state.last_run_at = Some(past.to_rfc3339());
-    save_curator_state(dir.path(), &state).expect("save");
+    save_curator_state(&store, &state).expect("save");
 
-    assert!(should_run_now(dir.path(), &config), "interval elapsed, should run");
+    assert!(should_run_now(&store, &config), "interval elapsed, should run");
 }
 
 // ---------------------------------------------------------------------------
@@ -219,28 +228,30 @@ fn should_run_now_after_interval_returns_true() {
 #[test]
 fn pause_resume_roundtrip() {
     let dir = tempdir().expect("tempdir");
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
 
-    assert!(!is_paused(dir.path()), "initially not paused");
+    assert!(!is_paused(&store), "initially not paused");
 
-    set_paused(dir.path(), true).expect("set_paused");
-    assert!(is_paused(dir.path()), "paused after set_paused(true)");
+    set_paused(&store, true).expect("set_paused");
+    assert!(is_paused(&store), "paused after set_paused(true)");
 
-    set_paused(dir.path(), false).expect("set_paused");
-    assert!(!is_paused(dir.path()), "not paused after set_paused(false)");
+    set_paused(&store, false).expect("set_paused");
+    assert!(!is_paused(&store), "not paused after set_paused(false)");
 }
 
 #[test]
 fn pause_state_persists_across_loads() {
     let dir = tempdir().expect("tempdir");
-    set_paused(dir.path(), true).expect("set_paused");
+    let store = UsageStore::with_dir(dir.path().to_path_buf());
+    set_paused(&store, true).expect("set_paused");
 
-    let state = load_curator_state(dir.path());
+    let state = load_curator_state(&store);
     assert!(state.paused);
 }
 
 #[test]
 fn maybe_run_curator_insufficient_idle_returns_false() {
-    let dir = setup_skills_dir(vec![]);
+    let (_dir, store) = setup_skills_dir(vec![]);
     let config = CuratorConfig {
         enabled: true,
         min_idle_hours: 2,
@@ -252,10 +263,10 @@ fn maybe_run_curator_insufficient_idle_returns_false() {
     let mut state = CuratorState::default();
     let past = Utc::now() - chrono::Duration::seconds(7200);
     state.last_run_at = Some(past.to_rfc3339());
-    save_curator_state(dir.path(), &state).unwrap();
+    save_curator_state(&store, &state).unwrap();
 
     // Only 30 seconds idle
-    assert!(!maybe_run_curator(dir.path(), &config, 30));
+    assert!(!maybe_run_curator(&store, &config, 30));
 }
 
 // ---------------------------------------------------------------------------
@@ -264,9 +275,9 @@ fn maybe_run_curator_insufficient_idle_returns_false() {
 
 #[test]
 fn auto_transitions_no_records_returns_all_zero() {
-    let dir = setup_skills_dir(vec![]);
+    let (_dir, store) = setup_skills_dir(vec![]);
     let config = CuratorConfig::default();
-    let result = apply_automatic_transitions(dir.path(), &config);
+    let result = apply_automatic_transitions(&store, &config);
     assert_eq!(result.checked, 0);
     assert_eq!(result.marked_stale, 0);
     assert_eq!(result.archived, 0);
@@ -277,7 +288,7 @@ fn auto_transitions_no_records_returns_all_zero() {
 fn auto_transitions_pinned_skill_is_skipped() {
     let now = Utc::now();
     let old = (now - chrono::Duration::seconds(86400 * 60)).to_rfc3339(); // 60 days ago
-    let dir = setup_skills_dir(vec![(
+    let (_dir, store) = setup_skills_dir(vec![(
         "pinned_skill",
         make_record(STATE_ACTIVE, Some(&old), true), // pinned!
     )]);
@@ -286,7 +297,7 @@ fn auto_transitions_pinned_skill_is_skipped() {
         archive_after_days: 90,
         ..Default::default()
     };
-    let result = apply_automatic_transitions(dir.path(), &config);
+    let result = apply_automatic_transitions(&store, &config);
     // Pinned skills are skipped entirely — not even checked
     assert_eq!(result.checked, 0);
 }
@@ -295,7 +306,7 @@ fn auto_transitions_pinned_skill_is_skipped() {
 fn auto_transitions_active_to_stale() {
     let now = Utc::now();
     let old = (now - chrono::Duration::seconds(86400 * 60)).to_rfc3339(); // 60 days → past stale threshold
-    let dir = setup_skills_dir(vec![(
+    let (_dir, store) = setup_skills_dir(vec![(
         "stale_skill",
         make_record(STATE_ACTIVE, Some(&old), false),
     )]);
@@ -304,12 +315,12 @@ fn auto_transitions_active_to_stale() {
         archive_after_days: 90,
         ..Default::default()
     };
-    let result = apply_automatic_transitions(dir.path(), &config);
+    let result = apply_automatic_transitions(&store, &config);
     assert_eq!(result.checked, 1);
     assert_eq!(result.marked_stale, 1);
 
     // Verify the state actually changed in .usage.json
-    let usage = load_usage(dir.path());
+    let usage = store.load_usage();
     assert_eq!(usage.get("stale_skill").unwrap().state, STATE_STALE);
 }
 
@@ -317,7 +328,7 @@ fn auto_transitions_active_to_stale() {
 fn auto_transitions_active_to_archived() {
     let now = Utc::now();
     let ancient = (now - chrono::Duration::seconds(86400 * 100)).to_rfc3339(); // 100 days → past archive
-    let dir = setup_skills_dir(vec![(
+    let (_dir, store) = setup_skills_dir(vec![(
         "old_skill",
         make_record(STATE_ACTIVE, Some(&ancient), false),
     )]);
@@ -326,10 +337,10 @@ fn auto_transitions_active_to_archived() {
         archive_after_days: 90,
         ..Default::default()
     };
-    let result = apply_automatic_transitions(dir.path(), &config);
+    let result = apply_automatic_transitions(&store, &config);
     assert_eq!(result.archived, 1);
     assert_eq!(result.marked_stale, 0); // archive takes priority
-    let usage = load_usage(dir.path());
+    let usage = store.load_usage();
     assert_eq!(usage.get("old_skill").unwrap().state, STATE_ARCHIVED);
 }
 
@@ -337,7 +348,7 @@ fn auto_transitions_active_to_archived() {
 fn auto_transitions_reactivation_stale_to_active() {
     let now = Utc::now();
     let recent = (now - chrono::Duration::seconds(86400 * 5)).to_rfc3339(); // 5 days → within stale window
-    let dir = setup_skills_dir(vec![(
+    let (_dir, store) = setup_skills_dir(vec![(
         "revived_skill",
         make_record(STATE_STALE, Some(&recent), false),
     )]);
@@ -346,21 +357,21 @@ fn auto_transitions_reactivation_stale_to_active() {
         archive_after_days: 90,
         ..Default::default()
     };
-    let result = apply_automatic_transitions(dir.path(), &config);
+    let result = apply_automatic_transitions(&store, &config);
     assert_eq!(result.reactivated, 1);
-    let usage = load_usage(dir.path());
+    let usage = store.load_usage();
     assert_eq!(usage.get("revived_skill").unwrap().state, STATE_ACTIVE);
 }
 
 #[test]
 fn auto_transitions_skill_with_no_activity_is_skipped() {
     // No last_used_at / last_viewed_at / last_patched_at
-    let dir = setup_skills_dir(vec![(
+    let (_dir, store) = setup_skills_dir(vec![(
         "never_touched",
         make_record(STATE_ACTIVE, None, false),
     )]);
     let config = CuratorConfig::default();
-    let result = apply_automatic_transitions(dir.path(), &config);
+    let result = apply_automatic_transitions(&store, &config);
     assert_eq!(result.checked, 0);
 }
 
@@ -371,7 +382,7 @@ fn auto_transitions_batch_mixed_state() {
     let ancient = (now - chrono::Duration::seconds(86400 * 100)).to_rfc3339();
     let recent = (now - chrono::Duration::seconds(86400 * 5)).to_rfc3339();
 
-    let dir = setup_skills_dir(vec![
+    let (_dir, store) = setup_skills_dir(vec![
         ("pinned_old", make_record(STATE_ACTIVE, Some(&old), true)),      // pinned → skipped
         ("going_stale", make_record(STATE_ACTIVE, Some(&old), false)),    // 60d → stale
         ("going_archive", make_record(STATE_ACTIVE, Some(&ancient), false)), // 100d → archive
@@ -383,7 +394,7 @@ fn auto_transitions_batch_mixed_state() {
         archive_after_days: 90,
         ..Default::default()
     };
-    let result = apply_automatic_transitions(dir.path(), &config);
+    let result = apply_automatic_transitions(&store, &config);
     assert_eq!(result.checked, 4); // pinned skipped
     assert_eq!(result.marked_stale, 1); // going_stale
     assert_eq!(result.archived, 1); // going_archive
@@ -481,8 +492,8 @@ fn write_curator_report_with_llm_error() {
 
 #[test]
 fn build_curator_prompt_with_no_skills_has_header() {
-    let dir = setup_skills_dir(vec![]);
-    let prompt = build_curator_prompt(dir.path());
+    let (_dir, store) = setup_skills_dir(vec![]);
+    let prompt = build_curator_prompt(&store);
     // The prompt starts with the curator role preamble
     assert!(prompt.contains("Hermes' background skill CURATOR"));
     // Even with no agent-created skills, the table header should appear
@@ -492,7 +503,7 @@ fn build_curator_prompt_with_no_skills_has_header() {
 #[test]
 fn build_curator_prompt_with_skills_includes_table() {
     let now = Utc::now();
-    let dir = setup_skills_dir(vec![
+    let (_dir, store) = setup_skills_dir(vec![
         (
             "skill_a",
             SkillUsageRecord {
@@ -514,7 +525,7 @@ fn build_curator_prompt_with_skills_includes_table() {
             },
         ),
     ]);
-    let prompt = build_curator_prompt(dir.path());
+    let prompt = build_curator_prompt(&store);
     // Both skills should appear in the markdown table
     assert!(prompt.contains("skill_a"), "prompt should mention skill_a");
     assert!(prompt.contains("skill_b"), "prompt should mention skill_b");

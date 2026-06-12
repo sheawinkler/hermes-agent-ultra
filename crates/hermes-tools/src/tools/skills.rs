@@ -206,7 +206,7 @@ fn default_skill_roots() -> Vec<PathBuf> {
             roots.push(legacy);
         }
     }
-    roots.sort();
+    // Canonical path always comes first — do NOT sort (sort breaks priority).
     roots.dedup();
     roots
 }
@@ -643,11 +643,10 @@ impl ToolHandler for SkillManageHandler {
                 hermes_insights::notify_skill_changed(&skill_dir, hermes_insights::SkillChangeKind::Agent);
 
                 // Mark as agent-created in usage tracking so curator can find it.
-                let usage_dir = self.user_skills_dir();
-                if let Err(e) = hermes_skills::mark_agent_created(&usage_dir, name) {
+                let store = hermes_skills::UsageStore::new();
+                if let Err(e) = store.mark_agent_created(name) {
                     tracing::warn!(
                         skill = %name,
-                        dir = %usage_dir.display(),
                         error = %e,
                         "failed to mark skill as agent-created in usage sidecar"
                     );

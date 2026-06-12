@@ -19,11 +19,9 @@ use std::path::{Path, PathBuf};
 use std::future::Future;
 
 use crate::curator_prompt::CURATOR_REVIEW_PROMPT;
-use crate::usage::{
-    agent_created_report, load_usage, set_state, STATE_ACTIVE, STATE_ARCHIVED, STATE_STALE,
-};
+use crate::usage::{UsageStore, STATE_ACTIVE, STATE_ARCHIVED, STATE_STALE};
 
-/// Curator persistent state (stored at `skills_dir/.curator_state`).
+/// Curator persistent state (stored at `store.dir()/.curator_state`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CuratorState {
     #[serde(default)]
@@ -44,12 +42,12 @@ pub struct CuratorState {
 
 const STATE_FILE: &str = ".curator_state";
 
-/// Load curator state from `skills_dir/.curator_state`.
+/// Load curator state from `store.dir()/.curator_state`.
 ///
 /// Returns [`CuratorState::default()`] when the file is missing or contains
 /// invalid JSON (mirrors Python fault-tolerance).
-pub fn load_curator_state(skills_dir: &Path) -> CuratorState {
-    let path = skills_dir.join(STATE_FILE);
+pub fn load_curator_state(store: &UsageStore) -> CuratorState {
+    let path = store.dir().join(STATE_FILE);
     let Ok(raw) = fs::read_to_string(&path) else {
         tracing::debug!("curator state file not found, using defaults");
         return CuratorState::default();
@@ -63,15 +61,15 @@ pub fn load_curator_state(skills_dir: &Path) -> CuratorState {
     }
 }
 
-/// Atomically persist curator state to `skills_dir/.curator_state`.
+/// Atomically persist curator state to `store.dir()/.curator_state`.
 ///
 /// Writes to a temporary file first then renames over the target to prevent
 /// corruption on crash. On Windows the target is removed before rename if it
 /// already exists (Windows `rename` semantics differ from POSIX).
-pub fn save_curator_state(skills_dir: &Path, state: &CuratorState) -> Result<(), std::io::Error> {
-    fs::create_dir_all(skills_dir)?;
-    let path = skills_dir.join(STATE_FILE);
-    let tmp = skills_dir.join(format!(".curator_state_{}.tmp", std::process::id()));
+pub fn save_curator_state(store: &UsageStore, state: &CuratorState) -> Result<(), std::io::Error> {
+    fs::create_dir_all(store.dir())?;
+    let path = store.dir().join(STATE_FILE);
+    let tmp = store.dir().join(format!(".curator_state_{}.tmp", std::process::id()));
 
     let body = serde_json::to_string_pretty(state).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, e)
@@ -97,15 +95,15 @@ pub fn save_curator_state(skills_dir: &Path, state: &CuratorState) -> Result<(),
 }
 
 /// Set the `paused` flag in curator state (load → mutate → save).
-pub fn set_paused(skills_dir: &Path, paused: bool) -> Result<(), std::io::Error> {
-    let mut state = load_curator_state(skills_dir);
+pub fn set_paused(store: &UsageStore, paused: bool) -> Result<(), std::io::Error> {
+    let mut state = load_curator_state(store);
     state.paused = paused;
-    save_curator_state(skills_dir, &state)
+    save_curator_state(store, &state)
 }
 
 /// Check whether the curator is currently paused.
-pub fn is_paused(skills_dir: &Path) -> bool {
-    load_curator_state(skills_dir).paused
+pub fn is_paused(store: &UsageStore) -> bool {
+    load_curator_state(store).paused
 }
 
 // ---------------------------------------------------------------------------
@@ -191,14 +189,14 @@ pub struct TransitionResult {
 /// - 活跃锚点: last_used_at / last_viewed_at / last_patched_at 中最大值
 /// - 转换: active→stale, stale→active(reactivation), *→archived
 pub fn apply_automatic_transitions(
-    skills_dir: &Path,
+    store: &UsageStore,
     config: &CuratorConfig,
 ) -> TransitionResult {
     let now = Utc::now();
     let stale_cutoff = now - chrono::Duration::seconds((config.stale_after_days * 86400) as i64);
     let archive_cutoff = now - chrono::Duration::seconds((config.archive_after_days * 86400) as i64);
 
-    let usage = load_usage(skills_dir);
+    let usage = store.load_usage();
     let mut result = TransitionResult::default();
 
     for (name, record) in &usage {
@@ -237,7 +235,7 @@ pub fn apply_automatic_transitions(
 
         // Archive rule (highest priority)
         if anchor <= archive_cutoff && record.state != STATE_ARCHIVED {
-            if let Err(e) = set_state(skills_dir, name, STATE_ARCHIVED) {
+            if let Err(e) = store.set_state(name, STATE_ARCHIVED) {
                 tracing::warn!("curator: failed to archive skill '{}': {}", name, e);
             } else {
                 tracing::debug!("curator: archived skill '{}'", name);
@@ -248,7 +246,7 @@ pub fn apply_automatic_transitions(
 
         // Stale rule
         if anchor <= stale_cutoff && record.state == STATE_ACTIVE {
-            if let Err(e) = set_state(skills_dir, name, STATE_STALE) {
+            if let Err(e) = store.set_state(name, STATE_STALE) {
                 tracing::warn!("curator: failed to mark skill '{}' stale: {}", name, e);
             } else {
                 tracing::debug!("curator: marked skill '{}' as stale", name);
@@ -259,7 +257,7 @@ pub fn apply_automatic_transitions(
 
         // Reactivation rule
         if anchor > stale_cutoff && record.state == STATE_STALE {
-            if let Err(e) = set_state(skills_dir, name, STATE_ACTIVE) {
+            if let Err(e) = store.set_state(name, STATE_ACTIVE) {
                 tracing::warn!("curator: failed to reactivate skill '{}': {}", name, e);
             } else {
                 tracing::debug!("curator: reactivated skill '{}'", name);
@@ -278,12 +276,12 @@ pub fn apply_automatic_transitions(
 /// 判断 curator 是否应该执行。
 /// 检查：enabled、not paused、last_run_at 超过 interval。
 /// 首次运行时种子化 last_run_at 为当前时间（延迟一个 interval 再真正执行）。
-pub fn should_run_now(skills_dir: &Path, config: &CuratorConfig) -> bool {
+pub fn should_run_now(store: &UsageStore, config: &CuratorConfig) -> bool {
     if !config.enabled {
         return false;
     }
 
-    let mut state = load_curator_state(skills_dir);
+    let mut state = load_curator_state(store);
 
     if state.paused {
         return false;
@@ -294,7 +292,7 @@ pub fn should_run_now(skills_dir: &Path, config: &CuratorConfig) -> bool {
     // First run: seed last_run_at and defer execution
     let Some(ref last_run_str) = state.last_run_at else {
         state.last_run_at = Some(now.to_rfc3339());
-        if let Err(e) = save_curator_state(skills_dir, &state) {
+        if let Err(e) = save_curator_state(store, &state) {
             tracing::warn!("curator: failed to seed last_run_at: {}", e);
         }
         return false;
@@ -306,7 +304,7 @@ pub fn should_run_now(skills_dir: &Path, config: &CuratorConfig) -> bool {
             tracing::warn!("curator: failed to parse last_run_at: {}", e);
             // Treat as first run
             state.last_run_at = Some(now.to_rfc3339());
-            let _ = save_curator_state(skills_dir, &state);
+            let _ = save_curator_state(store, &state);
             return false;
         }
     };
@@ -317,11 +315,11 @@ pub fn should_run_now(skills_dir: &Path, config: &CuratorConfig) -> bool {
 
 /// 组合调度门控：idle 时间足够 + should_run_now。
 /// 由 session 主循环在空闲时调用。
-pub fn maybe_run_curator(skills_dir: &Path, config: &CuratorConfig, idle_seconds: u64) -> bool {
+pub fn maybe_run_curator(store: &UsageStore, config: &CuratorConfig, idle_seconds: u64) -> bool {
     if idle_seconds < config.min_idle_hours * 3600 {
         return false;
     }
-    should_run_now(skills_dir, config)
+    should_run_now(store, config)
 }
 
 // ---------------------------------------------------------------------------
@@ -456,8 +454,8 @@ pub struct CuratorRunRecord {
 ///
 /// 加载 skills_dir 下所有 agent-created 技能的状态信息，
 /// 格式化为表格附加在 [`CURATOR_REVIEW_PROMPT`] 后面。
-pub fn build_curator_prompt(skills_dir: &Path) -> String {
-    let rows = agent_created_report(skills_dir);
+pub fn build_curator_prompt(store: &UsageStore) -> String {
+    let rows = store.agent_created_report();
 
     let mut table = String::from("## Current skill inventory\n\n");
     table.push_str("| Name | State | Pinned | Activity | Last Active |\n");
@@ -513,7 +511,7 @@ fn format_relative_time(ts: &str, now: DateTime<Utc>) -> String {
 ///
 /// 返回 [`CuratorRunRecord`] 记录本次运行的完整结果。
 pub async fn run_curator_review<F, Fut>(
-    skills_dir: &Path,
+    store: &UsageStore,
     config: &CuratorConfig,
     dry_run: bool,
     llm_runner: Option<F>,
@@ -526,7 +524,7 @@ where
         return Err(CuratorError::Disabled);
     }
 
-    let state = load_curator_state(skills_dir);
+    let state = load_curator_state(store);
     if state.paused {
         return Err(CuratorError::Paused);
     }
@@ -537,12 +535,12 @@ where
     let auto_transitions = if dry_run {
         TransitionResult::default()
     } else {
-        apply_automatic_transitions(skills_dir, config)
+        apply_automatic_transitions(store, config)
     };
 
     // Phase 2: LLM review (optional)
     let llm_review = if let Some(runner) = llm_runner {
-        let prompt = build_curator_prompt(skills_dir);
+        let prompt = build_curator_prompt(store);
         match runner(prompt).await {
             Ok(result) => Some(result),
             Err(e) => {
@@ -561,14 +559,14 @@ where
 
     // Update curator state
     if !dry_run {
-        let mut curator_state = load_curator_state(skills_dir);
+        let mut curator_state = load_curator_state(store);
         curator_state.last_run_at = Some(started_at.to_rfc3339());
         curator_state.last_run_duration_seconds = Some(duration_seconds);
         if let Some(ref review) = llm_review {
             curator_state.last_run_summary = Some(review.summary.clone());
         }
         curator_state.run_count += 1;
-        if let Err(e) = save_curator_state(skills_dir, &curator_state) {
+        if let Err(e) = save_curator_state(store, &curator_state) {
             tracing::warn!("curator: failed to save post-run state: {}", e);
         }
     }
