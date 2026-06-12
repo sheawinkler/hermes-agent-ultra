@@ -5,6 +5,7 @@
 //! - token-reduction output filtering for verbose tool outputs
 //! - dual logging (raw + filtered) for operator auditability
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs::{OpenOptions, create_dir_all};
 use std::io::Write;
@@ -138,14 +139,16 @@ impl RtkFilterEngine {
     }
 
     fn filter_output(&self, tool_name: &str, params: &Value, raw_output: &str) -> String {
-        let mut text = strip_ansi(raw_output);
-        if text.is_empty() {
-            return text;
+        let stripped = strip_ansi(raw_output);
+        if stripped.is_empty() {
+            return stripped;
         }
-        text = text.replace("\r\n", "\n").replace('\r', "\n");
-        text = redact_secrets(&text);
+        // Normalize line endings and redact secrets in a single owned string.
+        let text = redact_secrets(&normalize_newlines(&stripped));
 
-        let mut lines: Vec<String> = text.lines().map(|line| line.to_string()).collect();
+        // Build line list directly from &str slices — only allocate owned Strings
+        // for lines that need modification (the summary annotations).
+        let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
         lines = collapse_repeated_lines(lines, self.repeat_keep);
         lines = collapse_blank_runs(lines);
 
@@ -156,7 +159,16 @@ impl RtkFilterEngine {
             lines = summarize_long_output(lines, self.head_lines, self.tail_lines);
         }
 
-        let out = lines.join("\n").trim().to_string();
+        // Pre-allocate output buffer using the filtered line count as a hint.
+        let estimated = lines.iter().map(|l| l.len() + 1).sum();
+        let mut out = String::with_capacity(estimated);
+        for (i, line) in lines.iter().enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            out.push_str(line);
+        }
+        let out = out.trim().to_string();
         if out.is_empty() {
             raw_output.trim().to_string()
         } else {
@@ -456,17 +468,42 @@ fn redact_patterns() -> &'static [Regex] {
     })
 }
 
-fn redact_secrets(input: &str) -> String {
-    let mut out = input.to_string();
-    for re in redact_patterns() {
-        out = re
-            .replace_all(&out, |caps: &regex::Captures| {
-                let key = caps.get(1).map(|m| m.as_str()).unwrap_or("token");
-                format!("{key}=<redacted>")
-            })
-            .to_string();
+/// Normalize `\r\n` and lone `\r` to `\n` in a single pass.
+/// Returns a `Cow::Borrowed` when the input already uses only `\n`.
+fn normalize_newlines(input: &str) -> Cow<'_, str> {
+    if !input.contains('\r') {
+        return Cow::Borrowed(input);
     }
-    out
+    let mut out = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\r' {
+            out.push('\n');
+            if i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                i += 1;
+            }
+        } else {
+            out.push(bytes[i] as char);
+        }
+        i += 1;
+    }
+    Cow::Owned(out)
+}
+
+fn redact_secrets(input: &str) -> String {
+    // Use Cow-aware replace to avoid allocating when a pattern has no matches.
+    let mut current: Cow<str> = Cow::Borrowed(input);
+    for re in redact_patterns() {
+        let replaced = re.replace_all(&current, |caps: &regex::Captures| {
+            let key = caps.get(1).map(|m| m.as_str()).unwrap_or("token");
+            format!("{key}=<redacted>")
+        });
+        if let Cow::Owned(s) = replaced {
+            current = Cow::Owned(s);
+        }
+    }
+    current.into_owned()
 }
 
 #[cfg(test)]
