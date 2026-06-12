@@ -1,14 +1,14 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-11T21:26:35.694599+00:00`_
+_Generated from source artifacts: `2026-06-12T05:27:11.497516+00:00`_
 
 ## Snapshot
 
-- Upstream target: `upstream/main` @ `6db65e687c53c933ea8a3b8d59f261de8eb4f0ec`
-- Workstream snapshot generated: `2026-06-11T15:32:21-06:00`
-- Parity matrix generated: `2026-06-12T03:52:01.994370+00:00`
-- Queue snapshot generated: `2026-06-12T03:51:59.952223+00:00`
-- Proof snapshot generated: `2026-06-11T21:26:35.694599+00:00`
+- Upstream target: `upstream/main` @ `c57417005099b66e94bf053cd309235bdefb2704`
+- Workstream snapshot generated: `2026-06-11T23:25:17-06:00`
+- Parity matrix generated: `2026-06-12T05:27:10.272055+00:00`
+- Queue snapshot generated: `2026-06-12T05:26:40.953596+00:00`
+- Proof snapshot generated: `2026-06-12T05:27:11.497516+00:00`
 
 ## Gate Status
 
@@ -17,7 +17,7 @@ _Generated from source artifacts: `2026-06-11T21:26:35.694599+00:00`_
 - Test coverage audit: **PASS**
 - SOTA harness matrix: **PASS**
 - Release gate failures: none
-- CI gate failures: max_commits_behind (actual=5801.0, limit=5500); max_upstream_patch_missing (actual=5591.0, limit=5000)
+- CI gate failures: max_commits_behind (actual=5833.0, limit=5500); max_upstream_patch_missing (actual=5616.0, limit=5000)
 
 ## Test Coverage Audit
 
@@ -45,22 +45,22 @@ _Generated from source artifacts: `2026-06-11T21:26:35.694599+00:00`_
 
 | Metric | Value |
 | --- | ---: |
-| Total commits in queue | 5613 |
+| Total commits in queue | 5618 |
 | Pending | 0 |
 | Ported | 266 |
-| Superseded | 5277 |
+| Superseded | 5282 |
 
 ## Tree/Patch Drift
 
 | Metric | Value |
 | --- | ---: |
-| commits_behind | 5827 |
-| commits_ahead | 1094 |
-| upstream_patch_missing | 5611 |
+| commits_behind | 5833 |
+| commits_ahead | 1096 |
+| upstream_patch_missing | 5616 |
 | upstream_patch_represented | 2 |
-| local_patch_unique | 891 |
-| files_only_upstream | 2288 |
-| files_only_local | 729 |
+| local_patch_unique | 892 |
+| files_only_upstream | 2292 |
+| files_only_local | 730 |
 | files_shared_identical | 1632 |
 | files_shared_different | 1099 |
 

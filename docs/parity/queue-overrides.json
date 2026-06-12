@@ -3224,6 +3224,14 @@
       "disposition": "superseded",
       "notes": "Upstream tool-row copy affordance is desktop React assistant-ui layout. Hermes Agent Ultra has no Electron tool fallback row; terminal/TUI copy behavior is handled by local TUI/terminal clipboard surfaces."
     },
+    "6e41ca956bbf": {
+      "disposition": "superseded",
+      "notes": "Upstream JetBrains Mono bundling fixes xterm font metrics in the Electron desktop terminal pane. Hermes Agent Ultra has no Electron/xterm terminal pane; terminal execution and rendering are Rust CLI/TUI surfaces using host terminal fonts."
+    },
+    "24f74eb88853": {
+      "disposition": "superseded",
+      "notes": "Upstream data-selectable-text attributes target the Electron desktop file-preview DOM. Hermes Agent Ultra has no React right-rail file preview surface; file viewing/copy behavior is exposed through Rust CLI/TUI/tool output paths."
+    },
     "8505e9d6691d": {
       "disposition": "superseded",
       "notes": "Upstream composer spellcheck is a desktop React/Electron input attribute fix. Hermes Agent Ultra uses the Rust Ratatui TUI/CLI composer and has no browser spellcheck attribute surface."

@@ -1,30 +1,30 @@
 {
-  "generated_at_utc": "2026-06-12T03:52:01.994370+00:00",
+  "generated_at_utc": "2026-06-12T05:27:10.272055+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "75d5233070092eed17a4cd475cbde4d0c6b5244e",
+    "local_sha": "b4dd2949e78635cd152169db208f3d615423090e",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "6db65e687c53c933ea8a3b8d59f261de8eb4f0ec",
+    "upstream_sha": "c57417005099b66e94bf053cd309235bdefb2704",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5827,
-    "commits_ahead": 1094,
-    "upstream_patch_missing": 5611,
+    "commits_behind": 5833,
+    "commits_ahead": 1096,
+    "upstream_patch_missing": 5616,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 891,
-    "files_only_upstream": 2288,
-    "files_only_local": 729,
+    "local_patch_unique": 892,
+    "files_only_upstream": 2292,
+    "files_only_local": 730,
     "files_shared_identical": 1632,
     "files_shared_different": 1099,
-    "tree_files_changed": 4042,
-    "tree_insertions": 984314,
-    "tree_deletions": 551956
+    "tree_files_changed": 4047,
+    "tree_insertions": 984937,
+    "tree_deletions": 552537
   },
   "top_upstream_only": [
     {
       "path": "apps/desktop",
-      "count": 493
+      "count": 496
     },
     {
       "path": "website/i18n",
@@ -44,7 +44,7 @@
     },
     {
       "path": "tests/gateway",
-      "count": 72
+      "count": 73
     },
     {
       "path": "tests/tools",
@@ -415,11 +415,11 @@
       "count": 10
     },
     {
-      "path": "docs/implementation",
-      "count": 9
+      "path": "docs/releases",
+      "count": 10
     },
     {
-      "path": "docs/releases",
+      "path": "docs/implementation",
       "count": 9
     },
     {
@@ -510,7 +510,7 @@
   "top_missing_from_local": [
     {
       "path": "apps/desktop",
-      "count": 493
+      "count": 496
     },
     {
       "path": "website/i18n",
@@ -530,7 +530,7 @@
     },
     {
       "path": "tests/gateway",
-      "count": 72
+      "count": 73
     },
     {
       "path": "tests/tools",
@@ -739,11 +739,11 @@
       "count": 10
     },
     {
-      "path": "docs/implementation",
-      "count": 9
+      "path": "docs/releases",
+      "count": 10
     },
     {
-      "path": "docs/releases",
+      "path": "docs/implementation",
       "count": 9
     },
     {
@@ -836,7 +836,7 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 509,
+      "upstream_only": 510,
       "shared_different": 722,
       "local_only": 34,
       "risk": "critical",
@@ -846,10 +846,10 @@
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 985,
+      "upstream_only": 988,
       "shared_different": 12,
       "local_only": 214,
-      "risk": "high",
+      "risk": "critical",
       "effort": "XL"
     },
     {
@@ -858,7 +858,7 @@
       "name": "UX parity",
       "upstream_only": 538,
       "shared_different": 267,
-      "local_only": 105,
+      "local_only": 106,
       "risk": "high",
       "effort": "XL"
     },
@@ -904,9 +904,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 5611,
+    "upstream_patch_missing": 5616,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 891,
+    "local_patch_unique": 892,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
