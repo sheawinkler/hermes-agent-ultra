@@ -197,7 +197,9 @@ async fn deliver_coalesced_web_tool_status(
             return;
         }
     }
-    let _ = gateway.send_message(platform, chat_id, combined, None).await;
+    let _ = gateway
+        .send_message(platform, chat_id, combined, None)
+        .await;
     coalescer.lock().unwrap().clear_after_send(!edit_capable);
 }
 
@@ -269,7 +271,8 @@ pub fn make_gateway_status_callback(
             None,
         );
         if progress_mode.as_deref() == Some("off")
-            && (event_type == "tool_progress" || is_coalescable_web_tool_status(event_type, message))
+            && (event_type == "tool_progress"
+                || is_coalescable_web_tool_status(event_type, message))
         {
             // Hooks still fire below; skip chat delivery.
         } else if is_coalescable_web_tool_status(event_type, message) {

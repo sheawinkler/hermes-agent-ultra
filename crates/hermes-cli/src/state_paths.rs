@@ -13,10 +13,7 @@ pub(crate) fn hermes_state_root(cli: &Cli) -> PathBuf {
 }
 
 /// Log when `HERMES_HOME` was remapped to the ultra home for this process.
-pub(crate) fn log_legacy_home_env_hint(
-    prior_home: Option<&str>,
-    migrated_home: &std::path::Path,
-) {
+pub(crate) fn log_legacy_home_env_hint(prior_home: Option<&str>, migrated_home: &std::path::Path) {
     let migrated = migrated_home.to_string_lossy();
     let Some(prior) = prior_home.map(str::trim).filter(|s| !s.is_empty()) else {
         return;

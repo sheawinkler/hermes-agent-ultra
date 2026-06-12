@@ -362,7 +362,8 @@ impl CommandTrie {
     }
 }
 
-static COMMAND_TRIE: LazyLock<CommandTrie> = LazyLock::new(|| CommandTrie::from_commands(SLASH_COMMANDS));
+static COMMAND_TRIE: LazyLock<CommandTrie> =
+    LazyLock::new(|| CommandTrie::from_commands(SLASH_COMMANDS));
 
 /// Return auto-completion suggestions for a partial slash command.
 pub fn autocomplete(partial: &str) -> Vec<&'static str> {
@@ -388,11 +389,7 @@ pub fn autocomplete(partial: &str) -> Vec<&'static str> {
                 out.push(cmd);
             }
         }
-        out.sort_by(|a, b| {
-            a.len()
-                .cmp(&b.len())
-                .then_with(|| a.cmp(b))
-        });
+        out.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
         return out;
     }
 
