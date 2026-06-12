@@ -1,29 +1,29 @@
 # Parity Matrix
 
-Generated: `2026-06-12T08:23:09.531590+00:00`
+Generated: `2026-06-12T10:03:47.604638+00:00`
 
 ## Scope
 
-- Local ref: `main` (`1154cb7b365e2d89d6047ba4fa48fa0a15db6ae3`)
-- Upstream ref: `upstream/main` (`4474873d2caae0fdfaf1e1e57fc490fade8dc143`)
+- Local ref: `main` (`6b6f1e617dbb703da680b6598855b25644334d32`)
+- Upstream ref: `upstream/main` (`88dbf95105644efb067500136c4a73277d3936d4`)
 - Merge base: `none (history divergence)`
 
 ## Summary
 
 | Metric | Value |
 | --- | ---: |
-| Commits behind local (`upstream` ancestry only) | 5875 |
-| Commits ahead local (`local` ancestry only) | 1098 |
-| Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 5652 |
+| Commits behind local (`upstream` ancestry only) | 5879 |
+| Commits ahead local (`local` ancestry only) | 1100 |
+| Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 5656 |
 | Upstream commits represented by patch-id (`git cherry local upstream`, `-`) | 2 |
-| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 893 |
-| Files only in upstream tree | 2304 |
+| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 894 |
+| Files only in upstream tree | 2307 |
 | Files only in local tree | 730 |
-| Shared files identical content | 1624 |
-| Shared files different content | 1107 |
-| Total files changed (`local` vs `upstream`) | 4067 |
-| Insertions (`local` vs `upstream`) | 994020 |
-| Deletions (`local` vs `upstream`) | 552730 |
+| Shared files identical content | 1623 |
+| Shared files different content | 1108 |
+| Total files changed (`local` vs `upstream`) | 4071 |
+| Insertions (`local` vs `upstream`) | 996952 |
+| Deletions (`local` vs `upstream`) | 554545 |
 
 ## Top 40 upstream-only buckets
 
@@ -33,7 +33,7 @@ Generated: `2026-06-12T08:23:09.531590+00:00`
 | `website/i18n` | 315 |
 | `tests/hermes_cli` | 142 |
 | `web/src` | 98 |
-| `tests/agent` | 81 |
+| `tests/agent` | 82 |
 | `tests/gateway` | 74 |
 | `tests/tools` | 53 |
 | `website/docs` | 49 |
@@ -42,7 +42,7 @@ Generated: `2026-06-12T08:23:09.531590+00:00`
 | `hermes_cli/subcommands` | 39 |
 | `tests/plugins` | 38 |
 | `apps/bootstrap-installer` | 35 |
-| `ui-tui/src` | 32 |
+| `ui-tui/src` | 34 |
 | `tests/run_agent` | 25 |
 | `tests/cli` | 23 |
 | `.github/workflows` | 17 |
@@ -78,7 +78,7 @@ Generated: `2026-06-12T08:23:09.531590+00:00`
 | `website/docs` | 149 |
 | `tests/tools` | 147 |
 | `tests/hermes_cli` | 133 |
-| `ui-tui/src` | 73 |
+| `ui-tui/src` | 74 |
 | `tests/agent` | 63 |
 | `tests/run_agent` | 59 |
 | `tests/cli` | 31 |
@@ -164,9 +164,9 @@ Generated: `2026-06-12T08:23:09.531590+00:00`
 
 | Workstream | Issue | Name | Upstream-only | Shared-different | Risk | Effort |
 | --- | ---: | --- | ---: | ---: | --- | --- |
-| `WS6` | #10 | Tests and CI parity | 518 | 723 | critical | XL |
+| `WS6` | #10 | Tests and CI parity | 519 | 723 | critical | XL |
 | `WS8` | #12 | Compatibility and divergence policy | 989 | 12 | critical | XL |
-| `WS5` | #9 | UX parity | 539 | 267 | high | XL |
+| `WS5` | #9 | UX parity | 541 | 268 | high | XL |
 | `WS3` | #7 | Tools and adapters parity | 117 | 78 | high | L |
 | `WS4` | #8 | Skills parity | 72 | 27 | medium | M |
 | `WS2` | #6 | Core runtime parity | 69 | 0 | critical | M |
@@ -174,10 +174,10 @@ Generated: `2026-06-12T08:23:09.531590+00:00`
 
 ## Commit Mapping
 
-- Upstream missing by patch-id: `5652`
+- Upstream missing by patch-id: `5656`
 - Upstream represented by patch-id: `2`
-- Local unique by patch-id: `893`
-- Intentional divergence tracked items: `8` (covered files: `1047`)
+- Local unique by patch-id: `894`
+- Intentional divergence tracked items: `8` (covered files: `1050`)
 - Merge base is absent; patch-id mapping is used as primary commit equivalence signal.
 
 ## Intentional Divergence Registry
@@ -191,7 +191,7 @@ Generated: `2026-06-12T08:23:09.531590+00:00`
 | `rust-gateway-platform-plugin-parity` | approved | WS3 | 5 | Keep platform adapter parity in the Rust gateway instead of vendoring upstream Python platform-plugin trees. |
 | `upstream-python-plugin-backend-drift-20260527` | temporary | WS3 | 10 | Track newly added upstream Python plugin/backend trees separately from surgical Rust issue-triage fixes. |
 | `upstream-s6-plan-doc-archive` | approved | WS7 | 0 | Do not import upstream implementation-plan archive documents unless they change local runtime or release behavior. |
-| `rust-cli-tui-primary-ux-surface` | approved | WS5 | 829 | Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported. |
+| `rust-cli-tui-primary-ux-surface` | approved | WS5 | 832 | Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported. |
 
 
 ## Notes

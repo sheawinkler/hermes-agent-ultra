@@ -1,14 +1,14 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-12T08:23:10.814450+00:00`_
+_Generated from source artifacts: `2026-06-12T10:03:48.881291+00:00`_
 
 ## Snapshot
 
-- Upstream target: `upstream/main` @ `4474873d2caae0fdfaf1e1e57fc490fade8dc143`
-- Workstream snapshot generated: `2026-06-11T23:28:55-06:00`
-- Parity matrix generated: `2026-06-12T08:23:09.531590+00:00`
-- Queue snapshot generated: `2026-06-12T08:23:04.974268+00:00`
-- Proof snapshot generated: `2026-06-12T08:23:10.814450+00:00`
+- Upstream target: `upstream/main` @ `9c505217044cedc28f174f1b74174d00d9ea1c81`
+- Workstream snapshot generated: `2026-06-12T04:01:49-06:00`
+- Parity matrix generated: `2026-06-12T10:03:47.604638+00:00`
+- Queue snapshot generated: `2026-06-12T10:03:42.850261+00:00`
+- Proof snapshot generated: `2026-06-12T10:03:48.881291+00:00`
 
 ## Gate Status
 
@@ -17,7 +17,7 @@ _Generated from source artifacts: `2026-06-12T08:23:10.814450+00:00`_
 - Test coverage audit: **PASS**
 - SOTA harness matrix: **PASS**
 - Release gate failures: none
-- CI gate failures: max_commits_behind (actual=5875.0, limit=5500); max_upstream_patch_missing (actual=5652.0, limit=5000)
+- CI gate failures: max_commits_behind (actual=5879.0, limit=5500); max_upstream_patch_missing (actual=5656.0, limit=5000)
 
 ## Test Coverage Audit
 
@@ -45,24 +45,24 @@ _Generated from source artifacts: `2026-06-12T08:23:10.814450+00:00`_
 
 | Metric | Value |
 | --- | ---: |
-| Total commits in queue | 5654 |
+| Total commits in queue | 5658 |
 | Pending | 0 |
 | Ported | 266 |
-| Superseded | 5318 |
+| Superseded | 5322 |
 
 ## Tree/Patch Drift
 
 | Metric | Value |
 | --- | ---: |
-| commits_behind | 5875 |
-| commits_ahead | 1098 |
-| upstream_patch_missing | 5652 |
+| commits_behind | 5879 |
+| commits_ahead | 1100 |
+| upstream_patch_missing | 5656 |
 | upstream_patch_represented | 2 |
-| local_patch_unique | 893 |
-| files_only_upstream | 2304 |
+| local_patch_unique | 894 |
+| files_only_upstream | 2307 |
 | files_only_local | 730 |
-| files_shared_identical | 1624 |
-| files_shared_different | 1107 |
+| files_shared_identical | 1623 |
+| files_shared_different | 1108 |
 
 ## Workstream States
 
