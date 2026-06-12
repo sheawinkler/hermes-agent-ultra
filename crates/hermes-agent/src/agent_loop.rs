@@ -5478,33 +5478,7 @@ mod tests {
 
     #[test]
     fn restore_primary_runtime_at_turn_start_after_fallback() {
-        struct NoopProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for NoopProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<LlmResponse, AgentError> {
-                Err(AgentError::LlmApi("noop".into()))
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                Box::pin(futures::stream::empty())
-            }
-        }
+        use crate::test_support::ErrNoopProvider as NoopProvider;
 
         let config = AgentConfig::default();
         let agent = AgentLoop::new(
@@ -5547,33 +5521,7 @@ mod tests {
         let prev_cwd = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(td.path()).expect("chdir");
 
-        struct NoopProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for NoopProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<LlmResponse, AgentError> {
-                Err(AgentError::LlmApi("noop".into()))
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                Box::pin(futures::stream::empty())
-            }
-        }
+        use crate::test_support::ErrNoopProvider as NoopProvider;
 
         let loop_engine = AgentLoop::new(
             AgentConfig::default(),
@@ -5828,39 +5776,7 @@ mod tests {
     fn hook_context_spill_writes_file_for_oversized_payload() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let prev = std::env::var("HERMES_HOOK_CONTEXT_SPILL_CHARS").ok();
         hermes_core::test_env::set_var("HERMES_HOOK_CONTEXT_SPILL_CHARS", "1024");
@@ -5869,7 +5785,11 @@ mod tests {
             hermes_home: Some(tmp.path().display().to_string()),
             ..AgentConfig::default()
         };
-        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), Arc::new(DummyProvider));
+        let agent = AgentLoop::new(
+            cfg,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider::default()),
+        );
         let large = "x".repeat(2_048);
         let spilled =
             spill_hook_context_if_oversized(&agent, &large).expect("spill should write file");
@@ -5891,44 +5811,12 @@ mod tests {
     fn post_llm_transform_hook_rewrites_assistant_content() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let mut content = Some("before".to_string());
         crate::hooks::apply_hook_output_transforms(
@@ -5942,44 +5830,12 @@ mod tests {
     fn set_runtime_session_id_updates_config() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         agent.set_runtime_session_id("session-abc");
         assert_eq!(agent.runtime_session_id().as_deref(), Some("session-abc"));
@@ -5989,44 +5845,12 @@ mod tests {
     async fn compress_messages_short_transcript_is_noop() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let messages = vec![
             Message::system("sys"),
@@ -6044,39 +5868,7 @@ mod tests {
     async fn preflight_compression_status_reports_skipped_when_under_threshold() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
         let cap_ref = captured.clone();
@@ -6093,7 +5885,7 @@ mod tests {
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         )
         .with_callbacks(callbacks);
         let mut ctx = ContextManager::new(100);
@@ -6112,39 +5904,7 @@ mod tests {
     async fn preflight_compression_status_reports_when_compressing() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
         let cap_ref = captured.clone();
@@ -6161,7 +5921,7 @@ mod tests {
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         )
         .with_callbacks(callbacks);
         let mut ctx = ContextManager::new(100);
@@ -6182,39 +5942,7 @@ mod tests {
     async fn status_callback_receives_context_pressure_messages() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
         let cap_ref = captured.clone();
@@ -6231,7 +5959,7 @@ mod tests {
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         )
         .with_callbacks(callbacks);
 
@@ -7272,39 +7000,7 @@ mod tests {
     async fn quiet_mode_suppresses_status_callback() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
         let cap_ref = captured.clone();
@@ -7322,8 +7018,12 @@ mod tests {
             quiet_mode: true,
             ..AgentConfig::default()
         };
-        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), Arc::new(DummyProvider))
-            .with_callbacks(callbacks);
+        let agent = AgentLoop::new(
+            cfg,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider::default()),
+        )
+        .with_callbacks(callbacks);
         let mut ctx = ContextManager::new(100);
         ctx.add_message(Message::user("x".repeat(90)));
         agent.auto_compress_if_over_threshold(&mut ctx).await;
@@ -7335,39 +7035,7 @@ mod tests {
     fn test_builtin_personality_injected_into_system_prompt() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let config = AgentConfig {
             personality: Some("coder".to_string()),
@@ -7376,7 +7044,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let prompt = agent.build_system_prompt("", &[], "gpt-4o");
         assert!(prompt.contains("## Active Personality (coder)"));
@@ -7387,39 +7055,7 @@ mod tests {
     fn test_unknown_personality_name_does_not_add_overlay_block() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let config = AgentConfig {
             personality: Some("unknown_persona".to_string()),
@@ -7428,7 +7064,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let prompt = agent.build_system_prompt("", &[], "gpt-4o");
         assert!(!prompt.contains("## Active Personality (unknown_persona)"));
@@ -7439,39 +7075,7 @@ mod tests {
     fn test_default_personality_name_does_not_add_overlay_block() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let config = AgentConfig {
             personality: Some("default".to_string()),
@@ -7480,7 +7084,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let prompt = agent.build_system_prompt("", &[], "gpt-4o");
         assert!(!prompt.contains("## Active Personality (default)"));
@@ -7492,44 +7096,12 @@ mod tests {
         use futures::stream::BoxStream;
         use hermes_core::JsonSchema;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let tools = vec![ToolSchema::new(
             "terminal",
@@ -7545,39 +7117,7 @@ mod tests {
         use futures::stream::BoxStream;
         use hermes_core::JsonSchema;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let config = AgentConfig {
             task_completion_guidance: false,
@@ -7586,7 +7126,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let tools = vec![ToolSchema::new(
             "terminal",
@@ -7601,44 +7141,12 @@ mod tests {
     fn test_task_completion_guidance_not_injected_without_tools() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let prompt = agent.build_system_prompt("", &[], "anthropic/claude-opus-4.8");
         assert!(!prompt.contains(crate::prompt_builder::TASK_COMPLETION_GUIDANCE));
@@ -7648,39 +7156,7 @@ mod tests {
     fn test_smart_model_routing_cheap_route_for_simple_turn() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -7716,7 +7192,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let messages = vec![Message::user("帮我总结一下今天要做什么")];
         let selected = crate::route_learning::resolve_smart_runtime_route(&agent, &messages);
@@ -7730,39 +7206,7 @@ mod tests {
     fn test_smart_model_routing_online_learning_prefers_primary_when_cheap_unstable() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -7797,7 +7241,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         if let Ok(mut m) = agent.route_learning.lock() {
             m.insert(
@@ -7835,44 +7279,16 @@ mod tests {
     fn test_route_learning_updates_after_outcomes() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let tmp = tempfile::tempdir().expect("tempdir");
         let mut cfg = AgentConfig::default();
         cfg.hermes_home = Some(tmp.path().to_string_lossy().to_string());
-        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), Arc::new(DummyProvider));
+        let agent = AgentLoop::new(
+            cfg,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider::default()),
+        );
         crate::route_learning::update_route_learning(
             &agent,
             None,
@@ -7900,39 +7316,7 @@ mod tests {
     fn test_route_learning_persists_across_agent_restarts() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let tmp = tempfile::tempdir().expect("tempdir");
         let mut cfg = AgentConfig::default();
@@ -7941,7 +7325,7 @@ mod tests {
         let agent = AgentLoop::new(
             cfg.clone(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         crate::route_learning::update_route_learning(
             &agent,
@@ -7959,7 +7343,7 @@ mod tests {
         let reloaded = AgentLoop::new(
             cfg.clone(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let snapshot =
             crate::route_learning::route_learning_snapshot(&reloaded, None, Some("openai:gpt-4o"));
@@ -7971,39 +7355,7 @@ mod tests {
     fn test_route_learning_malformed_file_is_safe_fallback() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let tmp = tempfile::tempdir().expect("tempdir");
         let mut cfg = AgentConfig::default();
@@ -8018,7 +7370,11 @@ mod tests {
         std::fs::write(&state_path, "{ this-is-invalid-json")
             .expect("write malformed route-learning file");
 
-        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), Arc::new(DummyProvider));
+        let agent = AgentLoop::new(
+            cfg,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider::default()),
+        );
         let snapshot =
             crate::route_learning::route_learning_snapshot(&agent, None, Some("openai:gpt-4o"));
         assert!(
@@ -8060,39 +7416,7 @@ mod tests {
     fn test_runtime_provider_command_args_override_primary_acp_metadata() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -8124,7 +7448,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let primary = crate::route_learning::primary_runtime_snapshot(&agent);
         assert_eq!(primary.command.as_deref(), Some("copilot-language-server"));
@@ -8142,39 +7466,7 @@ mod tests {
     fn test_smart_model_routing_codex_provider_alias_builds_runtime() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -8210,7 +7502,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let messages = vec![Message::user("总结一下这个需求")];
         let selected = crate::route_learning::resolve_smart_runtime_route(&agent, &messages);
@@ -8232,39 +7524,7 @@ mod tests {
     fn test_smart_model_routing_qwen_oauth_alias_builds_runtime() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -8300,7 +7560,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let selected = crate::route_learning::resolve_smart_runtime_route(
             &agent,
@@ -8316,39 +7576,7 @@ mod tests {
     fn test_runtime_provider_stepfun_build_supported() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -8373,7 +7601,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
 
         let built = crate::runtime_provider::build_runtime_provider(
@@ -8394,39 +7622,7 @@ mod tests {
         use futures::stream::BoxStream;
         use std::time::{SystemTime, UNIX_EPOCH};
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -8485,7 +7681,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let selected = crate::route_learning::resolve_smart_runtime_route(
             &agent,
@@ -8504,39 +7700,7 @@ mod tests {
         use futures::stream::BoxStream;
         use std::time::{SystemTime, UNIX_EPOCH};
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -8584,7 +7748,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let resolved = agent.resolve_runtime_api_key("openai", None, None);
         assert_eq!(resolved.as_deref(), Some("openai-oauth-token"));
@@ -8596,39 +7760,7 @@ mod tests {
         use futures::stream::BoxStream;
         use hermes_core::JsonSchema;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("done"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut registry = ToolRegistry::new();
         registry.register(
@@ -8641,7 +7773,11 @@ mod tests {
             skill_creation_nudge_interval: 10,
             ..AgentConfig::default()
         };
-        let agent = AgentLoop::new(config, Arc::new(registry), Arc::new(DummyProvider));
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(registry),
+            Arc::new(DummyProvider::default()),
+        );
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let _ = rt
             .block_on(agent.run(vec![Message::user("hello")], None))
@@ -8656,39 +7792,7 @@ mod tests {
         use futures::stream::BoxStream;
         use hermes_core::JsonSchema;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("done"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         // Fixture-style cases distilled from Python v2026.4.13:
         // - counter persists across runs
@@ -8721,7 +7825,11 @@ mod tests {
                 memory_nudge_interval: 2,
                 ..AgentConfig::default()
             };
-            let agent = AgentLoop::new(config, Arc::new(registry), Arc::new(DummyProvider));
+            let agent = AgentLoop::new(
+                config,
+                Arc::new(registry),
+                Arc::new(DummyProvider::default()),
+            );
             let rt = tokio::runtime::Runtime::new().expect("runtime");
             for _ in 0..case.runs {
                 let _ = rt
@@ -8955,39 +8063,7 @@ mod tests {
     fn test_smart_model_routing_copilot_acp_missing_cli_falls_back() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -9023,7 +8099,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let selected = crate::route_learning::resolve_smart_runtime_route(
             &agent,
@@ -9039,39 +8115,7 @@ mod tests {
     fn test_smart_model_routing_copilot_acp_tcp_mode_skips_cli_check() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -9107,7 +8151,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let selected = crate::route_learning::resolve_smart_runtime_route(
             &agent,
@@ -9123,39 +8167,7 @@ mod tests {
     fn test_smart_model_routing_skips_complex_turn() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let config = AgentConfig {
             model: "openai:gpt-4o".to_string(),
@@ -9175,7 +8187,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let messages = vec![Message::user("请帮我 debug 这段 traceback 并修复错误")];
         let selected = crate::route_learning::resolve_smart_runtime_route(&agent, &messages);
@@ -9253,38 +8265,7 @@ mod tests {
     #[test]
     fn test_hydrate_session_search_args_injects_current_session_id() {
         use futures::stream::BoxStream;
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<hermes_core::StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let config = AgentConfig {
             session_id: Some("sess-auto-1".into()),
@@ -9293,7 +8274,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let mut tc = ToolCall {
             id: "s1".into(),
@@ -9314,38 +8295,7 @@ mod tests {
     #[test]
     fn test_hydrate_session_search_args_keeps_existing_current_session_id() {
         use futures::stream::BoxStream;
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<hermes_core::StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let config = AgentConfig {
             session_id: Some("sess-outer".into()),
@@ -9354,7 +8304,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let mut tc = ToolCall {
             id: "s2".into(),
@@ -9381,40 +8331,9 @@ mod tests {
         let registry = Arc::new(ToolRegistry::new());
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
-        let agent = AgentLoop::new(config, registry, Arc::new(DummyProvider));
+        let agent = AgentLoop::new(config, registry, Arc::new(DummyProvider::default()));
 
         let max = agent.config().max_turns;
         assert!(budget_pressure_text(6, max, 0.7, 0.9, true).is_none());
@@ -9505,38 +8424,7 @@ mod tests {
     fn test_oauth_refresh_config_prefers_provider_config_over_env() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -9575,7 +8463,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
 
         // Set conflicting env values - config must win.
@@ -9602,38 +8490,7 @@ mod tests {
     fn test_runtime_provider_api_key_env_is_resolved() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let mut runtime_providers = HashMap::new();
         runtime_providers.insert(
@@ -9657,7 +8514,7 @@ mod tests {
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
 
         hermes_core::test_env::set_var("MY_FALLBACK_KEY", "env-secret");
@@ -9670,43 +8527,12 @@ mod tests {
     fn test_runtime_provider_api_key_env_supports_anthropic_aliases_and_gemini_oauth() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
 
         hermes_core::test_env::remove_var("ANTHROPIC_API_KEY");
@@ -9734,45 +8560,14 @@ mod tests {
     fn test_oauth_refresh_config_anthropic_defaults_available() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         hermes_core::test_env::remove_var("HERMES_ANTHROPIC_OAUTH_TOKEN_URL");
         hermes_core::test_env::remove_var("HERMES_ANTHROPIC_OAUTH_CLIENT_ID");
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let (token_url, client_id) = agent.oauth_refresh_config("anthropic").unwrap();
         assert_eq!(token_url, "https://console.anthropic.com/v1/oauth/token");
@@ -9783,38 +8578,7 @@ mod tests {
     fn test_oauth_refresh_config_openai_defaults_available() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         hermes_core::test_env::remove_var("HERMES_OPENAI_OAUTH_TOKEN_URL");
         hermes_core::test_env::remove_var("HERMES_OPENAI_OAUTH_CLIENT_ID");
@@ -9823,7 +8587,7 @@ mod tests {
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let (token_url, client_id) = agent.oauth_refresh_config("openai").unwrap();
         assert_eq!(token_url, "https://auth.openai.com/oauth/token");
@@ -9834,38 +8598,7 @@ mod tests {
     fn test_oauth_refresh_config_nous_defaults_available() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         hermes_core::test_env::remove_var("HERMES_NOUS_OAUTH_TOKEN_URL");
         hermes_core::test_env::remove_var("HERMES_NOUS_OAUTH_CLIENT_ID");
@@ -9874,7 +8607,7 @@ mod tests {
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         let (token_url, client_id) = agent.oauth_refresh_config("nous").unwrap();
         assert_eq!(token_url, "https://portal.nousresearch.com/api/oauth/token");
@@ -9885,44 +8618,13 @@ mod tests {
     fn test_runtime_provider_stepfun_env_key_and_base_url_defaults() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let config = AgentConfig::default();
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
 
         hermes_core::test_env::remove_var("HERMES_STEPFUN_API_KEY");
@@ -10039,39 +8741,7 @@ mod tests {
     fn test_resolve_reliability_degrade_model_does_not_hop_to_openai_by_default() {
         use futures::stream::BoxStream;
 
-        struct DummyProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for DummyProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<hermes_core::LlmResponse, AgentError> {
-                Ok(hermes_core::LlmResponse {
-                    message: Message::assistant("dummy"),
-                    usage: None,
-                    model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
-                    ..Default::default()
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        type DummyProvider = crate::test_support::FixedAssistantProvider;
 
         let agent = AgentLoop::new(
             AgentConfig {
@@ -10080,7 +8750,7 @@ mod tests {
                 ..AgentConfig::default()
             },
             Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
+            Arc::new(DummyProvider::default()),
         );
         assert_eq!(
             crate::route_learning::resolve_reliability_degrade_model(
@@ -10635,33 +9305,7 @@ mod tests {
     /// `conversation_loop` (`invalidate_turn_api_messages_cache` each inner iteration).
     #[test]
     fn turn_api_messages_cache_contract() {
-        struct NoopProvider;
-        #[async_trait::async_trait]
-        impl LlmProvider for NoopProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<LlmResponse, AgentError> {
-                Err(AgentError::LlmApi("noop".into()))
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                Box::pin(futures::stream::empty())
-            }
-        }
+        use crate::test_support::ErrNoopProvider as NoopProvider;
 
         let agent = AgentLoop::new(
             AgentConfig::default(),

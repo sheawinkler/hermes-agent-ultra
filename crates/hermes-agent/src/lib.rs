@@ -4,6 +4,9 @@
 //! context management into a fully autonomous loop that runs until the
 //! model finishes naturally or the turn budget is exhausted.
 
+#[cfg(test)]
+pub mod test_support;
+
 pub mod agent_callbacks;
 pub mod agent_config;
 pub mod agent_loop;
