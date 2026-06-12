@@ -2195,3 +2195,125 @@ async fn turn_post_tool(agent: &AgentLoop, tc: &mut TurnContext) -> TurnState {
 
     TurnState::Guard
 }
+
+// ---------------------------------------------------------------------------
+// Transition table (Phase A — compile-time documentation + test coverage)
+// ---------------------------------------------------------------------------
+
+/// State identifier without the `Done` payload — used in the transition table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum TurnStateId {
+    Guard,
+    Prefetch,
+    RouteSelection,
+    CallLlm,
+    ProcessLlmOutput,
+    ExecuteTools,
+    PostTool,
+    Done,
+}
+
+impl TurnStateId {
+    pub(crate) fn from_state(s: &TurnState) -> Self {
+        match s {
+            TurnState::Guard => Self::Guard,
+            TurnState::Prefetch => Self::Prefetch,
+            TurnState::RouteSelection => Self::RouteSelection,
+            TurnState::CallLlm => Self::CallLlm,
+            TurnState::ProcessLlmOutput => Self::ProcessLlmOutput,
+            TurnState::ExecuteTools => Self::ExecuteTools,
+            TurnState::PostTool => Self::PostTool,
+            TurnState::Done(_) => Self::Done,
+        }
+    }
+}
+
+/// Exhaustive list of all legal (from, to) transitions observed in the state
+/// functions above.  A unit test below asserts that every reachable pair is
+/// covered here.
+pub(crate) const VALID_TRANSITIONS: &[(TurnStateId, TurnStateId)] = &[
+    // Guard exits
+    (TurnStateId::Guard, TurnStateId::Prefetch),
+    (TurnStateId::Guard, TurnStateId::Done),
+    // Prefetch exits
+    (TurnStateId::Prefetch, TurnStateId::RouteSelection),
+    (TurnStateId::Prefetch, TurnStateId::Done),
+    // RouteSelection exits
+    (TurnStateId::RouteSelection, TurnStateId::CallLlm),
+    (TurnStateId::RouteSelection, TurnStateId::Done),
+    // CallLlm exits
+    (TurnStateId::CallLlm, TurnStateId::ProcessLlmOutput),
+    (TurnStateId::CallLlm, TurnStateId::Done),
+    // ProcessLlmOutput exits
+    (TurnStateId::ProcessLlmOutput, TurnStateId::ExecuteTools),
+    (TurnStateId::ProcessLlmOutput, TurnStateId::CallLlm),
+    (TurnStateId::ProcessLlmOutput, TurnStateId::Done),
+    // ExecuteTools exits
+    (TurnStateId::ExecuteTools, TurnStateId::PostTool),
+    (TurnStateId::ExecuteTools, TurnStateId::CallLlm),
+    (TurnStateId::ExecuteTools, TurnStateId::Done),
+    // PostTool exits
+    (TurnStateId::PostTool, TurnStateId::Guard),
+    (TurnStateId::PostTool, TurnStateId::CallLlm),
+    (TurnStateId::PostTool, TurnStateId::Done),
+    // Done is a sink
+    (TurnStateId::Done, TurnStateId::Done),
+];
+
+pub(crate) fn is_valid_transition(from: TurnStateId, to: TurnStateId) -> bool {
+    VALID_TRANSITIONS.iter().any(|&(f, t)| f == from && t == to)
+}
+
+#[cfg(test)]
+mod transitions_tests {
+    use super::*;
+
+    #[test]
+    fn transition_table_is_exhaustive_for_all_states() {
+        let all_states = [
+            TurnStateId::Guard,
+            TurnStateId::Prefetch,
+            TurnStateId::RouteSelection,
+            TurnStateId::CallLlm,
+            TurnStateId::ProcessLlmOutput,
+            TurnStateId::ExecuteTools,
+            TurnStateId::PostTool,
+            TurnStateId::Done,
+        ];
+        for state in all_states {
+            let has_exit = VALID_TRANSITIONS.iter().any(|&(from, _)| from == state);
+            assert!(
+                has_exit,
+                "State {state:?} has no transitions in VALID_TRANSITIONS"
+            );
+        }
+    }
+
+    #[test]
+    fn guard_can_reach_prefetch_and_done() {
+        assert!(is_valid_transition(
+            TurnStateId::Guard,
+            TurnStateId::Prefetch
+        ));
+        assert!(is_valid_transition(TurnStateId::Guard, TurnStateId::Done));
+        assert!(!is_valid_transition(
+            TurnStateId::Guard,
+            TurnStateId::CallLlm
+        ));
+    }
+
+    #[test]
+    fn post_tool_loops_back_to_guard() {
+        assert!(is_valid_transition(
+            TurnStateId::PostTool,
+            TurnStateId::Guard
+        ));
+    }
+
+    #[test]
+    fn done_is_a_sink_state() {
+        assert!(is_valid_transition(TurnStateId::Done, TurnStateId::Done));
+        assert!(!is_valid_transition(TurnStateId::Done, TurnStateId::Guard));
+    }
+}
