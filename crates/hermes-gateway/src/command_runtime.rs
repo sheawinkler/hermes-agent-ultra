@@ -68,6 +68,11 @@ pub(crate) async fn apply_command(
             .await?;
             Ok(true)
         }
+        GatewayCommandResult::EvolveStatus => {
+            let reply = gw.execute_evolve_status();
+            gw.send_incoming_reply(incoming, &reply, None).await?;
+            Ok(true)
+        }
 
         // ── session ───────────────────────────────────────────────────────
         result @ (GatewayCommandResult::ResetSession(_)

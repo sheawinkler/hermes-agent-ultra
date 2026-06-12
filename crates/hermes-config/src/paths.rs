@@ -199,6 +199,26 @@ pub fn insights_skill_state_path() -> PathBuf {
     insights_dir().join("skill_state.json")
 }
 
+/// `$hermes_home/evolution/` — background review ledger and evolution state.
+pub fn evolution_dir() -> PathBuf {
+    hermes_home().join("evolution")
+}
+
+/// Append-only background review event log.
+pub fn evolution_reviews_path() -> PathBuf {
+    evolution_dir().join("reviews.jsonl")
+}
+
+/// Evolution directory under an explicit Hermes home.
+pub fn evolution_dir_in(home: impl AsRef<Path>) -> PathBuf {
+    home.as_ref().join("evolution")
+}
+
+/// Review ledger path under an explicit Hermes home.
+pub fn evolution_reviews_path_in(home: impl AsRef<Path>) -> PathBuf {
+    evolution_dir_in(home).join("reviews.jsonl")
+}
+
 /// `$hermes_home/.env`
 pub fn env_path() -> PathBuf {
     hermes_home().join(".env")

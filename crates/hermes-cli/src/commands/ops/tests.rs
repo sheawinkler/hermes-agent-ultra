@@ -114,6 +114,15 @@ fn self_evolution_recommendations_extracts_lines() {
 }
 
 #[test]
+fn runtime_evolve_status_empty_ledger() {
+    let tmp = tempdir().expect("tempdir");
+    let cfg = hermes_agent::AgentConfig::default();
+    let text = hermes_agent::evolution_ledger::format_evolve_status(tmp.path(), &cfg);
+    assert!(text.contains("Evolution status"));
+    assert!(text.contains("last review: none yet"));
+}
+
+#[test]
 fn summarize_performance_autopilot_report_formats_fields() {
     let tmp = tempdir().expect("tempdir");
     let path = tmp.path().join("performance-autopilot-test.json");

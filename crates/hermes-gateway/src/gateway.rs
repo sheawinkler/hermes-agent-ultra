@@ -1176,6 +1176,12 @@ impl Gateway {
         lines.join("\n")
     }
 
+    pub(crate) fn execute_evolve_status(&self) -> String {
+        let home = hermes_config::paths::hermes_home();
+        let config = hermes_agent::evolution_ledger::status_agent_config();
+        hermes_agent::evolution_ledger::format_evolve_status(&home, &config)
+    }
+
     pub(crate) fn execute_curator_run(&self, dry_run: bool) -> String {
         let store = hermes_skills::UsageStore::new();
         let config = &self.config.curator;

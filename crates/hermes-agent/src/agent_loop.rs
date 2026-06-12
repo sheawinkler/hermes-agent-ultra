@@ -3956,6 +3956,7 @@ impl AgentLoop {
         turn: u32,
         ctx: &ContextManager,
         review_memory_at_end: bool,
+        session_key: Option<&str>,
     ) {
         self.emit_background_review_metrics(turn, ctx);
         if !self.config().background_review_enabled {
@@ -3982,12 +3983,32 @@ impl AgentLoop {
         if !review_memory && !review_skills {
             return;
         }
+        let trigger = match crate::evolution_ledger::review_trigger(review_memory, review_skills) {
+            Some(t) => t,
+            None => return,
+        };
         let prompt: &'static str = match (review_memory, review_skills) {
             (true, true) => COMBINED_REVIEW_PROMPT,
             (true, false) => MEMORY_REVIEW_PROMPT,
             (false, true) => SKILL_REVIEW_PROMPT,
             _ => return,
         };
+        let ledger_enabled = crate::evolution_ledger::evolution_ledger_enabled(self.config().as_ref());
+        let hermes_home = crate::evolution_ledger::resolve_hermes_home(self.config().as_ref());
+        let ledger_max = self.config().evolution_ledger_max_entries;
+        let review_id = crate::evolution_ledger::new_review_id();
+        let session_key_owned = session_key.map(str::to_string);
+        if ledger_enabled {
+            let started = crate::evolution_ledger::started_event(
+                review_id.clone(),
+                session_key_owned.clone(),
+                trigger,
+            );
+            if let Err(e) = crate::evolution_ledger::append_event(&hermes_home, &started, ledger_max)
+            {
+                tracing::debug!(error = %e, "evolution ledger append (started) failed");
+            }
+        }
         let mut hist = ctx.get_messages().to_vec();
         hist.push(Message::user(prompt));
         let mut cfg = (*self.config()).clone();
@@ -4022,18 +4043,49 @@ impl AgentLoop {
         let async_tool_dispatch = self.async_tool_dispatch();
         let review_cb = self.callbacks.background_review_callback.clone();
         tokio::spawn(async move {
+            let timer = crate::evolution_ledger::ReviewTimer::start();
             let agent = AgentLoop::new(cfg, tools, provider)
                 .maybe_with_async_tool_dispatch(async_tool_dispatch);
             match agent.run(hist, None).await {
                 Ok(result) => {
-                    if let Some(cb) = review_cb.as_ref() {
-                        if let Some(summary) = summarize_background_review_result(&result.messages)
+                    let tools = crate::evolution_ledger::extract_review_tools(&result.messages);
+                    let summary = crate::evolution_ledger::summarize_review_for_chat(&result.messages);
+                    if ledger_enabled {
+                        let completed = crate::evolution_ledger::completed_event(
+                            review_id.clone(),
+                            session_key_owned.clone(),
+                            trigger,
+                            timer.elapsed_ms(),
+                            tools,
+                            summary.clone(),
+                        );
+                        if let Err(e) =
+                            crate::evolution_ledger::append_event(&hermes_home, &completed, ledger_max)
                         {
+                            tracing::debug!(error = %e, "evolution ledger append (completed) failed");
+                        }
+                    }
+                    if let Some(cb) = review_cb.as_ref() {
+                        if let Some(summary) = summary {
                             cb(&summary);
                         }
                     }
                 }
                 Err(e) => {
+                    if ledger_enabled {
+                        let failed = crate::evolution_ledger::failed_event(
+                            review_id,
+                            session_key_owned,
+                            trigger,
+                            timer.elapsed_ms(),
+                            e.to_string(),
+                        );
+                        if let Err(err) =
+                            crate::evolution_ledger::append_event(&hermes_home, &failed, ledger_max)
+                        {
+                            tracing::debug!(error = %err, "evolution ledger append (failed) failed");
+                        }
+                    }
                     tracing::debug!(error = %e, "background memory/skill review failed");
                 }
             }
@@ -5269,110 +5321,8 @@ pub(crate) fn is_contextlattice_shell_invocation(raw_args: &str) -> bool {
     lower == "contextlattice" || lower.starts_with("contextlattice ")
 }
 
-fn is_safe_background_review_message(message: &str) -> bool {
-    let trimmed = message.trim();
-    if trimmed.is_empty() || trimmed.len() > 200 {
-        return false;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    // Suppress operational/status leakage from background passes.
-    if lower.contains("status:")
-        || lower.contains("status=")
-        || lower.contains("token")
-        || lower.contains("api_key")
-        || lower.contains("secret")
-        || lower.contains("credential")
-    {
-        return false;
-    }
-    // Skip verbose object-like payloads.
-    if (trimmed.contains('{') && trimmed.contains('}')) || trimmed.contains('\n') {
-        return false;
-    }
-    true
-}
-
 fn summarize_background_review_result(messages: &[Message]) -> Option<String> {
-    let mut actions: Vec<String> = Vec::new();
-    for msg in messages {
-        if !matches!(msg.role, hermes_core::MessageRole::Tool) {
-            continue;
-        }
-        let Some(raw) = msg.content.as_deref() else {
-            continue;
-        };
-        let Ok(data) = serde_json::from_str::<Value>(raw) else {
-            continue;
-        };
-        if !data
-            .get("success")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        let message = data
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let target = data
-            .get("target")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if message.is_empty() {
-            continue;
-        }
-        if !is_safe_background_review_message(&message) {
-            continue;
-        }
-        let lower = message.to_ascii_lowercase();
-        if lower.contains("created") || lower.contains("updated") {
-            actions.push(message);
-        } else if lower.contains("added") || (!target.is_empty() && lower.contains("add")) {
-            let label = match target.as_str() {
-                "memory" => "Memory",
-                "user" => "User profile",
-                _ => target.as_str(),
-            };
-            if !label.is_empty() {
-                actions.push(format!("{label} updated"));
-            }
-        } else if message.contains("Entry added") {
-            let label = match target.as_str() {
-                "memory" => "Memory",
-                "user" => "User profile",
-                _ => target.as_str(),
-            };
-            if !label.is_empty() {
-                actions.push(format!("{label} updated"));
-            }
-        } else if lower.contains("removed") || lower.contains("replaced") {
-            let label = match target.as_str() {
-                "memory" => "Memory",
-                "user" => "User profile",
-                _ => target.as_str(),
-            };
-            if !label.is_empty() {
-                actions.push(format!("{label} updated"));
-            }
-        }
-    }
-    if actions.is_empty() {
-        return None;
-    }
-    let mut deduped: Vec<String> = Vec::new();
-    for action in actions {
-        if !deduped.iter().any(|a| a == &action) {
-            deduped.push(action);
-        }
-    }
-    // Unicode 转义，最稳定，不依赖编辑器/终端编码
-    // 🧠 = \u{1F9E0}，分隔符用 " · " 或 " → "
-    Some(format!("\u{1F9E0} {}", deduped.join(" \u{00B7} ")))
+    crate::evolution_ledger::summarize_review_for_chat(messages)
 }
 
 fn default_model_cost_per_million(model: &str) -> Option<(f64, f64)> {

@@ -98,6 +98,8 @@ pub enum GatewayCommandResult {
     CuratorRestore { name: String },
     /// Curator list archived skills.
     CuratorListArchived,
+    /// Runtime evolution / background review status.
+    EvolveStatus,
     /// Plan-then-execute mode (`/plan-mode` on messaging channels).
     PlanMode { args: String },
     /// Unknown command.
@@ -302,6 +304,12 @@ pub fn all_commands() -> Vec<CommandInfo> {
             aliases: &[],
             description: "Manage the skill curator (status, run, pause, resume, pin, unpin, archive, restore)",
             usage: "/curator [subcommand] [args]",
+        },
+        CommandInfo {
+            name: "/evolve",
+            aliases: &[],
+            description: "Show runtime background review / evolution status",
+            usage: "/evolve [status]",
         },
         CommandInfo {
             name: "/help",
@@ -794,6 +802,17 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 )),
             }
         }
+        "/evolve" => {
+            let tokens: Vec<&str> = args.split_whitespace().collect();
+            let sub = tokens.first().copied().unwrap_or("status");
+            match sub {
+                "status" | "" => GatewayCommandResult::EvolveStatus,
+                _ => GatewayCommandResult::Reply(
+                    "Usage: /evolve status\n\nShows runtime background review ledger (memory/skill nudges)."
+                        .to_string(),
+                ),
+            }
+        }
         "/help" | "/commands" => {
             let mut help = String::from("📖 **Available Commands:**\n\n");
             for cmd_info in all_commands() {
@@ -891,6 +910,18 @@ mod tests {
         match handle_command("/fast turbo") {
             GatewayCommandResult::Reply(text) => assert!(text.contains("Usage")),
             other => panic!("Expected usage reply for invalid /fast, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_evolve_status_command() {
+        match handle_command("/evolve status") {
+            GatewayCommandResult::EvolveStatus => {}
+            other => panic!("Expected EvolveStatus, got {:?}", other),
+        }
+        match handle_command("/evolve") {
+            GatewayCommandResult::EvolveStatus => {}
+            other => panic!("Expected EvolveStatus for bare /evolve, got {:?}", other),
         }
     }
 

@@ -28,6 +28,7 @@ pub mod copilot_acp;
 pub mod credential_pool;
 pub mod credential_pool_recovery;
 mod error_classifier;
+pub mod evolution_ledger;
 pub mod fallback;
 pub mod file_mutation_tracker;
 pub mod governor;

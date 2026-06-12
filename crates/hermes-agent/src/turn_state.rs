@@ -1290,7 +1290,12 @@ async fn turn_process_output(agent: &AgentLoop, tc: &mut TurnContext) -> TurnSta
         // Final memory sync
         let (u, a) = extract_last_user_assistant(tc.ctx.get_messages());
         agent.memory_sync(&u, &a, &tc.session_id);
-        agent.spawn_background_review(tc.total_turns, &tc.ctx, tc.review_memory_at_end);
+        agent.spawn_background_review(
+            tc.total_turns,
+            &tc.ctx,
+            tc.review_memory_at_end,
+            Some(tc.session_id.as_str()),
+        );
         crate::hooks::turn_end_plugin_hooks(
             agent,
             tc.ctx.get_messages(),

@@ -437,6 +437,14 @@ pub struct AgentConfig {
     #[serde(default = "default_background_review_metrics_enabled")]
     pub background_review_metrics_enabled: bool,
 
+    /// Persist structured background review events to `$HERMES_HOME/evolution/reviews.jsonl`.
+    #[serde(default = "default_evolution_ledger_enabled")]
+    pub evolution_ledger_enabled: bool,
+
+    /// Max JSONL lines retained in the review ledger (`0` = unlimited).
+    #[serde(default = "default_evolution_ledger_max_entries")]
+    pub evolution_ledger_max_entries: u32,
+
     /// Exact system prompt from SQLite when continuing a session (stable Anthropic prefix cache).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stored_system_prompt: Option<String>,
@@ -599,6 +607,14 @@ fn default_recall_enabled() -> bool {
     true
 }
 
+fn default_evolution_ledger_enabled() -> bool {
+    true
+}
+
+fn default_evolution_ledger_max_entries() -> u32 {
+    200
+}
+
 fn default_budget_caution_threshold() -> f64 {
     0.7
 }
@@ -733,6 +749,8 @@ impl Default for AgentConfig {
             background_review_enabled: default_background_review_enabled(),
             recall_enabled: default_recall_enabled(),
             background_review_metrics_enabled: default_background_review_metrics_enabled(),
+            evolution_ledger_enabled: default_evolution_ledger_enabled(),
+            evolution_ledger_max_entries: default_evolution_ledger_max_entries(),
             stored_system_prompt: None,
             cache_ttl: default_cache_ttl(),
             use_prompt_caching: false,
