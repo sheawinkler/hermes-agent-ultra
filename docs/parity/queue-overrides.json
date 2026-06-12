@@ -3168,6 +3168,62 @@
       "disposition": "ported",
       "notes": "The final upstream Automation Blueprints terminology cleanup is ported on the local website surface: guides/automation-blueprints replaces the stale automation-templates slug, the sidebar points at the new slug, and the Rust runtime/catalog already use Automation Blueprints naming. Upstream Python docstring/web-server wording is non-runtime for Hermes Agent Ultra's Rust-only implementation."
     },
+    "73969771a514": {
+      "disposition": "superseded",
+      "notes": "Upstream dashboard /api/ws MCP discovery targets Python hermes_cli/tui_gateway startup. Hermes Agent Ultra exposes MCP through the Rust hermes-mcp client/server and Rust CLI registration paths; Python dashboard websocket backend discovery is not a Rust runtime surface."
+    },
+    "d221e369b8f3": {
+      "disposition": "superseded",
+      "notes": "Upstream assistant-ui message render boundary and virtualizer recovery is Electron/React desktop UI only. Hermes Agent Ultra's owned runtime surface is Rust CLI/TUI/gateway, with no assistant-ui thread virtualizer equivalent."
+    },
+    "e96fe06e4968": {
+      "disposition": "superseded",
+      "notes": "Upstream served dashboard token adoption targets Electron child-process dashboard websocket auth. Hermes Agent Ultra does not ship that Electron backend launcher; Rust gateway/session auth is handled by typed Rust services and CLI config rather than desktop dashboard-token.cjs."
+    },
+    "7a2d498b9dd2": {
+      "disposition": "superseded",
+      "notes": "Upstream profile session read routing is desktop React hermes.ts/session-picker wiring. Hermes Agent Ultra session state is owned by Rust SessionPersistence, CLI/TUI App state, and gateway session metadata rather than Electron profile session facades."
+    },
+    "e3ed7722b5b1": {
+      "disposition": "superseded",
+      "notes": "Upstream foreign-backend token refusal is Electron dashboard-token readiness logic. The local Rust runtime has no Electron dashboard backend token adoption path; gateway sessions are explicit Rust session keys and platform adapters."
+    },
+    "9ff0ba082739": {
+      "disposition": "superseded",
+      "notes": "Upstream port-squat and pickPort self-collision protection targets Electron desktop main.cjs and port-pool.cjs. Hermes Agent Ultra does not launch Electron dashboard child processes; Rust services bind through their own listener lifecycle."
+    },
+    "81436e143ebb": {
+      "disposition": "superseded",
+      "notes": "Upstream allow_permanent propagation fixes Python/TUI/desktop prompt payloads. Hermes Agent Ultra's Rust approval manager already carries allow_permanent in ApprovalPrompt, GatewayApprovalRequest, and approval hook events, and blocks permanent approvals for Tirith warnings."
+    },
+    "cc726aad687a": {
+      "disposition": "superseded",
+      "notes": "Upstream refactors Electron served-token adoption and foreign-backend refusal into a helper. Hermes Agent Ultra has no Electron dashboard-token helper; the underlying local token adoption/refusal failure mode is absent from the Rust runtime."
+    },
+    "b097d7b03352": {
+      "disposition": "superseded",
+      "notes": "Upstream native fetch change is confined to Electron dashboard-token.cjs. Hermes Agent Ultra's Rust runtime does not consume that JavaScript helper."
+    },
+    "55a18e68600d": {
+      "disposition": "superseded",
+      "notes": "Upstream allow_permanent comment/DRY cleanup is Python, desktop React, and ui-tui TypeScript presentation polish. The Rust approval contract remains the source of truth and already exposes allow_permanent on prompts, gateway requests, and hooks."
+    },
+    "e2145a5c9cae": {
+      "disposition": "superseded",
+      "notes": "Upstream embedded dashboard chat gateway stabilization targets ui-tui TypeScript gatewayClient and Python tui_gateway transport behavior. Hermes Agent Ultra release/runtime gates are Rust-first; the local Rust gateway/CLI session path is separate from that embedded JS/Python dashboard chat transport."
+    },
+    "4ddb03390a95": {
+      "disposition": "superseded",
+      "notes": "Upstream custom OpenAI endpoint API-key collection is desktop onboarding plus Python web_server settings. Hermes Agent Ultra handles model/provider credentials through Rust config/auth/provider flows; the Electron onboarding overlay and Python dashboard endpoint are not local Rust runtime surfaces."
+    },
+    "6c00077d3838": {
+      "disposition": "superseded",
+      "notes": "Upstream RTL/bidi auto-direction is desktop React chat text rendering. Hermes Agent Ultra has no Electron assistant-ui message text component; terminal/TUI rendering follows the local Rust/terminal surfaces."
+    },
+    "09bcf5a9370e": {
+      "disposition": "superseded",
+      "notes": "Upstream tool-row copy affordance is desktop React assistant-ui layout. Hermes Agent Ultra has no Electron tool fallback row; terminal/TUI copy behavior is handled by local TUI/terminal clipboard surfaces."
+    },
     "8505e9d6691d": {
       "disposition": "superseded",
       "notes": "Upstream composer spellcheck is a desktop React/Electron input attribute fix. Hermes Agent Ultra uses the Rust Ratatui TUI/CLI composer and has no browser spellcheck attribute surface."

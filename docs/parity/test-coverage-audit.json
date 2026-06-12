@@ -4,19 +4,19 @@
       "kind": "nonzero_tree_drift",
       "message": "max_commits_behind remains nonzero in parity matrix",
       "metric": "max_commits_behind",
-      "value": 5796.0
+      "value": 5827.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_upstream_patch_missing remains nonzero in parity matrix",
       "metric": "max_upstream_patch_missing",
-      "value": 5586.0
+      "value": 5611.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_files_only_upstream remains nonzero in parity matrix",
       "metric": "max_files_only_upstream",
-      "value": 2280.0
+      "value": 2288.0
     }
   ],
   "audit_gate": {
@@ -61,7 +61,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-11T21:26:21.505744+00:00",
+  "generated_at_utc": "2026-06-12T03:52:17.847960+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -547,7 +547,7 @@
     "divergence_unowned": 0,
     "missing_rust_test_refs": 0,
     "queue_pending": 0,
-    "queue_total": 5593,
+    "queue_total": 5613,
     "rust_test_files": 308,
     "rust_test_functions": 3465,
     "test_intent_mapping_ratio": 1.0,
