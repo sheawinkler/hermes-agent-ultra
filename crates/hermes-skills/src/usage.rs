@@ -350,39 +350,62 @@ impl UsageStore {
 // ── Agent-created queries ────────────────────────────────────────────────
 
 impl UsageStore {
+    /// Return agent-created skill names based solely on `.usage.json`.
+    ///
+    /// Before returning, this function **auto-heals** the usage data:
+    /// - Entries where `agent_created=true` but the skill is actually
+    ///   bundled/hub-installed → `agent_created` is reset to `false`.
+    /// - Entries whose skill directory no longer exists on disk → the
+    ///   entire usage record is removed.
+    ///
+    /// Modified usage is persisted immediately so later calls always
+    /// see clean data.  The returned list contains **only** names where
+    /// `agent_created` is `true` — no secondary filtering is applied.
     pub fn list_agent_created_skill_names(&self) -> Vec<String> {
-        let usage = self.load_usage();
-        tracing::debug!(
-            skills_dir = %self.skills_dir.display(),
-            usage_entries = usage.len(),
-            "loading agent-created skill names"
-        );
-        let mut names: Vec<String> = Vec::new();
-        for (name, rec) in &usage {
-            if !rec.agent_created {
-                continue;
-            }
-            // Defense in depth: exclude protected (bundled/hub) skills even
-            // if their .usage.json entry somehow has agent_created=true.
+        let mut usage = self.load_usage();
+        let mut dirty = false;
+
+        // Auto-heal: fix stale / incorrectly marked entries.
+        let names_to_check: Vec<String> = usage
+            .iter()
+            .filter(|(_, rec)| rec.agent_created)
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in &names_to_check {
             if is_protected_skill(&self.skills_dir, name) {
+                // Bundled / hub-installed skill incorrectly marked.
+                if let Some(rec) = usage.get_mut(name) {
+                    rec.agent_created = false;
+                }
+                dirty = true;
                 tracing::warn!(
                     skill = %name,
-                    "agent_created=true found for protected skill; excluding from curator"
+                    "auto-fixed: agent_created=true reset for protected skill"
                 );
-                continue;
-            }
-            // Exclude skills whose directory no longer exists on disk.
-            // This prevents the LLM from receiving stale skill names that
-            // skill_view cannot resolve, avoiding tool-loop guard trips.
-            if find_skill_dir(&self.skills_dir, name).is_none() {
+            } else if find_skill_dir(&self.skills_dir, name).is_none() {
+                // Skill directory no longer exists on disk — remove
+                // the orphaned usage record.
+                usage.remove(name);
+                dirty = true;
                 tracing::debug!(
                     skill = %name,
-                    "skill directory not found on disk; excluding from curator (stale .usage.json entry?)"
+                    "auto-removed: usage record for non-existent skill directory"
                 );
-                continue;
             }
-            names.push(name.clone());
         }
+
+        if dirty {
+            if let Err(e) = self.save_usage(&usage) {
+                tracing::warn!("failed to persist auto-healed usage: {}", e);
+            }
+        }
+
+        // Only .usage.json matters — no secondary filtering.
+        let mut names: Vec<String> = usage
+            .iter()
+            .filter(|(_, rec)| rec.agent_created)
+            .map(|(name, _)| name.clone())
+            .collect();
         names.sort();
         names
     }
@@ -509,198 +532,6 @@ pub(crate) fn read_skill_name_from_dir(skill_dir: &Path) -> String {
     read_skill_name_from_file(&skill_dir.join("SKILL.md"), fallback)
 }
 
-/// Compile-time fallback list of bundled skill directory names.
-///
-/// Used as a defense-in-depth safeguard when `.bundled_manifest` is missing
-/// or empty at runtime. These are the directory names under `skills/` in the
-/// repository — the names that appear as keys in `.usage.json` and that
-/// `find_skill_dir()` matches on.
-/// Compile-time list of **leaf skill directory names** (not category names)
-/// sourced from both `skills/` and `optional-skills/`.
-///
-/// This is always merged into `bundled_skill_names()` regardless of whether
-/// `.bundled_manifest` exists, providing defense-in-depth coverage even when
-/// the runtime manifest is stale or incomplete.
-///
-/// **Maintenance**: update this list when skills are added to or removed
-/// from the repository's `skills/` and `optional-skills/` directories.
-/// Run from repo root:
-///   Get-ChildItem -Path skills,optional-skills -Recurse -Depth 4 -Dir |
-///     Where-Object { Test-Path "$_\SKILL.md" } |
-///     ForEach-Object Name | Sort-Object -Unique
-const BUNDLED_SKILL_NAMES_FALLBACK: &[&str] = &[
-    // ── skills/ leaf names ──────────────────────────────────────────────
-    "airtable",
-    "apple-notes",
-    "apple-reminders",
-    "architecture-diagram",
-    "arxiv",
-    "ascii-art",
-    "ascii-video",
-    "audiocraft",
-    "baoyu-comic",
-    "baoyu-infographic",
-    "blogwatcher",
-    "claude-code",
-    "claude-design",
-    "codebase-inspection",
-    "codex",
-    "comfyui",
-    "creative-ideation",
-    "debugging-hermes-tui-commands",
-    "design-md",
-    "dogfood",
-    "dspy",
-    "excalidraw",
-    "findmy",
-    "gif-search",
-    "github-auth",
-    "github-code-review",
-    "github-issues",
-    "github-pr-workflow",
-    "github-repo-management",
-    "godmode",
-    "google-workspace",
-    "heartmula",
-    "hermes-agent",
-    "hermes-agent-skill-authoring",
-    "himalaya",
-    "huggingface-hub",
-    "humanizer",
-    "imessage",
-    "jupyter-live-kernel",
-    "kanban-orchestrator",
-    "kanban-worker",
-    "linear",
-    "llama-cpp",
-    "llm-wiki",
-    "lm-evaluation-harness",
-    "macos-computer-use",
-    "manim-video",
-    "maps",
-    "minecraft-modpack-server",
-    "nano-pdf",
-    "native-mcp",
-    "node-inspect-debugger",
-    "notion",
-    "obliteratus",
-    "obsidian",
-    "ocr-and-documents",
-    "opencode",
-    "openhue",
-    "p5js",
-    "pixel-art",
-    "plan",
-    "pokemon-player",
-    "polymarket",
-    "popular-web-designs",
-    "powerpoint",
-    "pretext",
-    "python-debugpy",
-    "requesting-code-review",
-    "research-paper-writing",
-    "segment-anything",
-    "sketch",
-    "songsee",
-    "songwriting-and-ai-music",
-    "spike",
-    "spotify",
-    "subagent-driven-development",
-    "systematic-debugging",
-    "teams-meeting-pipeline",
-    "test-driven-development",
-    "touchdesigner-mcp",
-    "vllm",
-    "webhook-subscriptions",
-    "weights-and-biases",
-    "writing-plans",
-    "xurl",
-    "youtube-content",
-    "yuanbao",
-    // ── optional-skills/ leaf names ─────────────────────────────────────
-    "1password",
-    "3-statement-model",
-    "accelerate",
-    "adversarial-ux-test",
-    "agentmail",
-    "axolotl",
-    "base",
-    "bioinformatics",
-    "blackbox",
-    "blender-mcp",
-    "canvas",
-    "chroma",
-    "cli",
-    "clip",
-    "comps-analysis",
-    "concept-diagrams",
-    "dcf-model",
-    "docker-management",
-    "domain-intel",
-    "drug-discovery",
-    "duckduckgo-search",
-    "embedding-atlas",
-    "excel-author",
-    "faiss",
-    "fastmcp",
-    "finance",
-    "fitness-nutrition",
-    "flash-attention",
-    "gitnexus-explorer",
-    "guidance",
-    "here-now",
-    "hermes-atropos-environments",
-    "honcho",
-    "huggingface-tokenizers",
-    "hyperframes",
-    "hyperliquid",
-    "instructor",
-    "kanban-video-orchestrator",
-    "lambda-labs",
-    "lbo-model",
-    "llava",
-    "mcporter",
-    "meme-generation",
-    "memento-flashcards",
-    "merger-model",
-    "modal",
-    "nemo-curator",
-    "neuroskill-bci",
-    "one-three-one-rule",
-    "openclaw-migration",
-    "oss-forensics",
-    "outlines",
-    "page-agent",
-    "parallel-cli",
-    "peft",
-    "pinecone",
-    "pptx-author",
-    "pytorch-fsdp",
-    "pytorch-lightning",
-    "qdrant",
-    "qmd",
-    "rest-graphql-debug",
-    "saelens",
-    "scrapling",
-    "searxng-search",
-    "sherlock",
-    "shop-app",
-    "shopify",
-    "simpo",
-    "siyuan",
-    "slime",
-    "solana",
-    "stable-diffusion",
-    "stocks",
-    "telephony",
-    "tensorrt-llm",
-    "torchtitan",
-    "trl-fine-tuning",
-    "unsloth",
-    "watchers",
-    "whisper",
-];
-
 fn bundled_skill_names(skills_dir: &Path) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     let manifest_path = skills_dir.join(".bundled_manifest");
@@ -711,12 +542,6 @@ fn bundled_skill_names(skills_dir: &Path) -> BTreeSet<String> {
                 names.insert(name.trim().to_string());
             }
         }
-    }
-    // Always merge compile-time fallback for defense-in-depth.
-    // Even when .bundled_manifest exists, it may be stale or
-    // incomplete (e.g. missing deeply nested leaf skill names).
-    for name in BUNDLED_SKILL_NAMES_FALLBACK {
-        names.insert((*name).to_string());
     }
     names
 }
@@ -1053,7 +878,14 @@ mod tests {
         let names = store.list_agent_created_skill_names();
         assert!(
             !names.contains(&"yuanbao".to_string()),
-            "protected skill should be excluded from list_agent_created_skill_names"
+            "protected skill with stale agent_created=true should be auto-fixed"
+        );
+        // Verify the auto-heal persisted: agent_created should now be false
+        let usage = store.load_usage();
+        let rec = usage.get("yuanbao").unwrap();
+        assert!(
+            !rec.agent_created,
+            "auto-heal should have reset agent_created to false"
         );
     }
 
@@ -1066,29 +898,34 @@ mod tests {
         let names = store.list_agent_created_skill_names();
         assert!(
             !names.contains(&"ghost-skill".to_string()),
-            "skills without disk directories should be excluded"
+            "orphaned usage record should be auto-removed by list_agent_created_skill_names"
+        );
+        // Verify the auto-heal persisted: the entry should be gone entirely
+        let usage = store.load_usage();
+        assert!(
+            !usage.contains_key("ghost-skill"),
+            "auto-heal should have removed the orphaned usage entry"
         );
     }
 
     #[test]
-    fn bundled_manifest_missing_fallback() {
+    fn bundled_manifest_missing_no_protection() {
         let dir = tempdir().unwrap();
         let skills = dir.path();
-        // No .bundled_manifest file — fallback should activate
+        // No .bundled_manifest file — without compile-time fallback,
+        // nothing is recognised as protected.
         assert!(
             !skills.join(".bundled_manifest").exists(),
             "test precondition: no manifest"
         );
-        // Fallback should recognise yuanbao as protected
         assert!(
-            is_protected_skill(skills, "yuanbao"),
-            "yuanbao should be protected via compile-time fallback"
+            !is_protected_skill(skills, "yuanbao"),
+            "without manifest, yuanbao is not protected"
         );
         assert!(
-            is_protected_skill(skills, "powerpoint"),
-            "powerpoint (a leaf skill name) should be protected via compile-time fallback"
+            !is_protected_skill(skills, "powerpoint"),
+            "without manifest, powerpoint is not protected"
         );
-        // Unknown skill should not be protected
         assert!(
             !is_protected_skill(skills, "my-custom-skill"),
             "unknown skill should not be protected"
