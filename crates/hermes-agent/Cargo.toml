@@ -49,3 +49,6 @@ hmac = "0.13"
 proptest = { workspace = true }
 tempfile = "3"
 tokio-stream = { workspace = true }
+
+[features]
+dhat-heap = []
