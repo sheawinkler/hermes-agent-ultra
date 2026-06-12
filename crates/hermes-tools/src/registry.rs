@@ -16,6 +16,7 @@ use tracing::warn;
 
 use crate::plan_mode::{plan_allows_tool, plan_block_payload, PlanPhase};
 use crate::rtk_filter::{RawModeState, RtkFilterEngine};
+use crate::tool_dispatch_helpers::{ParallelMode, infer_parallel_mode};
 use crate::tool_policy::{
     ToolPolicyCounters, ToolPolicyDecision, ToolPolicyEngine, annotate_policy_audit,
     annotate_policy_simulation, default_tool_policy_counters_path, persist_tool_policy_counters,
@@ -48,6 +49,8 @@ pub struct ToolEntry {
     pub emoji: String,
     /// Per-tool max result size override (characters).
     pub max_result_size_chars: Option<usize>,
+    /// Parallelism classification, assigned once at registration.
+    pub parallel_mode: ParallelMode,
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +197,7 @@ impl ToolRegistry {
         if tools.contains_key(&name) {
             warn!("Tool '{}' already registered; overwriting", name);
         }
+        let parallel_mode = infer_parallel_mode(&name);
         tools.insert(
             name.clone(),
             ToolEntry {
@@ -207,8 +211,21 @@ impl ToolRegistry {
                 description: description.into(),
                 emoji: emoji.into(),
                 max_result_size_chars,
+                parallel_mode,
             },
         );
+    }
+
+    /// Return the `ParallelMode` assigned at registration for the named tool.
+    ///
+    /// Returns `ParallelMode::Unknown` for tools not in the registry.
+    pub fn parallel_mode_of(&self, name: &str) -> ParallelMode {
+        self.tools
+            .read()
+            .unwrap()
+            .get(name)
+            .map(|e| e.parallel_mode)
+            .unwrap_or(ParallelMode::Unknown)
     }
 
     /// Deregister a tool by name.

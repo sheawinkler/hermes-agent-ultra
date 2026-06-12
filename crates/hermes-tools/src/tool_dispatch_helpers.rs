@@ -1,12 +1,54 @@
 //! Tool batch parallelism gating — parity with Python `agent/tool_dispatch_helpers.py`.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use hermes_core::ToolCall;
 use regex::Regex;
 use serde_json::Value;
 use std::sync::LazyLock;
+
+// ---------------------------------------------------------------------------
+// ParallelMode — registered once per tool, read on every dispatch call
+// ---------------------------------------------------------------------------
+
+/// Describes how a tool participates in parallel batch dispatch.
+///
+/// Assigned at registration time; eliminates the per-call HashSet rebuild
+/// that `should_parallelize_tool_batch` previously performed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParallelMode {
+    /// Never run this tool concurrently (interactive / session-owning tools).
+    Serial,
+    /// Always safe to run concurrently with other `Always` tools.
+    Always,
+    /// Safe when the `path` argument does not overlap with other path-scoped tools.
+    PathScoped,
+    /// Safe when the `command` argument is non-destructive.
+    CommandScoped,
+    /// Default: cannot be parallelised until proven safe (conservative).
+    #[default]
+    Unknown,
+}
+
+/// Infer `ParallelMode` for a tool name at registration time.
+///
+/// Keeps the static tables as the single source of truth; the mode is
+/// stored in `ToolEntry` so lookup is O(1) per dispatch call.
+pub fn infer_parallel_mode(name: &str) -> ParallelMode {
+    if NEVER_PARALLEL_TOOLS.contains(&name) || name.starts_with("browser_") {
+        return ParallelMode::Serial;
+    }
+    if PATH_SCOPED_TOOLS.contains(&name) {
+        return ParallelMode::PathScoped;
+    }
+    if name == "terminal" {
+        return ParallelMode::CommandScoped;
+    }
+    if PARALLEL_SAFE_TOOLS.contains(&name) {
+        return ParallelMode::Always;
+    }
+    ParallelMode::Unknown
+}
 
 /// Tools that must never run concurrently (interactive / user-facing).
 pub const NEVER_PARALLEL_TOOLS: &[&str] = &["clarify"];
@@ -43,10 +85,6 @@ static DESTRUCTIVE_PATTERNS: LazyLock<Regex> = LazyLock::new(|| {
 
 static REDIRECT_OVERWRITE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[^>]>[^>]|^>[^>]").expect("redirect overwrite regex"));
-
-fn tool_set(names: &[&str]) -> HashSet<String> {
-    names.iter().map(|s| (*s).to_string()).collect()
-}
 
 /// Heuristic: does this terminal command look like it modifies/deletes files?
 pub fn is_destructive_command(cmd: &str) -> bool {
@@ -98,62 +136,60 @@ pub fn paths_overlap(left: &Path, right: &Path) -> bool {
 }
 
 /// Return true when a tool-call batch is safe to run concurrently.
+///
+/// Uses `infer_parallel_mode` for each tool name — O(n) single pass, no
+/// per-call HashSet builds.  This is equivalent to the previous logic but
+/// removes the three `HashSet::new()` allocations per invocation.
 pub fn should_parallelize_tool_batch(tool_calls: &[ToolCall]) -> bool {
     if tool_calls.len() <= 1 {
         return false;
-    }
-
-    let never_parallel = tool_set(NEVER_PARALLEL_TOOLS);
-    let parallel_safe = tool_set(PARALLEL_SAFE_TOOLS);
-    let path_scoped = tool_set(PATH_SCOPED_TOOLS);
-
-    for tc in tool_calls {
-        let tool_name = tc.function.name.as_str();
-        if never_parallel.contains(tool_name) || is_browser_tool(tool_name) {
-            return false;
-        }
     }
 
     let mut reserved_paths: Vec<PathBuf> = Vec::new();
 
     for tc in tool_calls {
         let tool_name = tc.function.name.as_str();
-        let Some(function_args) = parse_tool_args(&tc.function.arguments) else {
-            tracing::debug!(
-                tool = tool_name,
-                "could not parse tool args — defaulting to sequential"
-            );
-            return false;
-        };
 
-        if tool_name == "terminal" {
-            if let Some(cmd) = function_args.get("command").and_then(|v| v.as_str()) {
-                if is_destructive_command(cmd) {
+        match infer_parallel_mode(tool_name) {
+            ParallelMode::Serial => return false,
+            ParallelMode::Always => {} // unconditionally safe
+            ParallelMode::PathScoped => {
+                let Some(function_args) = parse_tool_args(&tc.function.arguments) else {
+                    tracing::debug!(
+                        tool = tool_name,
+                        "could not parse tool args — defaulting to sequential"
+                    );
+                    return false;
+                };
+                let Some(scoped_path) = extract_parallel_scope_path(tool_name, &function_args)
+                else {
+                    return false;
+                };
+                if reserved_paths
+                    .iter()
+                    .any(|existing| paths_overlap(&scoped_path, existing))
+                {
                     return false;
                 }
+                reserved_paths.push(scoped_path);
             }
-            if !parallel_safe.contains(tool_name) {
+            ParallelMode::CommandScoped => {
+                let Some(function_args) = parse_tool_args(&tc.function.arguments) else {
+                    tracing::debug!(
+                        tool = tool_name,
+                        "could not parse tool args — defaulting to sequential"
+                    );
+                    return false;
+                };
+                if let Some(cmd) = function_args.get("command").and_then(|v| v.as_str()) {
+                    if is_destructive_command(cmd) {
+                        return false;
+                    }
+                }
+                // Terminal shares session state; serial even when non-destructive.
                 return false;
             }
-            continue;
-        }
-
-        if path_scoped.contains(tool_name) {
-            let Some(scoped_path) = extract_parallel_scope_path(tool_name, &function_args) else {
-                return false;
-            };
-            if reserved_paths
-                .iter()
-                .any(|existing| paths_overlap(&scoped_path, existing))
-            {
-                return false;
-            }
-            reserved_paths.push(scoped_path);
-            continue;
-        }
-
-        if !parallel_safe.contains(tool_name) {
-            return false;
+            ParallelMode::Unknown => return false,
         }
     }
 
@@ -178,7 +214,10 @@ mod tests {
 
     #[test]
     fn single_tool_not_parallel() {
-        assert!(!should_parallelize_tool_batch(&[tc("read_file", r#"{"path":"a.txt"}"#)]));
+        assert!(!should_parallelize_tool_batch(&[tc(
+            "read_file",
+            r#"{"path":"a.txt"}"#
+        )]));
     }
 
     #[test]

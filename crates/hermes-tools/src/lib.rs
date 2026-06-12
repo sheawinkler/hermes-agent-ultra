@@ -62,8 +62,8 @@ pub use kanban_failure::{
 };
 pub use task_cleanup::cleanup_task_resources;
 pub use tool_dispatch_helpers::{
-    NEVER_PARALLEL_TOOLS, extract_parallel_scope_path, is_browser_tool, is_destructive_command,
-    paths_overlap, should_parallelize_tool_batch,
+    NEVER_PARALLEL_TOOLS, ParallelMode, extract_parallel_scope_path, infer_parallel_mode,
+    is_browser_tool, is_destructive_command, paths_overlap, should_parallelize_tool_batch,
 };
 
 // Re-export approval types
