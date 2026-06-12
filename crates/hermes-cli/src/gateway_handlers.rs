@@ -22,19 +22,11 @@ use hermes_cli::platform_toolsets::{
 use hermes_cli::tool_preview::{build_tool_preview_from_value, tool_emoji};
 
 use crate::gateway_main::{
-    GatewayAgentCache, extract_last_assistant_reply, get_or_build_gateway_cached_agent,
-    resolve_model_for_gateway, truncate_hook_tool_result,
+    GatewayAgentCache, get_or_build_gateway_cached_agent, resolve_model_for_gateway,
+    truncate_hook_tool_result,
 };
 use crate::gateway_plan_mode::{finalize_gateway_agent_reply, prepare_gateway_plan_turn};
 use hermes_cli::plan_mode::PlanTurnPrep;
-
-fn gateway_conversation_reply(conv: &hermes_agent::ConversationResult) -> String {
-    conv.final_response
-        .as_ref()
-        .filter(|s| !s.trim().is_empty())
-        .cloned()
-        .unwrap_or_else(|| extract_last_assistant_reply(conv.messages()))
-}
 
 fn gateway_reply_log_tail(text: &str, max_chars: usize) -> String {
     let trimmed = text.trim();

@@ -10,8 +10,7 @@ use hermes_tools::PlanPhase;
 use hermes_cli::app::bridge_tool_registry;
 use hermes_cli::plan_mode::{
     PlanApprovalParseStyle, PlanModeSlashAction, PlanTurnPrep, finalize_plan_agent_reply,
-    format_plan_pending_reply, parse_plan_mode_slash_args, plan_mode_help_text,
-    plan_mode_status_text, prepare_plan_turn,
+    parse_plan_mode_slash_args, plan_mode_help_text, plan_mode_status_text, prepare_plan_turn,
 };
 
 use crate::gateway_handlers::GatewayHandlerDeps;
@@ -61,7 +60,7 @@ pub async fn execute_plan_mode_slash_command(
 ) -> Result<(), GatewayError> {
     let action = parse_plan_mode_slash_args(args);
     let agent_arc = gateway_agent_for_session(&gateway, incoming, session_key, &deps).await?;
-    let mut agent = agent_arc.lock().await;
+    let agent = agent_arc.lock().await;
 
     match action {
         PlanModeSlashAction::Help => {
