@@ -1,6 +1,6 @@
 # Test Coverage Audit
 
-Generated: `2026-06-12T10:03:58.712167+00:00`
+Generated: `2026-06-12T11:29:23.268813+00:00`
 
 ## Gate
 
@@ -21,7 +21,7 @@ Generated: `2026-06-12T10:03:58.712167+00:00`
 | `coverage_manifest_entries_with_valid_rust_tests` | 405 |
 | `missing_rust_test_refs` | 0 |
 | `queue_pending` | 0 |
-| `queue_total` | 5658 |
+| `queue_total` | 5659 |
 | `test_intents_total` | 10 |
 | `test_intents_mapped` | 10 |
 
