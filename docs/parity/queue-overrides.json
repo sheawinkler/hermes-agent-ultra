@@ -3272,6 +3272,14 @@
       "disposition": "superseded",
       "notes": "Upstream SimpleX document classification fixes a Python plugin adapter. Hermes Agent Ultra has no Rust SimpleX gateway adapter; document attachment classification is covered in supported Rust adapters such as Discord, Telegram, and Signal."
     },
+    "7ba5df0d52b9": {
+      "disposition": "superseded",
+      "notes": "Upstream /credits adds Python CLI/gateway billing views and Ink UI-TUI RPC/buttons. Hermes Agent Ultra's Rust runtime has provider auth diagnostics and usage accounting, but it does not ship the upstream Python CLI or Ink TUI money surface, so this UI-only command remains reference-only until a Rust-native billing surface is deliberately designed."
+    },
+    "0fd34e8c5a7a": {
+      "disposition": "superseded",
+      "notes": "Upstream Teams attachment classification fixes the Python Teams gateway adapter. Hermes Agent Ultra does not register a Rust Teams chat gateway adapter; its Teams code is the Rust-native meeting pipeline, while document/image/video/audio caching is already implemented for supported Rust gateway adapters."
+    },
     "8505e9d6691d": {
       "disposition": "superseded",
       "notes": "Upstream composer spellcheck is a desktop React/Electron input attribute fix. Hermes Agent Ultra uses the Rust Ratatui TUI/CLI composer and has no browser spellcheck attribute surface."
