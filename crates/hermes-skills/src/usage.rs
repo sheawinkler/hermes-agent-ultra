@@ -515,35 +515,190 @@ pub(crate) fn read_skill_name_from_dir(skill_dir: &Path) -> String {
 /// or empty at runtime. These are the directory names under `skills/` in the
 /// repository — the names that appear as keys in `.usage.json` and that
 /// `find_skill_dir()` matches on.
+/// Compile-time list of **leaf skill directory names** (not category names)
+/// sourced from both `skills/` and `optional-skills/`.
+///
+/// This is always merged into `bundled_skill_names()` regardless of whether
+/// `.bundled_manifest` exists, providing defense-in-depth coverage even when
+/// the runtime manifest is stale or incomplete.
 ///
 /// **Maintenance**: update this list when skills are added to or removed
-/// from the repository's `skills/` directory.
+/// from the repository's `skills/` and `optional-skills/` directories.
+/// Run from repo root:
+///   Get-ChildItem -Path skills,optional-skills -Recurse -Depth 4 -Dir |
+///     Where-Object { Test-Path "$_\SKILL.md" } |
+///     ForEach-Object Name | Sort-Object -Unique
 const BUNDLED_SKILL_NAMES_FALLBACK: &[&str] = &[
-    "apple",
-    "autonomous-ai-agents",
-    "creative",
-    "data-science",
-    "devops",
-    "diagramming",
+    // ── skills/ leaf names ──────────────────────────────────────────────
+    "airtable",
+    "apple-notes",
+    "apple-reminders",
+    "architecture-diagram",
+    "arxiv",
+    "ascii-art",
+    "ascii-video",
+    "audiocraft",
+    "baoyu-comic",
+    "baoyu-infographic",
+    "blogwatcher",
+    "claude-code",
+    "claude-design",
+    "codebase-inspection",
+    "codex",
+    "comfyui",
+    "creative-ideation",
+    "debugging-hermes-tui-commands",
+    "design-md",
     "dogfood",
-    "domain",
-    "email",
-    "gaming",
-    "gifs",
-    "github",
-    "index-cache",
-    "inference-sh",
-    "mcp",
-    "media",
-    "mlops",
-    "note-taking",
-    "productivity",
-    "red-teaming",
-    "research",
-    "smart-home",
-    "social-media",
-    "software-development",
+    "dspy",
+    "excalidraw",
+    "findmy",
+    "gif-search",
+    "github-auth",
+    "github-code-review",
+    "github-issues",
+    "github-pr-workflow",
+    "github-repo-management",
+    "godmode",
+    "google-workspace",
+    "heartmula",
+    "hermes-agent",
+    "hermes-agent-skill-authoring",
+    "himalaya",
+    "huggingface-hub",
+    "humanizer",
+    "imessage",
+    "jupyter-live-kernel",
+    "kanban-orchestrator",
+    "kanban-worker",
+    "linear",
+    "llama-cpp",
+    "llm-wiki",
+    "lm-evaluation-harness",
+    "macos-computer-use",
+    "manim-video",
+    "maps",
+    "minecraft-modpack-server",
+    "nano-pdf",
+    "native-mcp",
+    "node-inspect-debugger",
+    "notion",
+    "obliteratus",
+    "obsidian",
+    "ocr-and-documents",
+    "opencode",
+    "openhue",
+    "p5js",
+    "pixel-art",
+    "plan",
+    "pokemon-player",
+    "polymarket",
+    "popular-web-designs",
+    "powerpoint",
+    "pretext",
+    "python-debugpy",
+    "requesting-code-review",
+    "research-paper-writing",
+    "segment-anything",
+    "sketch",
+    "songsee",
+    "songwriting-and-ai-music",
+    "spike",
+    "spotify",
+    "subagent-driven-development",
+    "systematic-debugging",
+    "teams-meeting-pipeline",
+    "test-driven-development",
+    "touchdesigner-mcp",
+    "vllm",
+    "webhook-subscriptions",
+    "weights-and-biases",
+    "writing-plans",
+    "xurl",
+    "youtube-content",
     "yuanbao",
+    // ── optional-skills/ leaf names ─────────────────────────────────────
+    "1password",
+    "3-statement-model",
+    "accelerate",
+    "adversarial-ux-test",
+    "agentmail",
+    "axolotl",
+    "base",
+    "bioinformatics",
+    "blackbox",
+    "blender-mcp",
+    "canvas",
+    "chroma",
+    "cli",
+    "clip",
+    "comps-analysis",
+    "concept-diagrams",
+    "dcf-model",
+    "docker-management",
+    "domain-intel",
+    "drug-discovery",
+    "duckduckgo-search",
+    "embedding-atlas",
+    "excel-author",
+    "faiss",
+    "fastmcp",
+    "finance",
+    "fitness-nutrition",
+    "flash-attention",
+    "gitnexus-explorer",
+    "guidance",
+    "here-now",
+    "hermes-atropos-environments",
+    "honcho",
+    "huggingface-tokenizers",
+    "hyperframes",
+    "hyperliquid",
+    "instructor",
+    "kanban-video-orchestrator",
+    "lambda-labs",
+    "lbo-model",
+    "llava",
+    "mcporter",
+    "meme-generation",
+    "memento-flashcards",
+    "merger-model",
+    "modal",
+    "nemo-curator",
+    "neuroskill-bci",
+    "one-three-one-rule",
+    "openclaw-migration",
+    "oss-forensics",
+    "outlines",
+    "page-agent",
+    "parallel-cli",
+    "peft",
+    "pinecone",
+    "pptx-author",
+    "pytorch-fsdp",
+    "pytorch-lightning",
+    "qdrant",
+    "qmd",
+    "rest-graphql-debug",
+    "saelens",
+    "scrapling",
+    "searxng-search",
+    "sherlock",
+    "shop-app",
+    "shopify",
+    "simpo",
+    "siyuan",
+    "slime",
+    "solana",
+    "stable-diffusion",
+    "stocks",
+    "telephony",
+    "tensorrt-llm",
+    "torchtitan",
+    "trl-fine-tuning",
+    "unsloth",
+    "watchers",
+    "whisper",
 ];
 
 fn bundled_skill_names(skills_dir: &Path) -> BTreeSet<String> {
@@ -557,15 +712,11 @@ fn bundled_skill_names(skills_dir: &Path) -> BTreeSet<String> {
             }
         }
     }
-    // Fallback: if manifest is missing/empty, use compile-time constant
-    if names.is_empty() && !manifest_path.exists() {
-        tracing::warn!(
-            manifest = %manifest_path.display(),
-            ".bundled_manifest missing; falling back to compile-time bundled list"
-        );
-        for name in BUNDLED_SKILL_NAMES_FALLBACK {
-            names.insert((*name).to_string());
-        }
+    // Always merge compile-time fallback for defense-in-depth.
+    // Even when .bundled_manifest exists, it may be stale or
+    // incomplete (e.g. missing deeply nested leaf skill names).
+    for name in BUNDLED_SKILL_NAMES_FALLBACK {
+        names.insert((*name).to_string());
     }
     names
 }
@@ -934,8 +1085,8 @@ mod tests {
             "yuanbao should be protected via compile-time fallback"
         );
         assert!(
-            is_protected_skill(skills, "apple"),
-            "apple should be protected via compile-time fallback"
+            is_protected_skill(skills, "powerpoint"),
+            "powerpoint (a leaf skill name) should be protected via compile-time fallback"
         );
         // Unknown skill should not be protected
         assert!(
