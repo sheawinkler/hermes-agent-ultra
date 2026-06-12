@@ -3280,6 +3280,10 @@
       "disposition": "superseded",
       "notes": "Upstream Teams attachment classification fixes the Python Teams gateway adapter. Hermes Agent Ultra does not register a Rust Teams chat gateway adapter; its Teams code is the Rust-native meeting pipeline, while document/image/video/audio caching is already implemented for supported Rust gateway adapters."
     },
+    "9c505217044c": {
+      "disposition": "superseded",
+      "notes": "Upstream Homebrew PATH repair is scoped to the Electron desktop backend environment for Python subprocesses. Hermes Agent Ultra does not ship the upstream Electron desktop backend; the Rust CLI/TUI release path uses Cargo/Homebrew install artifacts and normal shell PATH resolution."
+    },
     "8505e9d6691d": {
       "disposition": "superseded",
       "notes": "Upstream composer spellcheck is a desktop React/Electron input attribute fix. Hermes Agent Ultra uses the Rust Ratatui TUI/CLI composer and has no browser spellcheck attribute surface."

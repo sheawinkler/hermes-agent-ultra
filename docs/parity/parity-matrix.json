@@ -1,30 +1,30 @@
 {
-  "generated_at_utc": "2026-06-12T10:03:47.604638+00:00",
+  "generated_at_utc": "2026-06-12T11:29:13.798398+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "6b6f1e617dbb703da680b6598855b25644334d32",
+    "local_sha": "17ee23e0adf80f56c1686918dbcc26a30d0c5a8a",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "88dbf95105644efb067500136c4a73277d3936d4",
+    "upstream_sha": "9c505217044cedc28f174f1b74174d00d9ea1c81",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5879,
-    "commits_ahead": 1100,
-    "upstream_patch_missing": 5656,
+    "commits_behind": 5880,
+    "commits_ahead": 1102,
+    "upstream_patch_missing": 5657,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 894,
-    "files_only_upstream": 2307,
+    "local_patch_unique": 895,
+    "files_only_upstream": 2309,
     "files_only_local": 730,
     "files_shared_identical": 1623,
     "files_shared_different": 1108,
-    "tree_files_changed": 4071,
-    "tree_insertions": 996952,
-    "tree_deletions": 554545
+    "tree_files_changed": 4073,
+    "tree_insertions": 997153,
+    "tree_deletions": 554659
   },
   "top_upstream_only": [
     {
       "path": "apps/desktop",
-      "count": 496
+      "count": 498
     },
     {
       "path": "website/i18n",
@@ -510,7 +510,7 @@
   "top_missing_from_local": [
     {
       "path": "apps/desktop",
-      "count": 496
+      "count": 498
     },
     {
       "path": "website/i18n",
@@ -846,7 +846,7 @@
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 989,
+      "upstream_only": 991,
       "shared_different": 12,
       "local_only": 214,
       "risk": "critical",
@@ -904,9 +904,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 5656,
+    "upstream_patch_missing": 5657,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 894,
+    "local_patch_unique": 895,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
