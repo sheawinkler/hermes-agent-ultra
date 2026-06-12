@@ -75,7 +75,6 @@ hermes_cli|clippy::items_after_test_module|crates/hermes-cli/src/app.rs
 hermes_cli|clippy::manual_checked_ops|crates/hermes-cli/src/tui.rs
 hermes_cli|clippy::manual_clamp|crates/hermes-cli/src/commands.rs
 hermes_cli|clippy::manual_clamp|crates/hermes-cli/src/tui.rs
-hermes_cli|clippy::manual_find|crates/hermes-cli/src/kanban.rs
 hermes_cli|clippy::manual_strip|crates/hermes-cli/src/auth.rs
 hermes_cli|clippy::needless_borrows_for_generic_args|crates/hermes-cli/src/commands.rs
 hermes_cli|clippy::needless_borrows_for_generic_args|crates/hermes-cli/src/platform_toolsets.rs
@@ -109,9 +108,7 @@ hermes_config|clippy::manual_strip|crates/hermes-config/src/managed_gateway/auth
 hermes_config|clippy::needless_borrows_for_generic_args|crates/hermes-config/src/python_yaml_compat.rs
 hermes_config|clippy::unwrap_or_default|crates/hermes-config/src/loader.rs
 hermes_config|clippy::unwrap_or_default|crates/hermes-config/src/python_platform_env.rs
-hermes_core|clippy::manual_map|crates/hermes-core/src/types.rs
 hermes_cron|clippy::cloned_ref_to_slice_refs|crates/hermes-cron/src/persistence.rs
-hermes_cron|clippy::field_reassign_with_default|crates/hermes-cron/src/runner.rs
 hermes_cron|clippy::len_zero|crates/hermes-cron/src/job.rs
 hermes_cron|clippy::question_mark|crates/hermes-cron/src/scheduler.rs
 hermes_cron|clippy::redundant_closure|crates/hermes-cron/src/persistence.rs
@@ -122,7 +119,6 @@ hermes_cron|clippy::vec_init_then_push|crates/hermes-cron/src/runner.rs
 hermes_eval|clippy::default_constructed_unit_structs|crates/hermes-eval/src/configured.rs
 hermes_eval|clippy::default_constructed_unit_structs|crates/hermes-eval/src/tblite.rs
 hermes_gateway|clippy::await_holding_lock|crates/hermes-gateway/src/gateway.rs
-hermes_gateway|clippy::collapsible_if|crates/hermes-gateway/src/gateway.rs
 hermes_gateway|clippy::collapsible_if|crates/hermes-gateway/src/media.rs
 hermes_gateway|clippy::collapsible_if|crates/hermes-gateway/src/voice.rs
 hermes_gateway|clippy::derivable_impls|crates/hermes-gateway/src/adapter.rs
@@ -134,14 +130,12 @@ hermes_gateway|clippy::identity_op|crates/hermes-gateway/src/platforms/weixin.rs
 hermes_gateway|clippy::if_same_then_else|crates/hermes-gateway/src/platforms/weixin.rs
 hermes_gateway|clippy::items_after_test_module|crates/hermes-gateway/src/platforms/whatsapp.rs
 hermes_gateway|clippy::manual_div_ceil|crates/hermes-gateway/src/platforms/email.rs
-hermes_gateway|clippy::manual_div_ceil|crates/hermes-gateway/src/platforms/signal.rs
 hermes_gateway|clippy::manual_div_ceil|crates/hermes-gateway/src/platforms/weixin.rs
 hermes_gateway|clippy::manual_is_multiple_of|crates/hermes-gateway/src/markdown_split.rs
 hermes_gateway|clippy::manual_is_multiple_of|crates/hermes-gateway/src/platforms/webhook.rs
 hermes_gateway|clippy::manual_is_multiple_of|crates/hermes-gateway/src/platforms/weixin.rs
 hermes_gateway|clippy::manual_is_multiple_of|crates/hermes-gateway/src/voice.rs
 hermes_gateway|clippy::manual_split_once|crates/hermes-gateway/src/platforms/api_server.rs
-hermes_gateway|clippy::manual_split_once|crates/hermes-gateway/src/platforms/webhook.rs
 hermes_gateway|clippy::needless_as_bytes|crates/hermes-gateway/src/platforms/weixin.rs
 hermes_gateway|clippy::needless_borrows_for_generic_args|crates/hermes-gateway/src/gateway.rs
 hermes_gateway|clippy::needless_borrows_for_generic_args|crates/hermes-gateway/src/platforms/slack.rs
@@ -183,11 +177,9 @@ hermes_mcp|clippy::doc_lazy_continuation|crates/hermes-mcp/src/server.rs
 hermes_mcp|clippy::double_ended_iterator_last|crates/hermes-mcp/src/transport.rs
 hermes_mcp|clippy::identity_op|crates/hermes-mcp/src/transport.rs
 hermes_mcp|clippy::new_without_default|crates/hermes-mcp/src/transport.rs
-hermes_mcp|clippy::unnecessary_map_or|crates/hermes-mcp/src/client.rs
 hermes_mcp|clippy::unnecessary_map_or|crates/hermes-mcp/src/serve.rs
 hermes_skills|clippy::derivable_impls|crates/hermes-skills/src/guard.rs
 hermes_skills|clippy::ptr_arg|crates/hermes-skills/src/skill.rs
-hermes_tools|clippy::await_holding_lock|crates/hermes-tools/src/tools/dashboard_control.rs
 hermes_tools|clippy::field_reassign_with_default|crates/hermes-tools/src/tts_streaming/sentence_buffer.rs
 hermes_tools|clippy::manual_checked_ops|crates/hermes-tools/src/backends/memory.rs
 hermes_tools|clippy::manual_clamp|crates/hermes-tools/src/backends/session_search.rs
