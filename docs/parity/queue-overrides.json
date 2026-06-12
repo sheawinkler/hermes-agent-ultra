@@ -3232,6 +3232,46 @@
       "disposition": "superseded",
       "notes": "Upstream data-selectable-text attributes target the Electron desktop file-preview DOM. Hermes Agent Ultra has no React right-rail file preview surface; file viewing/copy behavior is exposed through Rust CLI/TUI/tool output paths."
     },
+    "906bee9cf791": {
+      "disposition": "superseded",
+      "notes": "Upstream node-pty staging fixes Nix packaging for the Electron desktop app. Hermes Agent Ultra's release/runtime path is Rust CLI/TUI plus Cargo artifacts; it does not package the upstream Electron desktop node-pty runtime."
+    },
+    "0a963d8c9a07": {
+      "disposition": "superseded",
+      "notes": "Upstream Photon telemetry toggling changes the Python plugin CLI and Node sidecar. Hermes Agent Ultra has no Rust Photon gateway adapter, and Python/Node plugin runtime changes remain reference-only under the Rust-only runtime policy."
+    },
+    "573c4e651154": {
+      "disposition": "superseded",
+      "notes": "Upstream Photon spectrum-ts markdown/reaction support is implemented in the Python adapter and Node sidecar. The Rust gateway does not register Photon, while reaction lifecycle and markdown/document handling are covered for supported Rust adapters."
+    },
+    "a652131c421b": {
+      "disposition": "superseded",
+      "notes": "Upstream Photon orphan-sidecar cleanup is Python subprocess/Node sidecar lifecycle logic. Hermes Agent Ultra does not run that sidecar from Rust, so this failure mode is outside the local Rust runtime surface."
+    },
+    "9bfff6e16cf1": {
+      "disposition": "superseded",
+      "notes": "Upstream spectrum-ts dependency bump belongs to the Photon Node sidecar. Hermes Agent Ultra does not ship a Rust Photon adapter or invoke that sidecar from the Rust runtime."
+    },
+    "a23c0b378ca9": {
+      "disposition": "superseded",
+      "notes": "Upstream Photon per-call httpx client fix targets the Python adapter event-loop boundary. Hermes Agent Ultra avoids that Python async client path in the Rust runtime."
+    },
+    "156f4fba923e": {
+      "disposition": "superseded",
+      "notes": "Upstream agent-facing Photon reaction support extends the Python send_message tool and Python adapter. Hermes Agent Ultra's Rust gateway already exposes reaction lifecycle contracts for supported Rust adapters; Photon remains non-Rust reference-only."
+    },
+    "23305cfeabfa": {
+      "disposition": "superseded",
+      "notes": "Upstream Photon DM reaction-key normalization is Python adapter state tracking. There is no local Rust Photon adapter state to update."
+    },
+    "b4e95a2efe50": {
+      "disposition": "superseded",
+      "notes": "Upstream Photon Windows-safe os.kill comments document Python sidecar cleanup behavior. Hermes Agent Ultra does not depend on that Python subprocess lifecycle in the Rust runtime."
+    },
+    "74180ebf0b1c": {
+      "disposition": "superseded",
+      "notes": "Upstream SimpleX document classification fixes a Python plugin adapter. Hermes Agent Ultra has no Rust SimpleX gateway adapter; document attachment classification is covered in supported Rust adapters such as Discord, Telegram, and Signal."
+    },
     "8505e9d6691d": {
       "disposition": "superseded",
       "notes": "Upstream composer spellcheck is a desktop React/Electron input attribute fix. Hermes Agent Ultra uses the Rust Ratatui TUI/CLI composer and has no browser spellcheck attribute surface."

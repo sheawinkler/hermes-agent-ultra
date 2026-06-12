@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-06-12T05:27:10.272055+00:00",
+  "generated_at_utc": "2026-06-12T08:23:09.531590+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "b4dd2949e78635cd152169db208f3d615423090e",
+    "local_sha": "1154cb7b365e2d89d6047ba4fa48fa0a15db6ae3",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "c57417005099b66e94bf053cd309235bdefb2704",
+    "upstream_sha": "4474873d2caae0fdfaf1e1e57fc490fade8dc143",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5833,
-    "commits_ahead": 1096,
-    "upstream_patch_missing": 5616,
+    "commits_behind": 5875,
+    "commits_ahead": 1098,
+    "upstream_patch_missing": 5652,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 892,
-    "files_only_upstream": 2292,
+    "local_patch_unique": 893,
+    "files_only_upstream": 2304,
     "files_only_local": 730,
-    "files_shared_identical": 1632,
-    "files_shared_different": 1099,
-    "tree_files_changed": 4047,
-    "tree_insertions": 984937,
-    "tree_deletions": 552537
+    "files_shared_identical": 1624,
+    "files_shared_different": 1107,
+    "tree_files_changed": 4067,
+    "tree_insertions": 994020,
+    "tree_deletions": 552730
   },
   "top_upstream_only": [
     {
@@ -32,7 +32,7 @@
     },
     {
       "path": "tests/hermes_cli",
-      "count": 141
+      "count": 142
     },
     {
       "path": "web/src",
@@ -40,19 +40,19 @@
     },
     {
       "path": "tests/agent",
-      "count": 80
+      "count": 81
     },
     {
       "path": "tests/gateway",
-      "count": 73
+      "count": 74
     },
     {
       "path": "tests/tools",
-      "count": 52
+      "count": 53
     },
     {
       "path": "website/docs",
-      "count": 48
+      "count": 49
     },
     {
       "path": "optional-skills/creative",
@@ -60,18 +60,18 @@
     },
     {
       "path": "gateway/platforms",
-      "count": 39
+      "count": 41
     },
     {
       "path": "hermes_cli/subcommands",
       "count": 39
     },
     {
-      "path": "apps/bootstrap-installer",
-      "count": 35
+      "path": "tests/plugins",
+      "count": 38
     },
     {
-      "path": "tests/plugins",
+      "path": "apps/bootstrap-installer",
       "count": 35
     },
     {
@@ -80,7 +80,7 @@
     },
     {
       "path": "tests/run_agent",
-      "count": 24
+      "count": 25
     },
     {
       "path": "tests/cli",
@@ -206,7 +206,7 @@
     },
     {
       "path": "tests/agent",
-      "count": 62
+      "count": 63
     },
     {
       "path": "tests/run_agent",
@@ -219,6 +219,10 @@
     {
       "path": "ui-tui/packages",
       "count": 21
+    },
+    {
+      "path": "plugins/platforms",
+      "count": 17
     },
     {
       "path": "tests/plugins",
@@ -238,10 +242,6 @@
     },
     {
       "path": "plugins/google_meet",
-      "count": 10
-    },
-    {
-      "path": "plugins/platforms",
       "count": 10
     },
     {
@@ -518,7 +518,7 @@
     },
     {
       "path": "tests/hermes_cli",
-      "count": 141
+      "count": 142
     },
     {
       "path": "web/src",
@@ -526,19 +526,19 @@
     },
     {
       "path": "tests/agent",
-      "count": 80
+      "count": 81
     },
     {
       "path": "tests/gateway",
-      "count": 73
+      "count": 74
     },
     {
       "path": "tests/tools",
-      "count": 52
+      "count": 53
     },
     {
       "path": "website/docs",
-      "count": 48
+      "count": 49
     },
     {
       "path": "optional-skills/creative",
@@ -546,18 +546,18 @@
     },
     {
       "path": "gateway/platforms",
-      "count": 39
+      "count": 41
     },
     {
       "path": "hermes_cli/subcommands",
       "count": 39
     },
     {
-      "path": "apps/bootstrap-installer",
-      "count": 35
+      "path": "tests/plugins",
+      "count": 38
     },
     {
-      "path": "tests/plugins",
+      "path": "apps/bootstrap-installer",
       "count": 35
     },
     {
@@ -566,7 +566,7 @@
     },
     {
       "path": "tests/run_agent",
-      "count": 24
+      "count": 25
     },
     {
       "path": "tests/cli",
@@ -836,8 +836,8 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 510,
-      "shared_different": 722,
+      "upstream_only": 518,
+      "shared_different": 723,
       "local_only": 34,
       "risk": "critical",
       "effort": "XL"
@@ -846,7 +846,7 @@
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 988,
+      "upstream_only": 989,
       "shared_different": 12,
       "local_only": 214,
       "risk": "critical",
@@ -856,7 +856,7 @@
       "workstream": "WS5",
       "issue": 9,
       "name": "UX parity",
-      "upstream_only": 538,
+      "upstream_only": 539,
       "shared_different": 267,
       "local_only": 106,
       "risk": "high",
@@ -867,7 +867,7 @@
       "issue": 7,
       "name": "Tools and adapters parity",
       "upstream_only": 117,
-      "shared_different": 71,
+      "shared_different": 78,
       "local_only": 120,
       "risk": "high",
       "effort": "L"
@@ -886,7 +886,7 @@
       "workstream": "WS2",
       "issue": 6,
       "name": "Core runtime parity",
-      "upstream_only": 67,
+      "upstream_only": 69,
       "shared_different": 0,
       "local_only": 157,
       "risk": "critical",
@@ -904,9 +904,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 5616,
+    "upstream_patch_missing": 5652,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 892,
+    "local_patch_unique": 893,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
@@ -960,7 +960,7 @@
       "6b69de4772eac5f982c097553dc6bcfeb60350e6"
     ],
     "intentional_divergence_items": 8,
-    "intentional_divergence_covered_files": 1046
+    "intentional_divergence_covered_files": 1047
   },
   "intentional_divergence": [
     {
@@ -1075,7 +1075,7 @@
       "status": "approved",
       "workstream": "WS5",
       "summary": "Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported.",
-      "matched_files": 828,
+      "matched_files": 829,
       "matched_sample": [
         "ui-tui/README.md",
         "ui-tui/babel.compiler.config.cjs",

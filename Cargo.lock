@@ -2784,9 +2784,9 @@ dependencies = [
 
 [[package]]
 name = "matrix-sdk-common"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54fae2bdfc3d760d21a84d6d2036b5db5c48d9a3dee3794119e3fb9c4cc4ccc5"
+checksum = "5b4f835df70f57d8a9db30820d06983f76b78b6b90d8ef3df7397250795704fb"
 dependencies = [
  "eyeball-im",
  "futures-core",
@@ -2807,9 +2807,9 @@ dependencies = [
 
 [[package]]
 name = "matrix-sdk-crypto"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "304fc576810a9618bb831c4ad6403c758ec424f677668a49a196e3cde4b8f99f"
+checksum = "7efb6b2fc6da6f6a8d09bf115fe6f6205071fd7855a16a834832b4b0b9fc335e"
 dependencies = [
  "aes",
  "aquamarine",
@@ -3578,7 +3578,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn",
@@ -3591,7 +3591,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn",
@@ -4213,9 +4213,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.11"
+version = "0.103.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20a6af516fea4b20eccceaf166e8aa666ac996208e8a644ce3ef5aa783bc7cd4"
+checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
 dependencies = [
  "aws-lc-rs",
  "ring",

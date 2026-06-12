@@ -1,16 +1,16 @@
 # GPAR-01..04 Parity Proof
 
-Generated: `2026-06-12T05:27:11.562261+00:00`
+Generated: `2026-06-12T08:23:10.880935+00:00`
 
 - Scope tickets: `20, 21, 22, 23`
-- Total scoped commits: `3760`
+- Total scoped commits: `3786`
 - Pending scoped commits: `0`
 - Gate: `PASS`
 
 | Ticket | Label | Total | Pending | Ported | Superseded |
 | ---: | --- | ---: | ---: | ---: | ---: |
-| #20 | GPAR-01 tests+CI parity | 2392 | 0 | 101 | 2277 |
+| #20 | GPAR-01 tests+CI parity | 2413 | 0 | 101 | 2298 |
 | #21 | GPAR-02 skills parity | 118 | 0 | 62 | 30 |
-| #22 | GPAR-03 UX parity | 855 | 0 | 33 | 801 |
-| #23 | GPAR-04 gateway/plugin-memory parity | 395 | 0 | 38 | 355 |
+| #22 | GPAR-03 UX parity | 856 | 0 | 33 | 802 |
+| #23 | GPAR-04 gateway/plugin-memory parity | 399 | 0 | 38 | 359 |
 
