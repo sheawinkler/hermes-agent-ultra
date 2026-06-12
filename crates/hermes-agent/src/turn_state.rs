@@ -752,7 +752,9 @@ async fn turn_call_llm(agent: &AgentLoop, tc: &mut TurnContext) -> TurnState {
         }
         let empty_without_reasoning = !AgentLoop::assistant_has_reasoning(&r.message);
         let awaiting_tool_result_final = tool_result_empty_continuation_requested
-            || crate::conversation_loop::last_non_system_message_is_tool_result(tc.ctx.get_messages());
+            || crate::conversation_loop::last_non_system_message_is_tool_result(
+                tc.ctx.get_messages(),
+            );
         if empty_without_reasoning && awaiting_tool_result_final {
             if !tool_result_empty_continuation_requested {
                 tool_result_empty_continuation_requested = true;
@@ -767,9 +769,8 @@ async fn turn_call_llm(agent: &AgentLoop, tc: &mut TurnContext) -> TurnState {
                 continue;
             }
             let mut response = r;
-            response.message.content = Some(
-                crate::conversation_loop::TOOL_RESULT_EMPTY_FAILURE_MESSAGE.to_string(),
-            );
+            response.message.content =
+                Some(crate::conversation_loop::TOOL_RESULT_EMPTY_FAILURE_MESSAGE.to_string());
             response.finish_reason = Some("empty_after_tool_result".to_string());
             break response;
         }
@@ -828,6 +829,22 @@ async fn turn_call_llm(agent: &AgentLoop, tc: &mut TurnContext) -> TurnState {
             ),
         }),
     );
+
+    if std::env::var("HERMES_TURN_PERF").map_or(false, |v| !v.is_empty()) {
+        tracing::info!(
+            target: "turn_perf",
+            turn = tc.total_turns,
+            provider = turn_runtime_route
+                .as_ref()
+                .and_then(|r| r.provider.as_deref())
+                .unwrap_or("primary"),
+            model = %response.model,
+            api_ms = _api_elapsed_ms,
+            tool_calls = response.message.tool_calls.as_ref().map_or(0, |v| v.len()),
+            finish_reason = ?response.finish_reason,
+            "llm turn timing"
+        );
+    }
 
     // Store response in context for next state
     tc.last_llm_response = Some(response);
@@ -1246,7 +1263,9 @@ async fn turn_process_output(agent: &AgentLoop, tc: &mut TurnContext) -> TurnSta
                         interrupted: false,
                         plan_pending: Some(plan_text),
                         plan_phase: Some(
-                            hermes_tools::PlanPhase::AwaitingApproval.as_str().to_string(),
+                            hermes_tools::PlanPhase::AwaitingApproval
+                                .as_str()
+                                .to_string(),
                         ),
                     },
                     tc.total_turns,
@@ -1822,6 +1841,20 @@ async fn turn_execute_tools(agent: &AgentLoop, tc: &mut TurnContext) -> TurnStat
         streaming = true,
         "agent tool batch finished"
     );
+    if std::env::var("HERMES_TURN_PERF").map_or(false, |v| !v.is_empty()) {
+        let tool_names: Vec<&str> = tool_calls
+            .iter()
+            .map(|t| t.function.name.as_str())
+            .collect();
+        tracing::info!(
+            target: "turn_perf",
+            turn = tc.total_turns,
+            tools = ?tool_names,
+            tool_elapsed_ms = tool_elapsed,
+            errors = turn_tool_error_count,
+            "tool batch timing"
+        );
+    }
     hooks::emit_tool_failure_notices(agent, &tool_calls, &results);
 
     let turn_tool_error_rate = if results.is_empty() {

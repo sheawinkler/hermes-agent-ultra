@@ -5,6 +5,7 @@
 //! All functions take `agent: &AgentLoop` instead of `&self`.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::StreamExt;
 use serde_json::Value;
@@ -393,6 +394,10 @@ pub(crate) async fn collect_stream_llm_response(
             )
         };
 
+        let t_stream_start = Instant::now();
+        let mut ttft_ms: Option<u64> = None;
+        let mut chunk_count: u64 = 0;
+
         let mut content = String::new();
         let mut reasoning_content = String::new();
         let mut tool_calls: Vec<ToolCall> = Vec::new();
@@ -480,6 +485,11 @@ pub(crate) async fn collect_stream_llm_response(
                 }
             };
 
+            if ttft_ms.is_none() {
+                ttft_ms = Some(t_stream_start.elapsed().as_millis() as u64);
+            }
+            chunk_count += 1;
+
             if let Some(ref delta) = chunk.delta {
                 if let Some(ref text) = delta.content {
                     deltas_were_sent = true;
@@ -539,6 +549,20 @@ pub(crate) async fn collect_stream_llm_response(
             }
 
             on_chunk(chunk);
+        }
+
+        if std::env::var("HERMES_TURN_PERF").map_or(false, |v| !v.is_empty()) {
+            let gen_ms = t_stream_start.elapsed().as_millis() as u64;
+            tracing::info!(
+                target: "turn_perf",
+                attempt = stream_attempt,
+                provider = %active_provider,
+                model = %active_model,
+                ttft_ms = ttft_ms.unwrap_or(gen_ms),
+                gen_ms,
+                chunks = chunk_count,
+                "stream timing"
+            );
         }
 
         if tool_calls.iter().any(tool_call_arguments_look_truncated) {
@@ -628,9 +652,8 @@ pub(crate) fn build_finalization_signals(
     let has_visible_text_after_think =
         AgentLoop::assistant_visible_text_after_think_blocks(message);
     let has_reasoning = AgentLoop::assistant_has_reasoning(message);
-    let continuation_required =
-        finish_reason_requires_continuation(finish_reason)
-            || missing_tool_calls_finish_mismatch(finish_reason, has_tool_calls);
+    let continuation_required = finish_reason_requires_continuation(finish_reason)
+        || missing_tool_calls_finish_mismatch(finish_reason, has_tool_calls);
     let ack_detected = !has_tool_calls
         && !continuation_required
         && agent_runtime_helpers::looks_like_codex_intermediate_ack(
@@ -788,8 +811,14 @@ mod tests {
 
     #[test]
     fn missing_tool_calls_finish_mismatch_detects_provider_tool_intent_gap() {
-        assert!(missing_tool_calls_finish_mismatch(Some("tool_calls"), false));
-        assert!(!missing_tool_calls_finish_mismatch(Some("tool_calls"), true));
+        assert!(missing_tool_calls_finish_mismatch(
+            Some("tool_calls"),
+            false
+        ));
+        assert!(!missing_tool_calls_finish_mismatch(
+            Some("tool_calls"),
+            true
+        ));
         assert!(!missing_tool_calls_finish_mismatch(Some("stop"), false));
         assert!(!missing_tool_calls_finish_mismatch(None, false));
     }
