@@ -1,0 +1,23 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -68,10 +68,6 @@
+ 
+ [dependencies.aes]
+ version = "0.8.4"
+-default-features = false
+-
+-[dependencies.aquamarine]
+-version = "0.6.0"
+ default-features = false
+ 
+ [dependencies.as_variant]
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -160,7 +160,6 @@
+     UnableToDecrypt(UnableToDecryptInfo),
+ }
+ 
+-#[cfg_attr(doc, aquamarine::aquamarine)]
+ /// A step by step guide that explains how to include [end-to-end-encryption]
+ /// support in a [Matrix] client library.
+ ///

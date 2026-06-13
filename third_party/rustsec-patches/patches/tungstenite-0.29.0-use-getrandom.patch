@@ -1,0 +1,50 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -156,8 +156,8 @@
+ optional = true
+ package = "native-tls"
+ 
+-[dependencies.rand]
+-version = "0.9.0"
++[dependencies.getrandom]
++version = "0.3"
+ 
+ [dependencies.rustls]
+ version = "0.23.0"
+@@ -197,9 +197,6 @@
+ [dev-dependencies.input_buffer]
+ version = "0.5.0"
+ 
+-[dev-dependencies.rand]
+-version = "0.9.0"
+-
+ [dev-dependencies.socket2]
+ version = "0.6.0"
+ 
+--- a/src/protocol/frame/mask.rs
++++ b/src/protocol/frame/mask.rs
+@@ -1,7 +1,9 @@
+ /// Generate a random frame mask.
+ #[inline]
+ pub fn generate_mask() -> [u8; 4] {
+-    rand::random()
++    let mut mask = [0u8; 4];
++    getrandom::fill(&mut mask).expect("websocket mask generation requires system randomness");
++    mask
+ }
+ 
+ /// Mask/unmask a frame.
+--- a/src/handshake/client.rs
++++ b/src/handshake/client.rs
+@@ -329,8 +329,9 @@
+ pub fn generate_key() -> String {
+     // a base64-encoded (see Section 4 of [RFC4648]) value that,
+     // when decoded, is 16 bytes in length (RFC 6455)
+-    let r: [u8; 16] = rand::random();
+-    data_encoding::BASE64.encode(&r)
++    let mut key = [0u8; 16];
++    getrandom::fill(&mut key).expect("websocket handshake key requires system randomness");
++    data_encoding::BASE64.encode(&key)
+ }
+ 
+ #[cfg(test)]
