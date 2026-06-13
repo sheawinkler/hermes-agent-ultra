@@ -90,4 +90,9 @@ minijinja = "2"
 jsonwebtoken = "9"
 indexmap = { version = "2", features = ["serde"] }
 once_cell = "1"
-proptest = "1"
+
+[patch.crates-io]
+matrix-pickle-derive = { path = "third_party/rustsec-patches/matrix-pickle-derive-0.2.2" }
+matrix-sdk-crypto = { path = "third_party/rustsec-patches/matrix-sdk-crypto-0.18.0" }
+tungstenite = { path = "third_party/rustsec-patches/tungstenite-0.29.0" }
+vodozemac = { path = "third_party/rustsec-patches/vodozemac-0.10.0" }

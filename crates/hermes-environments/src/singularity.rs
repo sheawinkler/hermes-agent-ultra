@@ -91,7 +91,7 @@ impl SingularityBackend {
     }
 
     /// Build the common singularity exec arguments.
-    fn build_exec_args(&self, workdir: Option<&str>) -> Vec<String> {
+    fn build_exec_args(&self, workdir: Option<&str>) -> Result<Vec<String>, AgentError> {
         let mut args = vec!["exec".to_string()];
 
         // Add bind mounts
@@ -107,11 +107,9 @@ impl SingularityBackend {
         }
 
         // Add the image
-        if let Ok(image) = self.image_path() {
-            args.push(image.to_string());
-        }
+        args.push(self.image_path()?.to_string());
 
-        args
+        Ok(args)
     }
 }
 
@@ -123,27 +121,11 @@ impl TerminalBackend for SingularityBackend {
         timeout: Option<u64>,
         workdir: Option<&str>,
         background: bool,
-        pty: bool,
+        _pty: bool,
     ) -> Result<CommandOutput, AgentError> {
-        let image = self.image_path()?;
         let timeout_secs = timeout.unwrap_or(self.default_timeout);
 
-        let mut args = vec!["exec".to_string()];
-
-        // Add bind mounts
-        for bind in &self.bind_paths {
-            args.push("--bind".to_string());
-            args.push(bind.clone());
-        }
-
-        // Add working directory
-        if let Some(dir) = workdir {
-            args.push("--pwd".to_string());
-            args.push(dir.to_string());
-        }
-
-        // Add the image
-        args.push(image.to_string());
+        let mut args = self.build_exec_args(workdir)?;
 
         // Add the command to execute
         args.push("sh".to_string());

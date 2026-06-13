@@ -1,0 +1,10 @@
+# all of these are valid words, but should never appear in this repo
+[default.extend-words]
+sing = "sign"
+singed = "signed"
+singing = "signing"
+# Base64 false positives
+Pn = "Pn"
+
+[files]
+extend-exclude = ["afl/*/in/*"]

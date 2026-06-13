@@ -137,8 +137,8 @@ impl TerminalBackend for ModalBackend {
         command: &str,
         timeout: Option<u64>,
         workdir: Option<&str>,
-        background: bool,
-        pty: bool,
+        _background: bool,
+        _pty: bool,
     ) -> Result<CommandOutput, AgentError> {
         let timeout_secs = timeout.unwrap_or(self.default_timeout);
 

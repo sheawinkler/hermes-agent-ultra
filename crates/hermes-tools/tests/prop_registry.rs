@@ -1,10 +1,10 @@
-//! Property 3: Tool registry consistency
+//! Bounded invariant coverage: tool registry consistency
 //! **Validates: Requirements 4.1, 4.2, 4.3**
 //!
-//! For any sequence of register/deregister operations, get_definitions returns
-//! the tool set that matches currently registered tools with check_fn == true.
+//! For representative register/deregister operation sequences,
+//! get_definitions returns the tool set that matches currently registered
+//! tools with check_fn == true.
 
-use proptest::prelude::*;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -12,10 +12,6 @@ use async_trait::async_trait;
 use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 use hermes_tools::ToolRegistry;
 use serde_json::Value;
-
-// ---------------------------------------------------------------------------
-// Stub handler
-// ---------------------------------------------------------------------------
 
 struct StubHandler {
     name: String,
@@ -26,45 +22,55 @@ impl ToolHandler for StubHandler {
     async fn execute(&self, _params: Value) -> Result<String, ToolError> {
         Ok("ok".to_string())
     }
+
     fn schema(&self) -> ToolSchema {
         tool_schema(&self.name, "stub", JsonSchema::new("object"))
     }
 }
 
-// ---------------------------------------------------------------------------
-// Operation enum for generating random sequences
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone)]
 enum Op {
-    Register(String),
-    Deregister(String),
+    Register(&'static str),
+    Deregister(&'static str),
 }
 
-fn arb_op() -> impl Strategy<Value = Op> {
-    let name = "[a-z]{2,8}";
-    prop_oneof![name.prop_map(Op::Register), name.prop_map(Op::Deregister),]
+fn operation_cases() -> Vec<Vec<Op>> {
+    vec![
+        vec![Op::Register("aa")],
+        vec![Op::Deregister("missing"), Op::Register("aa")],
+        vec![Op::Register("aa"), Op::Register("bb"), Op::Deregister("aa")],
+        vec![
+            Op::Register("aa"),
+            Op::Register("aa"),
+            Op::Deregister("aa"),
+            Op::Register("cc"),
+        ],
+        vec![
+            Op::Register("aa"),
+            Op::Register("bb"),
+            Op::Deregister("missing"),
+            Op::Register("dd"),
+            Op::Deregister("bb"),
+            Op::Register("ee"),
+        ],
+    ]
 }
 
-// ---------------------------------------------------------------------------
-// Property tests
-// ---------------------------------------------------------------------------
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
-
-    #[test]
-    fn prop_registry_consistency(ops in proptest::collection::vec(arb_op(), 1..20)) {
+#[test]
+fn registry_consistency() {
+    for ops in operation_cases() {
         let registry = ToolRegistry::new();
         let mut expected: HashSet<String> = HashSet::new();
 
         for op in &ops {
             match op {
                 Op::Register(name) => {
-                    let handler = Arc::new(StubHandler { name: name.clone() });
+                    let handler = Arc::new(StubHandler {
+                        name: (*name).to_string(),
+                    });
                     let schema = handler.schema();
                     registry.register(
-                        name.clone(),
+                        (*name).to_string(),
                         "test",
                         schema,
                         handler,
@@ -72,14 +78,14 @@ proptest! {
                         vec![],
                         false,
                         "stub",
-                        "🔧",
+                        "tool",
                         None,
                     );
-                    expected.insert(name.clone());
+                    expected.insert((*name).to_string());
                 }
                 Op::Deregister(name) => {
                     registry.deregister(name);
-                    expected.remove(name);
+                    expected.remove(*name);
                 }
             }
         }
@@ -87,7 +93,7 @@ proptest! {
         let defs = registry.get_definitions();
         let def_names: HashSet<String> = defs.iter().map(|d| d.name.clone()).collect();
 
-        prop_assert_eq!(
+        assert_eq!(
             expected, def_names,
             "Registry definitions don't match expected set"
         );

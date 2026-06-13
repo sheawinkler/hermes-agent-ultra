@@ -32,6 +32,3 @@ uuid = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
 toml = "0.8"
-
-[dev-dependencies]
-proptest = { workspace = true }

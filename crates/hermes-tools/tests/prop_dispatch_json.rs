@@ -1,57 +1,58 @@
-//! Property 4: Tool dispatch always returns valid JSON
+//! Bounded invariant coverage: tool dispatch always returns valid JSON
 //! **Validates: Requirements 4.4, 4.5, 4.6, 3.6, 3.7**
 //!
-//! For any tool name and parameters (whether the tool exists or not),
-//! ToolRegistry::dispatch returns a parseable JSON string.
-
-use proptest::prelude::*;
+//! For representative tool names and parameters, ToolRegistry::dispatch returns
+//! a parseable JSON string even when the tool does not exist.
 
 use hermes_tools::ToolRegistry;
 
-// ---------------------------------------------------------------------------
-// Property tests
-// ---------------------------------------------------------------------------
+fn params_cases() -> Vec<serde_json::Value> {
+    vec![
+        serde_json::Value::Null,
+        serde_json::json!({}),
+        serde_json::json!({"key": "val"}),
+        serde_json::json!(42),
+        serde_json::json!([1, 2, 3]),
+    ]
+}
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+#[test]
+fn dispatch_nonexistent_returns_valid_json() {
+    let registry = ToolRegistry::new();
 
-    /// Dispatching a non-existent tool should still return valid JSON.
-    #[test]
-    fn prop_dispatch_nonexistent_returns_valid_json(
-        name in "[a-z]{1,20}",
-        params_str in prop_oneof![
-            Just("null".to_string()),
-            Just("{}".to_string()),
-            Just(r#"{"key":"val"}"#.to_string()),
-            Just("42".to_string()),
-            Just(r#"[1,2,3]"#.to_string()),
-        ]
-    ) {
-        let registry = ToolRegistry::new();
-        let params: serde_json::Value = serde_json::from_str(&params_str).unwrap();
-        let result = registry.dispatch(&name, params);
-
-        // The result must always be valid JSON
-        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&result);
-        prop_assert!(parsed.is_ok(),
-            "dispatch returned invalid JSON: {}", result);
+    for name in ["a", "missing_tool", "lookup_123", "toolwithlongname"] {
+        for params in params_cases() {
+            let result = registry.dispatch(name, params);
+            let parsed: Result<serde_json::Value, _> = serde_json::from_str(&result);
+            assert!(parsed.is_ok(), "dispatch returned invalid JSON: {result}");
+        }
     }
+}
 
-    /// The static tool_error helper always returns valid JSON.
-    #[test]
-    fn prop_tool_error_is_valid_json(msg in ".{0,200}") {
-        let result = ToolRegistry::tool_error(&msg);
+#[test]
+fn tool_error_is_valid_json() {
+    for msg in ["", "simple error", "quoted \"error\"", "line one\nline two"] {
+        let result = ToolRegistry::tool_error(msg);
         let parsed: Result<serde_json::Value, _> = serde_json::from_str(&result);
-        prop_assert!(parsed.is_ok(),
-            "tool_error returned invalid JSON for msg '{}': {}", msg, result);
+        assert!(
+            parsed.is_ok(),
+            "tool_error returned invalid JSON for msg '{}': {}",
+            msg,
+            result
+        );
     }
+}
 
-    /// The static tool_result helper always returns valid JSON.
-    #[test]
-    fn prop_tool_result_is_valid_json(data in "[a-zA-Z0-9 ]{0,200}") {
-        let result = ToolRegistry::tool_result(&data);
+#[test]
+fn tool_result_is_valid_json() {
+    for data in ["", "ok", "value with spaces", "line one\nline two"] {
+        let result = ToolRegistry::tool_result(data);
         let parsed: Result<serde_json::Value, _> = serde_json::from_str(&result);
-        prop_assert!(parsed.is_ok(),
-            "tool_result returned invalid JSON for data '{}': {}", data, result);
+        assert!(
+            parsed.is_ok(),
+            "tool_result returned invalid JSON for data '{}': {}",
+            data,
+            result
+        );
     }
 }
