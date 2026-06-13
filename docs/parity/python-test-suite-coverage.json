@@ -49,15 +49,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -112,15 +112,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -175,15 +175,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -238,15 +238,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -301,15 +301,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -364,15 +364,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -427,15 +427,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -491,15 +491,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -555,15 +555,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -618,15 +618,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -681,15 +681,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -744,15 +744,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -807,15 +807,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -870,15 +870,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -934,15 +934,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -998,15 +998,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -1062,15 +1062,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -1125,15 +1125,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -1189,15 +1189,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -1252,15 +1252,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -1315,15 +1315,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -1378,15 +1378,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -1441,15 +1441,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -1504,15 +1504,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -1567,15 +1567,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -1630,15 +1630,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -5194,15 +5194,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -5257,15 +5257,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -5320,15 +5320,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-agent/src/bedrock.rs",
@@ -5832,15 +5832,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-gateway/src/gateway.rs",
@@ -5895,15 +5895,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-gateway/src/gateway.rs",
@@ -5958,15 +5958,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-gateway/src/gateway.rs",
@@ -6021,15 +6021,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-gateway/src/gateway.rs",
@@ -6084,15 +6084,15 @@
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_per_result_invariant"
+          "name": "budget_per_result_invariant"
         },
         {
           "file": "crates/hermes-agent/tests/prop_budget.rs",
-          "name": "prop_budget_does_not_grow_content"
+          "name": "budget_does_not_grow_content"
         },
         {
           "file": "crates/hermes-agent/tests/prop_max_turns.rs",
-          "name": "prop_agent_loop_respects_max_turns"
+          "name": "agent_loop_respects_max_turns"
         },
         {
           "file": "crates/hermes-gateway/src/gateway.rs",

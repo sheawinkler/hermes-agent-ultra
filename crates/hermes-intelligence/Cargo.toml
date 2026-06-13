@@ -24,8 +24,5 @@ strsim = "0.11"
 dirs = "6"
 tempfile = "3"
 
-[dev-dependencies]
-proptest = { workspace = true }
-
 [features]
 swarms = []

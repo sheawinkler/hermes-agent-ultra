@@ -14,9 +14,6 @@ pub mod traits;
 pub mod types;
 pub mod version;
 
-#[cfg(test)]
-pub mod test_generators;
-
 // Re-export all error types
 pub use errors::{AgentError, ConfigError, GatewayError, ToolError};
 

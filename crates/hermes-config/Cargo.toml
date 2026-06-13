@@ -24,5 +24,4 @@ default = []
 test-helpers = []
 
 [dev-dependencies]
-proptest = { workspace = true }
 tempfile = "3"

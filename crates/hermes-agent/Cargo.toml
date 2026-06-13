@@ -39,5 +39,4 @@ hmac = "0.12"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
-proptest = { workspace = true }
 tempfile = "3"

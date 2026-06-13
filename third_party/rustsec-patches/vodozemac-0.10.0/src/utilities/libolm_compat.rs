@@ -1,0 +1,111 @@
+// Copyright 2021 Damir Jelić
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#[cfg(feature = "libolm-compat")]
+use std::io::Cursor;
+
+#[cfg(feature = "libolm-compat")]
+use matrix_pickle::{Decode, Encode};
+#[cfg(feature = "libolm-compat")]
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
+#[cfg(feature = "libolm-compat")]
+use super::{base64_decode, base64_encode};
+#[cfg(feature = "libolm-compat")]
+use crate::{LibolmPickleError, cipher::Cipher};
+
+/// Fetch the pickle version from the given pickle source.
+pub(crate) fn get_version(source: &[u8]) -> Option<u32> {
+    // Pickle versions are always u32 encoded as a fixed sized integer in
+    // big endian encoding.
+    let version = source.get(0..4)?;
+    Some(u32::from_be_bytes(version.try_into().ok()?))
+}
+
+/// Decrypt and decode the given pickle with the given pickle key.
+///
+/// # Arguments
+///
+/// * pickle - The base64-encoded and encrypted libolm pickle string
+/// * pickle_key - The key that was used to encrypt the libolm pickle
+/// * pickle_version - The expected version of the pickle. Unpickling will fail
+///   if the version in the pickle doesn't match this one.
+#[cfg(feature = "libolm-compat")]
+pub(crate) fn unpickle_libolm<P: Decode, T: TryFrom<P, Error = LibolmPickleError>>(
+    pickle: &str,
+    pickle_key: &[u8],
+    pickle_version: u32,
+) -> Result<T, LibolmPickleError> {
+    // libolm pickles are always base64 encoded, so first try to decode.
+    let decoded = base64_decode(pickle)?;
+
+    // The pickle is always encrypted, even if a zero key is given. Try to
+    // decrypt next.
+    let cipher = Cipher::new_pickle(pickle_key);
+    let mut decrypted = cipher.decrypt_pickle(&decoded)?;
+
+    // A pickle starts with a version, which will decide how we need to decode.
+    // We only support the latest version so bail out if it isn't the expected
+    // pickle version.
+    let version = get_version(&decrypted).ok_or(LibolmPickleError::MissingVersion)?;
+
+    if version == pickle_version {
+        let mut cursor = Cursor::new(&decrypted);
+        let pickle = P::decode(&mut cursor)?;
+
+        decrypted.zeroize();
+        pickle.try_into()
+    } else {
+        Err(LibolmPickleError::Version(pickle_version, version))
+    }
+}
+
+#[cfg(feature = "libolm-compat")]
+pub(crate) fn pickle_libolm<P>(pickle: P, pickle_key: &[u8]) -> Result<String, LibolmPickleError>
+where
+    P: Encode,
+{
+    let mut encoded = pickle.encode_to_vec()?;
+
+    let cipher = Cipher::new_pickle(pickle_key);
+    let encrypted = cipher.encrypt_pickle(&encoded);
+    encoded.zeroize();
+
+    Ok(base64_encode(encrypted))
+}
+
+#[cfg(feature = "libolm-compat")]
+#[derive(Encode, Decode, Zeroize, ZeroizeOnDrop)]
+pub(crate) struct LibolmEd25519Keypair {
+    pub public_key: [u8; 32],
+    #[secret]
+    pub private_key: Box<[u8; 64]>,
+}
+
+#[cfg(all(feature = "libolm-compat", test))]
+mod test {
+    use super::*;
+
+    #[test]
+    fn encode_cycle() {
+        let key_pair =
+            LibolmEd25519Keypair { public_key: [10u8; 32], private_key: [20u8; 64].into() };
+
+        let encoded = key_pair.encode_to_vec().unwrap();
+        let decoded = LibolmEd25519Keypair::decode_from_slice(&encoded).unwrap();
+
+        assert_eq!(key_pair.public_key, decoded.public_key);
+        assert_eq!(key_pair.private_key, decoded.private_key);
+    }
+}

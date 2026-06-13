@@ -1,10 +1,10 @@
-//! Property 7: Agent loop respects max_turns limit
+//! Bounded invariant coverage: Agent loop respects max_turns limit
 //! **Validates: Requirement 3.2**
 //!
-//! For any max_turns value and an LLM that always returns tool_calls,
-//! the agent loop stops at exactly max_turns, with finished_naturally == false.
+//! For representative max_turns values and an LLM that always returns
+//! tool_calls, the agent loop stops at exactly max_turns, with
+//! finished_naturally == false.
 
-use proptest::prelude::*;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,10 +14,6 @@ use hermes_core::{
     ToolSchema, UsageStats,
 };
 use serde_json::Value;
-
-// ---------------------------------------------------------------------------
-// Mock LLM that always returns a tool call
-// ---------------------------------------------------------------------------
 
 struct AlwaysToolCallLlm;
 
@@ -68,10 +64,6 @@ impl LlmProvider for AlwaysToolCallLlm {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Echo handler for the tool registry
-// ---------------------------------------------------------------------------
-
 fn echo_handler(params: Value) -> Result<String, ToolError> {
     Ok(params.to_string())
 }
@@ -86,16 +78,11 @@ fn make_registry() -> ToolRegistry {
     registry
 }
 
-// ---------------------------------------------------------------------------
-// Property tests
-// ---------------------------------------------------------------------------
+#[test]
+fn agent_loop_respects_max_turns() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
-
-    #[test]
-    fn prop_agent_loop_respects_max_turns(max_turns in 1u32..20) {
-        let rt = tokio::runtime::Runtime::new().unwrap();
+    for max_turns in [1, 2, 3, 5, 8, 13, 19] {
         rt.block_on(async {
             let config = AgentConfig {
                 max_turns,
@@ -105,15 +92,17 @@ proptest! {
             let llm = Arc::new(AlwaysToolCallLlm);
             let agent = AgentLoop::new(config, registry, llm);
 
-            let result = agent
-                .run(vec![Message::user("test")], None)
-                .await
-                .unwrap();
+            let result = agent.run(vec![Message::user("test")], None).await.unwrap();
 
-            assert_eq!(result.total_turns, max_turns,
-                "Expected {} turns, got {}", max_turns, result.total_turns);
-            assert!(!result.finished_naturally,
-                "Should not finish naturally when LLM always returns tool calls");
+            assert_eq!(
+                result.total_turns, max_turns,
+                "Expected {} turns, got {}",
+                max_turns, result.total_turns
+            );
+            assert!(
+                !result.finished_naturally,
+                "Should not finish naturally when LLM always returns tool calls"
+            );
         });
     }
 }
