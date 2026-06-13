@@ -11,8 +11,6 @@ use hermes_config::{GatewayConfig, LlmProviderConfig, StaleAuxiliaryAssignment};
 use hermes_core::AgentError;
 use hermes_intelligence::models_dev::{default_client, ModelsDevClient};
 use hmac::{Hmac, Mac};
-use rand::rngs::OsRng;
-use rand::RngCore;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -370,7 +368,7 @@ fn ensure_provenance_key() -> Option<Vec<u8>> {
         return None;
     }
     let mut key = [0u8; 32];
-    OsRng.fill_bytes(&mut key);
+    rand::fill(&mut key[..]);
     let encoded = hex::encode(key);
     if std::fs::write(&key_path, format!("{encoded}\n")).is_err() {
         return None;

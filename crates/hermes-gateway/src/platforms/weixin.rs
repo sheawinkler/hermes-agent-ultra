@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use base64::Engine;
-use rand::Rng;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1115,11 +1114,14 @@ impl WeChatAdapter {
             .await
             .map_err(|e| GatewayError::SendFailed(format!("weixin read file: {e}")))?;
         let (filekey, aes_key, aeskey_hex) = {
-            let mut rng = rand::thread_rng();
-            let filekey: String = (0..16)
-                .map(|_| format!("{:02x}", rng.gen::<u8>()))
+            let mut filekey_bytes = [0u8; 16];
+            rand::fill(&mut filekey_bytes[..]);
+            let filekey: String = filekey_bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
                 .collect();
-            let aes_key: [u8; 16] = rng.gen();
+            let mut aes_key = [0u8; 16];
+            rand::fill(&mut aes_key[..]);
             let aeskey_hex: String = aes_key.iter().map(|b| format!("{b:02x}")).collect();
             (filekey, aes_key, aeskey_hex)
         };
@@ -1501,7 +1503,7 @@ mod weixin_crypto_tests {
 
     #[test]
     fn aes128_ecb_roundtrip_short_plaintext() {
-        let key: [u8; 16] = rand::random();
+        let key = [7u8; 16];
         let plain = b"hello-weixin-ilink";
         let ct = aes128_ecb_encrypt(plain, &key);
         assert_eq!(ct.len() % 16, 0);

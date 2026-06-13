@@ -203,7 +203,7 @@ impl MattermostAdapter {
             "data": { "token": self.config.token },
         });
         socket
-            .send(Message::Text(auth.to_string()))
+            .send(Message::Text(auth.to_string().into()))
             .await
             .map_err(Self::map_ws_error)?;
 

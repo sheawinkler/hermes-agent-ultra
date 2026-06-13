@@ -100,8 +100,6 @@ use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
 use hermes_tools::{default_tool_policy_counters_path, load_tool_policy_counters, ToolRegistry};
-use rand::rngs::OsRng;
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::OpenOptions;
@@ -6803,7 +6801,7 @@ fn qqbot_onboard_endpoints_from_disk(disk: &hermes_config::GatewayConfig) -> (St
 
 fn qqbot_generate_bind_key_base64() -> String {
     let mut key = [0u8; 32];
-    OsRng.fill_bytes(&mut key);
+    rand::fill(&mut key[..]);
     BASE64_STANDARD.encode(key)
 }
 
@@ -12417,7 +12415,7 @@ fn load_or_create_provenance_key(cli: &Cli, allow_create: bool) -> Result<Vec<u8
             .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
     }
     let mut key_bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut key_bytes);
+    rand::fill(&mut key_bytes[..]);
     let key_hex = hex::encode(key_bytes);
     std::fs::write(&path, format!("{key_hex}\n"))
         .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))?;
@@ -13794,7 +13792,7 @@ async fn run_rotate_provenance_key(cli: Cli, json: bool) -> Result<(), AgentErro
     };
 
     let mut key_bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut key_bytes);
+    rand::fill(&mut key_bytes[..]);
     let key_hex = hex::encode(key_bytes);
     std::fs::write(&path, format!("{key_hex}\n"))
         .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))?;

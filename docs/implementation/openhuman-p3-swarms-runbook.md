@@ -22,11 +22,11 @@ Implemented in `hermes-intelligence`:
   - `swarm_runtime_status()`
   - `build_swarm_execution_plan(...)`
 
-Feature-gated external engine wiring:
+Feature-gated compatibility wiring:
 
-- Optional dependency: `swarms-rs` (renamed crate key: `swarms`)
 - Feature flag: `swarms`
-- Status reports whether `swarms-rs` is compiled/linked or quorum-fallback is active.
+- Status reports whether the compatibility feature is compiled.
+- Runtime execution remains Hermes Rust-native quorum orchestration; no external swarm engine is linked into the release graph.
 
 ## 2) Command Surface
 
@@ -65,4 +65,3 @@ New tests:
 - `commands::tests::p3_swarm_commands_registered_and_completable`
 - `commands::tests::p3_swarm_status_plan_run_cancel_surface_is_handled`
 - `swarm_runtime::tests::required_success_uses_majority_when_voters_gt_two`
-

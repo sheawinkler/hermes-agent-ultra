@@ -420,7 +420,8 @@ impl DingTalkAdapter {
                                                                 break;
                                                             }
                                                             if let Some(line) = ack {
-                                                                let _ = ws.send(WsMessage::Text(line)).await;
+                                                                let _ =
+                                                                    ws.send(WsMessage::Text(line.into())).await;
                                                             }
                                                         }
                                                         Some(Ok(WsMessage::Ping(p))) => {
