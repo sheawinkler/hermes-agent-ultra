@@ -58,7 +58,7 @@ serde_yaml = "0.9"
 
 # HTTP / networking
 reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls"] }
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.29"
 eventsource-stream = "0.2"
 
 # Error handling & logging
@@ -68,9 +68,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # CLI & TUI
 clap = { version = "4", features = ["derive"] }
-ratatui = "0.29"
-crossterm = "0.28"
-tui-textarea = "0.7"
+ratatui = { version = "0.30.1", default-features = false, features = ["all-widgets", "crossterm", "macros", "underline-color"] }
+crossterm = "0.29"
 
 # Database
 rusqlite = { version = "0.32", features = ["bundled"] }

@@ -365,9 +365,6 @@ pub fn list_distributions() -> Vec<String> {
 /// Sample toolsets from a distribution: include toolsets whose weight exceeds
 /// a random threshold.
 pub fn sample_toolsets_from_distribution(dist: &ToolsetDistribution) -> Vec<String> {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-
     dist.toolset_weights
         .iter()
         .filter(|(_, &weight)| {
@@ -376,7 +373,7 @@ pub fn sample_toolsets_from_distribution(dist: &ToolsetDistribution) -> Vec<Stri
             } else if weight <= 0.0 {
                 false
             } else {
-                rng.gen::<f64>() < weight
+                rand::random::<f64>() < weight
             }
         })
         .map(|(name, _)| name.clone())

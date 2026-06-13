@@ -50,20 +50,17 @@ pub fn swarm_runtime_status() -> SwarmRuntimeStatus {
     let mut notes = Vec::new();
     let feature_enabled = cfg!(feature = "swarms");
     if feature_enabled {
-        let _markers = linked_swarms_type_markers();
-        notes.push("swarms-rs feature compiled and linked".to_string());
+        notes.push("swarms compatibility feature compiled".to_string());
+        notes.push("using Hermes Rust-native quorum runtime".to_string());
         notes.push("use Hermes guardrails for tool policy/objective before dispatch".to_string());
     } else {
-        notes.push("swarms-rs feature not compiled; using quorum-only runtime".to_string());
-        notes.push("rebuild with `--features swarms` to enable native swarms engine".to_string());
+        notes.push("swarms compatibility feature not compiled".to_string());
+        notes.push("using Hermes Rust-native quorum runtime".to_string());
+        notes.push("rebuild with `--features swarms` to expose compatibility status".to_string());
     }
     SwarmRuntimeStatus {
         feature_enabled,
-        engine: if feature_enabled {
-            "swarms-rs"
-        } else {
-            "quorum-fallback"
-        },
+        engine: "quorum-native",
         supported_modes: vec![
             SwarmExecutionMode::Concurrent,
             SwarmExecutionMode::Sequential,
@@ -105,19 +102,6 @@ pub fn build_swarm_execution_plan(
     }
 }
 
-#[cfg(feature = "swarms")]
-fn linked_swarms_type_markers() -> Vec<&'static str> {
-    vec![
-        std::any::type_name::<swarms::structs::concurrent_workflow::ConcurrentWorkflow>(),
-        std::any::type_name::<swarms::structs::swarms_router::SwarmType>(),
-    ]
-}
-
-#[cfg(not(feature = "swarms"))]
-fn linked_swarms_type_markers() -> Vec<&'static str> {
-    Vec::new()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +111,15 @@ mod tests {
         let plan = build_swarm_execution_plan(SwarmExecutionMode::Concurrent, 5, vec![], None, 99);
         assert_eq!(plan.required_success, 3);
         assert_eq!(plan.pass_cap, 8);
+    }
+
+    #[test]
+    fn runtime_status_uses_rust_native_quorum_engine() {
+        let status = swarm_runtime_status();
+        assert_eq!(status.engine, "quorum-native");
+        assert!(status
+            .notes
+            .iter()
+            .any(|note| note.contains("Rust-native quorum runtime")));
     }
 }

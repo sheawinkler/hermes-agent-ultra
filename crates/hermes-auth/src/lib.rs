@@ -9,7 +9,6 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
 use hermes_core::AgentError;
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
@@ -160,7 +159,7 @@ fn encrypt_token_cache(
     let plaintext = serde_json::to_vec(cache).map_err(|e| AgentError::Config(e.to_string()))?;
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| AgentError::Config(e.to_string()))?;
     let mut nonce_bytes = [0u8; TOKEN_STORE_NONCE_BYTES];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    rand::fill(&mut nonce_bytes[..]);
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, plaintext.as_ref())
@@ -216,7 +215,7 @@ async fn load_or_create_store_key(path: &Path) -> Result<[u8; TOKEN_STORE_KEY_BY
     }
 
     let mut key = [0u8; TOKEN_STORE_KEY_BYTES];
-    rand::rngs::OsRng.fill_bytes(&mut key);
+    rand::fill(&mut key[..]);
     let encoded = base64::engine::general_purpose::STANDARD.encode(key);
     write_file_private(path, encoded.as_bytes()).await?;
     Ok(key)

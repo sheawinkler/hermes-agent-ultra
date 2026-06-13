@@ -33,7 +33,6 @@ use ratatui::widgets::{
 use ratatui::Frame;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tui_textarea::{CursorMove, TextArea};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use hermes_auth::FileTokenStore;
@@ -1200,7 +1199,7 @@ impl TuiState {
                 false
             }
             _ => {
-                self.apply_textarea_input(key);
+                self.apply_editor_input(key);
                 self.selection_anchor = None;
                 self.refresh_completions_for_app(Some(app));
                 false
@@ -1393,30 +1392,101 @@ impl TuiState {
         byte.min(line_end)
     }
 
-    fn textarea_from_input(&self) -> TextArea<'static> {
-        let lines: Vec<String> = if self.input.is_empty() {
-            vec![String::new()]
+    fn input_line_text(&self) -> Vec<Line<'static>> {
+        if self.input.is_empty() {
+            vec![Line::from(String::new())]
         } else {
-            self.input.split('\n').map(ToString::to_string).collect()
-        };
-        let mut textarea = TextArea::from(lines);
+            self.input
+                .split('\n')
+                .map(|line| Line::from(line.to_string()))
+                .collect()
+        }
+    }
+
+    fn move_cursor_left(&mut self) {
+        let at = Self::clamp_char_boundary(&self.input, self.cursor_position);
+        self.cursor_position = self.input[..at]
+            .char_indices()
+            .next_back()
+            .map(|(idx, _)| idx)
+            .unwrap_or(0);
+    }
+
+    fn move_cursor_right(&mut self) {
+        let at = Self::clamp_char_boundary(&self.input, self.cursor_position);
+        self.cursor_position = self.input[at..]
+            .chars()
+            .next()
+            .map(|ch| at + ch.len_utf8())
+            .unwrap_or(at);
+    }
+
+    fn move_cursor_vertical(&mut self, delta: isize) {
         let (row, col) = Self::cursor_row_col(&self.input, self.cursor_position);
-        let row_u16 = row.min(u16::MAX as usize) as u16;
-        let col_u16 = col.min(u16::MAX as usize) as u16;
-        textarea.move_cursor(CursorMove::Jump(row_u16, col_u16));
-        textarea
+        let next_row = if delta.is_negative() {
+            row.saturating_sub(delta.unsigned_abs())
+        } else {
+            row.saturating_add(delta as usize)
+        };
+        self.cursor_position = Self::row_col_to_byte_offset(&self.input, next_row, col);
     }
 
-    fn sync_from_textarea(&mut self, textarea: &TextArea<'_>) {
-        self.input = textarea.lines().join("\n");
-        let (row, col) = textarea.cursor();
-        self.cursor_position = Self::row_col_to_byte_offset(&self.input, row, col);
+    fn delete_before_cursor(&mut self) {
+        let at = Self::clamp_char_boundary(&self.input, self.cursor_position);
+        if let Some((prev, _)) = self.input[..at].char_indices().next_back() {
+            self.input.replace_range(prev..at, "");
+            self.cursor_position = prev;
+        }
     }
 
-    fn apply_textarea_input(&mut self, key: KeyEvent) {
-        let mut textarea = self.textarea_from_input();
-        let _ = textarea.input(key);
-        self.sync_from_textarea(&textarea);
+    fn delete_after_cursor(&mut self) {
+        let at = Self::clamp_char_boundary(&self.input, self.cursor_position);
+        if let Some(ch) = self.input[at..].chars().next() {
+            self.input.replace_range(at..at + ch.len_utf8(), "");
+            self.cursor_position = at;
+        }
+    }
+
+    fn insert_char_at_cursor(&mut self, ch: char) {
+        let at = Self::clamp_char_boundary(&self.input, self.cursor_position);
+        self.input.insert(at, ch);
+        self.cursor_position = at + ch.len_utf8();
+    }
+
+    fn move_cursor_to_line_start(&mut self) {
+        let (row, _) = Self::cursor_row_col(&self.input, self.cursor_position);
+        self.cursor_position = Self::row_col_to_byte_offset(&self.input, row, 0);
+    }
+
+    fn move_cursor_to_line_end(&mut self) {
+        let (row, _) = Self::cursor_row_col(&self.input, self.cursor_position);
+        self.cursor_position = Self::row_col_to_byte_offset(&self.input, row, usize::MAX);
+    }
+
+    fn apply_editor_input(&mut self, key: KeyEvent) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        match key.code {
+            KeyCode::Char(ch)
+                if !key.modifiers.intersects(
+                    KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                ) =>
+            {
+                self.insert_char_at_cursor(ch);
+            }
+            KeyCode::Backspace => self.delete_before_cursor(),
+            KeyCode::Delete => self.delete_after_cursor(),
+            KeyCode::Left => self.move_cursor_left(),
+            KeyCode::Right => self.move_cursor_right(),
+            KeyCode::Up => self.move_cursor_vertical(-1),
+            KeyCode::Down => self.move_cursor_vertical(1),
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_cursor_to_line_start();
+            }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_cursor_to_line_end();
+            }
+            _ => {}
+        }
     }
 
     fn insert_newline_at_cursor(&mut self) {
@@ -3895,32 +3965,27 @@ fn render_input(
         )));
     }
 
-    let mut textarea = state.textarea_from_input();
-    textarea.set_block(block.clone());
-    textarea.set_style(Style::default().fg(colors.foreground).bg(colors.background));
-    textarea.set_cursor_style(
-        Style::default()
-            .fg(Color::Black)
-            .bg(colors.status_bar_strong)
-            .add_modifier(Modifier::BOLD),
-    );
-    textarea.set_cursor_line_style(Style::default().bg(colors.background));
-    if state.input.is_empty() && state.mode == InputMode::Insert && !state.history_search_active {
-        textarea.set_placeholder_text(
+    let input_text = if state.input.is_empty()
+        && state.mode == InputMode::Insert
+        && !state.history_search_active
+    {
+        Text::from(Line::from(Span::styled(
             "Type a message (Enter sends, Shift+Enter/Ctrl+J inserts newline)",
-        );
-        textarea.set_placeholder_style(
             Style::default()
                 .fg(colors.status_bar_dim)
                 .bg(colors.background)
                 .add_modifier(Modifier::ITALIC),
-        );
+        )))
     } else {
-        textarea.set_placeholder_text("");
-    }
+        Text::from(state.input_line_text())
+    };
+    let input = Paragraph::new(input_text)
+        .block(block.clone())
+        .style(Style::default().fg(colors.foreground).bg(colors.background))
+        .wrap(Wrap { trim: false });
 
     frame.render_widget(Clear, area);
-    frame.render_widget(&textarea, area);
+    frame.render_widget(input, area);
 
     if state.mode == InputMode::Normal {
         return None;
@@ -3930,7 +3995,7 @@ fn render_input(
     if inner.width == 0 || inner.height == 0 {
         return None;
     }
-    let (row, col) = textarea.cursor();
+    let (row, col) = TuiState::cursor_row_col(&state.input, state.cursor_position);
     Some(Position {
         x: inner.x + (col as u16).min(inner.width.saturating_sub(1)),
         y: inner.y + (row as u16).min(inner.height.saturating_sub(1)),
@@ -6233,6 +6298,60 @@ mod tests {
     fn test_cursor_row_col_clamps_non_char_boundary() {
         assert_eq!(TuiState::cursor_row_col("éx", 1), (0, 0));
         assert_eq!(TuiState::cursor_row_col("éx", 2), (0, 1));
+    }
+
+    #[test]
+    fn test_native_editor_input_inserts_and_deletes_at_cursor() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut state = TuiState::default();
+        state.input = "helo".to_string();
+        state.cursor_position = 2;
+
+        state.apply_editor_input(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+        assert_eq!(state.input, "hello");
+        assert_eq!(state.cursor_position, 3);
+
+        state.apply_editor_input(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(state.input, "helo");
+        assert_eq!(state.cursor_position, 2);
+
+        state.apply_editor_input(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+        assert_eq!(state.input, "heo");
+        assert_eq!(state.cursor_position, 2);
+    }
+
+    #[test]
+    fn test_native_editor_cursor_navigation_respects_multiline_unicode() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut state = TuiState::default();
+        state.input = "ab\nécd\nxy".to_string();
+        state.cursor_position = TuiState::row_col_to_byte_offset(&state.input, 1, 2);
+
+        state.apply_editor_input(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(
+            TuiState::cursor_row_col(&state.input, state.cursor_position),
+            (0, 2)
+        );
+
+        state.apply_editor_input(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(
+            TuiState::cursor_row_col(&state.input, state.cursor_position),
+            (1, 2)
+        );
+
+        state.apply_editor_input(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        assert_eq!(
+            TuiState::cursor_row_col(&state.input, state.cursor_position),
+            (1, 0)
+        );
+
+        state.apply_editor_input(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+        assert_eq!(
+            TuiState::cursor_row_col(&state.input, state.cursor_position),
+            (1, 3)
+        );
     }
 
     #[test]
