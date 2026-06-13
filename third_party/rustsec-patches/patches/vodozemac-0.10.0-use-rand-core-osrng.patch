@@ -1,0 +1,143 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -121,8 +121,9 @@
+ [dependencies.prost]
+ version = "0.14.3"
+ 
+-[dependencies.rand]
+-version = "0.8.5"
++[dependencies.rand_core]
++version = "0.6"
++features = ["getrandom"]
+ 
+ [dependencies.serde]
+ version = "1.0.219"
+--- a/src/types/curve25519.rs
++++ b/src/types/curve25519.rs
+@@ -16,7 +16,7 @@
+ 
+ use base64::decoded_len_estimate;
+ use matrix_pickle::{Decode, DecodeError};
+-use rand::thread_rng;
++use rand_core::OsRng;
+ use serde::{Deserialize, Serialize};
+ use x25519_dalek::{EphemeralSecret, PublicKey, ReusableSecret, SharedSecret, StaticSecret};
+ use zeroize::Zeroize;
+@@ -32,7 +32,7 @@
+ impl Curve25519SecretKey {
+     /// Generate a new, random, Curve25519SecretKey.
+     pub fn new() -> Self {
+-        let rng = thread_rng();
++        let rng = OsRng;
+ 
+         Self(Box::new(StaticSecret::random_from_rng(rng)))
+     }
+--- a/src/types/ed25519.rs
++++ b/src/types/ed25519.rs
+@@ -20,7 +20,7 @@
+ use ed25519_dalek::{
+     PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH, Signature, Signer, SigningKey, VerifyingKey,
+ };
+-use rand::thread_rng;
++use rand_core::OsRng;
+ use serde::{Deserialize, Deserializer, Serialize, Serializer};
+ use serde_bytes::{ByteBuf as SerdeByteBuf, Bytes as SerdeBytes};
+ use sha2::Sha512;
+@@ -127,7 +127,7 @@
+ impl Ed25519Keypair {
+     /// Create a new, random, `Ed25519Keypair`.
+     pub fn new() -> Self {
+-        let mut rng = thread_rng();
++        let mut rng = OsRng;
+         let signing_key = SigningKey::generate(&mut rng);
+ 
+         Self {
+@@ -206,7 +206,7 @@
+ 
+     /// Create a new random `Ed25519SecretKey`.
+     pub fn new() -> Self {
+-        let mut rng = thread_rng();
++        let mut rng = OsRng;
+         let signing_key = SigningKey::generate(&mut rng);
+         let key = Box::new(signing_key);
+ 
+--- a/src/ecies/mod.rs
++++ b/src/ecies/mod.rs
+@@ -85,7 +85,7 @@
+ 
+ use chacha20poly1305::{ChaCha20Poly1305, Key as Chacha20Key, KeyInit, Nonce, aead::Aead};
+ use hkdf::Hkdf;
+-use rand::thread_rng;
++use rand_core::OsRng;
+ use sha2::Sha512;
+ use thiserror::Error;
+ use x25519_dalek::{EphemeralSecret, SharedSecret};
+@@ -244,7 +244,7 @@
+     /// The application info will be used to derive the various secrets and
+     /// provide domain separation.
+     pub fn with_info(info: &str) -> Self {
+-        let rng = thread_rng();
++        let rng = OsRng;
+         let secret_key = EphemeralSecret::random_from_rng(rng);
+         let application_info_prefix = info.to_owned();
+ 
+--- a/src/sas.rs
++++ b/src/sas.rs
+@@ -53,7 +53,7 @@
+ 
+ use hkdf::Hkdf;
+ use hmac::{Hmac, Mac as _, digest::MacError};
+-use rand::thread_rng;
++use rand_core::OsRng;
+ use sha2::Sha256;
+ use thiserror::Error;
+ use x25519_dalek::{EphemeralSecret, SharedSecret};
+@@ -221,7 +221,7 @@
+     /// This creates an ephemeral curve25519 keypair that can be used to
+     /// establish a shared secret.
+     pub fn new() -> Self {
+-        let rng = thread_rng();
++        let rng = OsRng;
+ 
+         let secret_key = EphemeralSecret::random_from_rng(rng);
+         let public_key = Curve25519PublicKey::from(&secret_key);
+--- a/src/olm/account/mod.rs
++++ b/src/olm/account/mod.rs
+@@ -21,7 +21,7 @@
+     ChaCha20Poly1305,
+     aead::{Aead, AeadCore, KeyInit},
+ };
+-use rand::thread_rng;
++use rand_core::OsRng;
+ use serde::{Deserialize, Serialize};
+ use thiserror::Error;
+ use zeroize::Zeroize;
+@@ -520,7 +520,7 @@
+             .map_err(|e| DehydratedDeviceError::LibolmPickle(LibolmPickleError::Encode(e)))?;
+ 
+         let cipher = ChaCha20Poly1305::new(key.into());
+-        let rng = thread_rng();
++        let rng = OsRng;
+         let nonce = ChaCha20Poly1305::generate_nonce(rng);
+         let ciphertext = cipher.encrypt(&nonce, encoded.as_slice());
+ 
+--- a/src/megolm/ratchet.rs
++++ b/src/megolm/ratchet.rs
+@@ -14,7 +14,7 @@
+ // limitations under the License.
+ 
+ use hmac::{Hmac, Mac as _};
+-use rand::{RngCore, thread_rng};
++use rand_core::{OsRng, RngCore};
+ use serde::{Deserialize, Deserializer, Serialize, Serializer};
+ use sha2::{Sha256, digest::CtOutput};
+ use subtle::{Choice, ConstantTimeEq};
+@@ -139,7 +139,7 @@
+     const LAST_RATCHET_INDEX: usize = Self::RATCHET_PART_COUNT - 1;
+ 
+     pub fn new() -> Self {
+-        let mut rng = thread_rng();
++        let mut rng = OsRng;
+ 
+         let mut ratchet =
+             Self { inner: RatchetBytes(Box::new([0u8; Self::RATCHET_LENGTH])), counter: 0 };
