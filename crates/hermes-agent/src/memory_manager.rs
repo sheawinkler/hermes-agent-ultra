@@ -677,31 +677,34 @@ fn memory_fusion_top_k() -> usize {
         .unwrap_or(6)
 }
 
-fn memory_fusion_weights() -> HashMap<String, f64> {
-    let raw = std::env::var("HERMES_MEMORY_FUSION_WEIGHTS").unwrap_or_else(|_| {
-        "builtin=1.2,interest=1.1,contextlattice=1.25,supermemory=1.15".to_string()
-    });
-    let mut weights = HashMap::new();
-    for piece in raw.split(',') {
-        let token = piece.trim();
-        if token.is_empty() {
-            continue;
+fn memory_fusion_weights() -> &'static HashMap<String, f64> {
+    static WEIGHTS: std::sync::OnceLock<HashMap<String, f64>> = std::sync::OnceLock::new();
+    WEIGHTS.get_or_init(|| {
+        let raw = std::env::var("HERMES_MEMORY_FUSION_WEIGHTS").unwrap_or_else(|_| {
+            "builtin=1.2,interest=1.1,contextlattice=1.25,supermemory=1.15".to_string()
+        });
+        let mut weights = HashMap::new();
+        for piece in raw.split(',') {
+            let token = piece.trim();
+            if token.is_empty() {
+                continue;
+            }
+            let mut split = token.splitn(2, '=');
+            let Some(name) = split.next().map(str::trim).filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            let Some(weight) = split
+                .next()
+                .map(str::trim)
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|v| v.is_finite() && *v > 0.0)
+            else {
+                continue;
+            };
+            weights.insert(name.to_ascii_lowercase(), weight);
         }
-        let mut split = token.splitn(2, '=');
-        let Some(name) = split.next().map(str::trim).filter(|s| !s.is_empty()) else {
-            continue;
-        };
-        let Some(weight) = split
-            .next()
-            .map(str::trim)
-            .and_then(|v| v.parse::<f64>().ok())
-            .filter(|v| v.is_finite() && *v > 0.0)
-        else {
-            continue;
-        };
-        weights.insert(name.to_ascii_lowercase(), weight);
-    }
-    weights
+        weights
+    })
 }
 
 fn memory_fusion_min_confidence() -> f64 {
@@ -922,7 +925,7 @@ fn fuse_memory_candidates(candidates: Vec<FusedMemoryCandidate>, query: &str) ->
     let mut scored: Vec<(f64, f64, FusedMemoryCandidate)> = candidates
         .into_iter()
         .map(|entry| {
-            let (score, confidence) = score_memory_candidate(&entry, &terms, &weights);
+            let (score, confidence) = score_memory_candidate(&entry, &terms, weights);
             (score, confidence, entry)
         })
         .collect();

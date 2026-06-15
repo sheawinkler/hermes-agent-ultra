@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
+use futures::future::join_all;
 use hermes_core::{Message, ToolCall, ToolError, ToolResult};
 use serde_json::Value;
 use tokio::sync::Semaphore;
@@ -47,12 +48,13 @@ impl AgentLoop {
         let mut dedupe_search_dups: Vec<(String, String)> = Vec::new();
         let plan_phase = self.plan_phase();
 
-        // Run orchestrated `delegate_task` calls sequentially in the caller's
-        // task - this keeps the inner AgentLoop future out of the Send-bound
-        // JoinSet and preserves the requested concurrency cap which is already
-        // applied upstream via `cap_delegates`.
+        // Run orchestrated `delegate_task` calls concurrently — each future is already
+        // spawned internally by the orchestrator, so join_all drives them in parallel
+        // without putting a non-Send AgentLoop future into a Send-bound JoinSet.
         let mut orchestrated: Vec<ToolResult> = Vec::new();
         if let Some(orch) = orchestrator.as_ref() {
+            let mut pending_ids: Vec<String> = Vec::new();
+            let mut pending_futs = Vec::new();
             for tc in tool_calls {
                 if tc.function.name != "delegate_task" {
                     continue;
@@ -112,11 +114,14 @@ impl AgentLoop {
                     parent_budget_remaining_usd,
                     inherited_tool_schemas: Vec::new(),
                 };
-                // Orchestrator internally runs the child on its own
-                // `tokio::spawn` task, which erases the child future and breaks
-                // async recursion between parent / child `execute_tool_calls`.
-                let output = orch.execute(req).await;
-                orchestrated.push(ToolResult::ok(&tc.id, output));
+                pending_ids.push(tc.id.clone());
+                pending_futs.push(orch.execute(req));
+            }
+            if !pending_futs.is_empty() {
+                let outputs = join_all(pending_futs).await;
+                for (id, output) in pending_ids.into_iter().zip(outputs) {
+                    orchestrated.push(ToolResult::ok(&id, output));
+                }
             }
         }
 
