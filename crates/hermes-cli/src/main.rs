@@ -49,14 +49,10 @@ use hermes_core::AgentError;
 use hermes_telemetry::init_telemetry_from_env;
 use interactive_lock::InteractiveSessionLockGuard;
 
-/// Windows default thread stacks are too small for gateway/TUI startup (large async state).
-const MAIN_THREAD_STACK: usize = 8 * 1024 * 1024;
-
 fn main() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let handle = std::thread::Builder::new()
-        .name("hermes-ultra-main".into())
-        .stack_size(MAIN_THREAD_STACK)
+        .name("rHermes".into())
         .spawn(main_thread_entry)
         .expect("failed to spawn main thread");
     match handle.join() {
@@ -91,7 +87,6 @@ fn main_thread_entry() -> Result<(), i32> {
     let cli = Cli::parse();
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .thread_stack_size(MAIN_THREAD_STACK)
         .build()
     {
         Ok(runtime) => runtime,
