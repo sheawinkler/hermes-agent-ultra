@@ -14,6 +14,7 @@ use crate::session::ServerSession;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const CLIENT_VERSION_HEADER: &str = "x-client-version";
+const LEGACY_TOKEN_HEADER: &str = "token";
 
 /// Shared HTTP client for server auth and LLM calls.
 #[derive(Clone)]
@@ -25,12 +26,19 @@ pub struct HttpTransport {
 
 impl HttpTransport {
     pub fn new(config: &ServerConfig) -> Result<Self, ServerClientError> {
-        let base_url = config.base_url.trim().trim_end_matches('/').to_string();
-        if config.enabled && base_url.is_empty() {
+        if config.enabled && config.base_url.trim().is_empty() {
+            return Err(ServerClientError::MissingBaseUrl);
+        }
+        Self::from_base_url(&config.base_url, config.llm.request_timeout_seconds)
+    }
+
+    pub fn from_base_url(base_url: &str, timeout_secs: u64) -> Result<Self, ServerClientError> {
+        let base_url = base_url.trim().trim_end_matches('/').to_string();
+        if base_url.is_empty() {
             return Err(ServerClientError::MissingBaseUrl);
         }
 
-        let timeout = Duration::from_secs(config.llm.request_timeout_seconds.max(1));
+        let timeout = Duration::from_secs(timeout_secs.max(1));
         let client = Client::builder()
             .timeout(timeout)
             .build()
@@ -55,6 +63,7 @@ impl HttpTransport {
         &self,
         bearer_token: Option<&str>,
         request_id: Option<&str>,
+        include_json_content_type: bool,
     ) -> Result<HeaderMap, ServerClientError> {
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -66,7 +75,9 @@ impl HttpTransport {
             HeaderName::from_static(CLIENT_VERSION_HEADER),
             HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
         );
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        if include_json_content_type {
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        }
 
         if let Some(id) = request_id {
             headers.insert(
@@ -82,6 +93,11 @@ impl HttpTransport {
                 HeaderValue::from_str(&format!("Bearer {token}"))
                     .map_err(|e| ServerClientError::Http(format!("authorization header: {e}")))?,
             );
+            headers.insert(
+                HeaderName::from_static(LEGACY_TOKEN_HEADER),
+                HeaderValue::from_str(token)
+                    .map_err(|e| ServerClientError::Http(format!("token header: {e}")))?,
+            );
         }
 
         Ok(headers)
@@ -93,13 +109,9 @@ impl HttpTransport {
             return path.to_string();
         }
         let path = path.strip_prefix('/').unwrap_or(path);
-        if self.base_url.is_empty() {
-            return format!("/{path}");
-        }
         format!("{}/{}", self.base_url, path)
     }
 
-    /// Send an HTTP request with optional bearer token and retry on transient failures.
     pub async fn request(
         &self,
         method: Method,
@@ -113,7 +125,7 @@ impl HttpTransport {
             Some(s) => s.access_token().await?,
             None => None,
         };
-        let headers = self.build_headers(bearer.as_deref(), Some(&request_id))?;
+        let headers = self.build_headers(bearer.as_deref(), Some(&request_id), body.is_some())?;
 
         debug!(%method, %url, request_id = %request_id, "server http request");
 
@@ -167,13 +179,6 @@ impl HttpTransport {
     ) -> Result<Response, ServerClientError> {
         self.request(Method::POST, path, session, Some(body)).await
     }
-
-    pub fn parse_request_id(headers: &HeaderMap) -> Option<String> {
-        headers
-            .get(REQUEST_ID_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_string)
-    }
 }
 
 #[cfg(test)]
@@ -184,16 +189,12 @@ mod tests {
     fn resolve_url_joins_base_and_path() {
         let transport = HttpTransport {
             client: Client::new(),
-            base_url: "https://api.example.com".to_string(),
+            base_url: "https://server.flowyaipc.cn/claw".to_string(),
             user_agent: "test".to_string(),
         };
         assert_eq!(
-            transport.resolve_url("/v1/models"),
-            "https://api.example.com/v1/models"
-        );
-        assert_eq!(
-            transport.resolve_url("v1/health"),
-            "https://api.example.com/v1/health"
+            transport.resolve_url("/user/me"),
+            "https://server.flowyaipc.cn/claw/user/me"
         );
     }
 }

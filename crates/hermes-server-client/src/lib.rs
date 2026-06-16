@@ -3,19 +3,29 @@
 //! Agent business logic (AgentLoop, tools, sessions) stays local; this crate only
 //! talks to the server for login and LLM HTTP calls.
 
+pub mod activation;
 pub mod auth;
 pub mod doctor;
 pub mod error;
+pub mod flowy;
 pub mod llm;
+pub mod paths;
+pub mod platform;
+pub mod profile;
 pub mod session;
 pub mod transport;
 
+pub use activation::DeviceActivation;
 pub use auth::{
     AuthManager, AuthPollResult, AuthUserInput, LoginMethod, PendingLogin, WhoamiStatus,
 };
 pub use doctor::{DoctorReport, run_doctor};
 pub use error::ServerClientError;
+pub use flowy::{
+    ClawModelEntry, CreditsBalance, CreditsCheckinResponse, FlowyApiClient, UserMe,
+};
 pub use llm::ServerLlmProvider;
+pub use profile::ProfileStore;
 pub use session::{SERVER_TOKEN_PROVIDER, ServerSession, ServerTokens, TokenSource};
 pub use transport::HttpTransport;
 
@@ -32,22 +42,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auth_manager_wechat_start_returns_not_configured() {
-        let mut config = ServerConfig::default();
-        config.enabled = true;
-        config.base_url = "https://example.com".to_string();
-        let manager = AuthManager::new(config, std::env::temp_dir()).expect("manager");
-        let err = manager
-            .start_login(LoginMethod::WechatQr)
-            .await
-            .expect_err("stub");
-        assert!(matches!(err, ServerClientError::NotConfigured(_)));
-    }
-
-    #[tokio::test]
-    async fn auth_manager_disabled_errors() {
+    async fn auth_manager_missing_base_url() {
         let config = ServerConfig::default();
         let result = AuthManager::new(config, std::env::temp_dir());
-        assert!(matches!(result, Err(ServerClientError::Disabled)));
+        assert!(matches!(result, Err(ServerClientError::MissingBaseUrl)));
     }
 }

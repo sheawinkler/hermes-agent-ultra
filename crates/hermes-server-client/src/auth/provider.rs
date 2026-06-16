@@ -2,13 +2,16 @@
 
 use async_trait::async_trait;
 
+use hermes_config::ServerConfig;
+
 use crate::auth::types::{AuthPollResult, AuthUserInput, LoginMethod, PendingLogin};
 use crate::error::ServerClientError;
-use crate::transport::HttpTransport;
+use crate::flowy::FlowyApiClient;
 
 /// Shared context for auth provider HTTP calls.
 pub struct AuthContext<'a> {
-    pub transport: &'a HttpTransport,
+    pub api: &'a FlowyApiClient,
+    pub config: &'a ServerConfig,
 }
 
 /// Pluggable login method (WeChat QR, email OTP, …).

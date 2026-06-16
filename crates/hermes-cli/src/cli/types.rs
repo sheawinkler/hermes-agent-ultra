@@ -236,6 +236,7 @@ pub enum CliCommand {
     },
     Server {
         action: Option<String>,
+        rest: Vec<String>,
         method: Option<String>,
     },
     Mcp {

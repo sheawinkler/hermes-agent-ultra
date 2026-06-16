@@ -15,6 +15,7 @@ mod memory;
 mod pairing;
 mod plugins;
 mod server;
+mod server_config;
 mod sessions;
 mod whatsapp;
 

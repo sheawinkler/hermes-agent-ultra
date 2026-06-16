@@ -568,7 +568,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, interest.enabled|extract_mode|max_topics|llm_on_session_end|per_turn_buffer|per_turn_persist|promote_min_evidence|promote_min_confidence|min_turn_chars, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, insights.contribution.enabled|endpoint|upload_interests|upload_skills|on_session_end|skill_min_age_hours|min_evidence_tier|exclude_verdicts|require_skill_binding|min_work_turns|upload_skills_refresh|redacted_body|installation_token|auth_token, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, interest.enabled|extract_mode|max_topics|llm_on_session_end|per_turn_buffer|per_turn_persist|promote_min_evidence|promote_min_confidence|min_turn_chars, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, insights.contribution.enabled|endpoint|upload_interests|upload_skills|on_session_end|skill_min_age_hours|min_evidence_tier|exclude_verdicts|require_skill_binding|min_work_turns|upload_skills_refresh|redacted_body|installation_token|auth_token, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider, server.enabled|base_url|wechat_base_url|channel|app|invite_code|auth.preferred_method|auth.poll_interval_ms|auth.otp_ttl_seconds|auth.heartbeat_interval_secs";
 
 fn parse_bool_config_value(value: &str, field: &str) -> Result<bool, ConfigError> {
     let normalized = value.trim().to_ascii_lowercase();
@@ -1049,6 +1049,80 @@ fn apply_user_config_patch_dotted(
                 Some(trimmed.to_string())
             };
         }
+        ["server", "enabled"] => {
+            config.server.enabled = parse_bool_config_value(value, "server.enabled")?;
+        }
+        ["server", "base_url"] => {
+            config.server.base_url = value.trim().trim_end_matches('/').to_string();
+        }
+        ["server", "wechat_base_url"] => {
+            config.server.wechat_base_url = value.trim().trim_end_matches('/').to_string();
+        }
+        ["server", "channel"] => {
+            let channel = value.trim().to_string();
+            config.server.channel = channel.clone();
+            crate::server::sync_wechat_app_id_for_channel(&mut config.server.auth, &channel);
+        }
+        ["server", "app"] => {
+            config.server.app = value.trim().to_string();
+        }
+        ["server", "invite_code"] => {
+            config.server.invite_code = value.trim().to_string();
+        }
+        ["server", "auth", "preferred_method"] => {
+            let normalized = value.trim().to_ascii_lowercase().replace('-', "_");
+            config.server.auth.preferred_method = match normalized.as_str() {
+                "wechat" | "wechat_qr" | "wx" => crate::server::ServerLoginMethod::WechatQr,
+                "email" | "email_otp" | "otp" => crate::server::ServerLoginMethod::EmailOtp,
+                _ => {
+                    return Err(ConfigError::ValidationError(format!(
+                        "server.auth.preferred_method must be wechat_qr or email_otp: {}",
+                        value
+                    )));
+                }
+            };
+        }
+        ["server", "auth", "poll_interval_ms"] => {
+            config.server.auth.poll_interval_ms = value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "server.auth.poll_interval_ms must be a positive integer: {}",
+                    value
+                ))
+            })?;
+        }
+        ["server", "auth", "otp_ttl_seconds"] => {
+            config.server.auth.otp_ttl_seconds = value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "server.auth.otp_ttl_seconds must be a positive integer: {}",
+                    value
+                ))
+            })?;
+        }
+        ["server", "auth", "heartbeat_interval_secs"] => {
+            config.server.auth.heartbeat_interval_secs = value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "server.auth.heartbeat_interval_secs must be a positive integer: {}",
+                    value
+                ))
+            })?;
+        }
+        ["server", "auth", "wechat_app_id"] => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                config.server.auth.wechat_app_id.clear();
+            } else if crate::server::is_valid_wechat_open_app_id(trimmed) {
+                config.server.auth.wechat_app_id = trimmed.to_string();
+            } else {
+                return Err(ConfigError::ValidationError(format!(
+                    "invalid WeChat Open Platform app id '{trimmed}' \
+                     (expected wx + 16 hex chars, e.g. wxc7a38fe55e162569 for flowy). \
+                     Use server.app for the client app identifier (flowymes), not wechat_app_id"
+                )));
+            }
+        }
+        ["server", "llm", "default_model"] => {
+            config.server.llm.default_model = value.trim().to_string();
+        }
         _ => {
             return Err(ConfigError::NotFound(format!(
                 "unknown config key: {} (supported: {})",
@@ -1371,6 +1445,53 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .filter(|s| !s.is_empty())
             .map(mask_secret)
             .unwrap_or_else(|| "(not set)".to_string())),
+        ["server", "enabled"] => Ok(config.server.enabled.to_string()),
+        ["server", "base_url"] => Ok(if config.server.base_url.trim().is_empty() {
+            "(not set)".to_string()
+        } else {
+            config.server.base_url.clone()
+        }),
+        ["server", "wechat_base_url"] => Ok(if config.server.wechat_base_url.trim().is_empty() {
+            "(not set)".to_string()
+        } else {
+            config.server.wechat_base_url.clone()
+        }),
+        ["server", "channel"] => Ok(config.server.channel.clone()),
+        ["server", "app"] => Ok(config.server.app.clone()),
+        ["server", "invite_code"] => Ok(if config.server.invite_code.trim().is_empty() {
+            "(not set)".to_string()
+        } else {
+            config.server.invite_code.clone()
+        }),
+        ["server", "auth", "preferred_method"] => {
+            Ok(config.server.auth.preferred_method.as_str().to_string())
+        }
+        ["server", "auth", "poll_interval_ms"] => {
+            Ok(config.server.auth.poll_interval_ms.to_string())
+        }
+        ["server", "auth", "otp_ttl_seconds"] => Ok(config.server.auth.otp_ttl_seconds.to_string()),
+        ["server", "auth", "heartbeat_interval_secs"] => {
+            Ok(config.server.auth.heartbeat_interval_secs.to_string())
+        }
+        ["server", "auth", "wechat_app_id"] => {
+            let effective = config.server.effective_wechat_app_id();
+            let stored = config.server.auth.wechat_app_id.trim();
+            Ok(if stored.is_empty() {
+                format!("(not set, using channel default: {effective})")
+            } else if !crate::server::is_valid_wechat_open_app_id(stored) {
+                format!("(invalid stored value '{stored}', using channel default: {effective})")
+            } else {
+                effective
+            })
+        }
+        ["server", "llm", "default_model"] => {
+            let effective = config.server.effective_default_llm_model();
+            Ok(if config.server.llm.default_model.trim().is_empty() {
+                format!("(not set, using built-in default: {effective})")
+            } else {
+                effective
+            })
+        }
         _ => Err(ConfigError::NotFound(format!(
             "unknown config key: {} (supported: {})",
             key, CONFIG_PATCH_HELP
@@ -2121,6 +2242,42 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
         if !trimmed.is_empty() {
             // Token is read at runtime from env by hermes-server-client; no config field needed.
             let _ = trimmed;
+        }
+    }
+    if let Ok(v) = std::env::var("HERMES_SERVER_CHANNEL") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            config.server.channel = trimmed.to_string();
+        }
+    }
+    if let Ok(v) = std::env::var("HERMES_SERVER_APP") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            config.server.app = trimmed.to_string();
+        }
+    }
+    if let Ok(v) = std::env::var("HERMES_SERVER_WECHAT_URL") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            config.server.wechat_base_url = trimmed.to_string();
+        }
+    }
+    if let Ok(v) = std::env::var("HERMES_SERVER_WECHAT_APP_ID") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            if crate::server::is_valid_wechat_open_app_id(trimmed) {
+                config.server.auth.wechat_app_id = trimmed.to_string();
+            } else {
+                tracing::warn!(
+                    "HERMES_SERVER_WECHAT_APP_ID ignored — invalid WeChat Open Platform app id: {trimmed}"
+                );
+            }
+        }
+    }
+    if let Ok(v) = std::env::var("HERMES_SERVER_INVITE_CODE") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            config.server.invite_code = trimmed.to_string();
         }
     }
     if let Ok(v) = std::env::var("HERMES_KANBAN_DISPATCH_IN_GATEWAY")
@@ -3083,6 +3240,32 @@ custom_providers:
         let loaded = load_user_config_file(&path).unwrap();
         assert_eq!(loaded.model.as_deref(), Some("openai:gpt-4o-mini"));
         assert_eq!(loaded.max_turns, 15);
+    }
+
+    #[test]
+    fn apply_patch_server_fields() {
+        let mut c = GatewayConfig::default();
+        apply_user_config_patch(
+            &mut c,
+            "server.base_url",
+            "https://server.flowyaipc.cn/claw",
+        )
+        .unwrap();
+        apply_user_config_patch(&mut c, "server.channel", "flowy").unwrap();
+        apply_user_config_patch(&mut c, "server.app", "flowymes").unwrap();
+        apply_user_config_patch(&mut c, "server.auth.preferred_method", "email").unwrap();
+        assert_eq!(
+            c.server.base_url,
+            "https://server.flowyaipc.cn/claw"
+        );
+        assert_eq!(c.server.channel, "flowy");
+        assert_eq!(c.server.app, "flowymes");
+        assert_eq!(
+            c.server.auth.preferred_method,
+            crate::server::ServerLoginMethod::EmailOtp
+        );
+        let display = user_config_field_display(&c, "server.base_url").unwrap();
+        assert_eq!(display, "https://server.flowyaipc.cn/claw");
     }
 
     #[test]

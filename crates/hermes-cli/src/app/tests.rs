@@ -1,6 +1,6 @@
 use super::actors::AuthLane;
 use super::provider::{
-    allow_no_api_key, clear_provider_cache, normalize_runtime_provider_name, NoBackendProvider,
+    NoBackendProvider, allow_no_api_key, clear_provider_cache, normalize_runtime_provider_name,
     provider_cache_key, resolve_provider_and_model, resolve_startup_model,
 };
 use super::quorum::{QUORUM_DEFAULT_VOTER_PASSES, QUORUM_HINT_PREFIX};

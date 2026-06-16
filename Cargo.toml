@@ -118,4 +118,6 @@ proptest = "1"
 ort = { version = "2.0.0-rc.12", default-features = false, features = ["download-binaries"] }
 which = "8"
 qrcode = "0.14"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+rqrr = "0.9"
 indicatif = "0.18"

@@ -33,6 +33,15 @@ impl ServerTokens {
         }
     }
 
+    pub fn from_jwt(access_token: String) -> Self {
+        Self {
+            access_token,
+            refresh_token: None,
+            expires_at: None,
+            token_type: "Bearer".to_string(),
+        }
+    }
+
     pub fn into_credential(self) -> OAuthCredential {
         OAuthCredential {
             provider: SERVER_TOKEN_PROVIDER.to_string(),

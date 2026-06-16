@@ -9,6 +9,7 @@ use hermes_agent::providers_extra::{
 };
 use hermes_config::GatewayConfig;
 use hermes_core::LlmProvider;
+use hermes_server_client::ServerLlmProvider;
 
 use super::api_keys::{
     allow_no_api_key, provider_api_key_from_env, resolve_api_key_literal_or_env_ref,
@@ -22,6 +23,24 @@ use super::urls::{
 };
 
 pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvider> {
+    if config.server.enabled && config.server.api_ready() {
+        match ServerLlmProvider::new(config.server.clone(), hermes_config::hermes_home()) {
+            Ok(provider) => {
+                tracing::info!(
+                    base_url = %config.server.effective_llm_base_url(),
+                    "using remote Flowy server LLM provider"
+                );
+                return Arc::new(provider);
+            }
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "server.enabled but remote LLM provider init failed; falling back to local provider config"
+                );
+            }
+        }
+    }
+
     let (provider_name, model_name) = resolve_provider_and_model(config, model);
     let runtime_provider = normalize_runtime_provider_name(provider_name.as_str());
 

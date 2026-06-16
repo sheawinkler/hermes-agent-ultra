@@ -7,19 +7,28 @@ repository.workspace = true
 description = "Remote LLM server client (auth + OpenAI-compatible LLM gateway) for Hermes Agent"
 
 [dependencies]
+hermes-agent = { workspace = true }
 hermes-auth = { workspace = true }
 hermes-config = { workspace = true }
 hermes-core = { workspace = true }
+async-stream = "0.3"
 async-trait = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
+image = { workspace = true }
+regex = { workspace = true }
+rqrr = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+url = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
+sha2 = "0.11"
+hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+wiremock = "0.6"

@@ -64,7 +64,11 @@ pub use paths::{
     state_db_path, state_db_path_in, state_dir, user_home_dir, user_path,
 };
 pub use platform::{PlatformConfig, UnauthorizedDmBehavior, extra_string, platform_token_or_extra};
-pub use server::{ServerAuthConfig, ServerConfig, ServerLlmConfig, ServerLoginMethod};
+pub use server::{
+    ServerAuthConfig, ServerConfig, ServerLlmConfig, ServerLoginMethod,
+    DEFAULT_SERVER_LLM_MODEL, DEFAULT_WECHAT_FLOWY_SERVER_BASE,
+    default_wechat_app_id_for_channel, is_valid_wechat_open_app_id,
+};
 pub use session::{DailyReset, IdleReset, SessionConfig, SessionResetPolicy, SessionType};
 pub use streaming::StreamingConfig;
 pub use voice::{

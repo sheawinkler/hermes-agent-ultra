@@ -826,10 +826,12 @@ pub fn parse_contribute(args: &[OsString]) -> Result<CliCommand, clap::Error> {
 #[derive(Parser, Debug, Clone)]
 #[command(
     name = "server",
-    about = "Remote LLM server account (login/logout/whoami/doctor)"
+    about = "Remote LLM server account (login/logout/whoami/profile/balance/checkin/doctor)"
 )]
 struct ServerArgs {
     action: Option<String>,
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    rest: Vec<String>,
     #[arg(long, value_parser = ["wechat", "wechat_qr", "email", "email_otp"])]
     method: Option<String>,
 }
@@ -837,6 +839,7 @@ struct ServerArgs {
 pub fn parse_server(args: &[OsString]) -> Result<CliCommand, clap::Error> {
     parse_subcommand::<ServerArgs, _>(args, |a| CliCommand::Server {
         action: a.action,
+        rest: a.rest,
         method: a.method,
     })
 }

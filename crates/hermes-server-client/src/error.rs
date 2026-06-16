@@ -16,6 +16,9 @@ pub enum ServerClientError {
     #[error("authentication required: {0}")]
     AuthRequired(String),
 
+    #[error("API error {code}: {msg}")]
+    Api { code: i32, msg: String },
+
     #[error("HTTP request failed: {0}")]
     Http(String),
 
