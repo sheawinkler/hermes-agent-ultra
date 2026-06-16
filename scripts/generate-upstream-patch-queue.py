@@ -49,15 +49,28 @@ PYTHON_TEST_SURFACE_PREFIXES: tuple[str, ...] = (
 RUST_PRIMARY_SUPERSEDE_PREFIXES: tuple[str, ...] = (
     "tests/",
     "test/",
+    "acp_adapter/",
     "agent/",
+    "batch_runner.py",
     "hermes_cli/",
+    "hermes_state.py",
+    "hermes_constants.py",
+    "hermes_logging.py",
+    "mini_swe_runner.py",
+    "minisweagent_path.py",
+    "mixture_of_agents_tool.py",
+    "model_tools.py",
     "gateway/",
+    "rl_cli.py",
     "tools/",
     "cron/",
     "providers/",
+    "terminal_tool.py",
+    "tui_gateway.py",
     "run_agent.py",
     "cli.py",
-    "tui_gateway.py",
+    "utils.py",
+    "web_tools.py",
     "pyproject.toml",
     "uv.lock",
     "requirements.txt",
@@ -83,6 +96,31 @@ RUST_PRIMARY_RETAINED_PREFIXES: tuple[str, ...] = (
     "Dockerfile",
     "flake.nix",
     ".github/workflows/",
+)
+RUST_PRIMARY_NEUTRAL_PREFIXES: tuple[str, ...] = (
+    ".dockerignore",
+    ".env.example",
+    ".envrc",
+    ".gitattributes",
+    ".gitignore",
+    ".cursorrules",
+    "__pycache__/",
+    "assets/",
+    "configs/",
+    "datagen-config-examples/",
+    "docs/agents.md",
+    "docs/llm_client.md",
+    "docs/message_graph.md",
+    "docs/tools.md",
+    "package-lock.json",
+    "package.json",
+    "requirements.txt",
+    "requirements-dev.txt",
+    "setup-hermes.sh",
+    "test_run.sh",
+    "toolset_distributions.py",
+    "TODO.md",
+    "VISION.md",
 )
 DEFAULT_SUBJECT_SUPERSEDE_PATTERNS: tuple[tuple[str, str], ...] = (
     (
@@ -150,7 +188,9 @@ def classify_ticket(files: list[str]) -> int:
 
 
 def is_python_test_surface(path: str) -> bool:
-    normalized = path.strip().lstrip("./")
+    normalized = path.strip()
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
     return any(normalized.startswith(prefix) for prefix in PYTHON_TEST_SURFACE_PREFIXES)
 
 
@@ -161,7 +201,9 @@ def commit_is_python_test_only(files: list[str]) -> bool:
 
 
 def _path_matches_any(path: str, prefixes: tuple[str, ...]) -> bool:
-    normalized = path.strip().lstrip("./")
+    normalized = path.strip()
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
     for prefix in prefixes:
         if normalized == prefix or normalized.startswith(prefix):
             return True
@@ -171,16 +213,19 @@ def _path_matches_any(path: str, prefixes: tuple[str, ...]) -> bool:
 def commit_is_rust_primary_superseded(files: list[str]) -> bool:
     if not files:
         return False
-    any_runtime = False
+    any_superseded_surface = False
     for path in files:
+        if _path_matches_any(path, RUST_PRIMARY_NEUTRAL_PREFIXES):
+            any_superseded_surface = True
+            continue
         if _path_matches_any(path, RUST_PRIMARY_RETAINED_PREFIXES):
             return False
         if _path_matches_any(path, RUST_PRIMARY_SUPERSEDE_PREFIXES):
-            any_runtime = True
+            any_superseded_surface = True
             continue
         # Any unclassified path is treated as potentially actionable.
         return False
-    return any_runtime
+    return any_superseded_surface
 
 
 def parse_log_blocks(raw: str) -> list[dict[str, Any]]:
@@ -233,13 +278,42 @@ def patch_equivalent_commits(repo_root: Path, local_ref: str, upstream_ref: str)
     return out
 
 
-def load_existing_state(path: Path) -> dict[str, dict[str, Any]]:
+def load_queue_payload(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def repo_relative_path(repo_root: Path, path: Path) -> str | None:
+    try:
+        return path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def load_queue_payload_from_ref(repo_root: Path, ref: str, path: Path) -> dict[str, Any]:
+    relative = repo_relative_path(repo_root, path)
+    if not relative:
+        return {}
+    proc = subprocess.run(
+        ["git", "show", f"{ref}:{relative}"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return {}
+    try:
+        return json.loads(proc.stdout)
+    except Exception:
+        return {}
+
+
+def load_existing_state(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for item in payload.get("commits", []):
         sha = str(item.get("sha", "")).strip()
@@ -253,11 +327,43 @@ def load_existing_state(path: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
-def git_blob_text(repo_root: Path, ref: str, path: str) -> str | None:
+def first_prior_sha(payload: dict[str, Any]) -> str:
+    commits = payload.get("commits", [])
+    if not isinstance(commits, list) or not commits:
+        return ""
+    first = commits[0]
+    if not isinstance(first, dict):
+        return ""
+    return str(first.get("sha", "")).strip()
+
+
+def has_merge_base(repo_root: Path, left_ref: str, right_ref: str) -> bool:
+    proc = subprocess.run(
+        ["git", "merge-base", left_ref, right_ref],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return proc.returncode == 0 and bool(proc.stdout.strip())
+
+
+def filter_blocks_from_baseline(
+    blocks: list[dict[str, Any]],
+    baseline_sha: str,
+) -> tuple[list[dict[str, Any]], int]:
+    if not baseline_sha:
+        return blocks, 0
+    for index, block in enumerate(blocks):
+        if str(block.get("sha", "")) == baseline_sha:
+            return blocks[index:], index
+    return blocks, 0
+
+
+def git_blob_bytes(repo_root: Path, ref: str, path: str) -> bytes | None:
     proc = subprocess.run(
         ["git", "show", f"{ref}:{path}"],
         cwd=repo_root,
-        text=True,
         capture_output=True,
         check=False,
     )
@@ -267,12 +373,10 @@ def git_blob_text(repo_root: Path, ref: str, path: str) -> str | None:
 
 
 def file_identical_between_refs(repo_root: Path, local_ref: str, upstream_ref: str, path: str) -> bool:
-    local_blob = git_blob_text(repo_root, local_ref, path)
-    if local_blob is None:
-        return False
-    upstream_blob = git_blob_text(repo_root, upstream_ref, path)
-    if upstream_blob is None:
-        return False
+    local_blob = git_blob_bytes(repo_root, local_ref, path)
+    upstream_blob = git_blob_bytes(repo_root, upstream_ref, path)
+    if local_blob is None or upstream_blob is None:
+        return local_blob is None and upstream_blob is None
     return local_blob == upstream_blob
 
 
@@ -372,6 +476,22 @@ def main() -> int:
         help="Queue markdown summary path (relative to repo root)",
     )
     parser.add_argument(
+        "--prior-ref",
+        default=None,
+        help=(
+            "Git ref to load the prior queue from. Defaults to --local-ref, which "
+            "keeps regeneration from preserving dirty/generated worktree state."
+        ),
+    )
+    parser.add_argument(
+        "--no-prior-baseline",
+        action="store_true",
+        help=(
+            "Do not use the first prior queued upstream commit as the lower bound "
+            "when local and upstream refs have no merge base."
+        ),
+    )
+    parser.add_argument(
         "--allow-python-test-surfaces",
         action="store_true",
         help=(
@@ -393,6 +513,16 @@ def main() -> int:
         fetch_remote_branch(repo_root, args.upstream_remote, args.upstream_branch)
 
     upstream_ref = f"{args.upstream_remote}/{args.upstream_branch}"
+    out_json = (repo_root / args.out_json).resolve()
+    out_md = (repo_root / args.out_md).resolve()
+    overrides_path = (repo_root / args.overrides).resolve()
+    prior_ref = args.prior_ref or args.local_ref
+    prior_payload = load_queue_payload_from_ref(repo_root, prior_ref, out_json)
+    prior_source = prior_ref if prior_payload else "worktree"
+    if not prior_payload:
+        prior_payload = load_queue_payload(out_json)
+    prior = load_existing_state(prior_payload)
+
     range_expr = f"{args.local_ref}..{upstream_ref}"
     log_raw = run_git(
         repo_root,
@@ -400,13 +530,14 @@ def main() -> int:
         check=False,
     )
     blocks = parse_log_blocks(log_raw)
+    skipped_before_baseline = 0
+    baseline_start_sha = ""
+    if not args.no_prior_baseline and not has_merge_base(repo_root, args.local_ref, upstream_ref):
+        baseline_start_sha = first_prior_sha(prior_payload)
+        blocks, skipped_before_baseline = filter_blocks_from_baseline(blocks, baseline_start_sha)
     if args.max_commits > 0:
         blocks = blocks[: args.max_commits]
 
-    out_json = (repo_root / args.out_json).resolve()
-    out_md = (repo_root / args.out_md).resolve()
-    overrides_path = (repo_root / args.overrides).resolve()
-    prior = load_existing_state(out_json)
     sha_overrides, subject_pattern_overrides = load_overrides(overrides_path)
     patch_equivalent = patch_equivalent_commits(repo_root, args.local_ref, upstream_ref)
 
@@ -422,7 +553,7 @@ def main() -> int:
         disposition = str(prev.get("disposition", "pending")) or "pending"
         notes = str(prev.get("notes", ""))
         owner = str(prev.get("owner", ""))
-        classification_rule = "prior_state"
+        classification_rule = "prior_state" if prev else "default_pending"
         override = resolve_sha_override(sha, sha_overrides)
         if override:
             classification_rule = "sha_override"
@@ -438,22 +569,6 @@ def main() -> int:
             if notes:
                 notes += " | "
             notes += f"patch-equivalent commit already present on {args.local_ref}"
-
-        if disposition in {"", "pending"}:
-            key = (args.local_ref, sha)
-            if key not in mirrored_cache:
-                mirrored_cache[key] = commit_mirrored_between_refs(
-                    repo_root,
-                    args.local_ref,
-                    upstream_ref,
-                    files,
-                )
-            if mirrored_cache[key]:
-                disposition = "mirrored"
-                classification_rule = "mirrored_file_state"
-                if notes:
-                    notes += " | "
-                notes += f"all touched files in {upstream_ref} already mirror {args.local_ref}"
 
         python_test_only = commit_is_python_test_only(files)
         rust_only_superseded = python_test_only and not args.allow_python_test_surfaces
@@ -474,6 +589,22 @@ def main() -> int:
                 "rust-primary parity policy: upstream Python runtime surface commit is "
                 "covered by Rust-native architecture and tracked via Rust gates"
             )
+
+        if disposition in {"", "pending"}:
+            key = (args.local_ref, sha)
+            if key not in mirrored_cache:
+                mirrored_cache[key] = commit_mirrored_between_refs(
+                    repo_root,
+                    args.local_ref,
+                    upstream_ref,
+                    files,
+                )
+            if mirrored_cache[key]:
+                disposition = "mirrored"
+                classification_rule = "mirrored_file_state"
+                if notes:
+                    notes += " | "
+                notes += f"all touched files in {upstream_ref} already mirror {args.local_ref}"
 
         if disposition in {"", "pending"}:
             custom_subject_match = None
@@ -525,6 +656,10 @@ def main() -> int:
             "local_ref": args.local_ref,
             "upstream_ref": upstream_ref,
             "range": range_expr,
+            "prior_ref": prior_ref,
+            "prior_source": prior_source,
+            "baseline_start_sha": baseline_start_sha,
+            "skipped_before_baseline": skipped_before_baseline,
         },
         "summary": {
             "total_commits": len(rows),

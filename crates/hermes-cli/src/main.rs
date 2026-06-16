@@ -5469,6 +5469,8 @@ async fn register_gateway_adapters(
                     token,
                     team_id: extra_string(platform_cfg, "team_id"),
                     proxy: Default::default(),
+                    reply_to_mode: extra_string(platform_cfg, "reply_to_mode")
+                        .unwrap_or_else(|| "off".to_string()),
                 };
                 match MattermostAdapter::new(mm_cfg) {
                     Ok(adapter) => {

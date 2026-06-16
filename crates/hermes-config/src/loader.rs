@@ -66,7 +66,7 @@ pub fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> 
         file.write_all(bytes).map_err(io_to_config_error)?;
         file.sync_all().map_err(io_to_config_error)?;
         drop(file);
-        std::fs::rename(&tmp_path, path).map_err(io_to_config_error)?;
+        replace_temp_file(&tmp_path, path)?;
         Ok(())
     })();
 
@@ -74,6 +74,31 @@ pub fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> 
         let _ = std::fs::remove_file(&tmp_path);
     }
     result
+}
+
+fn replace_temp_file(tmp_path: &Path, path: &Path) -> Result<(), ConfigError> {
+    match std::fs::rename(tmp_path, path) {
+        Ok(()) => Ok(()),
+        Err(err) if is_cross_device_rename_error(&err) => {
+            std::fs::copy(tmp_path, path).map_err(io_to_config_error)?;
+            let _ = std::fs::remove_file(tmp_path);
+            Ok(())
+        }
+        Err(err) => Err(io_to_config_error(err)),
+    }
+}
+
+fn is_cross_device_rename_error(err: &std::io::Error) -> bool {
+    let code = err.raw_os_error();
+    #[cfg(unix)]
+    if code == Some(18) {
+        return true;
+    }
+    #[cfg(windows)]
+    if code == Some(17) {
+        return true;
+    }
+    false
 }
 
 #[cfg(unix)]
@@ -2501,6 +2526,22 @@ mod tests {
             .file_name()
             .to_string_lossy()
             .contains(".tmp.")));
+    }
+
+    #[test]
+    fn cross_device_rename_detection_matches_platform_error_code() {
+        #[cfg(unix)]
+        assert!(is_cross_device_rename_error(
+            &std::io::Error::from_raw_os_error(18)
+        ));
+        #[cfg(windows)]
+        assert!(is_cross_device_rename_error(
+            &std::io::Error::from_raw_os_error(17)
+        ));
+        assert!(!is_cross_device_rename_error(&std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "ordinary rename failure",
+        )));
     }
 
     #[test]

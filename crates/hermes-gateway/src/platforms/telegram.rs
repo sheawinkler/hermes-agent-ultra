@@ -1858,26 +1858,41 @@ impl TelegramAdapter {
         callback: Option<(&str, &str)>,
     ) -> Option<IncomingMessage> {
         let text = msg.text.clone().or_else(|| msg.caption.clone());
+        let reply = msg.reply_to_message.as_deref();
+        let own_media = msg.voice.is_some()
+            || msg.photo.is_some()
+            || msg.sticker.is_some()
+            || msg.document.is_some();
+        let replied_media = if own_media { None } else { reply };
         let user_id = msg.from.as_ref().map(|u| u.id);
         let username = msg.from.as_ref().and_then(|u| u.username.clone());
 
-        let is_voice = msg.voice.is_some();
-        let voice_file_id = msg.voice.as_ref().map(|v| v.file_id.clone());
+        let voice = msg
+            .voice
+            .as_ref()
+            .or_else(|| replied_media.and_then(|r| r.voice.as_ref()));
+        let is_voice = voice.is_some();
+        let voice_file_id = voice.map(|v| v.file_id.clone());
 
-        let is_photo = msg.photo.is_some();
-        let photo_file_id = msg
+        let photo = msg
             .photo
             .as_ref()
-            .and_then(|photos| photos.last().map(|p| p.file_id.clone()));
+            .or_else(|| replied_media.and_then(|r| r.photo.as_ref()));
+        let is_photo = photo.is_some();
+        let photo_file_id = photo.and_then(|photos| photos.last().map(|p| p.file_id.clone()));
 
         let is_sticker = msg.sticker.is_some();
         let sticker_file_id = msg.sticker.as_ref().map(|s| s.file_id.clone());
 
-        let is_document = msg.document.is_some();
-        let document_file_id = msg.document.as_ref().map(|d| d.file_id.clone());
-        let document_file_name = msg.document.as_ref().and_then(|d| d.file_name.clone());
-        let document_mime_type = msg.document.as_ref().and_then(|d| d.mime_type.clone());
-        let document_file_size = msg.document.as_ref().and_then(|d| d.file_size);
+        let replied_document = replied_media
+            .and_then(|r| r.document.as_ref())
+            .filter(|doc| !Self::document_exceeds_size_limit(doc));
+        let document = msg.document.as_ref().or(replied_document);
+        let is_document = document.is_some();
+        let document_file_id = document.map(|d| d.file_id.clone());
+        let document_file_name = document.and_then(|d| d.file_name.clone());
+        let document_mime_type = document.and_then(|d| d.mime_type.clone());
+        let document_file_size = document.and_then(|d| d.file_size);
 
         let reply_to_message_id = msg.reply_to_message.as_ref().map(|r| r.message_id);
 
@@ -3563,6 +3578,166 @@ mod tests {
         assert_eq!(incoming.message_thread_id, Some(999));
         assert!(incoming.is_group);
         assert_eq!(incoming.chat_type, ChatKind::Supergroup);
+    }
+
+    #[test]
+    fn parse_update_text_reply_to_photo_exposes_replied_media() {
+        let reply_msg = TelegramMessage {
+            message_id: 51,
+            chat: make_chat(100, "supergroup"),
+            from: Some(make_user(50, None)),
+            text: None,
+            voice: None,
+            photo: Some(vec![PhotoSize {
+                file_id: "replied-large".into(),
+                file_unique_id: "rp1".into(),
+                width: 1280,
+                height: 720,
+            }]),
+            caption: None,
+            entities: Vec::new(),
+            caption_entities: Vec::new(),
+            sticker: None,
+            document: None,
+            reply_to_message: None,
+            message_thread_id: None,
+            is_topic_message: None,
+        };
+
+        let update = Update {
+            update_id: 31,
+            message: Some(TelegramMessage {
+                message_id: 56,
+                chat: make_chat(100, "supergroup"),
+                from: Some(make_user(200, None)),
+                text: Some("what is in this image?".into()),
+                voice: None,
+                photo: None,
+                caption: None,
+                entities: Vec::new(),
+                caption_entities: Vec::new(),
+                sticker: None,
+                document: None,
+                reply_to_message: Some(Box::new(reply_msg)),
+                message_thread_id: Some(999),
+                is_topic_message: None,
+            }),
+            callback_query: None,
+        };
+
+        let incoming = TelegramAdapter::parse_update(&update).unwrap();
+        assert_eq!(incoming.reply_to_message_id, Some(51));
+        assert_eq!(incoming.text, Some("what is in this image?".into()));
+        assert!(incoming.is_photo);
+        assert_eq!(incoming.photo_file_id, Some("replied-large".into()));
+    }
+
+    #[test]
+    fn parse_update_current_media_does_not_merge_replied_media() {
+        let reply_msg = TelegramMessage {
+            message_id: 53,
+            chat: make_chat(100, "supergroup"),
+            from: Some(make_user(50, None)),
+            text: None,
+            voice: Some(Voice {
+                file_id: "replied-voice".into(),
+                file_unique_id: "voice-unique".into(),
+                duration: 7,
+            }),
+            photo: None,
+            caption: None,
+            entities: Vec::new(),
+            caption_entities: Vec::new(),
+            sticker: None,
+            document: None,
+            reply_to_message: None,
+            message_thread_id: None,
+            is_topic_message: None,
+        };
+
+        let update = Update {
+            update_id: 33,
+            message: Some(TelegramMessage {
+                message_id: 58,
+                chat: make_chat(100, "supergroup"),
+                from: Some(make_user(200, None)),
+                text: None,
+                voice: None,
+                photo: Some(vec![PhotoSize {
+                    file_id: "current-photo".into(),
+                    file_unique_id: "current-photo-unique".into(),
+                    width: 640,
+                    height: 480,
+                }]),
+                caption: Some("caption".into()),
+                entities: Vec::new(),
+                caption_entities: Vec::new(),
+                sticker: None,
+                document: None,
+                reply_to_message: Some(Box::new(reply_msg)),
+                message_thread_id: None,
+                is_topic_message: None,
+            }),
+            callback_query: None,
+        };
+
+        let incoming = TelegramAdapter::parse_update(&update).unwrap();
+        assert!(incoming.is_photo);
+        assert_eq!(incoming.photo_file_id, Some("current-photo".into()));
+        assert!(!incoming.is_voice);
+        assert_eq!(incoming.voice_file_id, None);
+    }
+
+    #[test]
+    fn parse_update_text_reply_ignores_oversized_replied_document() {
+        let reply_msg = TelegramMessage {
+            message_id: 52,
+            chat: make_chat(100, "supergroup"),
+            from: Some(make_user(50, None)),
+            text: None,
+            voice: None,
+            photo: None,
+            caption: None,
+            entities: Vec::new(),
+            caption_entities: Vec::new(),
+            sticker: None,
+            document: Some(Document {
+                file_id: "huge-doc".into(),
+                file_unique_id: Some("huge-unique".into()),
+                file_name: Some("huge.pdf".into()),
+                mime_type: Some("application/pdf".into()),
+                file_size: Some(TELEGRAM_MAX_DOCUMENT_SIZE_BYTES + 1),
+            }),
+            reply_to_message: None,
+            message_thread_id: None,
+            is_topic_message: None,
+        };
+
+        let update = Update {
+            update_id: 32,
+            message: Some(TelegramMessage {
+                message_id: 57,
+                chat: make_chat(100, "supergroup"),
+                from: Some(make_user(200, None)),
+                text: Some("read this".into()),
+                voice: None,
+                photo: None,
+                caption: None,
+                entities: Vec::new(),
+                caption_entities: Vec::new(),
+                sticker: None,
+                document: None,
+                reply_to_message: Some(Box::new(reply_msg)),
+                message_thread_id: None,
+                is_topic_message: None,
+            }),
+            callback_query: None,
+        };
+
+        let incoming = TelegramAdapter::parse_update(&update).unwrap();
+        assert_eq!(incoming.reply_to_message_id, Some(52));
+        assert!(!incoming.is_document);
+        assert_eq!(incoming.document_file_id, None);
     }
 
     // -----------------------------------------------------------------------

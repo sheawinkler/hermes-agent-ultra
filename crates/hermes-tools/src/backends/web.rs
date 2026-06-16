@@ -51,7 +51,6 @@ impl WebSearchBackend for FallbackSearchBackend {
                  - TAVILY_API_KEY (https://tavily.com)\n\
                  - FIRECRAWL_API_KEY or FIRECRAWL_API_URL (https://firecrawl.dev)\n\
                  - PARALLEL_API_KEY with HERMES_WEB_SEARCH_BACKEND=parallel (https://parallel.ai)\n\
-                 - HERMES_WEB_SEARCH_BACKEND=parallel for keyless Parallel Search MCP\n\
                  - XAI_API_KEY with HERMES_WEB_SEARCH_BACKEND=xai (https://x.ai)\n\
                  - SERPER_API_KEY (https://serper.dev)\n\
                  - SEARXNG_BASE_URL or SEARXNG_URL (https://docs.searxng.org/dev/search_api.html)\n\
@@ -113,15 +112,7 @@ const SEARXNG_SEARCH_PATH: &str = "/search";
 const BRAVE_SEARCH_URL_DEFAULT: &str = "https://api.search.brave.com/res/v1/web/search";
 const DDG_INSTANT_ANSWER_URL_DEFAULT: &str = "https://api.duckduckgo.com/";
 const PARALLEL_BASE_URL_DEFAULT: &str = "https://api.parallel.ai";
-const PARALLEL_MCP_SEARCH_URL_DEFAULT: &str = "https://search.parallel.ai/mcp";
-const PARALLEL_MCP_PROTOCOL_VERSION: &str = "2025-06-18";
-const PARALLEL_MCP_CLIENT_NAME: &str = "mcp-web-client";
-const PARALLEL_MCP_CLIENT_VERSION: &str = "1.0.0";
-const PARALLEL_MCP_USER_AGENT: &str = "mcp-web-client/1.0.0";
-const PARALLEL_FREE_SEARCH_ATTRIBUTION: &str =
-    "Search powered by the free Parallel Web Search MCP (https://parallel.ai).";
-const PARALLEL_FREE_EXTRACT_ATTRIBUTION: &str =
-    "Extraction powered by the free Parallel Web Search MCP (https://parallel.ai).";
+const PARALLEL_USER_AGENT: &str = "hermes-agent-web/1.0.0";
 const FIRECRAWL_BASE_URL_DEFAULT: &str = "https://api.firecrawl.dev";
 const XAI_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
 const XAI_WEB_MODEL_DEFAULT: &str = "grok-4.3";
@@ -1192,13 +1183,11 @@ fn collect_duckduckgo_related(value: Option<&Value>, rows: &mut Vec<Value>) {
 
 /// Parallel.ai search/extract backend.
 ///
-/// With `PARALLEL_API_KEY`, this uses Parallel's v1 REST endpoints. Without a
-/// key, it uses the hosted Search MCP endpoint with a neutral client identity.
+/// Uses Parallel's v1 REST endpoints and requires `PARALLEL_API_KEY`.
 pub struct ParallelWebBackend {
     client: Client,
     api_key: Option<String>,
     rest_base_url: String,
-    mcp_url: String,
     search_mode: String,
 }
 
@@ -1208,33 +1197,25 @@ impl ParallelWebBackend {
             env_optional_nonempty("PARALLEL_API_KEY"),
             env_optional_nonempty("PARALLEL_BASE_URL")
                 .unwrap_or_else(|| PARALLEL_BASE_URL_DEFAULT.to_string()),
-            env_optional_nonempty("PARALLEL_MCP_URL")
-                .unwrap_or_else(|| PARALLEL_MCP_SEARCH_URL_DEFAULT.to_string()),
             parallel_search_mode_from_env(),
         )
     }
 
-    fn with_endpoints(
-        api_key: Option<String>,
-        rest_base_url: String,
-        mcp_url: String,
-        search_mode: String,
-    ) -> Self {
+    fn with_endpoints(api_key: Option<String>, rest_base_url: String, search_mode: String) -> Self {
         Self {
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
-                .user_agent(PARALLEL_MCP_USER_AGENT)
+                .user_agent(PARALLEL_USER_AGENT)
                 .build()
                 .unwrap_or_else(|_| Client::new()),
             api_key,
             rest_base_url: rest_base_url.trim().trim_end_matches('/').to_string(),
-            mcp_url,
             search_mode,
         }
     }
 
     fn new_session_id() -> String {
-        format!("{}-{}", PARALLEL_MCP_CLIENT_NAME, Uuid::new_v4().simple())
+        format!("parallel-{}", Uuid::new_v4().simple())
     }
 
     async fn search_rest(
@@ -1265,26 +1246,6 @@ impl ParallelWebBackend {
         .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
     }
 
-    async fn search_mcp(&self, query: &str, limit: usize) -> Result<String, ToolError> {
-        let payload = self
-            .mcp_call(
-                "web_search",
-                json!({
-                    "objective": query,
-                    "search_queries": [query],
-                    "session_id": Self::new_session_id(),
-                }),
-            )
-            .await?;
-        let formatted = normalize_parallel_search_results(&payload, limit);
-        serde_json::to_string_pretty(&json!({
-            "results": formatted,
-            "provider": "parallel",
-            "attribution": PARALLEL_FREE_SEARCH_ATTRIBUTION,
-        }))
-        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
-    }
-
     async fn extract_rest(&self, api_key: &str, url: &str) -> Result<String, ToolError> {
         let body = json!({
             "urls": [url],
@@ -1299,22 +1260,7 @@ impl ParallelWebBackend {
             )
             .await?;
         let documents = normalize_parallel_extract_documents(&data, &[url]);
-        parallel_extract_response(url, documents, false)
-    }
-
-    async fn extract_mcp(&self, url: &str) -> Result<String, ToolError> {
-        let payload = self
-            .mcp_call(
-                "web_fetch",
-                json!({
-                    "urls": [url],
-                    "full_content": true,
-                    "session_id": Self::new_session_id(),
-                }),
-            )
-            .await?;
-        let documents = normalize_parallel_extract_documents(&payload, &[url]);
-        parallel_extract_response(url, documents, true)
+        parallel_extract_response(url, documents)
     }
 
     async fn post_json(
@@ -1327,7 +1273,7 @@ impl ParallelWebBackend {
             .client
             .post(endpoint)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(reqwest::header::USER_AGENT, PARALLEL_MCP_USER_AGENT)
+            .header(reqwest::header::USER_AGENT, PARALLEL_USER_AGENT)
             .json(body);
         if let Some(api_key) = api_key.filter(|v| !v.trim().is_empty()) {
             req = req.bearer_auth(api_key);
@@ -1349,108 +1295,6 @@ impl ParallelWebBackend {
             ToolError::ExecutionFailed(format!("Failed to parse Parallel response: {e}"))
         })
     }
-
-    async fn mcp_call(&self, tool_name: &str, arguments: Value) -> Result<Value, ToolError> {
-        let init_id = Uuid::new_v4().to_string();
-        let init = self
-            .mcp_post(
-                None,
-                None,
-                &json!({
-                    "jsonrpc": "2.0",
-                    "id": init_id,
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": PARALLEL_MCP_PROTOCOL_VERSION,
-                        "capabilities": {},
-                        "clientInfo": {
-                            "name": PARALLEL_MCP_CLIENT_NAME,
-                            "version": PARALLEL_MCP_CLIENT_VERSION,
-                        },
-                    },
-                }),
-            )
-            .await?;
-        let mcp_session_id = init
-            .headers()
-            .get("mcp-session-id")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_string);
-        let init_text = init.text().await.map_err(|e| {
-            ToolError::ExecutionFailed(format!(
-                "Failed to read Parallel MCP initialize response: {e}"
-            ))
-        })?;
-        let init_envelope = parallel_mcp_response_envelope(&init_text, &init_id);
-        let negotiated_version = init_envelope
-            .get("result")
-            .and_then(|v| v.get("protocolVersion"))
-            .and_then(Value::as_str)
-            .unwrap_or(PARALLEL_MCP_PROTOCOL_VERSION)
-            .to_string();
-
-        let _ = self
-            .mcp_post(
-                mcp_session_id.as_deref(),
-                Some(&negotiated_version),
-                &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-            )
-            .await?;
-
-        let call_id = Uuid::new_v4().to_string();
-        let call = self
-            .mcp_post(
-                mcp_session_id.as_deref(),
-                Some(&negotiated_version),
-                &json!({
-                    "jsonrpc": "2.0",
-                    "id": call_id,
-                    "method": "tools/call",
-                    "params": {"name": tool_name, "arguments": arguments},
-                }),
-            )
-            .await?;
-        let call_text = call.text().await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("Failed to read Parallel MCP tool response: {e}"))
-        })?;
-        parallel_mcp_payload(&parallel_mcp_response_envelope(&call_text, &call_id))
-    }
-
-    async fn mcp_post(
-        &self,
-        mcp_session_id: Option<&str>,
-        protocol_version: Option<&str>,
-        body: &Value,
-    ) -> Result<reqwest::Response, ToolError> {
-        let mut req = self
-            .client
-            .post(&self.mcp_url)
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .header(
-                reqwest::header::ACCEPT,
-                "application/json, text/event-stream",
-            )
-            .header(reqwest::header::USER_AGENT, PARALLEL_MCP_USER_AGENT)
-            .json(body);
-        if let Some(session_id) = mcp_session_id.filter(|v| !v.trim().is_empty()) {
-            req = req.header("Mcp-Session-Id", session_id);
-        }
-        if let Some(version) = protocol_version.filter(|v| !v.trim().is_empty()) {
-            req = req.header("MCP-Protocol-Version", version);
-        }
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Parallel MCP request failed: {e}")))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(ToolError::ExecutionFailed(format!(
-                "Parallel MCP error ({status}): {text}"
-            )));
-        }
-        Ok(resp)
-    }
 }
 
 #[async_trait]
@@ -1465,7 +1309,9 @@ impl WebSearchBackend for ParallelWebBackend {
         if let Some(api_key) = self.api_key.as_deref() {
             self.search_rest(api_key, query, limit).await
         } else {
-            self.search_mcp(query, limit).await
+            Err(ToolError::ExecutionFailed(
+                "PARALLEL_API_KEY is required for the Parallel web search backend".into(),
+            ))
         }
     }
 }
@@ -1477,7 +1323,9 @@ impl WebExtractBackend for ParallelWebBackend {
         if let Some(api_key) = self.api_key.as_deref() {
             self.extract_rest(api_key, url).await
         } else {
-            self.extract_mcp(url).await
+            Err(ToolError::ExecutionFailed(
+                "PARALLEL_API_KEY is required for the Parallel web extract backend".into(),
+            ))
         }
     }
 }
@@ -1600,138 +1448,20 @@ fn normalize_parallel_extract_documents(response: &Value, requested_urls: &[&str
     rows
 }
 
-fn parallel_extract_response(
-    url: &str,
-    documents: Vec<Value>,
-    free_mcp: bool,
-) -> Result<String, ToolError> {
+fn parallel_extract_response(url: &str, documents: Vec<Value>) -> Result<String, ToolError> {
     let first_content = documents
         .first()
         .and_then(|d| d.get("content"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    let mut response = json!({
+    let response = json!({
         "url": url,
         "content": first_content,
         "results": documents,
         "provider": "parallel",
     });
-    if free_mcp {
-        response["attribution"] = json!(PARALLEL_FREE_EXTRACT_ATTRIBUTION);
-    }
     serde_json::to_string_pretty(&response)
         .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize result: {e}")))
-}
-
-fn flatten_parallel_mcp_message(payload: Value, out: &mut Vec<Value>) {
-    match payload {
-        Value::Array(items) => out.extend(items),
-        other => out.push(other),
-    }
-}
-
-fn parallel_mcp_messages(text: &str) -> Vec<Value> {
-    let body = text.trim();
-    if body.is_empty() {
-        return Vec::new();
-    }
-    if body.starts_with('{') || body.starts_with('[') {
-        let Ok(payload) = serde_json::from_str::<Value>(body) else {
-            return Vec::new();
-        };
-        let mut out = Vec::new();
-        flatten_parallel_mcp_message(payload, &mut out);
-        return out;
-    }
-
-    let mut out = Vec::new();
-    let mut data_lines: Vec<String> = Vec::new();
-    for raw in body.lines() {
-        let line = raw.trim_end_matches('\r');
-        if let Some(data) = line.strip_prefix("data:") {
-            data_lines.push(data.trim_start().to_string());
-            continue;
-        }
-        if line.trim().is_empty() && !data_lines.is_empty() {
-            if let Ok(payload) = serde_json::from_str::<Value>(&data_lines.join("\n")) {
-                flatten_parallel_mcp_message(payload, &mut out);
-            }
-            data_lines.clear();
-        }
-    }
-    if !data_lines.is_empty() {
-        if let Ok(payload) = serde_json::from_str::<Value>(&data_lines.join("\n")) {
-            flatten_parallel_mcp_message(payload, &mut out);
-        }
-    }
-    out
-}
-
-fn parallel_mcp_response_envelope(text: &str, request_id: &str) -> Value {
-    let mut fallback = Value::Object(Default::default());
-    for msg in parallel_mcp_messages(text) {
-        let Some(obj) = msg.as_object() else {
-            continue;
-        };
-        if !(obj.contains_key("result") || obj.contains_key("error")) {
-            continue;
-        }
-        if msg.get("id").and_then(Value::as_str) == Some(request_id) {
-            return msg;
-        }
-        fallback = msg;
-    }
-    fallback
-}
-
-fn parallel_mcp_payload(envelope: &Value) -> Result<Value, ToolError> {
-    if let Some(error) = envelope.get("error") {
-        return Err(ToolError::ExecutionFailed(format!(
-            "Parallel MCP error: {}",
-            truncate_json_for_error(error)
-        )));
-    }
-    let result = envelope.get("result").cloned().unwrap_or_else(|| json!({}));
-    if result
-        .get("isError")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        return Err(ToolError::ExecutionFailed(format!(
-            "Parallel MCP tool error: {}",
-            truncate_json_for_error(&result)
-        )));
-    }
-    if let Some(structured) = result.get("structuredContent").filter(|v| v.is_object()) {
-        return Ok(structured.clone());
-    }
-    if let Some(content) = result.get("content").and_then(Value::as_array) {
-        for block in content {
-            let text = block
-                .get("text")
-                .and_then(Value::as_str)
-                .filter(|v| !v.trim().is_empty());
-            if block.get("type").and_then(Value::as_str) == Some("text") {
-                if let Some(text) = text {
-                    if let Ok(parsed) = serde_json::from_str::<Value>(text) {
-                        return Ok(parsed);
-                    }
-                }
-            }
-        }
-    }
-    Err(ToolError::ExecutionFailed(format!(
-        "Parallel MCP returned no parseable content: {}",
-        truncate_json_for_error(&result)
-    )))
-}
-
-fn truncate_json_for_error(value: &Value) -> String {
-    let mut text = value.to_string();
-    if text.len() > 500 {
-        text.truncate(500);
-    }
-    text
 }
 
 /// Resolve preferred web-search backend from environment.
@@ -1745,7 +1475,7 @@ fn truncate_json_for_error(value: &Value) -> String {
 /// 5. Firecrawl (`FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL`, or managed gateway)
 /// 6. SearXNG (`SEARXNG_BASE_URL` or `SEARXNG_URL`)
 /// 7. Brave (`BRAVE_SEARCH_API_KEY`)
-/// 8. Keyless Parallel Search MCP fallback
+/// 8. Local fallback helper response
 pub fn search_backend_from_env_or_fallback() -> Box<dyn WebSearchBackend> {
     match search_backend_choice_from_env() {
         "exa" => ExaSearchBackend::from_env()
@@ -1796,7 +1526,7 @@ fn search_backend_choice_from_env() -> &'static str {
     } else if env_present_nonempty("BRAVE_SEARCH_API_KEY") {
         "brave-free"
     } else {
-        "parallel"
+        "fallback"
     }
 }
 
@@ -1822,7 +1552,8 @@ fn normalize_search_backend_choice(choice: &str) -> Option<&'static str> {
 ///    (`parallel`, `firecrawl`, `tavily`, `simple`; search-only backends return a clear error)
 /// 2. Firecrawl direct/self-hosted/managed when configured
 /// 3. Tavily when configured
-/// 4. Parallel REST/MCP fallback
+/// 4. Parallel REST when `PARALLEL_API_KEY` is configured
+/// 5. Simple local extractor fallback
 pub fn extract_backend_from_env_or_fallback() -> Box<dyn WebExtractBackend> {
     match extract_backend_choice_from_env() {
         "parallel" => Box::new(ParallelWebBackend::from_env()),
@@ -1871,8 +1602,10 @@ fn extract_backend_choice_from_env() -> &'static str {
         "firecrawl"
     } else if env_present_nonempty("TAVILY_API_KEY") {
         "tavily"
-    } else {
+    } else if env_present_nonempty("PARALLEL_API_KEY") {
         "parallel"
+    } else {
+        "simple"
     }
 }
 
@@ -2636,7 +2369,6 @@ mod web_search_env_tests {
                 "FIRECRAWL_API_URL",
                 "PARALLEL_API_KEY",
                 "PARALLEL_BASE_URL",
-                "PARALLEL_MCP_URL",
                 "PARALLEL_SEARCH_MODE",
                 "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
                 "TOOL_GATEWAY_USER_TOKEN",
@@ -2781,7 +2513,7 @@ mod web_search_env_tests {
     fn search_backend_choice_uses_xai_only_when_explicit() {
         let _scope = EnvScope::new();
         std::env::set_var("XAI_API_KEY", "xai-key");
-        assert_eq!(search_backend_choice_from_env(), "parallel");
+        assert_eq!(search_backend_choice_from_env(), "fallback");
         std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "xai");
         assert_eq!(search_backend_choice_from_env(), "xai");
     }
@@ -2821,9 +2553,9 @@ mod web_search_env_tests {
     }
 
     #[test]
-    fn search_backend_choice_uses_keyless_parallel_as_last_resort() {
+    fn search_backend_choice_uses_fallback_as_last_resort() {
         let _scope = EnvScope::new();
-        assert_eq!(search_backend_choice_from_env(), "parallel");
+        assert_eq!(search_backend_choice_from_env(), "fallback");
     }
 
     #[test]
@@ -2855,11 +2587,18 @@ mod web_search_env_tests {
     #[test]
     fn extract_backend_choice_prefers_firecrawl_then_tavily_then_simple() {
         let _scope = EnvScope::new();
-        assert_eq!(extract_backend_choice_from_env(), "parallel");
+        assert_eq!(extract_backend_choice_from_env(), "simple");
         std::env::set_var("TAVILY_API_KEY", "tavily-key");
         assert_eq!(extract_backend_choice_from_env(), "tavily");
         std::env::set_var("FIRECRAWL_API_KEY", "fire-key");
         assert_eq!(extract_backend_choice_from_env(), "firecrawl");
+    }
+
+    #[test]
+    fn extract_backend_choice_uses_parallel_key_when_present() {
+        let _scope = EnvScope::new();
+        std::env::set_var("PARALLEL_API_KEY", "parallel-key");
+        assert_eq!(extract_backend_choice_from_env(), "parallel");
     }
 
     #[test]
@@ -2995,23 +2734,6 @@ mod web_search_env_tests {
     }
 
     #[test]
-    fn parallel_mcp_messages_parse_plain_json_and_sse() {
-        let plain = parallel_mcp_messages(
-            r#"[{"jsonrpc":"2.0","id":"a","result":{"ok":1}},{"method":"n"}]"#,
-        );
-        assert_eq!(plain.len(), 2);
-        assert_eq!(plain[0]["id"], "a");
-
-        let sse = parallel_mcp_response_envelope(
-            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"noise\",\"result\":{\"skip\":true}}\n\n\
-             data: {\"jsonrpc\":\"2.0\",\"id\":\"target\",\"result\":{\"structuredContent\":{\"results\":[{\"url\":\"https://a.example\"}]}}}\n\n",
-            "target",
-        );
-        let payload = parallel_mcp_payload(&sse).expect("mcp payload");
-        assert_eq!(payload["results"][0]["url"], "https://a.example");
-    }
-
-    #[test]
     fn parallel_normalizers_map_search_and_extract_shapes() {
         let rows = normalize_parallel_search_results(
             &json!({
@@ -3039,76 +2761,17 @@ mod web_search_env_tests {
     }
 
     #[tokio::test]
-    async fn parallel_keyless_mcp_search_uses_generic_client_identity() {
-        use wiremock::matchers::{body_partial_json, header, method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/mcp"))
-            .and(header("user-agent", PARALLEL_MCP_USER_AGENT))
-            .and(body_partial_json(json!({
-                "method": "initialize",
-                "params": {"clientInfo": {"name": PARALLEL_MCP_CLIENT_NAME}},
-            })))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .insert_header("mcp-session-id", "sess-1")
-                    .set_body_json(json!({
-                        "jsonrpc": "2.0",
-                        "id": "ignored-by-fallback",
-                        "result": {"protocolVersion": PARALLEL_MCP_PROTOCOL_VERSION},
-                    })),
-            )
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("POST"))
-            .and(path("/mcp"))
-            .and(header("mcp-session-id", "sess-1"))
-            .and(header(
-                "mcp-protocol-version",
-                PARALLEL_MCP_PROTOCOL_VERSION,
-            ))
-            .and(body_partial_json(
-                json!({"method": "notifications/initialized"}),
-            ))
-            .respond_with(ResponseTemplate::new(202).set_body_string(""))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("POST"))
-            .and(path("/mcp"))
-            .and(header("mcp-session-id", "sess-1"))
-            .and(body_partial_json(json!({
-                "method": "tools/call",
-                "params": {
-                    "name": "web_search",
-                    "arguments": {"objective": "rust async"},
-                },
-            })))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "event: message\n\
-                 data: {\"jsonrpc\":\"2.0\",\"id\":\"fallback\",\"result\":{\"structuredContent\":{\"results\":[{\"url\":\"https://rust-lang.org\",\"title\":\"Rust\",\"excerpts\":[\"Language\"]}]}}}\n\n",
-            ))
-            .expect(1)
-            .mount(&server)
-            .await;
-
+    async fn parallel_without_key_returns_configuration_error() {
         let backend = ParallelWebBackend::with_endpoints(
             None,
             PARALLEL_BASE_URL_DEFAULT.to_string(),
-            format!("{}/mcp", server.uri()),
             "advanced".to_string(),
         );
-        let out = backend
+        let err = backend
             .search("rust async", 5, None)
             .await
-            .expect("parallel keyless search");
-        let json: Value = serde_json::from_str(&out).expect("json output");
-        assert_eq!(json["provider"], "parallel");
-        assert_eq!(json["results"][0]["url"], "https://rust-lang.org");
-        assert_eq!(json["attribution"], PARALLEL_FREE_SEARCH_ATTRIBUTION);
+            .expect_err("parallel search requires an API key");
+        assert!(err.to_string().contains("PARALLEL_API_KEY"));
     }
 
     #[tokio::test]
@@ -3136,7 +2799,6 @@ mod web_search_env_tests {
         let backend = ParallelWebBackend::with_endpoints(
             Some("parallel-key".to_string()),
             server.uri(),
-            PARALLEL_MCP_SEARCH_URL_DEFAULT.to_string(),
             "basic".to_string(),
         );
         let out = backend
@@ -3194,7 +2856,6 @@ mod firecrawl_managed_tests {
                 "FIRECRAWL_API_URL",
                 "PARALLEL_API_KEY",
                 "PARALLEL_BASE_URL",
-                "PARALLEL_MCP_URL",
                 "PARALLEL_SEARCH_MODE",
                 "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
                 "TOOL_GATEWAY_USER_TOKEN",

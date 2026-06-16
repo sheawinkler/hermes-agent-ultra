@@ -96,6 +96,7 @@ static DEFAULT_CONTEXT_LENGTHS: &[(&str, u64)] = &[
     // MiniMax
     ("minimax", 204_800),
     // GLM
+    ("glm-5.2", 1_000_000),
     ("glm", 202_752),
     // xAI Grok
     ("grok-4-1-fast", 2_000_000),
@@ -326,6 +327,18 @@ pub fn known_models() -> Vec<ModelInfo> {
             supports_tools: true,
             supports_streaming: true,
             supports_reasoning: false,
+            input_cost_per_million: None,
+            output_cost_per_million: None,
+        },
+        ModelInfo {
+            name: "glm-5.2".into(),
+            provider: "zai".into(),
+            context_window: 1_000_000,
+            max_output_tokens: None,
+            supports_vision: false,
+            supports_tools: true,
+            supports_streaming: true,
+            supports_reasoning: true,
             input_cost_per_million: None,
             output_cost_per_million: None,
         },
@@ -691,6 +704,7 @@ mod tests {
         );
         assert_eq!(get_model_context_length("gemini-2.0-flash"), 1_048_576);
         assert_eq!(get_model_context_length("gemma4:31b-cloud"), 256_000);
+        assert_eq!(get_model_context_length("zai/glm-5.2"), 1_000_000);
         assert_eq!(get_model_context_length("xiaomi/mimo-v2.5-pro"), 1_000_000);
         assert!(get_model_context_length("hy3-preview") >= 4096);
         assert_eq!(
