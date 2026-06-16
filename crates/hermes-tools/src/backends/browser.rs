@@ -26,6 +26,8 @@ const BROWSERBASE_MAX_SESSION_TIMEOUT_SECS: u64 = 21_600;
 const BROWSER_USE_BASE_URL_DEFAULT: &str = "https://api.browser-use.com/api/v3";
 const BROWSER_USE_MANAGED_TIMEOUT_MINUTES: u64 = 5;
 const BROWSER_USE_MANAGED_PROXY_COUNTRY_CODE: &str = "us";
+const FIRECRAWL_BROWSER_BASE_URL_DEFAULT: &str = "https://api.firecrawl.dev";
+const FIRECRAWL_BROWSER_DEFAULT_TTL_SECS: u64 = 300;
 #[cfg(test)]
 const CAMOFOX_STATE_DIR_NAME: &str = "browser_auth";
 #[cfg(test)]
@@ -51,6 +53,7 @@ struct CamofoxLoopbackRewrite {
 /// Selection order:
 /// - `HERMES_BROWSER_BACKEND=browser-use` / `BROWSER_CLOUD_PROVIDER=browser-use`
 /// - `HERMES_BROWSER_BACKEND=browserbase` / `BROWSER_CLOUD_PROVIDER=browserbase`
+/// - `HERMES_BROWSER_BACKEND=firecrawl` / `BROWSER_CLOUD_PROVIDER=firecrawl`
 /// - Browserbase credentials (`BROWSERBASE_API_KEY` + `BROWSERBASE_PROJECT_ID`)
 /// - Browser Use direct or managed gateway configuration
 /// - `HERMES_BROWSER_BACKEND=camofox`
@@ -73,6 +76,16 @@ pub fn browser_backend_from_env() -> Arc<dyn BrowserBackend> {
                 Arc::new(backend),
             )),
             Err(err) if explicit_browserbase_requested_from_env_or_config() => {
+                Arc::new(UnavailableBrowserBackend::new(err.to_string()))
+            }
+            Err(_) => Arc::new(CdpBrowserBackend::from_env()),
+        },
+        "firecrawl" => match FirecrawlBrowserBackend::from_env() {
+            Ok(backend) => Arc::new(CloudFallbackBrowserBackend::new(
+                "FirecrawlBrowserProvider",
+                Arc::new(backend),
+            )),
+            Err(err) if explicit_firecrawl_requested_from_env_or_config() => {
                 Arc::new(UnavailableBrowserBackend::new(err.to_string()))
             }
             Err(_) => Arc::new(CdpBrowserBackend::from_env()),
@@ -110,6 +123,21 @@ fn explicit_browserbase_requested_from_env_or_config() -> bool {
         }
     }
     matches!(configured_browser_cloud_provider(), Some("browserbase"))
+}
+
+fn explicit_firecrawl_requested_from_env_or_config() -> bool {
+    for key in [
+        "HERMES_BROWSER_BACKEND",
+        "BROWSER_CLOUD_PROVIDER",
+        "BROWSER_PROVIDER",
+    ] {
+        if let Some(value) = env_optional_nonempty(key) {
+            if normalize_browser_provider(&value) == Some("firecrawl") {
+                return true;
+            }
+        }
+    }
+    matches!(configured_browser_cloud_provider(), Some("firecrawl"))
 }
 
 fn browser_backend_choice_from_env() -> &'static str {
@@ -150,6 +178,7 @@ fn normalize_browser_provider(value: &str) -> Option<&'static str> {
             Some("browser-use")
         }
         "browserbase" | "browser-base" => Some("browserbase"),
+        "firecrawl" | "fire-crawl" | "firecrawl-browser" | "firecrawl_browser" => Some("firecrawl"),
         "camofox" | "camo" => Some("camofox"),
         "cdp" | "chrome" | "chromium" | "local" => Some("cdp"),
         _ => None,
@@ -544,6 +573,33 @@ pub struct BrowserUseBrowserBackend {
     pending_create_key: Mutex<Option<String>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirecrawlBrowserConfig {
+    api_key: String,
+    base_url: String,
+    ttl_secs: u64,
+    task_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FirecrawlBrowserSession {
+    session_name: String,
+    bb_session_id: String,
+    cdp_url: String,
+    ttl_secs: u64,
+}
+
+/// Firecrawl cloud browser backend.
+///
+/// This is distinct from the Firecrawl web search/extract backend: it creates
+/// remote CDP browser sessions via `/v2/browser` and then routes browser tool
+/// commands to the returned CDP URL.
+pub struct FirecrawlBrowserBackend {
+    config: FirecrawlBrowserConfig,
+    client: reqwest::Client,
+    session: Mutex<Option<FirecrawlBrowserSession>>,
+}
+
 impl UnavailableBrowserBackend {
     fn new(message: String) -> Self {
         Self { message }
@@ -690,6 +746,44 @@ impl BrowserUseConfig {
 
     pub fn managed_mode(&self) -> bool {
         self.managed_mode
+    }
+}
+
+impl FirecrawlBrowserConfig {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            api_key,
+            base_url: FIRECRAWL_BROWSER_BASE_URL_DEFAULT.to_string(),
+            ttl_secs: FIRECRAWL_BROWSER_DEFAULT_TTL_SECS,
+            task_id: "rust".to_string(),
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ToolError> {
+        let api_key = env_optional_nonempty("FIRECRAWL_API_KEY").ok_or_else(|| {
+            ToolError::ExecutionFailed("Firecrawl browser requires FIRECRAWL_API_KEY.".into())
+        })?;
+        let mut cfg = Self::new(api_key);
+        if let Some(base_url) = env_optional_nonempty("FIRECRAWL_API_URL") {
+            cfg.base_url =
+                normalize_base_url_with_default(&base_url, FIRECRAWL_BROWSER_BASE_URL_DEFAULT);
+        }
+        cfg.ttl_secs = env_optional_nonempty("FIRECRAWL_BROWSER_TTL")
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(FIRECRAWL_BROWSER_DEFAULT_TTL_SECS);
+        if let Some(task_id) = env_optional_nonempty("HERMES_TASK_ID") {
+            cfg.task_id = task_id;
+        }
+        Ok(cfg)
+    }
+
+    pub fn is_configured_from_env() -> bool {
+        env_optional_nonempty("FIRECRAWL_API_KEY").is_some()
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 }
 
@@ -1031,6 +1125,133 @@ impl BrowserUseBrowserBackend {
     }
 }
 
+impl FirecrawlBrowserBackend {
+    pub fn new(config: FirecrawlBrowserConfig) -> Self {
+        Self {
+            config,
+            client: reqwest::Client::new(),
+            session: Mutex::new(None),
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ToolError> {
+        Ok(Self::new(FirecrawlBrowserConfig::from_env()?))
+    }
+
+    pub fn config(&self) -> &FirecrawlBrowserConfig {
+        &self.config
+    }
+
+    async fn ensure_session(&self) -> Result<FirecrawlBrowserSession, ToolError> {
+        let mut guard = self.session.lock().await;
+        if let Some(session) = guard.as_ref() {
+            return Ok(session.clone());
+        }
+        let session = self.create_session().await?;
+        *guard = Some(session.clone());
+        Ok(session)
+    }
+
+    async fn create_session(&self) -> Result<FirecrawlBrowserSession, ToolError> {
+        let response = self.post_session().await?;
+        let status = response.status();
+        let text = response.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Firecrawl browser response: {e}"))
+        })?;
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Failed to create Firecrawl browser session: {status} {text}"
+            )));
+        }
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse Firecrawl browser response: {e}"))
+        })?;
+        let bb_session_id = data
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed("Firecrawl browser response missing id".into())
+            })?
+            .to_string();
+        let cdp_url = data
+            .get("cdpUrl")
+            .or_else(|| data.get("connectUrl"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed("Firecrawl browser response missing cdpUrl".into())
+            })?
+            .to_string();
+        let suffix = Uuid::new_v4().simple().to_string();
+        let session_name = format!("hermes_{}_{}", self.config.task_id, &suffix[..8]);
+        tracing::info!(
+            session_id = %bb_session_id,
+            session_name = %session_name,
+            "created Firecrawl browser session"
+        );
+        Ok(FirecrawlBrowserSession {
+            session_name,
+            bb_session_id,
+            cdp_url,
+            ttl_secs: self.config.ttl_secs,
+        })
+    }
+
+    async fn post_session(&self) -> Result<reqwest::Response, ToolError> {
+        self.client
+            .post(format!("{}/v2/browser", self.config.base_url))
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .json(&firecrawl_browser_session_payload(&self.config))
+            .send()
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("Firecrawl browser API connection failed: {e}"))
+            })
+    }
+
+    pub async fn close_active_session(&self) -> Result<bool, ToolError> {
+        let mut guard = self.session.lock().await;
+        let Some(session) = guard.take() else {
+            return Ok(false);
+        };
+        self.close_session(&session.bb_session_id).await
+    }
+
+    async fn close_session(&self, session_id: &str) -> Result<bool, ToolError> {
+        let resp = self
+            .client
+            .delete(format!("{}/v2/browser/{session_id}", self.config.base_url))
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .send()
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("Firecrawl browser close failed: {e}"))
+            })?;
+        Ok(matches!(
+            resp.status(),
+            reqwest::StatusCode::OK
+                | reqwest::StatusCode::CREATED
+                | reqwest::StatusCode::NO_CONTENT
+        ))
+    }
+
+    async fn firecrawl_command(&self, method: &str, params: Value) -> Result<Value, ToolError> {
+        let session = self.ensure_session().await?;
+        Ok(json!({
+            "method": method,
+            "params": params,
+            "target": session.cdp_url,
+            "status": "sent",
+            "firecrawl": {
+                "session_name": session.session_name,
+                "bb_session_id": session.bb_session_id,
+                "features": {"firecrawl": true},
+                "ttl": session.ttl_secs,
+            }
+        }))
+    }
+}
+
 fn browser_use_headers(
     config: &BrowserUseConfig,
     idempotency_key: Option<&str>,
@@ -1054,6 +1275,10 @@ fn browser_use_session_payload(managed_mode: bool) -> Value {
     } else {
         json!({})
     }
+}
+
+fn firecrawl_browser_session_payload(config: &FirecrawlBrowserConfig) -> Value {
+    json!({"ttl": config.ttl_secs})
 }
 
 fn browser_use_should_preserve_pending_create_key(status: reqwest::StatusCode, body: &str) -> bool {
@@ -1563,6 +1788,142 @@ impl BrowserBackend for BrowserUseBrowserBackend {
     }
 }
 
+#[async_trait]
+impl BrowserBackend for FirecrawlBrowserBackend {
+    async fn navigate(&self, url: &str) -> Result<String, ToolError> {
+        validate_url_does_not_exfiltrate_secret(url)?;
+        let result = self
+            .firecrawl_command("Page.navigate", json!({"url": url}))
+            .await?;
+        Ok(json!({"status": "navigated", "url": url, "cdp": result}).to_string())
+    }
+
+    async fn snapshot(&self) -> Result<String, ToolError> {
+        let result = self
+            .firecrawl_command("Accessibility.getFullAXTree", json!({}))
+            .await?;
+        Ok(redact_browser_observation(
+            &json!({"status": "snapshot", "cdp": result}).to_string(),
+        ))
+    }
+
+    async fn click(&self, selector: &str) -> Result<String, ToolError> {
+        let js = format!(
+            "document.querySelector('{}')?.click(); 'clicked'",
+            selector.replace('\'', "\\'")
+        );
+        let result = self
+            .firecrawl_command("Runtime.evaluate", json!({"expression": js}))
+            .await?;
+        Ok(json!({"status": "clicked", "selector": selector, "cdp": result}).to_string())
+    }
+
+    async fn r#type(&self, selector: &str, text: &str) -> Result<String, ToolError> {
+        let js = format!(
+            "let el = document.querySelector('{}'); if(el) {{ el.value = '{}'; el.dispatchEvent(new Event('input')); 'typed' }} else {{ 'not found' }}",
+            selector.replace('\'', "\\'"),
+            text.replace('\'', "\\'")
+        );
+        let result = self
+            .firecrawl_command("Runtime.evaluate", json!({"expression": js}))
+            .await?;
+        Ok(
+            json!({"status": "typed", "selector": selector, "text": text, "cdp": result})
+                .to_string(),
+        )
+    }
+
+    async fn scroll(&self, direction: &str, amount: Option<u32>) -> Result<String, ToolError> {
+        let px = amount.unwrap_or(500) as i32;
+        let (x, y) = match direction {
+            "up" => (0, -px),
+            "down" => (0, px),
+            "left" => (-px, 0),
+            "right" => (px, 0),
+            _ => (0, px),
+        };
+        let js = format!("window.scrollBy({}, {}); 'scrolled'", x, y);
+        let result = self
+            .firecrawl_command("Runtime.evaluate", json!({"expression": js}))
+            .await?;
+        Ok(
+            json!({"status": "scrolled", "direction": direction, "amount": px, "cdp": result})
+                .to_string(),
+        )
+    }
+
+    async fn go_back(&self) -> Result<String, ToolError> {
+        let result = self
+            .firecrawl_command(
+                "Runtime.evaluate",
+                json!({"expression": "history.back(); 'back'"}),
+            )
+            .await?;
+        Ok(json!({"status": "navigated_back", "cdp": result}).to_string())
+    }
+
+    async fn press(&self, key: &str) -> Result<String, ToolError> {
+        let result = self
+            .firecrawl_command(
+                "Input.dispatchKeyEvent",
+                json!({
+                    "type": "keyDown",
+                    "key": key,
+                }),
+            )
+            .await?;
+        Ok(json!({"status": "key_pressed", "key": key, "cdp": result}).to_string())
+    }
+
+    async fn get_images(&self, selector: Option<&str>) -> Result<String, ToolError> {
+        let sel = selector.unwrap_or("img");
+        let js = format!(
+            "JSON.stringify(Array.from(document.querySelectorAll('{}')).map(img => ({{src: img.src, alt: img.alt, width: img.width, height: img.height}})))",
+            sel.replace('\'', "\\'")
+        );
+        let result = self
+            .firecrawl_command(
+                "Runtime.evaluate",
+                json!({"expression": js, "returnByValue": true}),
+            )
+            .await?;
+        Ok(json!({"status": "images_found", "selector": sel, "cdp": result}).to_string())
+    }
+
+    async fn vision(&self, instruction: &str) -> Result<String, ToolError> {
+        let result = self
+            .firecrawl_command("Page.captureScreenshot", json!({"format": "png"}))
+            .await?;
+        Ok(browser_vision_payload(instruction, result))
+    }
+
+    async fn console(&self, action: &str) -> Result<String, ToolError> {
+        match action {
+            "read" => {
+                let result = self
+                    .firecrawl_command("Runtime.evaluate", json!({
+                        "expression": "'Console messages require Runtime.consoleAPICalled event listener'"
+                    }))
+                    .await?;
+                Ok(json!({"status": "console_read", "cdp": result}).to_string())
+            }
+            "clear" => {
+                let result = self
+                    .firecrawl_command(
+                        "Runtime.evaluate",
+                        json!({"expression": "console.clear(); 'cleared'"}),
+                    )
+                    .await?;
+                Ok(json!({"status": "console_cleared", "cdp": result}).to_string())
+            }
+            other => Err(ToolError::InvalidParams(format!(
+                "Unknown console action: {}",
+                other
+            ))),
+        }
+    }
+}
+
 impl CamoFoxBrowserBackend {
     pub fn new(endpoint: String, profile: String) -> Self {
         Self {
@@ -1860,6 +2221,9 @@ mod tests {
                 "BROWSERBASE_SESSION_TIMEOUT",
                 "BROWSER_USE_API_KEY",
                 "BROWSER_USE_GATEWAY_URL",
+                "FIRECRAWL_API_KEY",
+                "FIRECRAWL_API_URL",
+                "FIRECRAWL_BROWSER_TTL",
                 "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
                 "HERMES_TASK_ID",
                 "HERMES_HOME",
@@ -2283,6 +2647,152 @@ mod tests {
         .expect("write config");
         std::env::set_var("HERMES_HOME", home.path());
         assert_eq!(browser_backend_choice_from_env(), "browser-use");
+    }
+
+    #[test]
+    fn browser_backend_choice_accepts_firecrawl_env_and_config() {
+        let _scope = EnvScope::new();
+        std::env::set_var("BROWSER_CLOUD_PROVIDER", "firecrawl");
+        assert_eq!(browser_backend_choice_from_env(), "firecrawl");
+
+        std::env::remove_var("BROWSER_CLOUD_PROVIDER");
+        std::env::set_var("FIRECRAWL_API_KEY", "fc-key");
+        assert_eq!(browser_backend_choice_from_env(), "cdp");
+
+        std::env::remove_var("FIRECRAWL_API_KEY");
+        let home = tempfile::tempdir().expect("temp hermes home");
+        std::fs::write(
+            home.path().join("config.yaml"),
+            "browser:\n  cloud_provider: firecrawl\n",
+        )
+        .expect("write config");
+        std::env::set_var("HERMES_HOME", home.path());
+        assert_eq!(browser_backend_choice_from_env(), "firecrawl");
+    }
+
+    #[test]
+    fn firecrawl_browser_config_from_env_matches_provider_contract() {
+        let _scope = EnvScope::new();
+        std::env::set_var("FIRECRAWL_API_KEY", "fc-key");
+        std::env::set_var("FIRECRAWL_API_URL", "https://firecrawl.example.com/");
+        std::env::set_var("FIRECRAWL_BROWSER_TTL", "900");
+        std::env::set_var("HERMES_TASK_ID", "task-firecrawl");
+
+        let cfg = FirecrawlBrowserConfig::from_env().expect("firecrawl config");
+
+        assert_eq!(cfg.api_key, "fc-key");
+        assert_eq!(cfg.base_url(), "https://firecrawl.example.com");
+        assert_eq!(cfg.ttl_secs, 900);
+        assert_eq!(cfg.task_id, "task-firecrawl");
+        assert_eq!(firecrawl_browser_session_payload(&cfg), json!({"ttl": 900}));
+    }
+
+    #[tokio::test]
+    async fn firecrawl_browser_create_session_sends_v2_browser_contract() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind server");
+        let addr = listener.local_addr().expect("server addr");
+        let (tx, rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = Vec::new();
+            let mut tmp = [0_u8; 1024];
+            loop {
+                let n = stream.read(&mut tmp).await.expect("read request");
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+                let text = String::from_utf8_lossy(&buf);
+                if text.contains("\r\n\r\n") && text.contains(r#""ttl":450"#) {
+                    break;
+                }
+            }
+            let request = String::from_utf8_lossy(&buf).to_string();
+            let _ = tx.send(request);
+            let body = r#"{"id":"fc_session_1","cdpUrl":"wss://firecrawl.example/session"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("write response");
+        });
+
+        let cfg = FirecrawlBrowserConfig {
+            api_key: "fc-key".into(),
+            base_url: format!("http://{addr}"),
+            ttl_secs: 450,
+            task_id: "task-firecrawl-create".into(),
+        };
+        let backend = FirecrawlBrowserBackend::new(cfg);
+        let session = backend.create_session().await.expect("create session");
+        let request = rx.await.expect("captured request").to_ascii_lowercase();
+
+        assert!(request.starts_with("post /v2/browser "));
+        assert!(request.contains("authorization: bearer fc-key"));
+        assert!(request.contains("content-type: application/json"));
+        assert!(request.contains(r#""ttl":450"#));
+        assert_eq!(session.bb_session_id, "fc_session_1");
+        assert_eq!(session.cdp_url, "wss://firecrawl.example/session");
+        assert_eq!(session.ttl_secs, 450);
+        assert!(session
+            .session_name
+            .starts_with("hermes_task-firecrawl-create_"));
+    }
+
+    #[tokio::test]
+    async fn firecrawl_browser_close_session_uses_delete_endpoint() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind server");
+        let addr = listener.local_addr().expect("server addr");
+        let (tx, rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = Vec::new();
+            let mut tmp = [0_u8; 1024];
+            loop {
+                let n = stream.read(&mut tmp).await.expect("read request");
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+                if String::from_utf8_lossy(&buf).contains("\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8_lossy(&buf).to_string();
+            let _ = tx.send(request);
+            stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .expect("write response");
+        });
+
+        let cfg = FirecrawlBrowserConfig {
+            api_key: "fc-key".into(),
+            base_url: format!("http://{addr}"),
+            ttl_secs: 300,
+            task_id: "task-firecrawl-close".into(),
+        };
+        let backend = FirecrawlBrowserBackend::new(cfg);
+
+        assert!(backend
+            .close_session("fc_session_close")
+            .await
+            .expect("close session"));
+        let request = rx.await.expect("captured request").to_ascii_lowercase();
+        assert!(request.starts_with("delete /v2/browser/fc_session_close "));
+        assert!(request.contains("authorization: bearer fc-key"));
     }
 
     #[test]

@@ -204,8 +204,8 @@ fn register_builtin_tools_with_data_dir(
 
     // -- Image generation ----------------------------------------------------
     {
-        let backend = crate::backends::image_gen::FalImageGenBackend::from_env()
-            .unwrap_or_else(|_| crate::backends::image_gen::FalImageGenBackend::new(String::new()));
+        let backend = crate::backends::image_gen::ImageGenRuntimeBackend::from_env_or_managed();
+        let env_deps = backend.required_env_vars();
         reg(
             registry,
             "image_gen",
@@ -213,7 +213,7 @@ fn register_builtin_tools_with_data_dir(
                 Arc::new(backend),
             )),
             "🎨",
-            vec!["FAL_KEY".into()],
+            env_deps,
         );
     }
 
