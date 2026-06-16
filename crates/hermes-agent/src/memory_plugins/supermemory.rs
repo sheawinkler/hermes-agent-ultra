@@ -19,6 +19,7 @@ use crate::memory_plugins::config_io;
 const DEFAULT_CONTAINER_TAG: &str = "hermes";
 const DEFAULT_MAX_RECALL: usize = 10;
 const DEFAULT_BASE_URL: &str = "https://api.supermemory.ai";
+const SUPERMEMORY_SOURCE: &str = "hermes";
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -26,7 +27,7 @@ const DEFAULT_BASE_URL: &str = "https://api.supermemory.ai";
 
 fn store_schema() -> Value {
     json!({
-        "name": "supermemory_store",
+        "name": "supermemory-save",
         "description": "Store an explicit memory for future recall.",
         "parameters": {
             "type": "object",
@@ -42,7 +43,7 @@ fn store_schema() -> Value {
 
 fn search_schema() -> Value {
     json!({
-        "name": "supermemory_search",
+        "name": "supermemory-search",
         "description": "Search long-term memory by semantic similarity.",
         "parameters": {
             "type": "object",
@@ -58,7 +59,7 @@ fn search_schema() -> Value {
 
 fn forget_schema() -> Value {
     json!({
-        "name": "supermemory_forget",
+        "name": "supermemory-forget",
         "description": "Forget a memory by exact id or by best-match query.",
         "parameters": {
             "type": "object",
@@ -73,7 +74,7 @@ fn forget_schema() -> Value {
 
 fn profile_schema() -> Value {
     json!({
-        "name": "supermemory_profile",
+        "name": "supermemory-profile",
         "description": "Retrieve persistent profile facts and recent memory context.",
         "parameters": {
             "type": "object",
@@ -292,6 +293,7 @@ impl SupermemoryMemoryPlugin {
             .request(method.clone(), &url)
             .header("Authorization", format!("Bearer {}", config.api_key))
             .header("X-API-Key", &config.api_key)
+            .header("x-sm-source", SUPERMEMORY_SOURCE)
             .header("Content-Type", "application/json");
         if let Some(body) = payload {
             req = req.json(body);
@@ -325,7 +327,7 @@ impl SupermemoryMemoryPlugin {
             "content": content,
             "container_tags": [tag],
             "container_tag": tag,
-            "metadata": metadata.unwrap_or_else(|| json!({})),
+            "metadata": with_source_metadata(metadata),
         });
         let mut last_error = String::new();
         for path in ["/v3/memories", "/v3/documents", "/v1/memories"] {
@@ -421,6 +423,7 @@ impl SupermemoryMemoryPlugin {
             "conversationId": session_id,
             "messages": messages,
             "containerTags": [config.container_tag],
+            "metadata": {"sm_source": SUPERMEMORY_SOURCE},
         });
         Self::send_json(config, Method::POST, "/v4/conversations", Some(&payload)).map(|_| ())
     }
@@ -506,8 +509,8 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
         format!(
             "# Supermemory\n\
              Active. Container: {}.\n\
-             Use supermemory_search, supermemory_store, supermemory_forget, and \
-             supermemory_profile for explicit memory operations.",
+             Use supermemory-search, supermemory-save, supermemory-forget, and \
+             supermemory-profile for explicit memory operations.",
             tag
         )
     }
@@ -604,7 +607,7 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
         let container_tag = args.get("container_tag").and_then(|v| v.as_str());
 
         match tool_name {
-            "supermemory_store" => {
+            "supermemory-save" | "supermemory_store" => {
                 let content = args
                     .get("content")
                     .and_then(|v| v.as_str())
@@ -622,7 +625,7 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
                     Err(e) => json!({"error": e}).to_string(),
                 }
             }
-            "supermemory_search" => {
+            "supermemory-search" | "supermemory_search" => {
                 let query = args
                     .get("query")
                     .and_then(|v| v.as_str())
@@ -640,7 +643,7 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
                     Err(e) => json!({"error": e}).to_string(),
                 }
             }
-            "supermemory_forget" => {
+            "supermemory-forget" | "supermemory_forget" => {
                 let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("").trim();
                 let query = args
                     .get("query")
@@ -674,7 +677,7 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
                     Err(e) => json!({"error": e}).to_string(),
                 }
             }
-            "supermemory_profile" => {
+            "supermemory-profile" | "supermemory_profile" => {
                 let query = args.get("query").and_then(|v| v.as_str());
                 match Self::get_profile(&config, query, container_tag) {
                     Ok(profile) => {
@@ -780,6 +783,21 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
     }
 }
 
+fn with_source_metadata(metadata: Option<Value>) -> Value {
+    let mut map = match metadata {
+        Some(Value::Object(map)) => map,
+        Some(other) => {
+            let mut map = serde_json::Map::new();
+            map.insert("value".to_string(), other);
+            map
+        }
+        None => serde_json::Map::new(),
+    };
+    map.entry("sm_source".to_string())
+        .or_insert_with(|| Value::String(SUPERMEMORY_SOURCE.to_string()));
+    Value::Object(map)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -822,7 +840,31 @@ mod tests {
     fn test_supermemory_tool_schemas() {
         let plugin = SupermemoryMemoryPlugin::new();
         let schemas = plugin.get_tool_schemas();
-        assert_eq!(schemas.len(), 4);
+        let names = schemas
+            .iter()
+            .filter_map(|schema| schema.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "supermemory-save",
+                "supermemory-search",
+                "supermemory-forget",
+                "supermemory-profile",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_supermemory_source_metadata_is_stamped_without_overwriting() {
+        assert_eq!(
+            with_source_metadata(Some(json!({"kind":"note"}))),
+            json!({"kind":"note", "sm_source":"hermes"})
+        );
+        assert_eq!(
+            with_source_metadata(Some(json!({"sm_source":"custom"}))),
+            json!({"sm_source":"custom"})
+        );
     }
 
     #[test]

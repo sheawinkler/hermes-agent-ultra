@@ -57,6 +57,8 @@ pub fn canonical_provider_profile_id(provider: &str) -> Option<&'static str> {
         "kimi" | "moonshot" | "moonshot-ai" | "kimi-coding" => Some("kimi-coding"),
         "kimi-coding-cn" | "kimi-cn" | "moonshot-cn" => Some("kimi-coding-cn"),
         "openrouter" | "or" => Some("openrouter"),
+        "minimax" | "mini-max" | "minimax-cn" | "minimax_cn" | "minimax-china"
+        | "minimax-oauth" | "minimax_oauth" => Some("minimax"),
         "nous" | "nous-portal" | "nous-api" | "nous_api" | "nousapi" | "nous-portal-api" => {
             Some("nous")
         }
@@ -73,6 +75,7 @@ pub fn default_max_tokens(profile: &str) -> Option<u32> {
         "nvidia" => Some(16_384),
         "kimi-coding" | "kimi-coding-cn" => Some(32_000),
         "qwen-oauth" => Some(65_536),
+        "custom" => Some(65_536),
         _ => None,
     }
 }
@@ -91,13 +94,16 @@ pub fn supports_vision(profile: &str) -> bool {
     )
 }
 
+pub fn supports_vision_tool_messages(profile: &str) -> bool {
+    !matches!(canonical_provider_profile_id(profile), Some("xiaomi"))
+}
+
 pub fn profile_auth_type(profile: &str) -> Option<&'static str> {
     match canonical_provider_profile_id(profile)? {
         "nous" => Some("oauth_device_code"),
         "qwen-oauth" => Some("oauth_external"),
-        "nvidia" | "kimi-coding" | "kimi-coding-cn" | "openrouter" | "xiaomi" | "custom" => {
-            Some("api_key")
-        }
+        "nvidia" | "kimi-coding" | "kimi-coding-cn" | "openrouter" | "minimax" | "xiaomi"
+        | "custom" => Some("api_key"),
         _ => None,
     }
 }
@@ -108,6 +114,7 @@ pub fn profile_base_url(profile: &str) -> Option<&'static str> {
         "kimi-coding" => Some(KIMI_CODE_BASE_URL),
         "kimi-coding-cn" => Some(KIMI_CN_BASE_URL),
         "openrouter" => Some("https://openrouter.ai/api/v1"),
+        "minimax" => Some("https://api.minimax.io/anthropic"),
         "nous" => Some("https://inference-api.nousresearch.com/v1"),
         "qwen-oauth" => Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
         "xiaomi" => Some("https://api.xiaomimimo.com/v1"),
@@ -227,6 +234,7 @@ pub fn apply_profile_to_body(
     profile: Option<&str>,
     body: &mut Value,
     effective_model: &str,
+    base_url: &str,
     extra_body: Option<&Value>,
 ) {
     let Some(profile) = profile.and_then(canonical_provider_profile_id) else {
@@ -234,6 +242,7 @@ pub fn apply_profile_to_body(
     };
     match profile {
         "kimi-coding" | "kimi-coding-cn" => apply_kimi_profile(body, extra_body),
+        "minimax" => apply_minimax_profile(body, effective_model, base_url, extra_body),
         "openrouter" => apply_openrouter_profile(body, effective_model, extra_body),
         "nous" => apply_nous_profile(body, extra_body),
         "qwen-oauth" => apply_qwen_profile(body, extra_body),
@@ -284,6 +293,28 @@ fn apply_kimi_profile(body: &mut Value, extra_body: Option<&Value>) {
     }
 }
 
+fn apply_minimax_profile(
+    body: &mut Value,
+    effective_model: &str,
+    base_url: &str,
+    extra_body: Option<&Value>,
+) {
+    if !is_minimax_global_openai_base_url(base_url) || !is_minimax_m3(effective_model) {
+        return;
+    }
+
+    remove_key(body, "reasoning");
+    body["reasoning_split"] = Value::Bool(true);
+    let reasoning = reasoning_config(extra_body);
+    let enabled = reasoning
+        .and_then(|cfg| cfg.get("enabled"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    body["thinking"] = serde_json::json!({
+        "type": if enabled { "adaptive" } else { "disabled" },
+    });
+}
+
 fn apply_openrouter_profile(body: &mut Value, effective_model: &str, extra_body: Option<&Value>) {
     if let Some(preferences) = extra_body.and_then(|v| v.get("provider_preferences")) {
         body["provider"] = preferences.clone();
@@ -302,7 +333,25 @@ fn apply_openrouter_profile(body: &mut Value, effective_model: &str, extra_body:
     }
 
     let supports_reasoning = bool_field(extra_body, "supports_reasoning").unwrap_or(false);
-    if let Some(reasoning) = reasoning_config(extra_body) {
+    if openrouter_anthropic_reasoning_is_mandatory(effective_model) {
+        remove_key(body, "reasoning");
+        let reasoning = reasoning_config(extra_body);
+        let enabled = reasoning
+            .and_then(|cfg| cfg.get("enabled"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let effort = reasoning
+            .and_then(|cfg| cfg.get("effort"))
+            .and_then(Value::as_str)
+            .or_else(|| string_field(extra_body, "reasoning_effort"))
+            .map(str::trim)
+            .filter(|v| !v.is_empty() && *v != "none");
+        if enabled {
+            if let Some(effort) = effort {
+                body["verbosity"] = Value::String(effort.to_string());
+            }
+        }
+    } else if let Some(reasoning) = reasoning_config(extra_body) {
         body["reasoning"] = reasoning.clone();
     } else if let Some(effort) = string_field(extra_body, "reasoning_effort") {
         body["reasoning"] = serde_json::json!({"enabled": true, "effort": effort});
@@ -394,6 +443,43 @@ fn is_grok_model(model: &str) -> bool {
         || lower.contains("/grok")
 }
 
+fn is_minimax_global_openai_base_url(base_url: &str) -> bool {
+    let normalized = base_url.trim().trim_end_matches('/').to_ascii_lowercase();
+    normalized == "https://api.minimax.io/v1"
+}
+
+fn is_minimax_m3(model: &str) -> bool {
+    matches!(
+        model.trim().to_ascii_lowercase().as_str(),
+        "minimax-m3" | "minimax/minimax-m3"
+    )
+}
+
+fn openrouter_anthropic_reasoning_is_mandatory(model: &str) -> bool {
+    let m = model.trim().to_ascii_lowercase();
+    if !m.starts_with("anthropic/") && !m.starts_with("claude") && !m.contains("claude") {
+        return false;
+    }
+    const OPTIONAL_SUBSTRINGS: &[&str] = &[
+        "claude-3",
+        "claude-opus-4-0",
+        "claude-opus-4.0",
+        "claude-opus-4-1",
+        "claude-opus-4.1",
+        "claude-sonnet-4-0",
+        "claude-sonnet-4.0",
+        "claude-opus-4-2025",
+        "claude-sonnet-4-2025",
+        "claude-opus-4-5",
+        "claude-opus-4.5",
+        "claude-sonnet-4-5",
+        "claude-sonnet-4.5",
+        "claude-haiku-4-5",
+        "claude-haiku-4.5",
+    ];
+    !OPTIONAL_SUBSTRINGS.iter().any(|needle| m.contains(needle))
+}
+
 fn is_pareto_code_model(model: &str) -> bool {
     let lower = model.trim().to_ascii_lowercase();
     lower == "openrouter/pareto-code" || lower.ends_with("/pareto-code")
@@ -421,6 +507,7 @@ mod tests {
             Some("kimi-coding-cn")
         );
         assert_eq!(canonical_provider_profile_id("or"), Some("openrouter"));
+        assert_eq!(canonical_provider_profile_id("mini-max"), Some("minimax"));
         assert_eq!(canonical_provider_profile_id("nous-portal"), Some("nous"));
         assert_eq!(canonical_provider_profile_id("nous-api"), Some("nous"));
         assert_eq!(canonical_provider_profile_id("nousapi"), Some("nous"));
@@ -439,6 +526,7 @@ mod tests {
         assert_eq!(default_max_tokens("nvidia"), Some(16_384));
         assert_eq!(default_max_tokens("kimi"), Some(32_000));
         assert_eq!(default_max_tokens("qwen-oauth"), Some(65_536));
+        assert_eq!(default_max_tokens("ollama-local"), Some(65_536));
         assert!(omit_temperature("kimi"));
         assert_eq!(profile_auth_type("nous"), Some("oauth_device_code"));
         assert_eq!(profile_auth_type("qwen-oauth"), Some("oauth_external"));
@@ -449,6 +537,7 @@ mod tests {
             .contains("moonshot.cn"));
         assert!(profile_base_url("mimo").unwrap().contains("xiaomimimo.com"));
         assert!(supports_vision("xiaomi"));
+        assert!(!supports_vision_tool_messages("xiaomi"));
         assert!(!supports_vision("kimi"));
         assert!(is_kimi_code_base_url(KIMI_CODE_BASE_URL));
         assert_eq!(

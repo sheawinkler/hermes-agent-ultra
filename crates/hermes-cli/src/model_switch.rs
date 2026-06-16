@@ -253,7 +253,7 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
         ],
     ),
     ("tencent-tokenhub", &["hy3-preview"]),
-    ("zai", &["glm-5.1", "glm-5.0", "glm-4.5-flash"]),
+    ("zai", &["glm-5.2", "glm-5.1", "glm-5.0", "glm-4.5-flash"]),
     ("minimax", &["MiniMax-M3", "MiniMax-M2.7"]),
     ("minimax-cn", &["MiniMax-M3", "MiniMax-M2.7"]),
     (
@@ -1507,6 +1507,7 @@ mod tests {
         assert!(provider_curated_models("arcee-ai").contains(&"trinity-mini"));
         assert!(provider_curated_models("mimo").contains(&"mimo-v2.5-pro"));
         assert!(provider_curated_models("tokenhub").contains(&"hy3-preview"));
+        assert_eq!(provider_curated_models("zai")[0], "glm-5.2");
         assert_eq!(provider_curated_models("minimax")[0], "MiniMax-M3");
         assert_eq!(provider_curated_models("minimax-cn")[0], "MiniMax-M3");
     }

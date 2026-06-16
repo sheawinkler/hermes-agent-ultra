@@ -611,11 +611,19 @@ impl GenericProvider {
                 .and_then(|v| v.as_str())
                 .and_then(parse_acp_multimodal_parts)
             {
-                api_msg["content"] = if model_supports_vision {
-                    Value::Array(parts)
-                } else {
-                    Value::String(flatten_multimodal_parts_text(&parts))
-                };
+                let is_tool_message = api_msg
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .is_some_and(|role| role.eq_ignore_ascii_case("tool"));
+                let supports_tool_multimodal = profile
+                    .map(provider_profiles::supports_vision_tool_messages)
+                    .unwrap_or(true);
+                api_msg["content"] =
+                    if model_supports_vision && (!is_tool_message || supports_tool_multimodal) {
+                        Value::Array(parts)
+                    } else {
+                        Value::String(flatten_multimodal_parts_text(&parts))
+                    };
             }
             if !enabled {
                 out.push(api_msg);
@@ -748,6 +756,7 @@ impl GenericProvider {
                 profile,
                 &mut body,
                 effective_model,
+                &self.base_url,
                 extra_body,
             );
         }
@@ -3299,6 +3308,36 @@ mod tests {
         );
         assert!(or_body.get("provider_preferences").is_none());
 
+        let anthropic_mandatory = openrouter.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "anthropic/claude-sonnet-4.6",
+            extra_body: Some(&serde_json::json!({
+                "supports_reasoning": true,
+                "reasoning": {"enabled": true, "effort": "high"}
+            })),
+            stream: false,
+        });
+        assert!(anthropic_mandatory.get("reasoning").is_none());
+        assert_eq!(anthropic_mandatory["verbosity"], "high");
+
+        let anthropic_disabled = openrouter.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "anthropic/claude-sonnet-4.6",
+            extra_body: Some(&serde_json::json!({
+                "supports_reasoning": true,
+                "reasoning": {"enabled": false}
+            })),
+            stream: false,
+        });
+        assert!(anthropic_disabled.get("reasoning").is_none());
+        assert!(anthropic_disabled.get("verbosity").is_none());
+
         let nous = GenericProvider::new(
             "https://inference-api.nousresearch.com/v1",
             "key",
@@ -3337,8 +3376,58 @@ mod tests {
             extra_body: Some(&serde_json::json!({"ollama_num_ctx": 131072})),
             stream: false,
         });
+        assert_eq!(custom_body["max_tokens"], 65_536);
         assert_eq!(custom_body["options"]["num_ctx"], 131_072);
         assert!(custom_body.get("ollama_num_ctx").is_none());
+    }
+
+    #[test]
+    fn test_provider_profile_request_body_minimax_m3_openai_reasoning_contract() {
+        let messages = vec![Message::user("hello")];
+        let provider = GenericProvider::new("https://api.minimax.io/v1", "key", "MiniMax-M3")
+            .with_provider_profile("minimax");
+
+        let enabled = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "MiniMax-M3",
+            extra_body: Some(&serde_json::json!({"reasoning": {"effort": "high"}})),
+            stream: false,
+        });
+        assert_eq!(enabled["reasoning_split"], true);
+        assert_eq!(enabled["thinking"], serde_json::json!({"type": "adaptive"}));
+        assert!(enabled.get("reasoning").is_none());
+
+        let disabled = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "minimax/minimax-m3",
+            extra_body: Some(&serde_json::json!({"reasoning_config": {"enabled": false}})),
+            stream: false,
+        });
+        assert_eq!(
+            disabled["thinking"],
+            serde_json::json!({"type": "disabled"})
+        );
+
+        let anthropic_route =
+            GenericProvider::new("https://api.minimax.io/anthropic", "key", "MiniMax-M3")
+                .with_provider_profile("minimax");
+        let body = anthropic_route.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "MiniMax-M3",
+            extra_body: Some(&serde_json::json!({"reasoning": {"effort": "high"}})),
+            stream: false,
+        });
+        assert!(body.get("reasoning_split").is_none());
+        assert!(body.get("thinking").is_none());
     }
 
     #[test]
@@ -3528,6 +3617,37 @@ mod tests {
             .expect("collapsed text");
         assert!(content.contains("[Attached image]"));
         assert!(body.get("supports_vision").is_none());
+    }
+
+    #[test]
+    fn test_xiaomi_profile_flattens_multimodal_tool_messages_only() {
+        let parts = serde_json::json!([
+            {"type": "text", "text": "tool summary"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
+        ]);
+        let messages = vec![
+            Message::user(format!("{ACP_MULTIMODAL_PREFIX}{parts}")),
+            Message::tool_result("tool-call-1", format!("{ACP_MULTIMODAL_PREFIX}{parts}")),
+        ];
+        let provider = GenericProvider::new("https://api.xiaomimimo.com/v1", "key", "mimo-v2-omni")
+            .with_provider_profile("xiaomi");
+
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "mimo-v2-omni",
+            extra_body: None,
+            stream: false,
+        });
+
+        assert!(body["messages"][0]["content"].is_array());
+        assert!(body["messages"][1]["content"].is_string());
+        assert!(body["messages"][1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("[Attached image]"));
     }
 
     #[test]

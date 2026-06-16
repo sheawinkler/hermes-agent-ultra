@@ -10553,7 +10553,7 @@ const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
     },
     SetupModelOption {
         provider: "zai",
-        model: "zai:glm-5.1",
+        model: "zai:glm-5.2",
         label: "Z.AI / GLM",
     },
     SetupModelOption {
