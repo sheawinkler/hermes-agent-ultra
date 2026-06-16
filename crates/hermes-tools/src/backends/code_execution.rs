@@ -27,6 +27,47 @@ impl Default for LocalCodeExecutionBackend {
     }
 }
 
+fn hermes_home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HERMES_HOME")
+        .or_else(|| std::env::var_os("HERMES_AGENT_ULTRA_HOME"))
+        .map(std::path::PathBuf::from)
+}
+
+fn real_home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HERMES_REAL_HOME")
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
+        .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))
+}
+
+fn code_subprocess_home() -> Option<std::path::PathBuf> {
+    match std::env::var("TERMINAL_HOME_MODE")
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("profile") | Some("isolated") => {
+            let home = hermes_home_dir()?.join("home");
+            if std::fs::create_dir_all(&home).is_ok() {
+                Some(home)
+            } else {
+                real_home_dir()
+            }
+        }
+        _ => real_home_dir(),
+    }
+}
+
+fn apply_code_subprocess_home(cmd: &mut TokioCommand) {
+    if let Some(real_home) = real_home_dir() {
+        cmd.env("HERMES_REAL_HOME", real_home);
+    }
+    if let Some(home) = code_subprocess_home() {
+        cmd.env("HOME", home);
+    }
+}
+
 #[async_trait]
 impl CodeExecutionBackend for LocalCodeExecutionBackend {
     async fn execute(
@@ -72,6 +113,7 @@ impl CodeExecutionBackend for LocalCodeExecutionBackend {
             cmd.arg(flag).arg(code);
         }
 
+        apply_code_subprocess_home(&mut cmd);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
@@ -134,5 +176,56 @@ mod tests {
             .await
             .expect_err("python should fail");
         assert!(err.to_string().contains("Python execution is disabled"));
+    }
+
+    #[tokio::test]
+    async fn profile_home_mode_sets_home_for_shell_snippets() {
+        let real = tempfile::tempdir().expect("real home");
+        let hermes = tempfile::tempdir().expect("hermes home");
+        let _home = EnvGuard::set("HOME", real.path().to_string_lossy().as_ref());
+        let _real_home = EnvGuard::set("HERMES_REAL_HOME", real.path().to_string_lossy().as_ref());
+        let _hermes_home = EnvGuard::set("HERMES_HOME", hermes.path().to_string_lossy().as_ref());
+        let _mode = EnvGuard::set("TERMINAL_HOME_MODE", "profile");
+        let backend = LocalCodeExecutionBackend::default();
+
+        let raw = backend
+            .execute(
+                "printf '%s|%s' \"$HOME\" \"$HERMES_REAL_HOME\"",
+                Some("bash"),
+                Some(5),
+            )
+            .await
+            .expect("bash should run");
+        let payload: serde_json::Value = serde_json::from_str(&raw).expect("json payload");
+        assert_eq!(
+            payload["stdout"].as_str().unwrap(),
+            format!(
+                "{}|{}",
+                hermes.path().join("home").display(),
+                real.path().display()
+            )
+        );
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
     }
 }

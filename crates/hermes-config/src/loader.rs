@@ -8,7 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub use hermes_core::ConfigError;
 
 use crate::config::{
-    GatewayConfig, LlmProviderConfig, ProxyConfig, TerminalBackendType, TerminalConfig, WebConfig,
+    GatewayConfig, LlmProviderConfig, ProxyConfig, TerminalBackendType, TerminalConfig,
+    TerminalHomeMode, WebConfig,
 };
 use crate::merge::merge_configs;
 use crate::paths;
@@ -1429,6 +1430,7 @@ pub fn terminal_config_env_bridge_pairs() -> &'static [(&'static str, &'static s
         ("modal_mode", "TERMINAL_MODAL_MODE"),
         ("shell_init_files", "TERMINAL_SHELL_INIT_FILES"),
         ("auto_source_bashrc", "TERMINAL_AUTO_SOURCE_BASHRC"),
+        ("home_mode", "TERMINAL_HOME_MODE"),
         ("ssh_host", "TERMINAL_SSH_HOST"),
         ("ssh_port", "TERMINAL_SSH_PORT"),
         ("ssh_user", "TERMINAL_SSH_USER"),
@@ -1891,6 +1893,12 @@ fn bridge_terminal_config_to_env(terminal: &TerminalConfig) {
             terminal.auto_source_bashrc.to_string(),
         );
     }
+    if terminal.home_mode != default.home_mode {
+        set_env_if_missing(
+            "TERMINAL_HOME_MODE",
+            terminal.home_mode.as_env_name().to_string(),
+        );
+    }
     if let Some(value) = &terminal.ssh_host {
         set_env_if_missing("TERMINAL_SSH_HOST", value.clone());
     }
@@ -2025,6 +2033,12 @@ fn apply_terminal_env_overrides(config: &mut TerminalConfig) {
         .and_then(|v| parse_bool_env("TERMINAL_AUTO_SOURCE_BASHRC", &v))
     {
         config.auto_source_bashrc = v;
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_HOME_MODE") {
+        match TerminalHomeMode::from_env_name(&v) {
+            Some(mode) => config.home_mode = mode,
+            None => tracing::warn!("Unknown TERMINAL_HOME_MODE '{v}'"),
+        }
     }
     if let Some(v) = env_var_nonempty("TERMINAL_SSH_HOST") {
         config.ssh_host = Some(v);
@@ -2737,6 +2751,7 @@ personalities: null
             "container_persistent",
             "shell_init_files",
             "auto_source_bashrc",
+            "home_mode",
             "vercel_runtime",
             "modal_mode",
         ] {
@@ -2777,6 +2792,7 @@ personalities: null
                 "false",
                 "TERMINAL_AUTO_SOURCE_BASHRC",
             ),
+            ("terminal.home_mode", "profile", "TERMINAL_HOME_MODE"),
         ] {
             let result = set_user_config_value(dir.path(), key, value).unwrap();
             assert!(result.wrote_config(), "{key} should write config");
@@ -2787,6 +2803,7 @@ personalities: null
         assert!(env_text.contains("TERMINAL_DOCKER_RUN_AS_HOST_USER=true"));
         assert!(env_text.contains("TERMINAL_DOCKER_ENV=FOO=bar"));
         assert!(env_text.contains("TERMINAL_AUTO_SOURCE_BASHRC=false"));
+        assert!(env_text.contains("TERMINAL_HOME_MODE=profile"));
         clear_terminal_env_bridge_vars();
     }
 

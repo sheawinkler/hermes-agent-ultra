@@ -716,7 +716,7 @@ fn extract_codex_image_b64(value: &Value) -> Option<String> {
             }
             found
         }
-        Value::Array(items) => items.iter().filter_map(extract_codex_image_b64).last(),
+        Value::Array(items) => items.iter().filter_map(extract_codex_image_b64).next_back(),
         _ => None,
     }
 }

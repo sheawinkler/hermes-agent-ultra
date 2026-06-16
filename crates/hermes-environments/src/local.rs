@@ -15,7 +15,7 @@ use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
 
-use hermes_config::TerminalConfig;
+use hermes_config::{TerminalConfig, TerminalHomeMode};
 use hermes_core::{AgentError, CommandOutput, TerminalBackend};
 
 const PROCESS_OUTPUT_WINDOW_CHARS: usize = 200_000;
@@ -53,6 +53,8 @@ pub struct LocalBackend {
     shell_init_files: Vec<String>,
     /// Auto-source common shell startup files when no explicit list is set.
     auto_source_bashrc: bool,
+    /// HOME policy for subprocesses.
+    home_mode: TerminalHomeMode,
     /// Env-var names allowed through subprocess secret sanitizers.
     env_passthrough: Vec<String>,
     /// Background processes tracked by session id for lifecycle operations.
@@ -62,23 +64,26 @@ pub struct LocalBackend {
 impl LocalBackend {
     /// Create a new local backend with the given defaults.
     pub fn new(default_timeout: u64, max_output_size: usize) -> Self {
-        let (shell_init_files, auto_source_bashrc, env_passthrough) = terminal_config_from_env();
-        Self::new_with_shell_init(
+        let (shell_init_files, auto_source_bashrc, home_mode, env_passthrough) =
+            terminal_config_from_env();
+        Self::new_with_shell_init_and_home_mode(
             default_timeout,
             max_output_size,
             shell_init_files,
             auto_source_bashrc,
+            home_mode,
             env_passthrough,
         )
     }
 
     /// Create a local backend directly from terminal configuration.
     pub fn from_terminal_config(config: &TerminalConfig) -> Self {
-        Self::new_with_shell_init(
+        Self::new_with_shell_init_and_home_mode(
             config.timeout,
             config.max_output_size,
             config.shell_init_files.clone(),
             config.auto_source_bashrc,
+            config.home_mode,
             config.env_passthrough.clone(),
         )
     }
@@ -90,11 +95,30 @@ impl LocalBackend {
         auto_source_bashrc: bool,
         env_passthrough: Vec<String>,
     ) -> Self {
+        Self::new_with_shell_init_and_home_mode(
+            default_timeout,
+            max_output_size,
+            shell_init_files,
+            auto_source_bashrc,
+            TerminalHomeMode::Auto,
+            env_passthrough,
+        )
+    }
+
+    pub fn new_with_shell_init_and_home_mode(
+        default_timeout: u64,
+        max_output_size: usize,
+        shell_init_files: Vec<String>,
+        auto_source_bashrc: bool,
+        home_mode: TerminalHomeMode,
+        env_passthrough: Vec<String>,
+    ) -> Self {
         Self {
             default_timeout,
             max_output_size,
             shell_init_files,
             auto_source_bashrc,
+            home_mode,
             env_passthrough,
             background_processes: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -468,6 +492,12 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+fn hermes_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HERMES_HOME")
+        .or_else(|| std::env::var_os("HERMES_AGENT_ULTRA_HOME"))
+        .map(PathBuf::from)
+}
+
 fn current_username() -> Option<String> {
     std::env::var("USER")
         .ok()
@@ -492,10 +522,7 @@ fn is_valid_unix_username(username: &str) -> bool {
 }
 
 #[cfg(unix)]
-fn lookup_home_for_username(username: &str) -> Option<PathBuf> {
-    if current_username().as_deref() == Some(username) {
-        return home_dir();
-    }
+fn passwd_home_for_username(username: &str) -> Option<PathBuf> {
     let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
     for line in passwd.lines() {
         if line.is_empty() || line.starts_with('#') {
@@ -515,12 +542,55 @@ fn lookup_home_for_username(username: &str) -> Option<PathBuf> {
     None
 }
 
+#[cfg(unix)]
+fn lookup_home_for_username(username: &str) -> Option<PathBuf> {
+    if current_username().as_deref() == Some(username) {
+        return home_dir();
+    }
+    passwd_home_for_username(username)
+}
+
 #[cfg(not(unix))]
 fn lookup_home_for_username(username: &str) -> Option<PathBuf> {
     if current_username().as_deref() == Some(username) {
         return home_dir();
     }
     None
+}
+
+fn real_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HERMES_REAL_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            #[cfg(unix)]
+            {
+                current_username()
+                    .as_deref()
+                    .and_then(passwd_home_for_username)
+            }
+            #[cfg(not(unix))]
+            {
+                None
+            }
+        })
+        .or_else(home_dir)
+}
+
+fn ensure_profile_home_dir() -> Option<PathBuf> {
+    let home = hermes_home_dir()?.join("home");
+    if std::fs::create_dir_all(&home).is_ok() {
+        Some(home)
+    } else {
+        None
+    }
+}
+
+fn subprocess_home_for_mode(mode: TerminalHomeMode) -> Option<PathBuf> {
+    match mode {
+        TerminalHomeMode::Auto | TerminalHomeMode::Real => real_home_dir(),
+        TerminalHomeMode::Profile => ensure_profile_home_dir().or_else(real_home_dir),
+    }
 }
 
 fn resolve_path(input: &str) -> Result<PathBuf, AgentError> {
@@ -801,17 +871,21 @@ fn bool_env_or_default(name: &str, default: bool) -> bool {
     }
 }
 
-fn terminal_config_from_env() -> (Vec<String>, bool, Vec<String>) {
+fn terminal_config_from_env() -> (Vec<String>, bool, TerminalHomeMode, Vec<String>) {
     let explicit = std::env::var("TERMINAL_SHELL_INIT_FILES")
         .ok()
         .map(|v| parse_shell_init_list(&v))
         .unwrap_or_default();
     let auto_source_bashrc = bool_env_or_default("TERMINAL_AUTO_SOURCE_BASHRC", true);
+    let home_mode = std::env::var("TERMINAL_HOME_MODE")
+        .ok()
+        .and_then(|v| TerminalHomeMode::from_env_name(&v))
+        .unwrap_or_default();
     let env_passthrough = std::env::var(SUBPROCESS_ENV_PASSTHROUGH_VAR)
         .ok()
         .map(|v| parse_subprocess_env_passthrough(&v).into_iter().collect())
         .unwrap_or_default();
-    (explicit, auto_source_bashrc, env_passthrough)
+    (explicit, auto_source_bashrc, home_mode, env_passthrough)
 }
 
 fn expand_env_refs(input: &str) -> String {
@@ -844,13 +918,17 @@ fn expand_env_refs(input: &str) -> String {
     output
 }
 
-fn expand_shell_init_path(input: &str) -> PathBuf {
+fn shell_home_dir(home_override: Option<&std::path::Path>) -> Option<PathBuf> {
+    home_override.map(PathBuf::from).or_else(home_dir)
+}
+
+fn expand_shell_init_path(input: &str, home_override: Option<&std::path::Path>) -> PathBuf {
     let expanded = expand_env_refs(input.trim());
     if expanded == "~" {
-        return home_dir().unwrap_or_else(|| PathBuf::from(expanded));
+        return shell_home_dir(home_override).unwrap_or_else(|| PathBuf::from(expanded));
     }
     if let Some(rest) = expanded.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
+        if let Some(home) = shell_home_dir(home_override) {
             return home.join(rest);
         }
     }
@@ -861,8 +939,11 @@ fn resolve_existing_shell_init_files(paths: impl IntoIterator<Item = PathBuf>) -
     paths.into_iter().filter(|p| p.is_file()).collect()
 }
 
-fn auto_shell_init_candidates(shell: &str) -> Vec<PathBuf> {
-    let Some(home) = home_dir() else {
+fn auto_shell_init_candidates(
+    shell: &str,
+    home_override: Option<&std::path::Path>,
+) -> Vec<PathBuf> {
+    let Some(home) = shell_home_dir(home_override) else {
         return Vec::new();
     };
     match shell {
@@ -881,18 +962,19 @@ fn resolve_shell_init_files_for_shell(
     shell: &str,
     explicit_files: &[String],
     auto_source_bashrc: bool,
+    home_override: Option<&std::path::Path>,
 ) -> Vec<PathBuf> {
     if !explicit_files.is_empty() {
         return resolve_existing_shell_init_files(
             explicit_files
                 .iter()
-                .map(|path| expand_shell_init_path(path.as_str())),
+                .map(|path| expand_shell_init_path(path.as_str(), home_override)),
         );
     }
     if !auto_source_bashrc {
         return Vec::new();
     }
-    resolve_existing_shell_init_files(auto_shell_init_candidates(shell))
+    resolve_existing_shell_init_files(auto_shell_init_candidates(shell, home_override))
 }
 
 fn shell_single_quote(value: &str) -> String {
@@ -959,11 +1041,21 @@ fn scrub_subprocess_env(cmd: &mut TokioCommand, configured_passthrough: &[String
     cmd.env("PATH", normalized_path);
 }
 
+fn apply_subprocess_home_policy(cmd: &mut TokioCommand, subprocess_home: Option<&PathBuf>) {
+    if let Some(real_home) = real_home_dir() {
+        cmd.env("HERMES_REAL_HOME", real_home);
+    }
+    if let Some(home) = subprocess_home {
+        cmd.env("HOME", home);
+    }
+}
+
 fn with_login_profile_sources(
     command: &str,
     explicit_files: &[String],
     auto_source_bashrc: bool,
     env_passthrough: &[String],
+    subprocess_home: Option<&std::path::Path>,
 ) -> String {
     #[cfg(unix)]
     {
@@ -972,11 +1064,13 @@ fn with_login_profile_sources(
             "bash",
             explicit_files,
             auto_source_bashrc,
+            subprocess_home,
         ));
         let zsh_prelude = shell_source_prelude(&resolve_shell_init_files_for_shell(
             "zsh",
             explicit_files,
             auto_source_bashrc,
+            subprocess_home,
         ));
         let bash_command = shell_single_quote(&format!("{bash_prelude}{cleanup}{command}"));
         let zsh_command = shell_single_quote(&format!("{zsh_prelude}{cleanup}{command}"));
@@ -1009,6 +1103,7 @@ else printf '%s\n' \"Hermes could not find bash or zsh in PATH. Run 'exec zsh -l
         let _ = explicit_files;
         let _ = auto_source_bashrc;
         let _ = env_passthrough;
+        let _ = subprocess_home;
         command.to_string()
     }
 }
@@ -1180,11 +1275,13 @@ impl TerminalBackend for LocalBackend {
     ) -> Result<CommandOutput, AgentError> {
         let timeout_secs = timeout.unwrap_or(self.default_timeout);
         let rewritten_command = rewrite_compound_background(command);
+        let subprocess_home = subprocess_home_for_mode(self.home_mode);
         let command_with_profiles = with_login_profile_sources(
             &rewritten_command,
             &self.shell_init_files,
             self.auto_source_bashrc,
             &self.env_passthrough,
+            subprocess_home.as_deref(),
         );
 
         if pty && !background {
@@ -1204,6 +1301,7 @@ impl TerminalBackend for LocalBackend {
                     .stderr(Stdio::piped())
                     .stdin(Stdio::null());
                 scrub_subprocess_env(&mut pty_cmd, &self.env_passthrough);
+                apply_subprocess_home_policy(&mut pty_cmd, subprocess_home.as_ref());
 
                 if let Some(dir) = workdir {
                     pty_cmd.current_dir(resolve_path(dir)?);
@@ -1253,6 +1351,7 @@ impl TerminalBackend for LocalBackend {
         };
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         scrub_subprocess_env(&mut cmd, &self.env_passthrough);
+        apply_subprocess_home_policy(&mut cmd, subprocess_home.as_ref());
 
         if let Some(dir) = workdir {
             cmd.current_dir(resolve_path(dir)?);
@@ -1366,11 +1465,13 @@ impl TerminalBackend for LocalBackend {
                 .await;
         };
         let rewritten_command = rewrite_compound_background(command);
+        let subprocess_home = subprocess_home_for_mode(self.home_mode);
         let command_with_profiles = with_login_profile_sources(
             &rewritten_command,
             &self.shell_init_files,
             self.auto_source_bashrc,
             &self.env_passthrough,
+            subprocess_home.as_deref(),
         );
 
         if background {
@@ -1406,6 +1507,7 @@ impl TerminalBackend for LocalBackend {
                     .stderr(Stdio::piped())
                     .stdin(Stdio::piped());
                 scrub_subprocess_env(&mut pty_cmd, &self.env_passthrough);
+                apply_subprocess_home_policy(&mut pty_cmd, subprocess_home.as_ref());
 
                 if let Some(dir) = workdir {
                     pty_cmd.current_dir(resolve_path(dir)?);
@@ -1437,6 +1539,7 @@ impl TerminalBackend for LocalBackend {
             .stderr(Stdio::piped())
             .stdin(Stdio::piped());
         scrub_subprocess_env(&mut cmd, &self.env_passthrough);
+        apply_subprocess_home_policy(&mut cmd, subprocess_home.as_ref());
         if let Some(dir) = workdir {
             cmd.current_dir(resolve_path(dir)?);
         }
@@ -1829,7 +1932,7 @@ mod tests {
             std::fs::write(td.path().join(file), "export HERMES_TEST=1\n").unwrap();
         }
         let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
-        let wrapped = with_login_profile_sources("echo hi", &[], true, &[]);
+        let wrapped = with_login_profile_sources("echo hi", &[], true, &[], None);
         assert!(wrapped.contains("command -v bash"));
         assert!(wrapped.contains("exec bash -lc"));
         assert!(wrapped.contains(".bash_profile"));
@@ -1845,7 +1948,7 @@ mod tests {
     fn test_with_login_profile_sources_prefers_user_shell_when_supported() {
         let _lock = lock_env();
         let _shell = EnvGuard::set("SHELL", "/bin/zsh");
-        let wrapped = with_login_profile_sources("echo hi", &[], true, &[]);
+        let wrapped = with_login_profile_sources("echo hi", &[], true, &[], None);
         let preferred = "if command -v zsh >/dev/null 2>&1; then exec zsh -lc";
         let fallback = "if command -v bash >/dev/null 2>&1; then exec bash -lc";
         let preferred_idx = wrapped.find(preferred).expect("preferred zsh branch");
@@ -1865,7 +1968,7 @@ mod tests {
         }
         let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
 
-        let resolved = resolve_shell_init_files_for_shell("bash", &[], true);
+        let resolved = resolve_shell_init_files_for_shell("bash", &[], true, None);
         let names = resolved
             .iter()
             .filter_map(|p| p.file_name().and_then(|name| name.to_str()))
@@ -1886,6 +1989,7 @@ mod tests {
             "bash",
             &[custom.to_string_lossy().to_string()],
             true,
+            None,
         );
         assert_eq!(resolved, [custom]);
     }
@@ -1897,7 +2001,7 @@ mod tests {
         std::fs::write(td.path().join(".bashrc"), "export FROM_BASHRC=1\n").unwrap();
         let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
 
-        let resolved = resolve_shell_init_files_for_shell("bash", &[], false);
+        let resolved = resolve_shell_init_files_for_shell("bash", &[], false, None);
         assert!(resolved.is_empty());
     }
 
@@ -1912,15 +2016,37 @@ mod tests {
         let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
         let _custom_dir = EnvGuard::set("CUSTOM_RC_DIR", rc_dir.to_string_lossy().as_ref());
 
-        let home_resolved =
-            resolve_shell_init_files_for_shell("bash", &["~/rc/custom.sh".to_string()], false);
+        let home_resolved = resolve_shell_init_files_for_shell(
+            "bash",
+            &["~/rc/custom.sh".to_string()],
+            false,
+            None,
+        );
         let env_resolved = resolve_shell_init_files_for_shell(
             "bash",
             &["${CUSTOM_RC_DIR}/custom.sh".to_string()],
             false,
+            None,
         );
         assert_eq!(home_resolved.as_slice(), std::slice::from_ref(&custom));
         assert_eq!(env_resolved, [custom]);
+    }
+
+    #[test]
+    fn test_resolve_shell_init_files_uses_subprocess_home_override() {
+        let _lock = lock_env();
+        let real = tempdir().unwrap();
+        let profile = tempdir().unwrap();
+        std::fs::write(real.path().join(".bashrc"), "export REAL_HOME_RC=1\n").unwrap();
+        std::fs::write(profile.path().join(".bashrc"), "export PROFILE_HOME_RC=1\n").unwrap();
+        let _home = EnvGuard::set("HOME", real.path().to_string_lossy().as_ref());
+
+        let resolved = resolve_shell_init_files_for_shell("bash", &[], true, Some(profile.path()));
+
+        assert!(resolved
+            .iter()
+            .any(|p| p == &profile.path().join(".bashrc")));
+        assert!(!resolved.iter().any(|p| p == &real.path().join(".bashrc")));
     }
 
     #[test]
@@ -1949,6 +2075,7 @@ mod tests {
                 "OPENAI_API_KEY".to_string(),
                 "HERMES_GATEWAY_SECRET".to_string(),
             ],
+            None,
         );
         assert!(wrapped.contains("HERMES_SUBPROCESS_ENV_PASSTHROUGH"));
         assert!(wrapped.contains("OPENAI_API_KEY"));
@@ -1956,6 +2083,42 @@ mod tests {
         assert!(wrapped.contains(
             "${HERMES_SUBPROCESS_FORCE_TARGETS:-} ${HERMES_SUBPROCESS_ENV_PASSTHROUGH:-}"
         ));
+    }
+
+    #[test]
+    fn test_profile_home_mode_sets_home_and_real_home() {
+        let _lock = lock_env();
+        let real = tempdir().unwrap();
+        let hermes = tempdir().unwrap();
+        let _home = EnvGuard::set("HOME", real.path().to_string_lossy().as_ref());
+        let _real_home = EnvGuard::set("HERMES_REAL_HOME", real.path().to_string_lossy().as_ref());
+        let _hermes_home = EnvGuard::set("HERMES_HOME", hermes.path().to_string_lossy().as_ref());
+        let backend = LocalBackend::new_with_shell_init_and_home_mode(
+            10,
+            1_048_576,
+            Vec::new(),
+            false,
+            TerminalHomeMode::Profile,
+            Vec::new(),
+        );
+
+        let output = block_on(backend.execute_command(
+            "printf '%s|%s' \"$HOME\" \"$HERMES_REAL_HOME\"",
+            None,
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            output.stdout,
+            format!(
+                "{}|{}",
+                hermes.path().join("home").display(),
+                real.path().display()
+            )
+        );
     }
 
     #[test]
@@ -2059,7 +2222,7 @@ mod tests {
     #[cfg(not(unix))]
     #[test]
     fn test_with_login_profile_sources_is_passthrough_off_unix() {
-        let wrapped = with_login_profile_sources("echo hi", &[], true, &[]);
+        let wrapped = with_login_profile_sources("echo hi", &[], true, &[], None);
         assert_eq!(wrapped, "echo hi");
     }
 

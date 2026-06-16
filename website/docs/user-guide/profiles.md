@@ -51,8 +51,10 @@ Copies **everything** — config, API keys, personality, all memories, full sess
 ### Clone from a specific profile
 
 ```bash
-hermes profile create work --clone --clone-from coder
+hermes profile create work --clone-from coder
 ```
+
+`--clone-from` implies a config clone, so this copies `coder`'s model, personality, and turn limit even when `--clone` is omitted. Add `--clone-all` when you want the full profile snapshot instead of config-only cloning.
 
 :::tip Honcho memory + profiles
 When Honcho is enabled, `--clone` automatically creates a dedicated AI peer for the new profile while sharing the same user workspace. Each profile builds its own observations and identity. See [Honcho -- Multi-agent / Profiles](./features/memory-providers.md#honcho) for details.
@@ -236,6 +238,8 @@ Add the line to your `~/.bashrc` or `~/.zshrc` for persistent completion. Comple
 Profiles use the `HERMES_HOME` environment variable. When you run `coder chat`, the wrapper script sets `HERMES_HOME=~/.hermes/profiles/coder` before launching hermes. Since 119+ files in the codebase resolve paths via `get_hermes_home()`, Hermes state automatically scopes to the profile's directory — config, sessions, memory, skills, state database, gateway PID, logs, and cron jobs.
 
 This is separate from terminal working directory. Tool execution starts from `terminal.cwd` (or the launch directory when `cwd: "."` on the local backend), not automatically from `HERMES_HOME`.
+
+Local terminal commands also keep your real operating-system `HOME` by default. If you want tools launched from a profile to use an isolated home directory, set `terminal.home_mode: profile`; Hermes will use `$HERMES_HOME/home` for local terminal and `execute_code` subprocesses while still exposing `HERMES_REAL_HOME` for tools that need the host user's original home.
 
 The default profile is simply `~/.hermes` itself. No migration needed — existing installs work identically.
 

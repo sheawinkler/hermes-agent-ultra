@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import Layout from "@theme/Layout";
 import skills from "../../data/skills.json";
+import meta from "../../data/skills-meta.json";
 import styles from "./styles.module.css";
 
 interface Skill {
@@ -18,9 +19,39 @@ interface Skill {
   envVars?: string[];
   commands?: string[];
   docsPath?: string;
+  identifier?: string;
+  installCmd?: string;
 }
 
 const allSkills: Skill[] = skills as Skill[];
+
+interface IndexMeta {
+  extractedAt?: string;
+  indexGeneratedAt?: string;
+  totalSkills?: number;
+  externalSource?: string;
+  indexHealth?: { status?: string; detail?: string };
+  bySource?: Record<string, number>;
+}
+
+const indexMeta: IndexMeta = meta as IndexMeta;
+
+function formatRelativeTime(iso?: string): string | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return null;
+  const diffMs = Date.now() - then;
+  if (diffMs < 0) return "just now";
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const months = Math.floor(days / 30);
+  return `${months} month${months === 1 ? "" : "s"} ago`;
+}
 
 const CATEGORY_ICONS: Record<string, string> = {
   apple: "\u{f179}",
@@ -250,7 +281,7 @@ function SkillCard({
               </div>
             )}
             <div className={styles.installHint}>
-              <code>hermes skills install {skill.name}</code>
+              <code>{skill.installCmd || `hermes skills install ${skill.name}`}</code>
             </div>
             {skill.docsPath && (
               <a
@@ -398,6 +429,20 @@ export default function SkillsDashboard() {
               <strong className={styles.heroAccent}>{allSkills.length}</strong> skills
               across {sources.length - 1} registries
             </p>
+            <div
+              className={`${styles.freshnessBadge} ${
+                indexMeta.indexHealth?.status === "ok" ? styles.freshnessOk : styles.freshnessWarn
+              }`}
+              title={indexMeta.indexHealth?.detail || "Skills index status"}
+            >
+              <span className={styles.freshnessDot} />
+              <span>
+                {indexMeta.indexHealth?.status === "ok" ? "Index healthy" : "Index degraded"}
+                {formatRelativeTime(indexMeta.indexGeneratedAt || indexMeta.extractedAt)
+                  ? ` - refreshed ${formatRelativeTime(indexMeta.indexGeneratedAt || indexMeta.extractedAt)}`
+                  : ""}
+              </span>
+            </div>
 
             <div className={styles.statsRow}>
               <StatCard

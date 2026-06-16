@@ -944,7 +944,7 @@ impl TelegramAdapter {
         }
         if content
             .lines()
-            .any(|line| Self::looks_like_markdown_table_separator(line))
+            .any(Self::looks_like_markdown_table_separator)
         {
             return true;
         }
@@ -1330,12 +1330,11 @@ impl TelegramAdapter {
         let (chat_id, inferred_thread_id) = Self::split_gateway_chat_thread(chat_id);
         let message_thread_id = message_thread_id.or(inferred_thread_id);
         if self.should_attempt_rich_text(text, keyboard.as_ref()) {
-            match self
+            if let Some(message_id) = self
                 .try_send_rich_text(chat_id, text, reply_to_message_id, message_thread_id)
                 .await?
             {
-                Some(message_id) => return Ok(vec![message_id]),
-                None => {}
+                return Ok(vec![message_id]);
             }
         }
 
@@ -1414,8 +1413,9 @@ impl TelegramAdapter {
             Err(err) => return Err(err),
         };
         resp.result
-            .map(|msg| Some(msg.message_id))
+            .map(|msg| msg.message_id)
             .ok_or_else(|| GatewayError::SendFailed("sendRichMessage returned no message".into()))
+            .map(Some)
     }
 
     async fn try_edit_rich_text(

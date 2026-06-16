@@ -9,6 +9,8 @@
 //!
 //! Corresponds to Python `agent/memory_manager.py`.
 
+use crate::skill_orchestrator::extract_user_instruction_from_skill_message;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -385,6 +387,11 @@ impl MemoryManager {
 
     /// Collect prefetch context from all providers, wrap in memory-context fence.
     pub fn prefetch_all(&self, query: &str, session_id: &str) -> String {
+        let Some(clean_query) = extract_user_instruction_from_skill_message(query) else {
+            return String::new();
+        };
+        let query = clean_query.as_ref();
+
         let mut candidates: Vec<FusedMemoryCandidate> = Vec::new();
         for provider in &self.providers {
             let result = provider.prefetch(query, session_id);
@@ -421,6 +428,11 @@ impl MemoryManager {
 
     /// Queue background prefetch on all providers for the next turn.
     pub fn queue_prefetch_all(&self, query: &str, session_id: &str) {
+        let Some(clean_query) = extract_user_instruction_from_skill_message(query) else {
+            return;
+        };
+        let query = clean_query.as_ref();
+
         for provider in &self.providers {
             provider.queue_prefetch(query, session_id);
         }
@@ -430,6 +442,12 @@ impl MemoryManager {
 
     /// Sync a completed turn to all providers.
     pub fn sync_all(&self, user_content: &str, assistant_content: &str, session_id: &str) {
+        let Some(clean_user_content) = extract_user_instruction_from_skill_message(user_content)
+        else {
+            return;
+        };
+        let user_content = clean_user_content.as_ref();
+
         for provider in &self.providers {
             provider.sync_turn(user_content, assistant_content, session_id);
         }
@@ -1003,6 +1021,64 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingProvider {
+        prefetched: Arc<std::sync::Mutex<Vec<String>>>,
+        queued: Arc<std::sync::Mutex<Vec<String>>>,
+        synced: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl RecordingProvider {
+        fn new() -> Self {
+            Self::default()
+        }
+    }
+
+    impl MemoryProviderPlugin for RecordingProvider {
+        fn name(&self) -> &str {
+            "recording"
+        }
+
+        fn prefetch(&self, query: &str, _session_id: &str) -> String {
+            self.prefetched.lock().unwrap().push(query.to_string());
+            String::new()
+        }
+
+        fn queue_prefetch(&self, query: &str, _session_id: &str) {
+            self.queued.lock().unwrap().push(query.to_string());
+        }
+
+        fn sync_turn(&self, user_content: &str, _assistant_content: &str, _session_id: &str) {
+            self.synced.lock().unwrap().push(user_content.to_string());
+        }
+    }
+
+    const SINGLE_SKILL_TURN: &str = concat!(
+        "[SYSTEM: The user has invoked the \"skill-creator\" skill, indicating they want ",
+        "you to follow its instructions. The full skill content is loaded below.]\n\n",
+        "# Skill Creator\n\n",
+        "Large skill body that must not be searched or embedded.\n\n",
+        "The user has provided the following instruction alongside the skill invocation: ",
+        "make a skill for release triage"
+    );
+
+    const BUNDLE_TURN: &str = concat!(
+        "[IMPORTANT: The user has invoked the \"backend-dev\" skill bundle, ",
+        "loading 2 skills together. Treat every skill below as active guidance for this turn.]\n\n",
+        "Bundle: backend-dev\n",
+        "Skills loaded: test-driven-development, code-review\n\n",
+        "User instruction: fix the failing retrieval test\n\n",
+        "[Loaded as part of the \"backend-dev\" skill bundle.]\n\n",
+        "Large bundled skill body that must not be searched or embedded."
+    );
+
+    const BARE_SKILL_TURN: &str = concat!(
+        "[SYSTEM: The user has invoked the \"skill-creator\" skill, indicating they want ",
+        "you to follow its instructions. The full skill content is loaded below.]\n\n",
+        "# Skill Creator\n\n",
+        "Large skill body, no user instruction."
+    );
+
     #[test]
     fn test_add_builtin_provider() {
         let mut mm = MemoryManager::new();
@@ -1058,6 +1134,89 @@ mod tests {
         mm.add_provider(Arc::new(TestProvider::new("builtin")));
         let ctx = mm.prefetch_all("hello", "");
         assert!(ctx.is_empty());
+    }
+
+    #[test]
+    fn test_prefetch_all_strips_single_skill_scaffolding() {
+        let provider = Arc::new(RecordingProvider::new());
+        let prefetched = provider.prefetched.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        let ctx = mm.prefetch_all(SINGLE_SKILL_TURN, "session");
+
+        assert!(ctx.is_empty());
+        assert_eq!(
+            *prefetched.lock().unwrap(),
+            vec!["make a skill for release triage".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_prefetch_all_skips_bare_skill_scaffolding() {
+        let provider = Arc::new(RecordingProvider::new());
+        let prefetched = provider.prefetched.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        let ctx = mm.prefetch_all(BARE_SKILL_TURN, "session");
+
+        assert!(ctx.is_empty());
+        assert!(prefetched.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_queue_prefetch_all_strips_bundle_scaffolding() {
+        let provider = Arc::new(RecordingProvider::new());
+        let queued = provider.queued.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        mm.queue_prefetch_all(BUNDLE_TURN, "session");
+
+        assert_eq!(
+            *queued.lock().unwrap(),
+            vec!["fix the failing retrieval test".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_queue_prefetch_all_skips_bare_skill_scaffolding() {
+        let provider = Arc::new(RecordingProvider::new());
+        let queued = provider.queued.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        mm.queue_prefetch_all(BARE_SKILL_TURN, "session");
+
+        assert!(queued.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_sync_all_strips_single_skill_scaffolding() {
+        let provider = Arc::new(RecordingProvider::new());
+        let synced = provider.synced.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        mm.sync_all(SINGLE_SKILL_TURN, "Done.", "session");
+
+        assert_eq!(
+            *synced.lock().unwrap(),
+            vec!["make a skill for release triage".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_sync_all_skips_bare_skill_scaffolding() {
+        let provider = Arc::new(RecordingProvider::new());
+        let synced = provider.synced.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        mm.sync_all(BARE_SKILL_TURN, "Done.", "session");
+
+        assert!(synced.lock().unwrap().is_empty());
     }
 
     #[test]

@@ -38,6 +38,7 @@ use crate::interrupt::InterruptController;
 /// Boxed `Send` future type alias used to short-circuit async-recursion
 /// between parent and child [`AgentLoop::execute_tool_calls`] futures.
 type BoxSendFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
+pub type BackgroundDelegationCallback = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Default wall-clock cap for a single child agent turn-chain.
 pub const DEFAULT_SUB_AGENT_TIMEOUT_SECS: u64 = 600;
@@ -127,7 +128,7 @@ pub struct SubAgentOrchestratorConfig {
     pub hermes_home: PathBuf,
     pub parent_session_id: Option<String>,
     pub timeout: Duration,
-    pub background_delegation_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    pub background_delegation_callback: Option<BackgroundDelegationCallback>,
 }
 
 /// In-process executor for `delegate_task` tool calls.

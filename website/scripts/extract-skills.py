@@ -4,6 +4,7 @@
 import json
 import os
 from collections import Counter
+from datetime import datetime, timezone
 
 import yaml
 
@@ -12,8 +13,10 @@ LOCAL_SKILL_DIRS = [
     ("skills", "built-in"),
     ("optional-skills", "optional"),
 ]
+UNIFIED_INDEX_PATH = os.path.join(REPO_ROOT, "website", "static", "api", "skills-index.json")
 INDEX_CACHE_DIR = os.path.join(REPO_ROOT, "skills", "index-cache")
 OUTPUT = os.path.join(REPO_ROOT, "website", "src", "data", "skills.json")
+META_OUTPUT = os.path.join(REPO_ROOT, "website", "src", "data", "skills-meta.json")
 
 CATEGORY_LABELS = {
     "apple": "Apple",
@@ -53,6 +56,27 @@ SOURCE_LABELS = {
     "openai_skills": "OpenAI",
     "claude_marketplace": "Claude Marketplace",
     "lobehub": "LobeHub",
+}
+
+UNIFIED_SOURCE_LABELS = {
+    "official": "optional",
+    "skills.sh": "skills.sh",
+    "skills-sh": "skills.sh",
+    "clawhub": "ClawHub",
+    "browse-sh": "browse.sh",
+    "lobehub": "LobeHub",
+    "claude-marketplace": "Claude Marketplace",
+    "well-known": "Well-Known",
+    "github": "GitHub",
+}
+
+GITHUB_TAP_LABELS = {
+    "openai/skills": "OpenAI",
+    "anthropics/skills": "Anthropic",
+    "huggingface/skills": "HuggingFace",
+    "VoltAgent/awesome-agent-skills": "VoltAgent",
+    "garrytan/gstack": "gstack",
+    "MiniMax-AI/cli": "MiniMax",
 }
 
 
@@ -270,6 +294,92 @@ def extract_cached_index_skills():
     return skills
 
 
+def _label_for_github_identifier(identifier: str) -> str:
+    if not identifier:
+        return "GitHub"
+    for prefix, label in GITHUB_TAP_LABELS.items():
+        if identifier == prefix or identifier.startswith(prefix + "/"):
+            return label
+    return "GitHub"
+
+
+def _install_command(source: str, identifier: str, name: str) -> str:
+    target = identifier or name
+    if not target:
+        return "hermes skills install <skill>"
+    source = source.lower()
+    if source == "clawhub" and not target.startswith("clawhub/"):
+        target = f"clawhub/{target}"
+    return f"hermes skills install {target}"
+
+
+def extract_unified_index_skills():
+    if not os.path.isfile(UNIFIED_INDEX_PATH):
+        return None, None
+
+    try:
+        with open(UNIFIED_INDEX_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[extract-skills] Failed to read unified index: {e}")
+        return None, None
+
+    if not isinstance(data, dict) or not isinstance(data.get("skills"), list):
+        return None, None
+
+    meta = {
+        "indexGeneratedAt": data.get("generated_at", ""),
+        "indexSkillCount": data.get("skill_count", 0),
+        "indexVersion": data.get("version", 0),
+    }
+    out = []
+    for entry in data.get("skills", []):
+        if not isinstance(entry, dict):
+            continue
+        source_id = (entry.get("source") or "").lower()
+        if source_id == "official":
+            # Local optional-skills extraction keeps richer official metadata.
+            continue
+
+        identifier = entry.get("identifier", "") or ""
+        name = entry.get("name") or identifier.split("/")[-1] or "unknown"
+        description = (entry.get("description") or "").split("\n")[0]
+        if len(description) > 280:
+            description = description[:277] + "..."
+        tags = entry.get("tags", []) or []
+        if not isinstance(tags, list):
+            tags = []
+        source_label = (
+            _label_for_github_identifier(identifier)
+            if source_id == "github"
+            else UNIFIED_SOURCE_LABELS.get(source_id, source_id or "community")
+        )
+        repo = entry.get("repo", "") or ""
+        author = repo.split("/")[0] if source_id in {"skills.sh", "skills-sh"} and repo else ""
+        category = _guess_category(tags)
+
+        out.append({
+            "name": name,
+            "description": description,
+            "overview": "",
+            "category": category,
+            "categoryLabel": "",
+            "source": source_label,
+            "tags": tags,
+            "platforms": [],
+            "author": author,
+            "version": "",
+            "license": "",
+            "envVars": [],
+            "commands": [],
+            "docsPath": "",
+            "identifier": identifier,
+            "installCmd": _install_command(source_id, identifier, name),
+        })
+
+    return out, meta
+
+
 TAG_TO_CATEGORY = {}
 for _cat, _tags in {
     "software-development": [
@@ -326,7 +436,12 @@ def _consolidate_small_categories(skills: list) -> list:
 
 def main():
     local = extract_local_skills()
-    external = extract_cached_index_skills()
+    external, index_meta = extract_unified_index_skills()
+    external_source = "unified-index"
+    if external is None:
+        external = extract_cached_index_skills()
+        index_meta = {}
+        external_source = "legacy-cache" if external else "local-only"
 
     all_skills = _consolidate_small_categories(local + external)
 
@@ -342,7 +457,33 @@ def main():
     with open(OUTPUT, "w", encoding="utf-8") as f:
         json.dump(all_skills, f, indent=2)
 
+    by_source = Counter(s["source"] for s in all_skills)
+    generated_at = index_meta.get("indexGeneratedAt", "") if index_meta else ""
+    health_status = "ok"
+    health_detail = "skills metadata extracted"
+    if external_source == "local-only":
+        health_status = "degraded"
+        health_detail = "unified skills index unavailable; only local skills were extracted"
+    elif external_source == "legacy-cache":
+        health_status = "degraded"
+        health_detail = "using legacy skills/index-cache fallback"
+    meta = {
+        "extractedAt": datetime.now(timezone.utc).isoformat(),
+        "indexGeneratedAt": generated_at,
+        "totalSkills": len(all_skills),
+        "externalSource": external_source,
+        "indexHealth": {
+            "status": health_status,
+            "detail": health_detail,
+        },
+        "bySource": dict(sorted(by_source.items())),
+        **(index_meta or {}),
+    }
+    with open(META_OUTPUT, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
     print(f"Extracted {len(all_skills)} skills to {OUTPUT}")
+    print(f"Wrote metadata to {META_OUTPUT} ({external_source})")
     print(f"  {len(local)} local ({sum(1 for s in local if s['source'] == 'built-in')} built-in, "
           f"{sum(1 for s in local if s['source'] == 'optional')} optional)")
     print(f"  {len(external)} from external indexes")

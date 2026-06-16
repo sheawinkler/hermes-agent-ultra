@@ -6,12 +6,72 @@
 //!
 //! Corresponds to Python `agent/skill_commands.py`.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use hermes_core::types::Skill;
 use hermes_skills::SkillGuard;
 use regex::Regex;
+
+// ---------------------------------------------------------------------------
+// Skill scaffolding extraction
+// ---------------------------------------------------------------------------
+
+const SKILL_INVOCATION_SYSTEM_PREFIX: &str = "[SYSTEM: The user has invoked the ";
+const SKILL_INVOCATION_IMPORTANT_PREFIX: &str = "[IMPORTANT: The user has invoked the ";
+const SINGLE_SKILL_MARKER: &str = "The full skill content is loaded below.]";
+const SINGLE_SKILL_INSTRUCTION: &str =
+    "The user has provided the following instruction alongside the skill invocation: ";
+const RUNTIME_NOTE_MARKER: &str = "\n\n[Runtime note:";
+const BUNDLE_MARKER: &str = " skill bundle,";
+const BUNDLE_USER_INSTRUCTION: &str = "\nUser instruction: ";
+const BUNDLE_FIRST_SKILL_BLOCK: &str = "\n\n[Loaded as part of the ";
+
+/// Recover the user's instruction from an expanded slash-skill turn.
+///
+/// Normal user messages pass through unchanged. Skill invocations with a user
+/// instruction return only that instruction. Bare skill invocations return
+/// `None` so memory providers can skip the prompt-scaffolding-only turn.
+pub fn extract_user_instruction_from_skill_message(content: &str) -> Option<Cow<'_, str>> {
+    if !content.starts_with(SKILL_INVOCATION_SYSTEM_PREFIX)
+        && !content.starts_with(SKILL_INVOCATION_IMPORTANT_PREFIX)
+    {
+        return Some(Cow::Borrowed(content));
+    }
+
+    let header = content.lines().next().unwrap_or(content);
+
+    if header.contains(BUNDLE_MARKER) {
+        return extract_bundle_user_instruction(content).map(Cow::Owned);
+    }
+
+    if header.contains(SINGLE_SKILL_MARKER) {
+        return extract_single_skill_user_instruction(content).map(Cow::Owned);
+    }
+
+    None
+}
+
+fn extract_single_skill_user_instruction(message: &str) -> Option<String> {
+    let marker_idx = message.rfind(SINGLE_SKILL_INSTRUCTION)?;
+    let mut instruction = &message[marker_idx + SINGLE_SKILL_INSTRUCTION.len()..];
+    if let Some(runtime_idx) = instruction.find(RUNTIME_NOTE_MARKER) {
+        instruction = &instruction[..runtime_idx];
+    }
+    let instruction = instruction.trim();
+    (!instruction.is_empty()).then(|| instruction.to_string())
+}
+
+fn extract_bundle_user_instruction(message: &str) -> Option<String> {
+    let marker_idx = message.find(BUNDLE_USER_INSTRUCTION)?;
+    let mut instruction = &message[marker_idx + BUNDLE_USER_INSTRUCTION.len()..];
+    if let Some(first_skill_idx) = instruction.find(BUNDLE_FIRST_SKILL_BLOCK) {
+        instruction = &instruction[..first_skill_idx];
+    }
+    let instruction = instruction.trim();
+    (!instruction.is_empty()).then(|| instruction.to_string())
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -589,6 +649,78 @@ mod tests {
         assert!(msg.contains("greet"));
         assert!(msg.contains("Say hello to the user."));
         assert!(msg.contains("in French"));
+    }
+
+    #[test]
+    fn extract_user_instruction_passes_plain_message_through() {
+        assert_eq!(
+            extract_user_instruction_from_skill_message("just a normal request").as_deref(),
+            Some("just a normal request")
+        );
+    }
+
+    #[test]
+    fn extract_user_instruction_strips_single_skill_scaffolding() {
+        let message = concat!(
+            "[SYSTEM: The user has invoked the \"skill-creator\" skill, indicating they want ",
+            "you to follow its instructions. The full skill content is loaded below.]\n\n",
+            "# Skill Creator\n\n",
+            "Large skill body that must not be embedded.\n\n",
+            "The user has provided the following instruction alongside the skill invocation: ",
+            "make a skill for release triage"
+        );
+
+        assert_eq!(
+            extract_user_instruction_from_skill_message(message).as_deref(),
+            Some("make a skill for release triage")
+        );
+    }
+
+    #[test]
+    fn extract_user_instruction_skips_bare_skill_scaffolding() {
+        let message = concat!(
+            "[SYSTEM: The user has invoked the \"skill-creator\" skill, indicating they want ",
+            "you to follow its instructions. The full skill content is loaded below.]\n\n",
+            "# Skill Creator\n\n",
+            "Large skill body, no user instruction."
+        );
+
+        assert!(extract_user_instruction_from_skill_message(message).is_none());
+    }
+
+    #[test]
+    fn extract_user_instruction_trims_runtime_note() {
+        let message = concat!(
+            "[SYSTEM: The user has invoked the \"skill-creator\" skill, indicating they want ",
+            "you to follow its instructions. The full skill content is loaded below.]\n\n",
+            "# Skill Creator\n\n",
+            "The user has provided the following instruction alongside the skill invocation: ",
+            "make a skill for release triage\n\n",
+            "[Runtime note: delegated subagent context]"
+        );
+
+        assert_eq!(
+            extract_user_instruction_from_skill_message(message).as_deref(),
+            Some("make a skill for release triage")
+        );
+    }
+
+    #[test]
+    fn extract_user_instruction_strips_bundle_scaffolding() {
+        let message = concat!(
+            "[IMPORTANT: The user has invoked the \"backend-dev\" skill bundle, ",
+            "loading 2 skills together. Treat every skill below as active guidance for this turn.]\n\n",
+            "Bundle: backend-dev\n",
+            "Skills loaded: test-driven-development, code-review\n\n",
+            "User instruction: fix the failing retrieval test\n\n",
+            "[Loaded as part of the \"backend-dev\" skill bundle.]\n\n",
+            "Large bundled skill body that must not be searched or embedded."
+        );
+
+        assert_eq!(
+            extract_user_instruction_from_skill_message(message).as_deref(),
+            Some("fix the failing retrieval test")
+        );
     }
 
     #[test]
