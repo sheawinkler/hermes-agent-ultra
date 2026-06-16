@@ -1,5 +1,29 @@
 {
   "sha": {
+    "bf8effad023b": {
+      "disposition": "ported",
+      "notes": "Rust config atomic writes now handle cross-device rename failures with a copy fallback that preserves same-directory temp cleanup; tests cover atomic writes and platform EXDEV detection."
+    },
+    "5e851bc6bc51": {
+      "disposition": "ported",
+      "notes": "Rust Discord auto slash registration now caps auto-added commands at Discord's 100-command application limit after reserving explicit command names, preserving gateway-before-plugin ordering with regression coverage."
+    },
+    "972a9885ee20": {
+      "disposition": "ported",
+      "notes": "Rust MCP stdio configs now reject the same high-signal shell-plus-network-egress exfiltration shape before direct client or manager connection. Tests cover the dangerous payload, clean npx, benign shell pipes, and manager rejection."
+    },
+    "efbe1635dd2e": {
+      "disposition": "ported",
+      "notes": "Rust gateway parsing now carries replied-to media through native surfaces: Telegram text replies expose referenced voice/photo/document file IDs, and Discord MESSAGE_CREATE parsing merges referenced-message attachments after current attachments."
+    },
+    "bff78a34dc44": {
+      "disposition": "ported",
+      "notes": "Rust ZAI model metadata and CLI curated models include glm-5.2 with a verified 1M context window; model context tests cover zai/glm-5.2."
+    },
+    "f3fe99863d13": {
+      "disposition": "ported",
+      "notes": "Rust web backends removed the keyless Parallel MCP fallback. Parallel search/extract are REST-only with PARALLEL_API_KEY, and no-key search/extract fall back to local fallback/simple behavior with tests."
+    },
     "fe54960142d1": {
       "disposition": "superseded",
       "notes": "Upstream desktop React trigger-popover text wrapping has no matching Rust runtime file. Hermes Agent Ultra renders slash completions through the Rust Ratatui popup in crates/hermes-cli/src/tui.rs, so the TS/CSS truncation fix is superseded by the local TUI surface."
@@ -9,12 +33,12 @@
       "notes": "Rust port covers the functional slash-command delta: TUI completions now use live App state for /handoff platforms and /tools enable|disable candidates, /personality completions list built-ins, and CLI slash /tools enable|disable persists tools_config plus refreshes active tool schemas. Upstream desktop registry/picker UI and Python tui_gateway context-manager changes are superseded by this Rust-only TUI/CLI/gateway architecture."
     },
     "e0e25717116c": {
-      "disposition": "ported",
-      "notes": "Rust web tools now support Parallel search/extract through crates/hermes-tools/src/backends/web.rs: keyed PARALLEL_API_KEY uses v1 REST /search and /extract payloads, keyless default uses the hosted Search MCP handshake, result normalization preserves local Rust tool shapes, and tests cover resolver priority, generic MCP identity, SSE/plain JSON parsing, and keyed REST payloads."
+      "disposition": "superseded",
+      "notes": "Upstream later reverted the keyless Parallel MCP search fallback in f3fe99863d13. Current Rust web tools intentionally keep Parallel search/extract REST-only behind PARALLEL_API_KEY."
     },
     "0a5762c78d11": {
-      "disposition": "ported",
-      "notes": "Rust Parallel keyless Search MCP client uses the neutral mcp-web-client identity in User-Agent, clientInfo, and per-call session ids, matching upstream telemetry policy without third-party Hermes attribution."
+      "disposition": "superseded",
+      "notes": "Upstream later removed the keyless Parallel MCP search path in f3fe99863d13, so the MCP client identity policy is no longer part of the active Rust runtime surface."
     },
     "aaccaada282b": {
       "disposition": "ported",
