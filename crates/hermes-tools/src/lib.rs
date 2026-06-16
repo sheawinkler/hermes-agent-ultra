@@ -126,7 +126,9 @@ pub use backends::cronjob::SignalCronjobBackend;
 pub use backends::delegation::{RpcDelegationBackend, SignalDelegationBackend};
 pub use backends::file::{LocalPatchBackend, LocalSearchBackend};
 pub use backends::homeassistant::HaRestBackend;
-pub use backends::image_gen::FalImageGenBackend;
+pub use backends::image_gen::{
+    FalImageGenBackend, ImageGenRuntimeBackend, OpenAICodexImageGenBackend,
+};
 pub use backends::memory::FileMemoryBackend;
 pub use backends::messaging::SignalMessagingBackend;
 pub use backends::session_search::SqliteSessionSearchBackend;

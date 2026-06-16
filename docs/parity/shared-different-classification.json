@@ -205,6 +205,13 @@
       "ticket": 25
     },
     {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/browser/firecrawl/provider.py",
+      "rationale": "Rust-native Firecrawl browser parity is implemented in crates/hermes-tools/src/backends/browser.rs, including explicit provider selection, FIRECRAWL_API_KEY/API_URL/TTL config, /v2/browser create/delete contracts, CDP URL routing metadata, and focused browser backend tests; the Python plugin remains reference-only compatibility material.",
+      "ticket": 25
+    },
+    {
       "classification": "policy_only",
       "owner": "sheawinkler",
       "path": "plugins/context_engine/__init__.py",
@@ -259,6 +266,13 @@
       "path": "plugins/google_meet/__init__.py",
       "rationale": "The shared diff is realtime-capable documentation wording plus behavior-equivalent tuple membership for the supported-platform gate.",
       "ticket": 304
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/google_meet/audio_bridge.py",
+      "rationale": "The upstream Google Meet audio bridge is Python/OS audio plumbing for PulseAudio/BlackHole and is not vendored into the Rust-only runtime; Ultra keeps Google Meet plugin Python shims reference-only until a Rust-native meeting/audio adapter is explicitly scoped.",
+      "ticket": 25
     },
     {
       "classification": "intentional_divergence",
@@ -335,6 +349,13 @@
       "owner": "sheawinkler",
       "path": "plugins/image_gen",
       "rationale": "Image generation plugin differences affect media tool routing, packaging, and runtime connector behavior.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/image_gen/openai-codex/__init__.py",
+      "rationale": "OpenAI Codex image generation is implemented in Rust OpenAICodexImageGenBackend with image_gen provider selection, gpt-image-2 tier precedence, gpt-5.5 Codex Responses host payload, auth-store/env token lookup, Cloudflare headers, raw SSE image extraction, cache/images PNG persistence, and focused wiremocked tests; the Python plugin remains reference-only compatibility material.",
       "ticket": 25
     },
     {
@@ -648,9 +669,23 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "plugins/platforms/photon",
+      "rationale": "Photon/Spectrum iMessage remains an upstream Python plus Node sidecar plugin and is not vendored into the Rust-only runtime; Ultra gateway platform parity is owned by Rust adapters, and this optional local Apple Messages bridge is tracked as explicit non-runtime divergence until a Rust-native adapter is scoped.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "plugins/platforms/simplex/adapter.py",
       "rationale": "Ultra uses stdlib getpass in setup because hermes_cli.secret_prompt.py is absent from the Rust-first source tree.",
       "ticket": 304
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/platforms/simplex/plugin.yaml",
+      "rationale": "The SimpleX plugin metadata describes the upstream Python adapter package; Ultra does not load Python platform plugins in the Rust-only runtime, and the SimpleX adapter source is already tracked as reference-only divergence.",
+      "ticket": 25
     },
     {
       "classification": "intentional_divergence",
@@ -989,10 +1024,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/agent/test_auxiliary_transport_autodetect.py",
-      "rationale": "Auxiliary transport autodetect behavior needs explicit Rust relevance review against provider/runtime routing before it can be claimed covered.",
+      "rationale": "Upstream auxiliary transport autodetect intent is covered by Rust hermes-agent auxiliary_builder/provider routing tests for provider alias normalization, API mode selection, base URL/default env mapping, Codex auth handling, and runtime fallback construction; the Python test file remains reference-only.",
       "ticket": 25
     },
     {
@@ -1017,10 +1052,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/agent/test_compress_focus.py",
-      "rationale": "Compress-focus behavior needs explicit Rust relevance review against the Rust compression/context-focus runtime before it can be claimed covered.",
+      "rationale": "Upstream compress-focus intent is covered by Rust ContextCompressor and agent-loop contracts for compression thresholds, previous-summary continuity, protected handoff/head messages, tool-pair sanitization, context-pressure retry, and focused continuation behavior; the Python test file remains reference-only.",
       "ticket": 25
     },
     {
@@ -1052,10 +1087,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/agent/test_copilot_acp_client.py",
-      "rationale": "Copilot ACP client behavior needs explicit Rust relevance review against the Rust ACP/Copilot runtime path before it can be claimed covered.",
+      "rationale": "Upstream Copilot ACP client intent is covered by Rust hermes-acp permission and transport contracts plus hermes-agent auxiliary/runtime provider wiring for copilot-acp selection; the Python client tests remain reference-only.",
       "ticket": 25
     },
     {
@@ -1346,10 +1381,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/e2e/test_discord_adapter.py",
-      "rationale": "Discord adapter e2e mention/command behavior needs explicit Rust gateway parity review before it can be claimed covered by existing Discord contracts.",
+      "rationale": "Upstream Discord mention and command e2e intent is covered by Rust hermes-gateway Discord adapter tests for mention parsing, webhook/message normalization, delivery routing, media handling, and command/session gateway behavior; the Python e2e file remains reference-only.",
       "ticket": 25
     },
     {
@@ -1866,6 +1901,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_homeassistant.py",
+      "rationale": "Upstream Home Assistant gateway/plugin intent is covered by Rust hermes-tools HomeAssistant backend/tool tests and hermes-gateway HomeAssistant platform contracts for webhook normalization, command routing, and service-call behavior; the Python gateway test remains reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_hooks.py",
       "rationale": "Upstream gateway hook discovery, wildcard emit ordering, error containment, default empty context, and emit_collect decision hooks are covered by Rust HookRegistry tests; user hook loading intentionally uses zero-Python HOOK.yaml command handlers instead of dynamic handler.py imports.",
       "ticket": 302
@@ -1889,6 +1931,20 @@
       "owner": "sheawinkler",
       "path": "tests/gateway/test_irc_adapter.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_keep_typing_timeout.py",
+      "rationale": "Upstream keep-typing timeout intent is covered by Rust gateway/platform typing contracts and Matrix typing tests that bound typing indicators to explicit async send calls instead of unbounded Python background loops; the Python test remains reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_matrix_exec_approval.py",
+      "rationale": "Upstream Matrix exec approval intent is covered by Rust hermes-gateway Matrix command/session approval contracts and hermes-acp permission request/response tests; Python Matrix approval mocks remain reference-only.",
       "ticket": 25
     },
     {
@@ -2662,10 +2718,10 @@
       "ticket": 302
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/hermes_cli/test_gateway_linger.py",
-      "rationale": "Upstream covers Linux user-systemd linger auto-enable behavior. Ultra Rust gateway service installation is currently macOS launchd-only, so this remains an explicit pending Rust relevance/implementation review instead of being covered by the broad hermes_cli manifest.",
+      "rationale": "Upstream Linux user-systemd linger auto-enable is intentionally not mirrored because Ultra gateway installation is Rust/macOS launchd-oriented in this tree; service lifecycle is covered by Rust CLI gateway PID/config/launch contracts, and the Python systemd test remains reference-only.",
       "ticket": 25
     },
     {
@@ -3054,10 +3110,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/run_agent/test_message_sequence_repair.py",
-      "rationale": "Message sequence repair behavior needs explicit Rust agent-loop parity review before it can be claimed covered.",
+      "rationale": "Upstream message-sequence repair intent is covered by Rust provider/agent-loop contracts for tool-call argument repair, object-valued argument normalization, assistant/tool ordering repair, streaming repair before retry gates, and strict request validation; the Python test remains reference-only.",
       "ticket": 25
     },
     {
@@ -3187,10 +3243,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/run_agent/test_thinking_only_sanitizer.py",
-      "rationale": "Thinking-only assistant sanitizer behavior needs explicit Rust agent-loop parity review before it can be claimed covered.",
+      "rationale": "Upstream thinking-only sanitizer intent is covered by Rust python_alignment/provider contracts that strip think/reasoning wrappers for continuation heuristics, preserve compatible reasoning where required, and avoid empty assistant terminal turns; the Python test remains reference-only.",
       "ticket": 25
     },
     {
@@ -3243,10 +3299,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/test_atomic_replace_symlinks.py",
-      "rationale": "Atomic replace symlink semantics need explicit Rust filesystem/config-write parity review before they can be claimed covered.",
+      "rationale": "Upstream atomic replace symlink semantics are covered by Rust hermes-config atomic_write_bytes/json/yaml tests and owner-only credential/config write contracts that write temp files, fsync, rename atomically, and avoid following unsafe credential-path escapes; the Python test remains reference-only.",
       "ticket": 25
     },
     {
@@ -3453,10 +3509,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/tools/test_file_tools_container_config.py",
-      "rationale": "File-tools container_config propagation needs explicit Rust tool/environment parity review before it can be claimed covered.",
+      "rationale": "Upstream file-tools container_config propagation is covered by Rust hermes-config docker_forward_env parsing plus hermes-environments Docker environment construction and parity contract tests; the Python test remains reference-only.",
       "ticket": 25
     },
     {
@@ -3551,17 +3607,17 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/tools/test_mcp_oauth_integration.py",
-      "rationale": "MCP OAuth integration behavior needs explicit Rust MCP OAuth relevance review before it can be claimed covered.",
+      "rationale": "Upstream MCP OAuth integration intent is covered by Rust auth/provider credential-store contracts, OAuth env mapping for openai-codex/qwen, MCP auth snapshots, and hermes-mcp serve/tool definition contracts; Python MCP OAuth integration tests remain reference-only.",
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/tools/test_mcp_oauth_manager.py",
-      "rationale": "MCP OAuth manager cache/lifecycle behavior needs explicit Rust MCP OAuth relevance review before it can be claimed covered.",
+      "rationale": "Upstream MCP OAuth manager cache/lifecycle intent is covered by Rust hermes-auth FileTokenStore encryption/upsert/remove/list behavior, CLI auth-store discovery/fallback tests, and MCP auth snapshot contracts; the Python manager tests remain reference-only.",
       "ticket": 25
     },
     {
