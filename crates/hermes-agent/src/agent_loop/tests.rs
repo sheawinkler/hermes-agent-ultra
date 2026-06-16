@@ -3398,6 +3398,15 @@ fn test_looks_like_tool_error_output_detects_json_error_envelope() {
     assert!(!looks_like_tool_error_output(
         r#"{"success":true,"result":"ok"}"#
     ));
+    assert!(looks_like_tool_error_output(
+        r#"{"stdout":"","stderr":"fail","exit_code":1}"#
+    ));
+    assert!(looks_like_tool_error_output(
+        "command output\n[exit code: 7]"
+    ));
+    assert!(!looks_like_tool_error_output(
+        "command output\n[exit code: 0]"
+    ));
 }
 
 #[test]

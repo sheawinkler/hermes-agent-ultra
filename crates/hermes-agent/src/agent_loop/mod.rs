@@ -808,6 +808,11 @@ pub(crate) fn looks_like_tool_error_output(output: &str) -> bool {
     }
     if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
         if let Some(obj) = value.as_object() {
+            if let Some(exit_code) = obj.get("exit_code").and_then(|v| v.as_i64()) {
+                if exit_code != 0 {
+                    return true;
+                }
+            }
             if let Some(err) = obj.get("error") {
                 if !err.is_null() {
                     return true;
@@ -825,10 +830,23 @@ pub(crate) fn looks_like_tool_error_output(output: &str) -> bool {
             }
         }
     }
+    if let Some(code) = parse_terminal_exit_code_suffix(trimmed) {
+        if code != 0 {
+            return true;
+        }
+    }
     let lower = trimmed.to_ascii_lowercase();
     lower.starts_with("error:")
         || lower.contains("invalid tool parameters")
         || lower.contains("missing '")
+}
+
+fn parse_terminal_exit_code_suffix(output: &str) -> Option<i32> {
+    const PREFIX: &str = "[exit code: ";
+    let start = output.rfind(PREFIX)? + PREFIX.len();
+    let rest = &output[start..];
+    let end = rest.find(']')?;
+    rest[..end].trim().parse().ok()
 }
 
 /// The main agent loop.

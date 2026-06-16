@@ -171,7 +171,7 @@ impl CodeExecutionBackend for LocalCodeExecutionBackend {
         }
 
         let (interpreter, flag) = match lang {
-            "javascript" | "js" | "node" => ("node", "-c"),
+            "javascript" | "js" | "node" => ("node", "-e"),
             "typescript" | "ts" => ("npx", ""),
             "bash" | "sh" => ("bash", "-c"),
             other => {

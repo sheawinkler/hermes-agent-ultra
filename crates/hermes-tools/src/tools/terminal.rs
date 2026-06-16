@@ -237,7 +237,14 @@ impl ToolHandler for TerminalHandler {
             )
             .await
         {
-            Ok(output) => Ok(format_command_output(&output)),
+            Ok(output) => {
+                let formatted = format_command_output(&output);
+                if output.exit_code != 0 {
+                    Err(ToolError::ExecutionFailed(formatted))
+                } else {
+                    Ok(formatted)
+                }
+            }
             Err(e) => Err(ToolError::ExecutionFailed(e.to_string())),
         }
     }
@@ -1225,16 +1232,17 @@ mod tests {
     }
 
     #[test]
-    fn terminal_handler_nonzero_exit_code_is_output_not_tool_failure() {
+    fn terminal_handler_nonzero_exit_code_is_tool_failure() {
         let _env_lock = TEST_ENV_LOCK.lock().expect("test env lock");
         let _sudo = EnvGuard::remove("SUDO_PASSWORD");
         let handler = TerminalHandler::new(Arc::new(NonzeroExitBackend));
 
-        let rendered = block_on(handler.execute(json!({"command": "false"})))
-            .expect("nonzero terminal exits should be returned to the model");
+        let err = block_on(handler.execute(json!({"command": "false"})))
+            .expect_err("nonzero terminal exits should surface as tool errors");
 
-        assert!(rendered.contains("stdout from false"));
-        assert!(rendered.contains("stderr from false"));
-        assert!(rendered.contains("[exit code: 7]"));
+        let msg = err.to_string();
+        assert!(msg.contains("stdout from false"));
+        assert!(msg.contains("stderr from false"));
+        assert!(msg.contains("[exit code: 7]"));
     }
 }
