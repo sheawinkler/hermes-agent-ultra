@@ -1294,6 +1294,39 @@ mod tests {
     }
 
     #[test]
+    fn cli_parse_mcp_add_command_does_not_clobber_top_level_command() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "mcp",
+            "add",
+            "filesystem",
+            "--command",
+            "npx",
+            "--parallel-tools",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Some(CliCommand::Mcp {
+                action,
+                name,
+                server,
+                url,
+                command,
+                parallel_tools,
+            }) => {
+                assert_eq!(action.as_deref(), Some("add"));
+                assert_eq!(name.as_deref(), Some("filesystem"));
+                assert!(server.is_none());
+                assert!(url.is_none());
+                assert_eq!(command.as_deref(), Some("npx"));
+                assert!(parallel_tools);
+            }
+            _ => panic!("Expected MCP add command"),
+        }
+    }
+
+    #[test]
     fn cli_parse_logs_default() {
         let cli = Cli::try_parse_from(vec!["hermes", "logs"]).unwrap();
         match cli.command {

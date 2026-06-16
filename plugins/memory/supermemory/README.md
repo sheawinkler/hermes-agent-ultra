@@ -45,12 +45,21 @@ Config file: `$HERMES_HOME/supermemory.json`
 
 ## Tools
 
-| Tool | Description |
-|------|-------------|
-| `supermemory_store` | Store an explicit memory |
-| `supermemory_search` | Search memories by semantic similarity |
-| `supermemory_forget` | Forget a memory by ID or best-match query |
-| `supermemory_profile` | Retrieve persistent profile and recent context |
+Kebab-case names are registered for the agent; snake_case aliases remain supported.
+
+| Tool | Alias | Description |
+|------|-------|-------------|
+| `supermemory-save` | `supermemory_store` | Store an explicit memory |
+| `supermemory-search` | `supermemory_search` | Search memories by semantic similarity |
+| `supermemory-forget` | `supermemory_forget` | Forget a memory by ID or best-match query |
+| `supermemory-profile` | `supermemory_profile` | Retrieve persistent profile and recent context |
+
+## Source Attribution
+
+All Supermemory API calls send `x-sm-source: hermes`, and document writes stamp
+`metadata.sm_source: hermes`. This groups Hermes-written memories into a
+dedicated Hermes source in Supermemory so they can be filtered and managed
+separately from other agent sources.
 
 ## Behavior
 
@@ -87,7 +96,7 @@ For advanced setups (e.g. OpenClaw-style multi-workspace), you can enable custom
 ```
 
 When enabled:
-- `supermemory_search`, `supermemory_store`, `supermemory_forget`, and `supermemory_profile` accept an optional `container_tag` parameter
+- `supermemory-search`, `supermemory-save`, `supermemory-forget`, and `supermemory-profile` accept an optional `container_tag` parameter
 - The tag must be in the whitelist: primary container + `custom_containers`
 - Automatic operations (turn sync, prefetch, memory write mirroring, session ingest) always use the **primary** container only
 - Custom container instructions are injected into the system prompt

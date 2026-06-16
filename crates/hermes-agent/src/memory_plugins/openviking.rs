@@ -178,12 +178,11 @@ fn memory_subdir_for_target(target: &str) -> &'static str {
     }
 }
 
-fn build_memory_uri(user: &str, agent: &str, subdir: &str) -> String {
+fn build_memory_uri(user: &str, _agent: &str, subdir: &str) -> String {
     let slug = uuid::Uuid::new_v4().simple().to_string();
     format!(
-        "viking://user/{}/agent/{}/memories/{}/mem_{}.md",
+        "viking://user/{}/memories/{}/mem_{}.md",
         viking_uri_segment(user),
-        viking_uri_segment(agent),
         viking_uri_segment(subdir),
         &slug[..12]
     )
@@ -868,9 +867,9 @@ mod tests {
     }
 
     #[test]
-    fn memory_uri_includes_agent_and_sanitizes_tenant_segments() {
+    fn memory_uri_sanitizes_tenant_segments_without_agent_scope() {
         let uri = build_memory_uri("user/name", "agent one", "patterns");
-        assert!(uri.starts_with("viking://user/user_name/agent/agent_one/memories/patterns/mem_"));
+        assert!(uri.starts_with("viking://user/user_name/memories/patterns/mem_"));
         assert!(uri.ends_with(".md"));
         assert!(!uri.contains("user/name"));
         assert!(!uri.contains("agent one"));
@@ -906,7 +905,7 @@ mod tests {
     }
 
     #[test]
-    fn content_write_body_uses_agent_scoped_create_uri() {
+    fn content_write_body_uses_user_scoped_create_uri() {
         let st = VikingState {
             client: Client::new(),
             endpoint: DEFAULT_ENDPOINT.to_string(),
@@ -919,7 +918,7 @@ mod tests {
         };
         let body = content_write_body(&st, "patterns", "fact");
         let uri = body["uri"].as_str().expect("uri");
-        assert!(uri.starts_with("viking://user/she_a/agent/hermes_ultra/memories/patterns/"));
+        assert!(uri.starts_with("viking://user/she_a/memories/patterns/"));
         assert_eq!(body["content"], "fact");
         assert_eq!(body["mode"], "create");
     }

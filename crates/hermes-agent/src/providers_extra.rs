@@ -218,7 +218,8 @@ pub struct MiniMaxProvider {
 impl MiniMaxProvider {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            inner: GenericProvider::new("https://api.minimax.chat/v1", api_key, "abab6.5s-chat"),
+            inner: GenericProvider::new("https://api.minimax.chat/v1", api_key, "abab6.5s-chat")
+                .with_provider_profile("minimax"),
         }
     }
 

@@ -250,7 +250,62 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
+    #[serde(deserialize_with = "deserialize_chat_content")]
     pub content: String,
+}
+
+const MAX_CHAT_CONTENT_DEPTH: usize = 10;
+const MAX_CHAT_CONTENT_LIST_SIZE: usize = 1000;
+const MAX_CHAT_CONTENT_CHARS: usize = 65_536;
+
+fn truncate_chat_content(input: &str) -> String {
+    input.chars().take(MAX_CHAT_CONTENT_CHARS).collect()
+}
+
+fn normalize_chat_content_value(value: &serde_json::Value, depth: usize) -> String {
+    if depth > MAX_CHAT_CONTENT_DEPTH {
+        return String::new();
+    }
+    match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::String(text) => truncate_chat_content(text),
+        serde_json::Value::Bool(value) => {
+            if *value {
+                "True".to_string()
+            } else {
+                "False".to_string()
+            }
+        }
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .take(MAX_CHAT_CONTENT_LIST_SIZE)
+            .map(|item| normalize_chat_content_value(item, depth + 1))
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        serde_json::Value::Object(map) => {
+            let part_type = map
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if matches!(part_type, "text" | "input_text" | "output_text") {
+                map.get("text")
+                    .map(|text| normalize_chat_content_value(text, depth + 1))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            }
+        }
+    }
+}
+
+fn deserialize_chat_content<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(normalize_chat_content_value(&value, 0))
 }
 
 #[derive(Debug, Serialize)]
@@ -3210,6 +3265,48 @@ mod tests {
         }))
         .expect("quoted false all should deserialize");
         assert!(!approval.all);
+    }
+
+    #[test]
+    fn chat_message_content_arrays_normalize_to_text() {
+        let chat: ChatCompletionRequest = serde_json::from_value(serde_json::json!({
+            "model": "hermes-agent",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "first"},
+                    {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}},
+                    {"type": "input_text", "text": "second"},
+                    42,
+                    true
+                ]
+            }]
+        }))
+        .expect("content array should normalize");
+
+        assert_eq!(chat.messages[0].content, "first\nsecond\n42\nTrue");
+    }
+
+    #[test]
+    fn chat_message_content_normalization_is_bounded() {
+        let many = (0..2000)
+            .map(|_| serde_json::json!({"type": "text", "text": "x"}))
+            .collect::<Vec<_>>();
+        let chat: ChatCompletionRequest = serde_json::from_value(serde_json::json!({
+            "model": "hermes-agent",
+            "messages": [{"role": "user", "content": many}]
+        }))
+        .expect("large content array should normalize");
+
+        assert_eq!(chat.messages[0].content.matches('x').count(), 1000);
+
+        let huge = "x".repeat(100_000);
+        let chat: ChatCompletionRequest = serde_json::from_value(serde_json::json!({
+            "model": "hermes-agent",
+            "messages": [{"role": "user", "content": huge}]
+        }))
+        .expect("huge string should normalize");
+        assert_eq!(chat.messages[0].content.len(), MAX_CHAT_CONTENT_CHARS);
     }
 
     #[test]

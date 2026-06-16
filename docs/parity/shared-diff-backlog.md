@@ -1,52 +1,55 @@
 # Shared-Different Backlog
 
-Generated: `2026-06-11T00:16:41.702827+00:00`
+Generated: `2026-06-16T02:58:21.710158+00:00`
 
 ## Summary
 
-- Total shared-different paths: `1122`
-- Pending classification: `3`
-- Pending functional review: `17`
-- Cleared non-runtime: `183`
-- Cleared intentional divergence: `919`
+- Total shared-different paths: `1126`
+- Pending classification: `0`
+- Pending functional review: `25`
+- Cleared non-runtime: `185`
+- Cleared intentional divergence: `916`
 
 ## Status Counts
 
 | Status | Count |
 | --- | ---: |
-| `cleared_intentional_divergence` | 919 |
-| `cleared_non_runtime` | 183 |
-| `pending_classification` | 3 |
-| `pending_review` | 17 |
+| `cleared_intentional_divergence` | 916 |
+| `cleared_non_runtime` | 185 |
+| `pending_review` | 25 |
 
 ## Workstream Counts
 
 | Workstream | Count |
 | --- | ---: |
-| `WS3` | 70 |
-| `WS4` | 54 |
-| `WS5` | 265 |
-| `WS6` | 719 |
-| `WS8` | 14 |
+| `WS3` | 78 |
+| `WS4` | 29 |
+| `WS5` | 268 |
+| `WS6` | 736 |
+| `WS8` | 15 |
 
 ## Pending Classification
 
 | Path | Workstream | Action |
 | --- | --- | --- |
-| `docs/kanban/multi-gateway.md` | `WS8` | Add classification, owner, issue, and surgical plan before implementation. |
-| `skills/media/gif-search/SKILL.md` | `WS4` | Add classification, owner, issue, and surgical plan before implementation. |
-| `skills/note-taking/obsidian/SKILL.md` | `WS4` | Add classification, owner, issue, and surgical plan before implementation. |
 
 ## Pending Functional Review By Prefix
 
 | Classification Path | Count |
 | --- | ---: |
-| `plugins/memory` | 5 |
-| `plugins/model-providers` | 4 |
-| `tests/gateway` | 2 |
+| `plugins/platforms` | 8 |
+| `tests/gateway` | 3 |
 | `plugins/browser` | 1 |
 | `plugins/google_meet` | 1 |
 | `plugins/image_gen` | 1 |
-| `plugins/platforms` | 1 |
-| `plugins/video_gen` | 1 |
-| `plugins/web` | 1 |
+| `tests/agent/test_auxiliary_transport_autodetect.py` | 1 |
+| `tests/agent/test_compress_focus.py` | 1 |
+| `tests/agent/test_copilot_acp_client.py` | 1 |
+| `tests/e2e/test_discord_adapter.py` | 1 |
+| `tests/hermes_cli/test_gateway_linger.py` | 1 |
+| `tests/run_agent/test_message_sequence_repair.py` | 1 |
+| `tests/run_agent/test_thinking_only_sanitizer.py` | 1 |
+| `tests/test_atomic_replace_symlinks.py` | 1 |
+| `tests/tools/test_file_tools_container_config.py` | 1 |
+| `tests/tools/test_mcp_oauth_integration.py` | 1 |
+| `tests/tools/test_mcp_oauth_manager.py` | 1 |

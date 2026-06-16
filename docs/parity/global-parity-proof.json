@@ -5,15 +5,13 @@
         "actual": 5880.0,
         "limit": 5500,
         "metric": "max_commits_behind",
-        "special_rule": "allow_tree_drift_when_functional_clean",
-        "status": "warn"
+        "status": "fail"
       },
       {
         "actual": 5657.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
-        "special_rule": "allow_tree_drift_when_functional_clean",
-        "status": "warn"
+        "status": "fail"
       },
       {
         "actual": 2309.0,
@@ -76,26 +74,16 @@
         "status": "pass"
       },
       {
-        "actual": 0.0,
+        "actual": 121.0,
         "limit": 100,
         "metric": "max_queue_pending_commits",
-        "status": "pass"
+        "status": "fail"
       }
     ],
     "mode": "tree-drift",
-    "pass": true,
-    "special_rules_applied": [
-      {
-        "metrics": [
-          "max_commits_behind",
-          "max_upstream_patch_missing"
-        ],
-        "reason": "functional parity clean; raw upstream tree drift kept as observability warning for the Rust fork",
-        "rule": "allow_tree_drift_when_functional_clean"
-      }
-    ]
+    "pass": false
   },
-  "generated_at_utc": "2026-06-12T11:29:22.950052+00:00",
+  "generated_at_utc": "2026-06-16T02:12:15.001297+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -111,7 +99,7 @@
     "max_commits_behind": 5880.0,
     "max_divergence_review_overdue": 0.0,
     "max_files_only_upstream": 2309.0,
-    "max_queue_pending_commits": 0.0,
+    "max_queue_pending_commits": 121.0,
     "max_sota_harness_critical_gaps": 0.0,
     "max_sota_harness_missing_rust_refs": 0.0,
     "max_test_coverage_audit_critical_gaps": 0.0,
@@ -131,21 +119,22 @@
   "queue_summary": {
     "by_disposition": {
       "mirrored": 70,
+      "pending": 121,
       "ported": 266,
-      "superseded": 5323
+      "superseded": 5499
     },
     "by_target_ticket": {
-      "20": 2416,
-      "21": 118,
-      "22": 856,
-      "23": 400,
+      "20": 2570,
+      "21": 119,
+      "22": 877,
+      "23": 416,
       "24": 22,
-      "25": 120,
-      "26": 1727
+      "25": 128,
+      "26": 1824
     },
     "overrides_path": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/queue-overrides.json",
     "patch_equivalent_count": 2,
-    "total_commits": 5659
+    "total_commits": 5956
   },
   "release_gate": {
     "checks": [
@@ -204,10 +193,10 @@
         "status": "pass"
       },
       {
-        "actual": 0.0,
+        "actual": 121.0,
         "limit": 0,
         "metric": "max_queue_pending_commits",
-        "status": "pass"
+        "status": "fail"
       },
       {
         "actual": {
@@ -227,7 +216,7 @@
       }
     ],
     "mode": "functional",
-    "pass": true
+    "pass": false
   },
   "sota_harness_summary": {
     "gate": {

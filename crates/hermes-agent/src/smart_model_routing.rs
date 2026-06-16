@@ -340,14 +340,20 @@ where
     }
 }
 
-/// Heuristic from Python `_detect_api_mode_for_url` (OpenAI direct host → Codex/Responses).
+/// Heuristic from Python `_detect_api_mode_for_url`.
 pub fn detect_api_mode_for_url(base_url: &str) -> Option<ApiMode> {
-    let normalized = base_url.trim().to_lowercase();
-    if normalized.contains("bedrock-runtime.") || normalized.contains("bedrock-runtime-") {
+    let parsed = url::Url::parse(base_url.trim()).ok()?;
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    let path = parsed.path().trim_end_matches('/').to_ascii_lowercase();
+
+    if host.contains("bedrock-runtime.") || host.contains("bedrock-runtime-") {
         return Some(ApiMode::BedrockConverse);
     }
-    if normalized.contains("api.openai.com") && !normalized.contains("openrouter") {
+    if host == "api.openai.com" || host == "api.x.ai" {
         return Some(ApiMode::CodexResponses);
+    }
+    if path == "/anthropic" || path.ends_with("/anthropic") {
+        return Some(ApiMode::AnthropicMessages);
     }
     None
 }
@@ -442,6 +448,62 @@ mod tests {
             detect_api_mode_for_url("https://bedrock-runtime.us-east-1.amazonaws.com"),
             Some(ApiMode::BedrockConverse)
         );
+    }
+
+    #[test]
+    fn detects_codex_api_mode_from_exact_openai_and_xai_hosts() {
+        assert_eq!(
+            detect_api_mode_for_url("https://api.openai.com/v1"),
+            Some(ApiMode::CodexResponses)
+        );
+        assert_eq!(
+            detect_api_mode_for_url("https://api.x.ai/v1"),
+            Some(ApiMode::CodexResponses)
+        );
+    }
+
+    #[test]
+    fn detects_anthropic_messages_api_mode_from_path_suffix() {
+        assert_eq!(
+            detect_api_mode_for_url("https://api.minimax.io/anthropic"),
+            Some(ApiMode::AnthropicMessages)
+        );
+        assert_eq!(
+            detect_api_mode_for_url("https://api.minimaxi.com/anthropic/"),
+            Some(ApiMode::AnthropicMessages)
+        );
+        assert_eq!(
+            detect_api_mode_for_url("https://dashscope.aliyuncs.com/api/v2/apps/anthropic"),
+            Some(ApiMode::AnthropicMessages)
+        );
+        assert_eq!(
+            detect_api_mode_for_url("https://API.MINIMAX.IO/Anthropic"),
+            Some(ApiMode::AnthropicMessages)
+        );
+    }
+
+    #[test]
+    fn detect_api_mode_rejects_host_suffix_and_path_false_positives() {
+        assert_eq!(
+            detect_api_mode_for_url("https://openrouter.ai/api/v1"),
+            None
+        );
+        assert_eq!(
+            detect_api_mode_for_url("https://api.openai.com.example/v1"),
+            None
+        );
+        assert_eq!(
+            detect_api_mode_for_url("https://proxy.example.test/api.openai.com/v1"),
+            None
+        );
+        assert_eq!(detect_api_mode_for_url("https://api.x.ai.example/v1"), None);
+        assert_eq!(
+            detect_api_mode_for_url("https://api.example.com/anthropic/v1"),
+            None
+        );
+        assert_eq!(detect_api_mode_for_url("https://api.together.xyz/v1"), None);
+        assert_eq!(detect_api_mode_for_url(""), None);
+        assert_eq!(detect_api_mode_for_url("http://localhost:11434/v1"), None);
     }
 
     #[test]

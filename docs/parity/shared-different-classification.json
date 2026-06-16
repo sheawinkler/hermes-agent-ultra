@@ -46,27 +46,6 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "Dockerfile",
-      "rationale": "Hermes Agent Ultra intentionally ships a Rust multi-stage container with tini/gosu and /data state instead of upstream's Python uv+s6-overlay image; Rust-native container contracts cover the retained runtime behavior.",
-      "ticket": 305
-    },
-    {
-      "classification": "policy_only",
-      "owner": "sheawinkler",
-      "path": "LICENSE",
-      "rationale": "Licensing and attribution metadata; no runtime effect.",
-      "ticket": 25
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
-      "path": "README.md",
-      "rationale": "README.md intentionally describes Ultra's Rust-first runtime, release installer, and parity workflow rather than upstream's Python product positioning; install/readme contracts cover the actionable setup guidance.",
-      "ticket": 305
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
       "path": "docker-compose.yml",
       "rationale": "Compose defaults intentionally target the Ultra Rust image, /data volume, and hermes-agent-ultra naming while preserving localhost dashboard and UID/GID runtime controls.",
       "ticket": 305
@@ -77,6 +56,27 @@
       "path": "docker/entrypoint.sh",
       "rationale": "The entrypoint intentionally implements the Rust image's direct tini/gosu startup path instead of upstream's s6 stage2 hook; entrypoint contracts cover home setup, UID/GID remap, and privilege drop.",
       "ticket": 305
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "Dockerfile",
+      "rationale": "Hermes Agent Ultra intentionally ships a Rust multi-stage container with tini/gosu and /data state instead of upstream's Python uv+s6-overlay image; Rust-native container contracts cover the retained runtime behavior.",
+      "ticket": 305
+    },
+    {
+      "classification": "policy_only",
+      "owner": "sheawinkler",
+      "path": "docs/design/profile-builder.md",
+      "rationale": "Profile-builder design prose is Python/web-server documentation; Ultra keeps the Rust CLI profile create/clone/no-skills contracts in crates/hermes-cli with hermes-cli coverage, so the shared diff is not runtime code to vendor.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "docs/kanban/multi-gateway.md",
+      "rationale": "Ultra documents the Rust kanban.dispatch_in_gateway flag, HERMES_KANBAN_DISPATCH_IN_GATEWAY override, gateway propagation, and JSON-backed Kanban store; upstream SQLite/WAL wording is intentionally not applicable to the Rust store.",
+      "ticket": 25
     },
     {
       "classification": "policy_only",
@@ -91,6 +91,13 @@
       "path": "flake.nix",
       "rationale": "Nix packaging intentionally builds the Rust workspace with the Hermes Ultra release version rather than upstream's Python flake-parts packaging stack.",
       "ticket": 305
+    },
+    {
+      "classification": "policy_only",
+      "owner": "sheawinkler",
+      "path": "LICENSE",
+      "rationale": "Licensing and attribution metadata; no runtime effect.",
+      "ticket": 25
     },
     {
       "classification": "intentional_divergence",
@@ -366,6 +373,13 @@
       "ticket": 25
     },
     {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/__init__.py",
+      "rationale": "Upstream Python memory namespace loading is reference-only in Ultra; Rust memory provider discovery is implemented in crates/hermes-agent/src/memory_plugins/mod.rs with native ContextLattice, Hindsight, OpenViking, Supermemory, and related provider contracts.",
+      "ticket": 25
+    },
+    {
       "classification": "policy_only",
       "owner": "sheawinkler",
       "path": "plugins/memory/byterover/__init__.py",
@@ -382,9 +396,9 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "plugins/memory/honcho/README.md",
-      "rationale": "Ultra documents the Rust-native `hermes memory setup honcho` path and dot-separated profile host keys used by crates/hermes-agent/src/memory_plugins/honcho.rs; legacy Python `hermes honcho ...` command dispatch remains disabled.",
-      "ticket": 304
+      "path": "plugins/memory/hindsight/README.md",
+      "rationale": "Hindsight is implemented as a Rust MemoryProviderPlugin with retain, recall, reflect, config loading, auto-recall, auto-retain, session switching, and focused Rust tests; local docs intentionally describe Ultra's Rust local-external/cloud contract instead of Python embedded daemon management.",
+      "ticket": 25
     },
     {
       "classification": "policy_only",
@@ -410,6 +424,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "plugins/memory/honcho/README.md",
+      "rationale": "Ultra documents the Rust-native `hermes memory setup honcho` path and dot-separated profile host keys used by crates/hermes-agent/src/memory_plugins/honcho.rs; legacy Python `hermes honcho ...` command dispatch remains disabled.",
+      "ticket": 304
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "plugins/memory/honcho/session.py",
       "rationale": "Ultra supersedes the upstream Python Honcho gateway identity resolver with the Rust Honcho memory provider resolver in crates/hermes-agent/src/memory_plugins/honcho.rs, including pinUserPeer, userPeerAliases, runtimePeerPrefix, and hash-escalated collision handling.",
       "ticket": 25
@@ -422,11 +443,32 @@
       "ticket": 304
     },
     {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/openviking/__init__.py",
+      "rationale": "OpenViking is implemented as a Rust MemoryProviderPlugin with REST context operations, resource upload handling, session commit, session switching, and URI regression coverage; the Python provider remains reference-only.",
+      "ticket": 25
+    },
+    {
       "classification": "policy_only",
       "owner": "sheawinkler",
       "path": "plugins/memory/supermemory/__init__.py",
       "rationale": "The shared diff is behavior-equivalent tuple membership for boolean parsing, context guards, and session-role filtering.",
       "ticket": 304
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/supermemory/plugin.yaml",
+      "rationale": "Supermemory plugin metadata is reference catalog material; Rust Supermemory provider behavior and tests carry the runtime contract, including the 1.0.1 source-attribution/tool-name semantics.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/supermemory/README.md",
+      "rationale": "Supermemory runtime behavior is implemented in Rust with kebab-case tool schemas, snake_case aliases, x-sm-source headers, sm_source metadata stamping, conversation ingest, and focused Rust tests; docs were updated to match that contract.",
+      "ticket": 25
     },
     {
       "classification": "functional",
@@ -459,6 +501,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "plugins/model-providers/custom/__init__.py",
+      "rationale": "Custom provider defaults are handled in Rust provider_profiles, including a 65536 default max_tokens floor for custom/Ollama-compatible profiles and provider request-body tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "plugins/model-providers/gemini/__init__.py",
       "rationale": "Bundled Gemini provider parity is covered by Rust provider registry and CLI routing contracts: the manifest directory is known, Google/Gemini aliases normalize consistently, and the Rust runtime selects the Gemini provider defaults without Python plugin imports.",
       "ticket": 25
@@ -473,6 +522,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "plugins/model-providers/minimax/__init__.py",
+      "rationale": "MiniMax provider behavior is handled in Rust provider_profiles/providers_extra/model_switch, including aliases, M3 defaults, anthropic default base URL, OpenAI-compatible api.minimax.io/v1 reasoning_split/thinking shaping, and focused request-body tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "plugins/model-providers/nous/__init__.py",
       "rationale": "Local Nous provider keeps a static Hermes product tag because the upstream agent.portal_tags helper is not present in this Rust checkout; focused contracts cover the emitted tag.",
       "ticket": 304
@@ -482,6 +538,27 @@
       "owner": "sheawinkler",
       "path": "plugins/model-providers/opencode-zen/__init__.py",
       "rationale": "OpenCode Zen and Go provider behavior is covered by Rust provider normalization, env-key resolution, default base URLs, model catalog merge, and GenericProvider OpenCode Go reasoning controls; this legacy upstream Python provider profile is reference-only and is not used by the Rust-only runtime.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/model-providers/openrouter/__init__.py",
+      "rationale": "OpenRouter provider behavior is handled in Rust provider_profiles, including reasoning-mandatory Anthropic model handling, verbosity effort mapping, x-grok-conv-id extra headers, and focused request-body/header tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/model-providers/xiaomi/__init__.py",
+      "rationale": "Xiaomi provider behavior is handled in Rust provider_profiles/provider serialization, including MiMo vision enablement and tool-message multimodal flattening for models that reject list-type tool content.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/model-providers/zai/__init__.py",
+      "rationale": "ZAI/GLM provider model fallback is represented in Rust model switching/setup surfaces, including glm-5.2 curated/default setup coverage and model normalization.",
       "ticket": 25
     },
     {
@@ -501,15 +578,15 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "plugins/observability/langfuse/README.md",
-      "rationale": "Local Langfuse README intentionally documents the Hermes tools credential flow while preserving the manual enable path.",
+      "path": "plugins/observability/langfuse/plugin.yaml",
+      "rationale": "Local Langfuse manifest intentionally advertises the Hermes tools enablement path in addition to manual plugin enablement.",
       "ticket": 304
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "plugins/observability/langfuse/plugin.yaml",
-      "rationale": "Local Langfuse manifest intentionally advertises the Hermes tools enablement path in addition to manual plugin enablement.",
+      "path": "plugins/observability/langfuse/README.md",
+      "rationale": "Local Langfuse README intentionally documents the Hermes tools credential flow while preserving the manual enable path.",
       "ticket": 304
     },
     {
@@ -646,6 +723,13 @@
       "ticket": 304
     },
     {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/video_gen/xai/plugin.yaml",
+      "rationale": "xAI video generation is implemented in Rust XaiVideoGenBackend with direct/auth-store credentials, text/image/reference-image payload shaping, polling, error handling, model override support, and video_generate tool registration/tests.",
+      "ticket": 25
+    },
+    {
       "classification": "functional",
       "owner": "sheawinkler",
       "path": "plugins/web",
@@ -657,6 +741,13 @@
       "owner": "sheawinkler",
       "path": "plugins/web/firecrawl/provider.py",
       "rationale": "Rust-native Firecrawl search/extract backends now cover direct, self-hosted, and Nous-managed routing; the Python plugin remains reference/compatibility code in the Rust-only runtime.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/web/searxng/provider.py",
+      "rationale": "SearXNG web search is implemented in Rust SearxngSearchBackend with SEARXNG_BASE_URL and upstream-compatible SEARXNG_URL aliases, base URL normalization, search result normalization, backend selection, and focused Rust tests.",
       "ticket": 25
     },
     {
@@ -679,6 +770,13 @@
       "path": "plugins/web/xai/provider.py",
       "rationale": "Rust-native xAI web search now routes through the Responses API server-side web_search tool with deterministic result normalization; the Python plugin remains reference/compatibility code.",
       "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "README.md",
+      "rationale": "README.md intentionally describes Ultra's Rust-first runtime, release installer, and parity workflow rather than upstream's Python product positioning; install/readme contracts cover the actionable setup guidance.",
+      "ticket": 305
     },
     {
       "classification": "intentional_divergence",
@@ -732,6 +830,20 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "skills/media/youtube-content/scripts/fetch_transcript.py",
+      "rationale": "The transcript fetcher is an allowed skill helper script, not Hermes runtime; Ultra adopted upstream uv instructions without introducing Python runtime dispatch.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "skills/media/youtube-content/SKILL.md",
+      "rationale": "The YouTube content skill is catalog/helper material, not Rust runtime code; Ultra adopted the upstream uv-based setup/run instructions while preserving the local skill-helper contract.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "skills/productivity",
       "rationale": "Skill catalog content is curated locally while loader and execution contracts carry runtime parity.",
       "ticket": 25
@@ -746,15 +858,15 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "skills/software-development",
-      "rationale": "Software-development skill content is curated locally while Rust native skill catalog loading and execution contracts carry runtime parity.",
+      "path": "skills/social-media/xurl/SKILL.md",
+      "rationale": "xurl skill documentation is curated locally for Hermes Agent Ultra safety guidance while skill loading and execution are governed separately.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "skills/social-media/xurl/SKILL.md",
-      "rationale": "xurl skill documentation is curated locally for Hermes Agent Ultra safety guidance while skill loading and execution are governed separately.",
+      "path": "skills/software-development",
+      "rationale": "Software-development skill content is curated locally while Rust native skill catalog loading and execution contracts carry runtime parity.",
       "ticket": 25
     },
     {
@@ -877,6 +989,13 @@
       "ticket": 25
     },
     {
+      "classification": "functional",
+      "owner": "sheawinkler",
+      "path": "tests/agent/test_auxiliary_transport_autodetect.py",
+      "rationale": "Auxiliary transport autodetect behavior needs explicit Rust relevance review against provider/runtime routing before it can be claimed covered.",
+      "ticket": 25
+    },
+    {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/agent/test_bedrock_1m_context.py",
@@ -898,17 +1017,17 @@
       "ticket": 25
     },
     {
-      "classification": "intentional_divergence",
+      "classification": "functional",
       "owner": "sheawinkler",
-      "path": "tests/agent/test_compressor_image_tokens.py",
-      "rationale": "Upstream image-aware compression-budget intent is covered by Rust hermes-intelligence context_engine contracts that charge fixed image-block budgets for OpenAI, Responses, and Anthropic image shapes without counting base64 payload bytes; the Python test file remains reference-only.",
+      "path": "tests/agent/test_compress_focus.py",
+      "rationale": "Compress-focus behavior needs explicit Rust relevance review against the Rust compression/context-focus runtime before it can be claimed covered.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/agent/test_context_compressor.py",
-      "rationale": "Upstream context compressor thresholding, summary fallback, cooldown, tool-pair sanitization, handoff-prefix, and collision-avoidance intent is covered by Rust hermes-agent ContextCompressor state-machine tests; the Python test file remains reference-only.",
+      "path": "tests/agent/test_compressor_image_tokens.py",
+      "rationale": "Upstream image-aware compression-budget intent is covered by Rust hermes-intelligence context_engine contracts that charge fixed image-block budgets for OpenAI, Responses, and Anthropic image shapes without counting base64 payload bytes; the Python test file remains reference-only.",
       "ticket": 25
     },
     {
@@ -921,8 +1040,22 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/agent/test_context_compressor.py",
+      "rationale": "Upstream context compressor thresholding, summary fallback, cooldown, tool-pair sanitization, handoff-prefix, and collision-avoidance intent is covered by Rust hermes-agent ContextCompressor state-machine tests; the Python test file remains reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/agent/test_context_engine.py",
       "rationale": "Upstream context-engine ABC/default behavior is represented in Rust by hermes-intelligence ContextEngine trait implementations plus Default and Importance engine compression contracts; the Python test file remains reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "functional",
+      "owner": "sheawinkler",
+      "path": "tests/agent/test_copilot_acp_client.py",
+      "rationale": "Copilot ACP client behavior needs explicit Rust relevance review against the Rust ACP/Copilot runtime path before it can be claimed covered.",
       "ticket": 25
     },
     {
@@ -1194,13 +1327,6 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/cron/test_scheduler.py",
-      "rationale": "Upstream scheduler tick/run/delivery/history intent is covered by Rust CronScheduler create/update/run/manual-trigger, context prefix, completion broadcast, delivery suppression, and runner contract tests; the Python test file remains reference-only.",
-      "ticket": 25
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
       "path": "tests/cron/test_scheduler_mcp_init.py",
       "rationale": "Upstream no_agent scheduler MCP-skip intent is covered by Rust CronRunner no_agent short-circuiting before AgentLoop construction and tool filtering tests that exclude recursive cron scheduling; the Python test file remains reference-only.",
       "ticket": 25
@@ -1208,8 +1334,22 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/cron/test_scheduler.py",
+      "rationale": "Upstream scheduler tick/run/delivery/history intent is covered by Rust CronScheduler create/update/run/manual-trigger, context prefix, completion broadcast, delivery suppression, and runner contract tests; the Python test file remains reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/e2e",
       "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "ticket": 25
+    },
+    {
+      "classification": "functional",
+      "owner": "sheawinkler",
+      "path": "tests/e2e/test_discord_adapter.py",
+      "rationale": "Discord adapter e2e mention/command behavior needs explicit Rust gateway parity review before it can be claimed covered by existing Discord contracts.",
       "ticket": 25
     },
     {
@@ -1264,13 +1404,6 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_api_server.py",
-      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
-      "ticket": 25
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
       "path": "tests/gateway/test_api_server_bind_guard.py",
       "rationale": "API-server bind-address guard behavior is covered by Rust ApiServerAdapter contracts: network-accessible IPv4/IPv6 and mapped addresses require auth tokens, loopback binds remain allowed without auth, hostname resolution fails closed, and start() rejects unsafe non-loopback binds without an auth token.",
       "ticket": 303
@@ -1285,6 +1418,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_api_server_normalize.py",
+      "rationale": "Upstream API-server chat-content normalization intent is covered in Rust by ChatMessage.content deserialization for strings, scalars, and bounded content arrays with focused api_server tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_api_server_runs.py",
       "rationale": "API-server /v1/runs behavior is covered by Rust-native TCP contracts for run start/status/events/stop, explicit session IDs, inbound gateway dispatch, completion usage/output, cancellation event closure, approval-no-pending conflicts, bool-like approval parsing, invalid conversation-history rejection without allocation, and auth gating.",
       "ticket": 303
@@ -1294,6 +1434,13 @@
       "owner": "sheawinkler",
       "path": "tests/gateway/test_api_server_toolset.py",
       "rationale": "Upstream's API-server toolset contract is covered by Rust toolset and platform-toolset tests; the Python test file remains reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_api_server.py",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
     {
@@ -1390,13 +1537,6 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_config.py",
-      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
-      "ticket": 25
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
       "path": "tests/gateway/test_config_cwd_bridge.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
@@ -1405,6 +1545,13 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/gateway/test_config_env_bridge_authority.py",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_config.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
@@ -1656,13 +1803,6 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_feishu.py",
-      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
-      "ticket": 25
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
       "path": "tests/gateway/test_feishu_approval_buttons.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
@@ -1678,6 +1818,13 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/gateway/test_feishu_comment.py",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_feishu.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
@@ -1747,13 +1894,6 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_matrix.py",
-      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
-      "ticket": 25
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
       "path": "tests/gateway/test_matrix_mention.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
@@ -1762,6 +1902,13 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/gateway/test_matrix_voice.py",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_matrix.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
@@ -1992,13 +2139,6 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_session.py",
-      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
-      "ticket": 25
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
       "path": "tests/gateway/test_session_boundary_hooks.py",
       "rationale": "Upstream gateway session-boundary lifecycle intent is covered by Rust hermes-gateway contracts for reset ordering, old logical session finalize hooks, new logical session reset hooks, hook error containment, shutdown finalization for active sessions, and idle-expiry finalization before session removal.",
       "ticket": 25
@@ -2008,6 +2148,13 @@
       "owner": "sheawinkler",
       "path": "tests/gateway/test_session_dm_thread_seeding.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_session_env.py",
+      "rationale": "Python contextvars session-env behavior is not a Rust runtime boundary; Ultra passes session identifiers explicitly through AgentConfig, gateway sessions, memory providers, session persistence, and tool/session cleanup contracts.",
       "ticket": 25
     },
     {
@@ -2069,14 +2216,14 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_shutdown_cache_cleanup.py",
+      "path": "tests/gateway/test_session.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_signal.py",
+      "path": "tests/gateway/test_shutdown_cache_cleanup.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
@@ -2097,7 +2244,7 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_slack.py",
+      "path": "tests/gateway/test_signal.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
@@ -2105,6 +2252,13 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/gateway/test_slack_approval_buttons.py",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_slack.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
@@ -2132,14 +2286,14 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_status.py",
+      "path": "tests/gateway/test_status_command.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_status_command.py",
+      "path": "tests/gateway/test_status.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
@@ -2160,15 +2314,15 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_stream_consumer.py",
-      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "path": "tests/gateway/test_stream_consumer_fresh_final.py",
+      "rationale": "Upstream fresh-final streaming intent is covered by Rust StreamConfig/StreamConsumer contracts for configurable fresh_final_after_seconds, no-edit sentinel safety, stale-preview fresh-final decisions, non-final segment behavior, turn-final delivery marking, reset clearing, and Telegram delete_message support for best-effort stale preview cleanup.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_stream_consumer_fresh_final.py",
-      "rationale": "Upstream fresh-final streaming intent is covered by Rust StreamConfig/StreamConsumer contracts for configurable fresh_final_after_seconds, no-edit sentinel safety, stale-preview fresh-final decisions, non-final segment behavior, turn-final delivery marking, reset clearing, and Telegram delete_message support for best-effort stale preview cleanup.",
+      "path": "tests/gateway/test_stream_consumer.py",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
     },
     {
@@ -2398,15 +2552,15 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_wecom.py",
-      "rationale": "Upstream WeCom outbound-media intent is covered by Rust WeCom adapter contracts for image URL fallback text, content-type-derived filenames, existing-extension preservation, and feature-gated adapter compilation with gateway delivery routing.",
+      "path": "tests/gateway/test_wecom_callback.py",
+      "rationale": "Upstream WeCom callback intent is covered by Rust WeCom callback contracts for signature stability, encrypted callback rejection on bad signatures, group-mention stripping, image fallback text, and remote image filename/content-type normalization.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/gateway/test_wecom_callback.py",
-      "rationale": "Upstream WeCom callback intent is covered by Rust WeCom callback contracts for signature stability, encrypted callback rejection on bad signatures, group-mention stripping, image fallback text, and remote image filename/content-type normalization.",
+      "path": "tests/gateway/test_wecom.py",
+      "rationale": "Upstream WeCom outbound-media intent is covered by Rust WeCom adapter contracts for image URL fallback text, content-type-derived filenames, existing-extension preservation, and feature-gated adapter compilation with gateway delivery routing.",
       "ticket": 25
     },
     {
@@ -2506,6 +2660,13 @@
       "path": "tests/hermes_cli/test_env_loader.py",
       "rationale": "Upstream dotenv loader precedence and sanitization intent is covered by Rust load_dotenv/load_dotenv_file tests for user-env precedence, project fallback, sanitized concatenated assignments before loading, and atomic sanitized-file rewrite.",
       "ticket": 302
+    },
+    {
+      "classification": "functional",
+      "owner": "sheawinkler",
+      "path": "tests/hermes_cli/test_gateway_linger.py",
+      "rationale": "Upstream covers Linux user-systemd linger auto-enable behavior. Ultra Rust gateway service installation is currently macOS launchd-only, so this remains an explicit pending Rust relevance/implementation review instead of being covered by the broad hermes_cli manifest.",
+      "ticket": 25
     },
     {
       "classification": "intentional_divergence",
@@ -2713,14 +2874,14 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/run_agent/test_background_review.py",
+      "path": "tests/run_agent/test_background_review_toolset_restriction.py",
       "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/run_agent/test_background_review_toolset_restriction.py",
+      "path": "tests/run_agent/test_background_review.py",
       "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
       "ticket": 25
     },
@@ -2734,14 +2895,14 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/run_agent/test_compression_boundary.py",
+      "path": "tests/run_agent/test_compression_boundary_hook.py",
       "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/run_agent/test_compression_boundary_hook.py",
+      "path": "tests/run_agent/test_compression_boundary.py",
       "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
       "ticket": 25
     },
@@ -2893,6 +3054,13 @@
       "ticket": 25
     },
     {
+      "classification": "functional",
+      "owner": "sheawinkler",
+      "path": "tests/run_agent/test_message_sequence_repair.py",
+      "rationale": "Message sequence repair behavior needs explicit Rust agent-loop parity review before it can be claimed covered.",
+      "ticket": 25
+    },
+    {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/run_agent/test_openai_client_lifecycle.py",
@@ -2944,14 +3112,14 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/run_agent/test_run_agent.py",
+      "path": "tests/run_agent/test_run_agent_codex_responses.py",
       "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/run_agent/test_run_agent_codex_responses.py",
+      "path": "tests/run_agent/test_run_agent.py",
       "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
       "ticket": 25
     },
@@ -2986,14 +3154,14 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/run_agent/test_streaming.py",
+      "path": "tests/run_agent/test_streaming_tool_call_repair.py",
       "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/run_agent/test_streaming_tool_call_repair.py",
+      "path": "tests/run_agent/test_streaming.py",
       "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
       "ticket": 25
     },
@@ -3016,6 +3184,13 @@
       "owner": "sheawinkler",
       "path": "tests/run_agent/test_switch_model_context.py",
       "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
+      "ticket": 25
+    },
+    {
+      "classification": "functional",
+      "owner": "sheawinkler",
+      "path": "tests/run_agent/test_thinking_only_sanitizer.py",
+      "rationale": "Thinking-only assistant sanitizer behavior needs explicit Rust agent-loop parity review before it can be claimed covered.",
       "ticket": 25
     },
     {
@@ -3068,6 +3243,13 @@
       "ticket": 25
     },
     {
+      "classification": "functional",
+      "owner": "sheawinkler",
+      "path": "tests/test_atomic_replace_symlinks.py",
+      "rationale": "Atomic replace symlink semantics need explicit Rust filesystem/config-write parity review before they can be claimed covered.",
+      "ticket": 25
+    },
+    {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/test_honcho_client_config.py",
@@ -3079,13 +3261,6 @@
       "owner": "sheawinkler",
       "path": "tests/tools",
       "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
-      "ticket": 25
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
-      "path": "tests/tools/test_approval.py",
-      "rationale": "Upstream dangerous-command approval behavior is covered and superseded by Rust hermes-tools approval contracts for hardline denials, recoverable confirmations, session/permanent approvals, yolo and session-yolo gates, container backend bypass, multiline shell/disk/write patterns, sensitive env/config writes, SQL/delete/find/killall refinements, sudo stdin floors, unmanaged gateway-run service-manager protection, and gateway approval queues. Python LLM smart-approval and input-prompt mechanics are intentionally not ported into the Rust safety path.",
       "ticket": 25
     },
     {
@@ -3105,16 +3280,16 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/tools/test_base_environment.py",
-      "rationale": "Upstream Python base environment wrapper tests are covered by the Rust TerminalBackend contract and hermes-environments local backend tests, including command execution, cwd handling, stdin defaults, background process lifecycle, env sanitization, and file read/write behavior.",
+      "path": "tests/tools/test_approval.py",
+      "rationale": "Upstream dangerous-command approval behavior is covered and superseded by Rust hermes-tools approval contracts for hardline denials, recoverable confirmations, session/permanent approvals, yolo and session-yolo gates, container backend bypass, multiline shell/disk/write patterns, sensitive env/config writes, SQL/delete/find/killall refinements, sudo stdin floors, unmanaged gateway-run service-manager protection, and gateway approval queues. Python LLM smart-approval and input-prompt mechanics are intentionally not ported into the Rust safety path.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/tools/test_browser_camofox.py",
-      "rationale": "Ultra supersedes upstream Python Camofox HTTP facade tests with Rust browser backend contracts in crates/hermes-tools/src/backends/browser.rs and crates/hermes-tools/src/tools/browser.rs, covering Camofox env selection, CDP override precedence, named profile wiring, loopback URL rewriting, secret exfiltration guards, and handler forwarding for navigate/click/type/scroll/back/press/images/vision/console.",
-      "ticket": 306
+      "path": "tests/tools/test_base_environment.py",
+      "rationale": "Upstream Python base environment wrapper tests are covered by the Rust TerminalBackend contract and hermes-environments local backend tests, including command execution, cwd handling, stdin defaults, background process lifecycle, env sanitization, and file read/write behavior.",
+      "ticket": 25
     },
     {
       "classification": "intentional_divergence",
@@ -3128,6 +3303,13 @@
       "owner": "sheawinkler",
       "path": "tests/tools/test_browser_camofox_state.py",
       "rationale": "Ultra maps upstream Camofox state helpers to Rust camofox_state_dir_for_home and camofox_identity_for_home contracts, proving $HERMES_HOME/browser_auth/camofox pathing, deterministic identity, task/session separation, and profile separation without Python state modules.",
+      "ticket": 306
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/tools/test_browser_camofox.py",
+      "rationale": "Ultra supersedes upstream Python Camofox HTTP facade tests with Rust browser backend contracts in crates/hermes-tools/src/backends/browser.rs and crates/hermes-tools/src/tools/browser.rs, covering Camofox env selection, CDP override precedence, named profile wiring, loopback URL rewriting, secret exfiltration guards, and handler forwarding for navigate/click/type/scroll/back/press/images/vision/console.",
       "ticket": 306
     },
     {
@@ -3271,6 +3453,13 @@
       "ticket": 25
     },
     {
+      "classification": "functional",
+      "owner": "sheawinkler",
+      "path": "tests/tools/test_file_tools_container_config.py",
+      "rationale": "File-tools container_config propagation needs explicit Rust tool/environment parity review before it can be claimed covered.",
+      "ticket": 25
+    },
+    {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/tools/test_file_tools.py",
@@ -3359,6 +3548,20 @@
       "owner": "sheawinkler",
       "path": "tests/tools/test_managed_media_gateways.py",
       "rationale": "Upstream managed media gateway behavior is covered by Rust OpenAI-audio managed endpoint contracts for TTS and transcription plus FAL managed video-generation contracts; direct keys still override managed gateways where required.",
+      "ticket": 25
+    },
+    {
+      "classification": "functional",
+      "owner": "sheawinkler",
+      "path": "tests/tools/test_mcp_oauth_integration.py",
+      "rationale": "MCP OAuth integration behavior needs explicit Rust MCP OAuth relevance review before it can be claimed covered.",
+      "ticket": 25
+    },
+    {
+      "classification": "functional",
+      "owner": "sheawinkler",
+      "path": "tests/tools/test_mcp_oauth_manager.py",
+      "rationale": "MCP OAuth manager cache/lifecycle behavior needs explicit Rust MCP OAuth relevance review before it can be claimed covered.",
       "ticket": 25
     },
     {
@@ -3490,15 +3693,15 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/tools/test_skills_hub.py",
-      "rationale": "Upstream skills hub trust, content hashing, and remote skill integrity intent is covered by Rust SkillsHubClient search/download/upload/update contracts, Ed25519 signature verification, trusted source resolution, and scan-before-use policy; Python source-adapter breadth remains reference-only.",
+      "path": "tests/tools/test_skills_hub_clawhub.py",
+      "rationale": "Upstream ClawHub listing/detail/search repair/version/file mapping intent is covered by Rust ClawHub registry metadata parsing, exact-slug repair, hyphenated query normalization, latest-version extraction, and inline/raw file reference contracts.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/tools/test_skills_hub_clawhub.py",
-      "rationale": "Upstream ClawHub listing/detail/search repair/version/file mapping intent is covered by Rust ClawHub registry metadata parsing, exact-slug repair, hyphenated query normalization, latest-version extraction, and inline/raw file reference contracts.",
+      "path": "tests/tools/test_skills_hub.py",
+      "rationale": "Upstream skills hub trust, content hashing, and remote skill integrity intent is covered by Rust SkillsHubClient search/download/upload/update contracts, Ed25519 signature verification, trusted source resolution, and scan-before-use policy; Python source-adapter breadth remains reference-only.",
       "ticket": 25
     },
     {
@@ -3581,13 +3784,6 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/tools/test_transcription.py",
-      "rationale": "Upstream transcription behavior is covered by Rust transcription handler contracts for audio extension mapping, credential/gateway endpoint resolution, missing-path errors, and model-specific response parsing.",
-      "ticket": 25
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
       "path": "tests/tools/test_transcription_dotenv_fallback.py",
       "rationale": "Upstream transcription key fallback behavior is covered by Rust openai-audio credential resolution contracts that prefer VOICE_TOOLS_OPENAI_KEY before HERMES_OPENAI_API_KEY and legacy OPENAI_API_KEY.",
       "ticket": 25
@@ -3597,6 +3793,13 @@
       "owner": "sheawinkler",
       "path": "tests/tools/test_transcription_tools.py",
       "rationale": "Upstream STT provider semantics are covered by Rust transcription contracts for explicit OpenAI-audio routing, managed/direct credential order, extension MIME mapping, and whisper text versus GPT transcribe JSON response formats.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/tools/test_transcription.py",
+      "rationale": "Upstream transcription behavior is covered by Rust transcription handler contracts for audio extension mapping, credential/gateway endpoint resolution, missing-path errors, and model-specific response parsing.",
       "ticket": 25
     },
     {
@@ -3686,13 +3889,6 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
-      "path": "tests/tools/test_web_providers.py",
-      "rationale": "Ultra supersedes upstream Python WebSearchProvider/WebExtractProvider ABC tests with Rust WebSearchBackend, WebExtractBackend, and WebCrawlBackend traits plus handler tests; Rust backend env tests prove per-capability search/extract selection over the generic web backend.",
-      "ticket": 306
-    },
-    {
-      "classification": "intentional_divergence",
-      "owner": "sheawinkler",
       "path": "tests/tools/test_web_providers_brave_free.py",
       "rationale": "Upstream Brave free provider intent is covered by Rust BraveFreeSearchBackend contracts for BRAVE_SEARCH_API_KEY gating, X-Subscription-Token requests, count clamping, result normalization, explicit/generic backend selection, auto-detect priority, and search-only extract/crawl error routing.",
       "ticket": 25
@@ -3710,6 +3906,13 @@
       "path": "tests/tools/test_web_providers_searxng.py",
       "rationale": "Upstream SearXNG provider intent is covered by Rust SearxngSearchBackend contracts for SEARXNG_BASE_URL and SEARXNG_URL aliases, trailing-slash normalization, score-descending sorting, limit truncation, result normalization, availability checks, and search-only extract/crawl errors.",
       "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/tools/test_web_providers.py",
+      "rationale": "Ultra supersedes upstream Python WebSearchProvider/WebExtractProvider ABC tests with Rust WebSearchBackend, WebExtractBackend, and WebCrawlBackend traits plus handler tests; Rust backend env tests prove per-capability search/extract selection over the generic web backend.",
+      "ticket": 306
     },
     {
       "classification": "intentional_divergence",
