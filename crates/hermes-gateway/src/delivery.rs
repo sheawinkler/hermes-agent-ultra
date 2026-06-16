@@ -355,6 +355,7 @@ impl DeliveryRouter {
                 SendMessageOptions {
                     thread_id: target.thread_id.clone(),
                     explicit_chat_id: target.is_explicit,
+                    notify: false,
                 },
             )
             .await
@@ -466,6 +467,7 @@ impl DeliveryRouter {
                         SendMessageOptions {
                             thread_id: target.thread_id.clone(),
                             explicit_chat_id: target.is_explicit,
+                            notify: false,
                         },
                     )
                     .await

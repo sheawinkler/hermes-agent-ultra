@@ -1290,3 +1290,43 @@
 - Outcome:
   - Queue end-state: `pending=0`, `ported=49`, `superseded=1065`.
   - Gates: CI `PASS`, release `PASS`.
+
+## 2026-06-16 runtime-threading-queue-batch (targeted upstream parity closure)
+- Scope:
+  - Continue from the refreshed `main..upstream/main` queue snapshot (`6101` tracked commits).
+  - Reduce active pending rows below the requested `<=25` threshold without broad-dispositioning unreviewed SSL, desktop, Photon, or profile rows.
+- Queue at start:
+  - `pending=32`, `ported=299`, `superseded=5696`, `mirrored=74`.
+- Rust/docs implementation ported in this pass:
+  - `c1a70a543925` and `40699c329265` (`disk-cleanup` protected empty-dir pruning):
+    - Rust cleanup walk now prunes protected top-level trees and dependency/cache dirs before recursive empty-dir deletion.
+    - Covered by `quick_does_not_descend_into_protected_or_pruned_trees` and `quick_removes_empty_dirs_in_managed_subtrees`.
+  - `c66ecf0bc30f` (`delegate_task(background=true)`):
+    - Tool schema/backends carry `background`; `AgentLoop` forwards it; `SubAgentOrchestrator` dispatches detached children and emits completion callbacks.
+  - `5a0e0d35b94f` (`mattermost` thread-local delivery hygiene):
+    - Gateway replies now preserve source `thread_id`; Mattermost resolves thread roots, parses WebSocket root IDs, and falls back flat only for final notifications with broken roots.
+  - `5bfed0fe071a` (optional payments skills):
+    - Added payments optional skills plus generated docs and catalog entries.
+  - `a6364bfa08db` (Telegram rich streamed preview edits):
+    - Telegram rich messages default on for rich-only content shapes; rich final sends/edits use Bot API 10.1 payloads with legacy fallback.
+- Superseded in this pass:
+  - `b689624aeeef`, `510df6eaf47e`, `e7cb5d4b68c3`, `dc4b0465b558`, `be89c2e4fa41`
+    - GitHub workflow-only slicing/trigger/supply-chain deltas; this repo's validation is owned by local scripts and Rust cargo gates.
+- Queue at end:
+  - `pending=21`, `ported=305`, `superseded=5701`, `mirrored=74`.
+- Verification:
+  - `cargo fmt --all --check`
+  - `cargo check -p hermes-core -p hermes-gateway -p hermes-agent -p hermes-tools -p hermes-http -p hermes-cli`
+  - `cargo test -p hermes-gateway gateway_replies_and_deferred_messages_preserve_source_thread -- --nocapture`
+  - `cargo test -p hermes-gateway --features mattermost platforms::mattermost::tests -- --nocapture`
+  - `cargo test -p hermes-gateway --features telegram telegram_rich -- --nocapture`
+  - `cargo test -p hermes-tools delegate_task -- --nocapture`
+  - `cargo test -p hermes-tools quick_ -- --nocapture`
+  - `cargo test -p hermes-tools signal_delegation_backend -- --nocapture`
+  - `cargo test -p hermes-agent background_request_dispatches_handle_and_emits_completion_callback -- --nocapture`
+  - `cargo test -p hermes-gateway gateway_deferred_post_delivery_messages_flush_after_main_reply -- --nocapture`
+  - `scripts/check-runtime-placeholders.sh`
+  - `cargo test -p hermes-parity-tests --test global_parity_governance -- --nocapture`
+  - `python3 scripts/generate-global-parity-proof.py --check-ci`
+- Verification note:
+  - All Rust/placeholder/governance checks above passed except `generate-global-parity-proof.py --check-ci`, which regenerated proof artifacts but exited non-zero on pre-existing tree-drift thresholds (`max_commits_behind=5880 > 5500`, `max_upstream_patch_missing=5657 > 5000`) and release-mode `pending=0` policy. The queue pending metric itself is under CI threshold (`21 <= 100`).

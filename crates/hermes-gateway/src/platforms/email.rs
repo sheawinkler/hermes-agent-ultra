@@ -505,6 +505,7 @@ fn imap_fetch_unseen(
                     body.trim().to_string()
                 },
                 message_id: Some(mid.clone()),
+                thread_id: None,
                 is_dm: true,
             });
         }

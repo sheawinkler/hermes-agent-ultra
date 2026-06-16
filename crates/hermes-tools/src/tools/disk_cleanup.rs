@@ -55,6 +55,14 @@ const PROTECTED_EMPTY_TOP_LEVEL: &[&str] = &[
     "profiles",
     ".worktrees",
 ];
+const EMPTY_DIR_SWEEP_PRUNE_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "venv",
+    ".venv",
+    "site-packages",
+    "__pycache__",
+];
 
 pub const ALLOWED_CATEGORIES: &[&str] = &[
     "temp",
@@ -468,7 +476,7 @@ impl DiskCleanup {
 
     fn remove_empty_dirs(&self) -> usize {
         let mut dirs = Vec::new();
-        collect_dirs_postorder(&self.hermes_home, &mut dirs);
+        collect_pruned_dirs_postorder(&self.hermes_home, &self.hermes_home, &mut dirs);
         let mut removed = 0usize;
         for dir in dirs {
             if dir == self.hermes_home {
@@ -935,16 +943,33 @@ fn remove_path(path: &Path) -> io::Result<()> {
     }
 }
 
-fn collect_dirs_postorder(root: &Path, dirs: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(root) else {
+fn collect_pruned_dirs_postorder(home: &Path, current: &Path, dirs: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(current) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            collect_dirs_postorder(&path, dirs);
-            dirs.push(path);
+        if !path.is_dir() {
+            continue;
         }
+        let Ok(rel) = path.strip_prefix(home) else {
+            continue;
+        };
+        let name = path.file_name().and_then(|v| v.to_str()).unwrap_or("");
+        if path
+            .symlink_metadata()
+            .is_ok_and(|m| m.file_type().is_symlink())
+        {
+            continue;
+        }
+        if rel.components().count() == 1 && PROTECTED_EMPTY_TOP_LEVEL.contains(&name) {
+            continue;
+        }
+        if EMPTY_DIR_SWEEP_PRUNE_DIRS.contains(&name) {
+            continue;
+        }
+        collect_pruned_dirs_postorder(home, &path, dirs);
+        dirs.push(path);
     }
 }
 
@@ -1111,6 +1136,36 @@ mod tests {
                 "{dir} should remain"
             );
         }
+    }
+
+    #[test]
+    fn quick_does_not_descend_into_protected_or_pruned_trees() {
+        let tmp = TempDir::new().unwrap();
+        let cleaner = cleaner(&tmp);
+        let protected_empty = cleaner
+            .hermes_home()
+            .join("hermes-agent/node_modules/pkg/empty");
+        fs::create_dir_all(&protected_empty).unwrap();
+
+        cleaner.quick();
+
+        assert!(
+            protected_empty.exists(),
+            "empty dirs under protected checkout/dependency trees must remain untouched"
+        );
+    }
+
+    #[test]
+    fn quick_removes_empty_dirs_in_managed_subtrees() {
+        let tmp = TempDir::new().unwrap();
+        let cleaner = cleaner(&tmp);
+        let managed_empty = cleaner.hermes_home().join("scratch/nested/empty");
+        fs::create_dir_all(&managed_empty).unwrap();
+
+        let summary = cleaner.quick();
+
+        assert!(summary.empty_dirs >= 3);
+        assert!(!cleaner.hermes_home().join("scratch").exists());
     }
 
     #[test]

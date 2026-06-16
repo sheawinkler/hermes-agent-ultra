@@ -70,6 +70,9 @@ pub struct SendMessageOptions {
     /// True when the caller supplied the chat/topic id explicitly rather than
     /// letting the gateway choose a configured home/publish target.
     pub explicit_chat_id: bool,
+    /// True for final user-visible replies where a platform may choose a
+    /// conservative delivery fallback if a requested thread root is broken.
+    pub notify: bool,
 }
 
 impl SendMessageOptions {
@@ -77,6 +80,7 @@ impl SendMessageOptions {
         Self {
             thread_id: thread_id.map(ToOwned::to_owned),
             explicit_chat_id: false,
+            notify: false,
         }
     }
 
@@ -84,6 +88,15 @@ impl SendMessageOptions {
         Self {
             thread_id: thread_id.map(ToOwned::to_owned),
             explicit_chat_id: true,
+            notify: false,
+        }
+    }
+
+    pub fn notify_threaded(thread_id: Option<&str>) -> Self {
+        Self {
+            thread_id: thread_id.map(ToOwned::to_owned),
+            explicit_chat_id: false,
+            notify: true,
         }
     }
 }

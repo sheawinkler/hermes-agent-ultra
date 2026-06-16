@@ -991,6 +991,7 @@ impl WeChatAdapter {
             } else {
                 Some(msg_id)
             },
+            thread_id: None,
             is_dm: chat_type == "dm",
         };
         if let Some(tx) = inner.inbound_tx.read().await.clone() {

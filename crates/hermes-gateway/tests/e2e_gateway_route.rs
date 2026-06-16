@@ -86,6 +86,7 @@ async fn e2e_gateway_routes_message_and_replies() {
             user_id: "u1".to_string(),
             text: "hello".to_string(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         })
         .await
