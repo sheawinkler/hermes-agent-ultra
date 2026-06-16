@@ -4353,6 +4353,8 @@ fn build_telegram_config(
         proxy: Default::default(),
         parse_markdown,
         parse_html,
+        disable_link_previews: extra_bool(platform_cfg, "disable_link_previews", false),
+        rich_messages: extra_bool(platform_cfg, "rich_messages", false),
         poll_timeout,
         reply_to_mode: reply_to_mode_string(platform_cfg).unwrap_or_else(|| "first".to_string()),
         reactions: extra_bool(platform_cfg, "reactions", false),
@@ -15936,6 +15938,12 @@ mod tests {
         platform
             .extra
             .insert("reactions".to_string(), serde_json::json!(true));
+        platform
+            .extra
+            .insert("disable_link_previews".to_string(), serde_json::json!(true));
+        platform
+            .extra
+            .insert("rich_messages".to_string(), serde_json::json!(true));
         platform.extra.insert(
             "fallback_ips".to_string(),
             serde_json::json!("149.154.167.220,::1"),
@@ -15985,6 +15993,8 @@ mod tests {
         assert_eq!(cfg.webhook_secret.as_deref(), Some("env-secret"));
         assert_eq!(cfg.reply_to_mode, "all");
         assert!(cfg.reactions);
+        assert!(cfg.disable_link_previews);
+        assert!(cfg.rich_messages);
         assert_eq!(cfg.fallback_ips, vec!["149.154.167.220", "::1"]);
         assert!(cfg.require_mention);
         assert!(cfg.guest_mode);
