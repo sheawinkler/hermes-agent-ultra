@@ -782,6 +782,7 @@ async fn handle_callback_request(
                         user_id: from_user,
                         text,
                         message_id: Some(msg_id),
+                        thread_id: None,
                         is_dm: !is_group,
                     })
                     .await;

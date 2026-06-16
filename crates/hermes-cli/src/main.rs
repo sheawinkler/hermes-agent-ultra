@@ -2975,6 +2975,7 @@ async fn run_gateway(
                             .await;
                         let platform_for_review = ctx.platform.clone();
                         let chat_for_review = ctx.chat_id.clone();
+                        let thread_for_review = ctx.thread_id.clone();
                         let deferred_queue = ctx.deferred_post_delivery_messages.clone();
                         let deferred_released = ctx.deferred_post_delivery_released.clone();
                         let gateway_for_review_cb = gateway_for_review.clone();
@@ -2992,9 +2993,18 @@ async fn run_gateway(
                             let gw = gateway_for_review_cb.clone();
                             let platform = platform_for_review.clone();
                             let chat_id = chat_for_review.clone();
+                            let thread_id = thread_for_review.clone();
                             let msg = text.to_string();
                             tokio::spawn(async move {
-                                let _ = gw.send_message(&platform, &chat_id, &msg, None).await;
+                                let _ = gw
+                                    .send_notify_message_threaded(
+                                        &platform,
+                                        &chat_id,
+                                        &msg,
+                                        None,
+                                        thread_id.as_deref(),
+                                    )
+                                    .await;
                             });
                         });
                         let gateway_for_status = gateway_for_review.clone();
@@ -3237,6 +3247,7 @@ async fn run_gateway(
                             .await;
                         let platform_for_review = ctx.platform.clone();
                         let chat_for_review = ctx.chat_id.clone();
+                        let thread_for_review = ctx.thread_id.clone();
                         let deferred_queue = ctx.deferred_post_delivery_messages.clone();
                         let deferred_released = ctx.deferred_post_delivery_released.clone();
                         let gateway_for_review_cb = gateway_for_review.clone();
@@ -3254,9 +3265,18 @@ async fn run_gateway(
                             let gw = gateway_for_review_cb.clone();
                             let platform = platform_for_review.clone();
                             let chat_id = chat_for_review.clone();
+                            let thread_id = thread_for_review.clone();
                             let msg = text.to_string();
                             tokio::spawn(async move {
-                                let _ = gw.send_message(&platform, &chat_id, &msg, None).await;
+                                let _ = gw
+                                    .send_notify_message_threaded(
+                                        &platform,
+                                        &chat_id,
+                                        &msg,
+                                        None,
+                                        thread_id.as_deref(),
+                                    )
+                                    .await;
                             });
                         });
                         let gateway_for_status = gateway_for_review.clone();
@@ -4354,7 +4374,7 @@ fn build_telegram_config(
         parse_markdown,
         parse_html,
         disable_link_previews: extra_bool(platform_cfg, "disable_link_previews", false),
-        rich_messages: extra_bool(platform_cfg, "rich_messages", false),
+        rich_messages: extra_bool(platform_cfg, "rich_messages", true),
         poll_timeout,
         reply_to_mode: reply_to_mode_string(platform_cfg).unwrap_or_else(|| "first".to_string()),
         reactions: extra_bool(platform_cfg, "reactions", false),
@@ -5269,6 +5289,7 @@ async fn run_api_server_inbound_loop(
             user_id: req.user_id.clone(),
             text: req.prompt.clone(),
             message_id: Some(req.request_id.clone()),
+            thread_id: None,
             is_dm: true,
         };
         if let Err(err) = gateway.route_message(&incoming).await {
@@ -5287,6 +5308,7 @@ async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<
                 .unwrap_or_else(|| "webhook-client".to_string()),
             text: payload.text,
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         if let Err(err) = gateway.route_message(&incoming).await {
@@ -5922,7 +5944,8 @@ fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMess
         .or(msg.username)
         .unwrap_or_else(|| "unknown".to_string());
 
-    let chat_id = match telegram_routable_topic_thread(msg.message_thread_id) {
+    let thread_id = telegram_routable_topic_thread(msg.message_thread_id);
+    let chat_id = match thread_id {
         Some(thread_id) => format!("{}:{}", msg.chat_id, thread_id),
         _ => msg.chat_id.to_string(),
     };
@@ -5933,6 +5956,7 @@ fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMess
         user_id,
         text,
         message_id: Some(msg.message_id.to_string()),
+        thread_id: thread_id.map(|id| id.to_string()),
         is_dm: msg.chat_id > 0,
     }
 }

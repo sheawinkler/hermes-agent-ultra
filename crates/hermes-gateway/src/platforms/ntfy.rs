@@ -271,6 +271,7 @@ impl NtfyAdapter {
             user_id: topic,
             text,
             message_id: Some(message_id),
+            thread_id: None,
             is_dm: true,
         };
         if let Some(tx) = inner.inbound_tx.read().await.as_ref() {

@@ -41,6 +41,7 @@ pub struct IncomingMattermostMessage {
     pub channel_id: String,
     pub user_id: String,
     pub message: String,
+    pub thread_id: Option<String>,
     pub is_bot: bool,
 }
 
@@ -102,7 +103,8 @@ impl MattermostAdapter {
 
     /// Send a message via Mattermost REST API.
     pub async fn send_text(&self, channel_id: &str, text: &str) -> Result<String, GatewayError> {
-        self.send_text_with_thread(channel_id, text, None).await
+        self.send_text_with_thread(channel_id, text, None, false)
+            .await
     }
 
     async fn send_text_with_thread(
@@ -110,32 +112,57 @@ impl MattermostAdapter {
         channel_id: &str,
         text: &str,
         thread_id: Option<&str>,
+        notify: bool,
     ) -> Result<String, GatewayError> {
-        let url = format!("{}/api/v4/posts", self.config.server_url);
-        let body =
-            mattermost_post_body(channel_id, text, None, self.thread_root_for_send(thread_id));
+        let root_id = self.thread_root_for_send(thread_id).await;
+        let body = mattermost_post_body(channel_id, text, None, root_id.as_deref());
 
+        match self.post_body_once(&body).await {
+            Ok(id) => Ok(id),
+            Err(err) if notify && root_id.is_some() && err.is_broken_thread_root() => {
+                let mut flat_body = mattermost_post_body(channel_id, text, None, None);
+                flat_body["message"] = serde_json::json!(format!(
+                    "Mattermost thread delivery failed; posting final reply in channel.\n\n{text}"
+                )
+                .trim());
+                self.post_body_once(&flat_body)
+                    .await
+                    .map_err(MattermostPostFailure::into_gateway_error)
+            }
+            Err(err) => Err(err.into_gateway_error()),
+        }
+    }
+
+    async fn post_body_once(
+        &self,
+        body: &serde_json::Value,
+    ) -> Result<String, MattermostPostFailure> {
+        let url = format!("{}/api/v4/posts", self.config.server_url);
         let resp = self
             .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
-            .json(&body)
+            .json(body)
             .send()
             .await
-            .map_err(|e| GatewayError::SendFailed(format!("Mattermost send failed: {}", e)))?;
+            .map_err(|e| MattermostPostFailure {
+                status: None,
+                body: format!("Mattermost send failed: {e}"),
+            })?;
 
         if !resp.status().is_success() {
+            let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!(
-                "Mattermost API error: {}",
-                text
-            )));
+            return Err(MattermostPostFailure {
+                status: Some(status),
+                body: text,
+            });
         }
 
-        let result: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!("Mattermost parse failed: {}", e)))?;
+        let result: serde_json::Value = resp.json().await.map_err(|e| MattermostPostFailure {
+            status: None,
+            body: format!("Mattermost parse failed: {e}"),
+        })?;
         Ok(result
             .get("id")
             .and_then(|v| v.as_str())
@@ -143,12 +170,44 @@ impl MattermostAdapter {
             .to_string())
     }
 
-    fn thread_root_for_send<'a>(&self, thread_id: Option<&'a str>) -> Option<&'a str> {
-        if self.config.reply_to_mode.eq_ignore_ascii_case("thread") {
-            thread_id.map(str::trim).filter(|id| !id.is_empty())
-        } else {
-            None
+    fn thread_candidate_for_send<'a>(&self, thread_id: Option<&'a str>) -> Option<&'a str> {
+        if !self.config.reply_to_mode.eq_ignore_ascii_case("thread") {
+            return None;
         }
+        thread_id.map(str::trim).filter(|id| !id.is_empty())
+    }
+
+    async fn thread_root_for_send(&self, thread_id: Option<&str>) -> Option<String> {
+        let candidate = self.thread_candidate_for_send(thread_id)?;
+        Some(self.resolve_root_id(candidate).await)
+    }
+
+    async fn resolve_root_id(&self, post_id: &str) -> String {
+        let candidate = post_id.trim();
+        let url = format!("{}/api/v4/posts/{}", self.config.server_url, candidate);
+        let Ok(resp) = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.config.token))
+            .send()
+            .await
+        else {
+            return candidate.to_string();
+        };
+
+        if !resp.status().is_success() {
+            return candidate.to_string();
+        }
+
+        let Ok(post) = resp.json::<serde_json::Value>().await else {
+            return candidate.to_string();
+        };
+        post.get("root_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .unwrap_or(candidate)
+            .to_string()
     }
 
     async fn send_file_with_thread(
@@ -157,6 +216,7 @@ impl MattermostAdapter {
         file_path: &str,
         caption: Option<&str>,
         thread_id: Option<&str>,
+        notify: bool,
     ) -> Result<(), GatewayError> {
         use crate::platforms::helpers::mime_from_extension;
 
@@ -206,36 +266,44 @@ impl MattermostAdapter {
             })
             .unwrap_or_default();
 
-        let post_url = format!("{}/api/v4/posts", self.config.server_url);
+        let root_id = self.thread_root_for_send(thread_id).await;
         let body = mattermost_post_body(
             chat_id,
             caption.unwrap_or(""),
-            Some(file_ids),
-            self.thread_root_for_send(thread_id),
+            Some(file_ids.clone()),
+            root_id.as_deref(),
         );
 
-        let resp = self
-            .client
-            .post(&post_url)
-            .header("Authorization", format!("Bearer {}", self.config.token))
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!("Mattermost file post failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!(
-                "Mattermost file post error: {text}"
-            )));
+        match self.post_body_once(&body).await {
+            Ok(_) => Ok(()),
+            Err(err) if notify && root_id.is_some() && err.is_broken_thread_root() => {
+                let mut flat_body =
+                    mattermost_post_body(chat_id, caption.unwrap_or(""), Some(file_ids), None);
+                flat_body["message"] = serde_json::json!(format!(
+                    "Mattermost thread delivery failed; posting final reply in channel.\n\n{}",
+                    caption.unwrap_or("")
+                )
+                .trim());
+                self.post_body_once(&flat_body)
+                    .await
+                    .map(|_| ())
+                    .map_err(MattermostPostFailure::into_gateway_error)
+            }
+            Err(err) => Err(err.into_gateway_error()),
         }
-        Ok(())
     }
 
     /// Parse a Mattermost WebSocket event into an incoming message.
     ///
     /// Only `posted` events that contain a valid post JSON are returned.
     pub fn parse_ws_event(event: &MattermostWsEvent) -> Option<IncomingMattermostMessage> {
+        Self::parse_ws_event_with_reply_mode(event, "off")
+    }
+
+    pub fn parse_ws_event_with_reply_mode(
+        event: &MattermostWsEvent,
+        reply_to_mode: &str,
+    ) -> Option<IncomingMattermostMessage> {
         if event.event != "posted" {
             return None;
         }
@@ -252,6 +320,23 @@ impl MattermostAdapter {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        let channel_type = data
+            .get("channel_type")
+            .or_else(|| post.get("channel_type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let mut thread_id = post
+            .get("root_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string);
+        if thread_id.is_none()
+            && reply_to_mode.eq_ignore_ascii_case("thread")
+            && channel_type != "D"
+        {
+            thread_id = Some(post_id.clone());
+        }
 
         let is_bot = post
             .get("props")
@@ -265,8 +350,16 @@ impl MattermostAdapter {
             channel_id,
             user_id,
             message,
+            thread_id,
             is_bot,
         })
+    }
+
+    fn parse_ws_event_for_config(
+        &self,
+        event: &MattermostWsEvent,
+    ) -> Option<IncomingMattermostMessage> {
+        Self::parse_ws_event_with_reply_mode(event, &self.config.reply_to_mode)
     }
 
     fn map_ws_error(err: tokio_tungstenite::tungstenite::Error) -> GatewayError {
@@ -319,7 +412,7 @@ impl MattermostAdapter {
                     match frame {
                         Some(Ok(Message::Text(text))) => {
                             if let Ok(event) = serde_json::from_str::<MattermostWsEvent>(text.as_str()) {
-                                if let Some(message) = Self::parse_ws_event(&event) {
+                                if let Some(message) = self.parse_ws_event_for_config(&event) {
                                     callback(message);
                                 }
                             }
@@ -479,6 +572,36 @@ impl MattermostAdapter {
     }
 }
 
+#[derive(Debug)]
+struct MattermostPostFailure {
+    status: Option<u16>,
+    body: String,
+}
+
+impl MattermostPostFailure {
+    fn is_broken_thread_root(&self) -> bool {
+        if !matches!(self.status, Some(400 | 404)) {
+            return false;
+        }
+        let body = self.body.to_ascii_lowercase();
+        let rootish = ["root_id", "rootid", "root id", "thread", "post"]
+            .iter()
+            .any(|needle| body.contains(needle));
+        let broken = ["invalid", "not found", "does not exist", "missing"]
+            .iter()
+            .any(|needle| body.contains(needle));
+        rootish && broken
+    }
+
+    fn into_gateway_error(self) -> GatewayError {
+        let body = self.body;
+        GatewayError::SendFailed(match self.status {
+            Some(status) => format!("Mattermost API error ({status}): {body}"),
+            None => body,
+        })
+    }
+}
+
 fn normalized_image_content_type(content_type: Option<&str>) -> Option<String> {
     let normalized = content_type?
         .split(';')
@@ -599,7 +722,8 @@ impl PlatformAdapter for MattermostAdapter {
         _parse_mode: Option<ParseMode>,
         thread_id: Option<&str>,
     ) -> Result<(), GatewayError> {
-        self.send_text_with_thread(chat_id, text, thread_id).await?;
+        self.send_text_with_thread(chat_id, text, thread_id, false)
+            .await?;
         Ok(())
     }
 
@@ -610,8 +734,10 @@ impl PlatformAdapter for MattermostAdapter {
         parse_mode: Option<ParseMode>,
         options: SendMessageOptions,
     ) -> Result<(), GatewayError> {
-        self.send_message_threaded(chat_id, text, parse_mode, options.thread_id.as_deref())
+        let _ = parse_mode;
+        self.send_text_with_thread(chat_id, text, options.thread_id.as_deref(), options.notify)
             .await
+            .map(|_| ())
     }
 
     async fn edit_message(
@@ -629,7 +755,7 @@ impl PlatformAdapter for MattermostAdapter {
         file_path: &str,
         caption: Option<&str>,
     ) -> Result<(), GatewayError> {
-        self.send_file_with_thread(chat_id, file_path, caption, None)
+        self.send_file_with_thread(chat_id, file_path, caption, None, false)
             .await
     }
 
@@ -640,8 +766,14 @@ impl PlatformAdapter for MattermostAdapter {
         caption: Option<&str>,
         options: SendMessageOptions,
     ) -> Result<(), GatewayError> {
-        self.send_file_with_thread(chat_id, file_path, caption, options.thread_id.as_deref())
-            .await
+        self.send_file_with_thread(
+            chat_id,
+            file_path,
+            caption,
+            options.thread_id.as_deref(),
+            options.notify,
+        )
+        .await
     }
 
     async fn send_image_url(
@@ -795,15 +927,34 @@ mod tests {
     #[test]
     fn thread_root_for_send_requires_thread_reply_mode() {
         let adapter = test_adapter();
-        assert_eq!(adapter.thread_root_for_send(Some("root-post-1")), None);
+        assert_eq!(adapter.thread_candidate_for_send(Some("root-post-1")), None);
 
         let mut threaded = test_adapter();
         threaded.config.reply_to_mode = "thread".to_string();
         assert_eq!(
-            threaded.thread_root_for_send(Some(" root-post-1 ")),
+            threaded.thread_candidate_for_send(Some(" root-post-1 ")),
             Some("root-post-1")
         );
-        assert_eq!(threaded.thread_root_for_send(Some("   ")), None);
+        assert_eq!(threaded.thread_candidate_for_send(Some("   ")), None);
+    }
+
+    #[test]
+    fn broken_thread_root_detection_is_specific() {
+        assert!(MattermostPostFailure {
+            status: Some(400),
+            body: "api.context.invalid_param.app_error: invalid root_id".into(),
+        }
+        .is_broken_thread_root());
+        assert!(!MattermostPostFailure {
+            status: Some(500),
+            body: "invalid root_id".into(),
+        }
+        .is_broken_thread_root());
+        assert!(!MattermostPostFailure {
+            status: Some(400),
+            body: "Internal Server Error".into(),
+        }
+        .is_broken_thread_root());
     }
 
     #[tokio::test]
@@ -870,7 +1021,78 @@ mod tests {
         assert_eq!(msg.channel_id, "channel-1");
         assert_eq!(msg.user_id, "user-1");
         assert_eq!(msg.message, "hello");
+        assert_eq!(msg.thread_id, None);
         assert!(msg.is_bot);
+    }
+
+    #[test]
+    fn parse_ws_event_preserves_existing_thread_root() {
+        let event = MattermostWsEvent {
+            event: "posted".to_string(),
+            data: Some(serde_json::json!({
+                "channel_type": "O",
+                "post": serde_json::json!({
+                    "id": "reply-post-1",
+                    "root_id": "root-post-1",
+                    "channel_id": "channel-1",
+                    "user_id": "user-1",
+                    "message": "thread reply"
+                }).to_string()
+            })),
+            broadcast: None,
+            seq: Some(3),
+        };
+
+        let msg = MattermostAdapter::parse_ws_event_with_reply_mode(&event, "thread")
+            .expect("thread reply event");
+        assert_eq!(msg.post_id, "reply-post-1");
+        assert_eq!(msg.thread_id.as_deref(), Some("root-post-1"));
+    }
+
+    #[test]
+    fn parse_ws_event_treats_top_level_channel_post_as_thread_root_in_thread_mode() {
+        let event = MattermostWsEvent {
+            event: "posted".to_string(),
+            data: Some(serde_json::json!({
+                "channel_type": "O",
+                "post": serde_json::json!({
+                    "id": "top-post-1",
+                    "root_id": "",
+                    "channel_id": "channel-1",
+                    "user_id": "user-1",
+                    "message": "top level"
+                }).to_string()
+            })),
+            broadcast: None,
+            seq: Some(4),
+        };
+
+        let msg = MattermostAdapter::parse_ws_event_with_reply_mode(&event, "thread")
+            .expect("top-level event");
+        assert_eq!(msg.thread_id.as_deref(), Some("top-post-1"));
+    }
+
+    #[test]
+    fn parse_ws_event_does_not_seed_dm_thread_root() {
+        let event = MattermostWsEvent {
+            event: "posted".to_string(),
+            data: Some(serde_json::json!({
+                "channel_type": "D",
+                "post": serde_json::json!({
+                    "id": "dm-post-1",
+                    "root_id": "",
+                    "channel_id": "dm-channel",
+                    "user_id": "user-1",
+                    "message": "hello"
+                }).to_string()
+            })),
+            broadcast: None,
+            seq: Some(5),
+        };
+
+        let msg =
+            MattermostAdapter::parse_ws_event_with_reply_mode(&event, "thread").expect("dm event");
+        assert_eq!(msg.thread_id, None);
     }
 
     #[test]

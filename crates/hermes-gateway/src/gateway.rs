@@ -130,6 +130,8 @@ pub struct IncomingMessage {
     pub text: String,
     /// Platform-specific message ID (for reply threading).
     pub message_id: Option<String>,
+    /// Platform-native thread/topic root for replies and progress updates.
+    pub thread_id: Option<String>,
     /// Whether this is a DM (direct message) or group message.
     pub is_dm: bool,
 }
@@ -172,6 +174,7 @@ pub struct GatewayRuntimeContext {
     pub session_key: String,
     pub platform: String,
     pub chat_id: String,
+    pub thread_id: Option<String>,
     pub user_id: String,
     pub model: Option<String>,
     pub provider: Option<String>,
@@ -2106,11 +2109,19 @@ impl Gateway {
             .await;
 
         // Send response back to the platform
-        self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
-            .await?;
+        let reply_thread_id = Self::reply_thread_id(incoming);
+        self.send_notify_message_threaded(
+            &incoming.platform,
+            &incoming.chat_id,
+            &response,
+            None,
+            reply_thread_id,
+        )
+        .await?;
         self.flush_post_delivery_messages(
             &incoming.platform,
             &incoming.chat_id,
+            reply_thread_id,
             deferred_messages,
             deferred_release,
         )
@@ -2168,13 +2179,21 @@ impl Gateway {
         let stream_id = stream_handle.id.clone();
 
         // Send an initial streaming anchor message.
-        self.send_message(&incoming.platform, &incoming.chat_id, "...", None)
-            .await?;
+        let reply_thread_id = Self::reply_thread_id(incoming).map(str::to_string);
+        self.send_message_threaded(
+            &incoming.platform,
+            &incoming.chat_id,
+            "...",
+            None,
+            reply_thread_id.as_deref(),
+        )
+        .await?;
 
         // Set up the chunk callback that updates the stream and edits the message
         let stream_manager = self.stream_manager.clone();
         let platform = incoming.platform.clone();
         let chat_id = incoming.chat_id.clone();
+        let thread_id = reply_thread_id.clone();
         let gateway_adapters = self.adapters.read().await.clone();
         let sid = stream_id.clone();
 
@@ -2183,6 +2202,7 @@ impl Gateway {
             let sid = sid.clone();
             let platform = platform.clone();
             let chat_id = chat_id.clone();
+            let thread_id = thread_id.clone();
             let adapters = gateway_adapters.clone();
 
             tokio::spawn(async move {
@@ -2192,7 +2212,14 @@ impl Gateway {
                             if let Some(adapter) = adapters.get(&platform) {
                                 // For streaming, we'd need the message_id from the initial send.
                                 // This is a simplified version.
-                                let _ = adapter.send_message(&chat_id, &content, None).await;
+                                let _ = adapter
+                                    .send_message_with_options(
+                                        &chat_id,
+                                        &content,
+                                        None,
+                                        SendMessageOptions::threaded(thread_id.as_deref()),
+                                    )
+                                    .await;
                             }
                         }
                     }
@@ -2240,12 +2267,19 @@ impl Gateway {
         self.bump_output_usage(session_key, response.chars().count())
             .await;
         if !response.trim().is_empty() {
-            self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
-                .await?;
+            self.send_notify_message_threaded(
+                &incoming.platform,
+                &incoming.chat_id,
+                &response,
+                None,
+                reply_thread_id.as_deref(),
+            )
+            .await?;
         }
         self.flush_post_delivery_messages(
             &incoming.platform,
             &incoming.chat_id,
+            reply_thread_id.as_deref(),
             deferred_messages,
             deferred_release,
         )
@@ -2334,6 +2368,7 @@ impl Gateway {
             session_key: session_key.to_string(),
             platform: incoming.platform.clone(),
             chat_id: incoming.chat_id.clone(),
+            thread_id: incoming.thread_id.clone(),
             user_id: incoming.user_id.clone(),
             model: state.model,
             provider: state.provider,
@@ -2354,10 +2389,19 @@ impl Gateway {
         }
     }
 
+    fn reply_thread_id(incoming: &IncomingMessage) -> Option<&str> {
+        incoming
+            .thread_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+    }
+
     async fn flush_post_delivery_messages(
         &self,
         platform: &str,
         chat_id: &str,
+        thread_id: Option<&str>,
         pending: Arc<StdMutex<Vec<String>>>,
         released: Arc<AtomicBool>,
     ) {
@@ -2367,7 +2411,10 @@ impl Gateway {
             Err(_) => Vec::new(),
         };
         for message in queued {
-            if let Err(e) = self.send_message(platform, chat_id, &message, None).await {
+            if let Err(e) = self
+                .send_message_threaded(platform, chat_id, &message, None, thread_id)
+                .await
+            {
                 warn!(
                     platform = platform,
                     chat_id = chat_id,
@@ -2639,6 +2686,7 @@ impl Gateway {
         let adapters = self.adapters.read().await.clone();
         let platform = incoming.platform.clone();
         let chat_id = incoming.chat_id.clone();
+        let thread_id = Self::reply_thread_id(incoming).map(str::to_string);
         let notify_task_id = task_id.clone();
         // Python `GatewayRunner._run_background_task`: only `user_message=prompt` (fresh session).
         // Python `_run_btw_task`: `conversation_history` snapshot + ephemeral user turn (no tools).
@@ -2677,7 +2725,12 @@ impl Gateway {
                             format!("✅ Background task {notify_task_id} completed")
                         };
                         let _ = adapter
-                            .send_message(&chat_id, &format!("{prefix}:\n{result}"), None)
+                            .send_message_with_options(
+                                &chat_id,
+                                &format!("{prefix}:\n{result}"),
+                                None,
+                                SendMessageOptions::notify_threaded(thread_id.as_deref()),
+                            )
                             .await;
                     }
                 }
@@ -2691,7 +2744,12 @@ impl Gateway {
                             format!("❌ Background task {notify_task_id} failed")
                         };
                         let _ = adapter
-                            .send_message(&chat_id, &format!("{prefix}: {error}"), None)
+                            .send_message_with_options(
+                                &chat_id,
+                                &format!("{prefix}: {error}"),
+                                None,
+                                SendMessageOptions::notify_threaded(thread_id.as_deref()),
+                            )
                             .await;
                     }
                 }
@@ -2787,6 +2845,26 @@ impl Gateway {
             text,
             parse_mode,
             SendMessageOptions::threaded(thread_id),
+        )
+        .await
+    }
+
+    /// Send a final user-visible reply, allowing adapters to make final-answer
+    /// delivery choices distinct from operational progress/status sends.
+    pub async fn send_notify_message_threaded(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        thread_id: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        self.send_message_with_options(
+            platform,
+            chat_id,
+            text,
+            parse_mode,
+            SendMessageOptions::notify_threaded(thread_id),
         )
         .await
     }
@@ -3191,6 +3269,10 @@ mod tests {
         files: Arc<Mutex<Vec<String>>>,
     }
 
+    struct ThreadOptionTestAdapter {
+        sends: Arc<Mutex<Vec<(String, String, Option<String>, bool)>>>,
+    }
+
     struct RecordingHook {
         seen: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
     }
@@ -3430,6 +3512,72 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl PlatformAdapter for ThreadOptionTestAdapter {
+        async fn start(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn stop(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_message(
+            &self,
+            chat_id: &str,
+            text: &str,
+            _parse_mode: Option<ParseMode>,
+        ) -> Result<(), GatewayError> {
+            self.sends
+                .lock()
+                .unwrap()
+                .push((chat_id.to_string(), text.to_string(), None, false));
+            Ok(())
+        }
+
+        async fn send_message_with_options(
+            &self,
+            chat_id: &str,
+            text: &str,
+            _parse_mode: Option<ParseMode>,
+            options: SendMessageOptions,
+        ) -> Result<(), GatewayError> {
+            self.sends.lock().unwrap().push((
+                chat_id.to_string(),
+                text.to_string(),
+                options.thread_id,
+                options.notify,
+            ));
+            Ok(())
+        }
+
+        async fn edit_message(
+            &self,
+            _chat_id: &str,
+            _message_id: &str,
+            _text: &str,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_file(
+            &self,
+            _chat_id: &str,
+            _file_path: &str,
+            _caption: Option<&str>,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        fn is_running(&self) -> bool {
+            true
+        }
+
+        fn platform_name(&self) -> &str {
+            "thread-option-test"
+        }
+    }
+
     #[test]
     fn gateway_prefill_loader_parses_json_message_array() {
         let dir = tempfile::tempdir().unwrap();
@@ -3582,6 +3730,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/release_captain ship it".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         })
         .await
@@ -3636,6 +3785,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/reload-skills".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         })
         .await
@@ -3646,6 +3796,7 @@ mod tests {
             user_id: "user1".into(),
             text: "next turn".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         })
         .await
@@ -3656,6 +3807,7 @@ mod tests {
             user_id: "user1".into(),
             text: "later turn".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         })
         .await
@@ -4045,6 +4197,7 @@ mod tests {
             user_id: "unknown_user".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
 
@@ -4066,6 +4219,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
 
@@ -4086,6 +4240,7 @@ mod tests {
             user_id: "unknown_user".into(),
             text: "hello group".into(),
             message_id: None,
+            thread_id: None,
             is_dm: false, // Group message, no DM check
         };
 
@@ -4114,6 +4269,7 @@ mod tests {
             user_id: "other_user".into(),
             text: "hello group".into(),
             message_id: None,
+            thread_id: None,
             is_dm: false,
         };
 
@@ -4146,6 +4302,7 @@ mod tests {
             user_id: "any_user".into(),
             text: "hello group".into(),
             message_id: None,
+            thread_id: None,
             is_dm: false,
         };
 
@@ -4181,6 +4338,7 @@ mod tests {
             user_id: "123".into(),
             text: "hello group".into(),
             message_id: None,
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw.route_message(&legacy_chat_source).await.is_err());
@@ -4196,6 +4354,7 @@ mod tests {
             user_id: "999".into(),
             text: "hello group".into(),
             message_id: None,
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw.route_message(&sender_source).await.is_err());
@@ -4223,6 +4382,7 @@ mod tests {
             user_id: "15551234567@s.whatsapp.net".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
 
@@ -4259,6 +4419,7 @@ mod tests {
             user_id: "15551234567@s.whatsapp.net".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
 
@@ -4306,6 +4467,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw.route_message(&ignored).await.is_ok());
@@ -4321,6 +4483,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw.route_message(&not_allowed).await.is_ok());
@@ -4335,6 +4498,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw.route_message(&allowed).await.is_ok());
@@ -4377,6 +4541,7 @@ mod tests {
             user_id: "user1".into(),
             text: "@hermes_bot hello".into(),
             message_id: Some("m1".into()),
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw.route_message(&mentioned_blocked_group).await.is_ok());
@@ -4392,6 +4557,7 @@ mod tests {
             user_id: "user1".into(),
             text: "dm hello".into(),
             message_id: Some("m2".into()),
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&dm).await.is_ok());
@@ -4429,6 +4595,7 @@ mod tests {
             user_id: "random_user".into(),
             text: "/status".into(),
             message_id: Some("m1".into()),
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw.route_message(&denied).await.is_ok());
@@ -4444,6 +4611,7 @@ mod tests {
             user_id: "allowed_user".into(),
             text: "/status".into(),
             message_id: Some("m2".into()),
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw.route_message(&allowed).await.is_ok());
@@ -4474,6 +4642,7 @@ mod tests {
             user_id: "worker_bot".into(),
             text: "notion event".into(),
             message_id: Some("m1".into()),
+            thread_id: None,
             is_dm: false,
         };
 
@@ -4509,6 +4678,7 @@ mod tests {
             user_id: "worker_bot".into(),
             text: "notion event".into(),
             message_id: Some("m1".into()),
+            thread_id: None,
             is_dm: false,
         };
 
@@ -4555,6 +4725,7 @@ mod tests {
             user_id: "other_human".into(),
             text: "hello".into(),
             message_id: Some("m1".into()),
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw
@@ -4573,6 +4744,7 @@ mod tests {
             user_id: "worker_bot".into(),
             text: "hello".into(),
             message_id: Some("m2".into()),
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw
@@ -4605,6 +4777,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/status".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
 
@@ -4662,6 +4835,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/compress".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
 
@@ -4712,6 +4886,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/compress".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
 
@@ -4794,6 +4969,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/background ping".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&start).await.is_ok());
@@ -4820,6 +4996,7 @@ mod tests {
             user_id: "user1".into(),
             text: format!("/background status {}", task_id),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&status).await.is_ok());
@@ -4847,6 +5024,7 @@ mod tests {
             user_id: "admin1".into(),
             text: "/approve user2".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&approve).await.is_ok());
@@ -4858,6 +5036,7 @@ mod tests {
             user_id: "user2".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&authorized_dm).await.is_err());
@@ -4868,6 +5047,7 @@ mod tests {
             user_id: "admin1".into(),
             text: "/deny user2".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&deny).await.is_ok());
@@ -4879,6 +5059,7 @@ mod tests {
             user_id: "user2".into(),
             text: "hello again".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&denied_dm).await.is_ok());
@@ -4903,6 +5084,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/provider openrouter".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&provider).await.is_ok());
@@ -4913,6 +5095,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/profile prod".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&profile).await.is_ok());
@@ -4923,6 +5106,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/reload_mcp".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&reload).await.is_ok());
@@ -4933,6 +5117,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/status".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&status).await.is_ok());
@@ -4982,6 +5167,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/title Release readiness".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&title).await.is_ok());
@@ -5070,6 +5256,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/profile work".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&profile).await.is_ok());
@@ -5080,6 +5267,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/status".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&status).await.is_ok());
@@ -5128,6 +5316,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/profile scratch".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&profile).await.is_ok());
@@ -5138,6 +5327,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/status".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&status).await.is_ok());
@@ -5190,6 +5380,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/provider openai".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&set_provider).await.is_ok());
@@ -5200,6 +5391,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/model gpt-4o".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&set_model).await.is_ok());
@@ -5210,6 +5402,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/profile prod".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&set_profile).await.is_ok());
@@ -5220,6 +5413,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/branch feature/parity".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&set_branch).await.is_ok());
@@ -5230,6 +5424,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/fast".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&set_fast).await.is_ok());
@@ -5240,6 +5435,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&normal).await.is_ok());
@@ -5283,6 +5479,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/verbose".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&verbose).await.is_ok());
@@ -5358,6 +5555,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/yolo".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&yolo_chat1).await.is_ok());
@@ -5368,6 +5566,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/yolo".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&yolo_chat2).await.is_ok());
@@ -5398,6 +5597,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/new".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&reset_chat1).await.is_ok());
@@ -5456,6 +5656,7 @@ mod tests {
                 user_id: "user1".into(),
                 text: text.into(),
                 message_id: None,
+                thread_id: None,
                 is_dm: true,
             })
             .await
@@ -5528,6 +5729,7 @@ mod tests {
             user_id: "user1".into(),
             text: "topic a before reset".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         let topic_b = IncomingMessage {
@@ -5536,6 +5738,7 @@ mod tests {
             user_id: "user1".into(),
             text: "topic b remains".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         gw.route_message(&topic_a).await.expect("route topic a");
@@ -5616,6 +5819,7 @@ mod tests {
             user_id: "user1".into(),
             text: format!("/topic {}", target_key),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         })
         .await
@@ -5680,6 +5884,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/yolo".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&yolo_chat1).await.is_ok());
@@ -5701,6 +5906,7 @@ mod tests {
             user_id: "user1".into(),
             text: format!("/sessions {}", target_key),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&switch).await.is_ok());
@@ -5768,6 +5974,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/approve".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&approve).await.is_ok());
@@ -5843,6 +6050,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/deny all".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&deny).await.is_ok());
@@ -5919,6 +6127,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/new".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&reset).await.is_ok());
@@ -5960,6 +6169,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: Some("1710000000.123".into()),
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6000,6 +6210,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: Some("123456789".into()),
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6050,6 +6261,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: Some("123456789".into()),
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6081,6 +6293,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: Some("456".into()),
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6136,6 +6349,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: Some("1710000000.456".into()),
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_err());
@@ -6175,6 +6389,7 @@ mod tests {
             user_id: "user1".into(),
             text: "general channel chatter".into(),
             message_id: Some("1710000000.789".into()),
+            thread_id: None,
             is_dm: false,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6228,6 +6443,7 @@ mod tests {
                 user_id: "user1".into(),
                 text: cmd.to_string(),
                 message_id: None,
+                thread_id: None,
                 is_dm: true,
             };
             assert!(gw.route_message(&incoming).await.is_ok());
@@ -6239,6 +6455,7 @@ mod tests {
             user_id: "user1".into(),
             text: "run".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&normal).await.is_ok());
@@ -6303,6 +6520,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6314,6 +6532,65 @@ mod tests {
             vec![
                 "main-response".to_string(),
                 "💾 deferred-memory-update".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_replies_and_deferred_messages_preserve_source_thread() {
+        let sends = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(ThreadOptionTestAdapter {
+            sends: sends.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("thread-option-test", adapter).await;
+        gw.set_message_handler_with_context(Arc::new(|_messages, ctx| {
+            Box::pin(async move {
+                let pending = ctx
+                    .deferred_post_delivery_messages
+                    .expect("deferred queue should be present");
+                pending
+                    .lock()
+                    .unwrap()
+                    .push("deferred follow-up".to_string());
+                Ok("final reply".to_string())
+            })
+        }))
+        .await;
+
+        let incoming = IncomingMessage {
+            platform: "thread-option-test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "run".into(),
+            message_id: Some("post-2".into()),
+            thread_id: Some("root-1".into()),
+            is_dm: true,
+        };
+        gw.route_message(&incoming)
+            .await
+            .expect("threaded route should succeed");
+
+        let sent = sends.lock().unwrap().clone();
+        assert_eq!(
+            sent,
+            vec![
+                (
+                    "chat1".to_string(),
+                    "final reply".to_string(),
+                    Some("root-1".to_string()),
+                    true,
+                ),
+                (
+                    "chat1".to_string(),
+                    "deferred follow-up".to_string(),
+                    Some("root-1".to_string()),
+                    false,
+                ),
             ]
         );
     }
@@ -6360,6 +6637,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6418,6 +6696,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6466,6 +6745,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6548,6 +6828,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6599,6 +6880,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/status".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -6644,6 +6926,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&normal).await.is_ok());
@@ -6654,6 +6937,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/reset".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&reset).await.is_ok());
@@ -6723,6 +7007,7 @@ mod tests {
             user_id: "user1".into(),
             text: "hello".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&normal).await.is_ok());
@@ -6739,6 +7024,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/reset".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&reset).await.is_ok());
@@ -6871,6 +7157,7 @@ mod tests {
             user_id: "user1".into(),
             text: "/new".into(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         };
         assert!(gw.route_message(&reset).await.is_ok());

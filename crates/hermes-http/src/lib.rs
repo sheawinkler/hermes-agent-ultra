@@ -506,6 +506,7 @@ async fn send_message(
         user_id,
         text: req.text,
         message_id: None,
+        thread_id: None,
         is_dm: false,
     };
 
@@ -572,6 +573,7 @@ async fn exec_command(
         user_id,
         text: cmd,
         message_id: None,
+        thread_id: None,
         is_dm: false,
     };
 

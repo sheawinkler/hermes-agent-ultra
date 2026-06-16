@@ -362,6 +362,7 @@ impl DingTalkAdapter {
             } else {
                 Some(parsed.message_id.clone())
             },
+            thread_id: None,
             is_dm: !parsed.is_group,
         };
         if let Some(tx) = inner.inbound_tx.read().await.clone() {

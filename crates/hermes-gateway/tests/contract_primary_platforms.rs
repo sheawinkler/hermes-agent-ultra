@@ -94,6 +94,7 @@ fn incoming(platform: &str, user_id: &str, text: &str) -> IncomingMessage {
         user_id: user_id.to_string(),
         text: text.to_string(),
         message_id: None,
+        thread_id: None,
         is_dm: true,
     }
 }
@@ -543,6 +544,7 @@ async fn contract_request_runtime_overrides_reach_context_handler() {
             user_id: "u1".to_string(),
             text: "run request".to_string(),
             message_id: None,
+            thread_id: None,
             is_dm: true,
         })
         .await
