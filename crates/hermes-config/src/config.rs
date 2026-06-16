@@ -1238,6 +1238,44 @@ impl TerminalBackendType {
     }
 }
 
+/// HOME policy for host subprocesses spawned by terminal/code tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalHomeMode {
+    /// Keep host subprocesses on the real OS-user HOME; container runtimes may
+    /// still use profile-scoped HOME when they own a persistent data volume.
+    Auto,
+    /// Force subprocesses to the real OS-user HOME.
+    Real,
+    /// Force subprocesses to `$HERMES_HOME/home`.
+    Profile,
+}
+
+impl Default for TerminalHomeMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl TerminalHomeMode {
+    pub fn from_env_name(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "real" => Some(Self::Real),
+            "profile" | "isolated" => Some(Self::Profile),
+            _ => None,
+        }
+    }
+
+    pub fn as_env_name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Real => "real",
+            Self::Profile => "profile",
+        }
+    }
+}
+
 /// Configuration for terminal/command-execution backends.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TerminalConfig {
@@ -1332,6 +1370,10 @@ pub struct TerminalConfig {
     )]
     pub auto_source_bashrc: bool,
 
+    /// HOME policy for host subprocesses spawned by terminal/code tools.
+    #[serde(default, skip_serializing_if = "is_default_home_mode")]
+    pub home_mode: TerminalHomeMode,
+
     /// Host env-var names allowed through provider/tool subprocess sanitizers.
     #[serde(
         default,
@@ -1379,6 +1421,7 @@ impl Default for TerminalConfig {
             modal_mode: None,
             shell_init_files: Vec::new(),
             auto_source_bashrc: default_auto_source_bashrc(),
+            home_mode: TerminalHomeMode::default(),
             env_passthrough: Vec::new(),
             ssh_host: None,
             ssh_port: None,
@@ -1394,6 +1437,10 @@ fn is_false(value: &bool) -> bool {
 
 fn is_true(value: &bool) -> bool {
     *value
+}
+
+fn is_default_home_mode(value: &TerminalHomeMode) -> bool {
+    *value == TerminalHomeMode::default()
 }
 
 fn default_true() -> bool {
@@ -2078,6 +2125,23 @@ terminal:
         assert_eq!(
             cfg.terminal.env_passthrough,
             vec!["OPENAI_API_KEY".to_string(), "TENOR_API_KEY".to_string()]
+        );
+    }
+
+    #[test]
+    fn terminal_config_accepts_home_mode() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+terminal:
+  home_mode: profile
+"#,
+        )
+        .expect("terminal home mode config");
+
+        assert_eq!(cfg.terminal.home_mode, TerminalHomeMode::Profile);
+        assert_eq!(
+            TerminalHomeMode::from_env_name("real"),
+            Some(TerminalHomeMode::Real)
         );
     }
 

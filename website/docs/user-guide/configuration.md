@@ -90,6 +90,7 @@ terminal:
   backend: local    # local | docker | ssh | modal | daytona | vercel_sandbox | singularity
   cwd: "."          # Gateway/cron working directory (CLI always uses launch dir)
   timeout: 180      # Per-command timeout in seconds
+  home_mode: auto   # auto | real | profile for local host subprocess HOME policy
   env_passthrough: []  # Env var names to forward to sandboxed execution (terminal + execute_code)
   singularity_image: "docker://nikolaik/python-nodejs:python3.11-nodejs20"  # Container image for Singularity backend
   modal_image: "nikolaik/python-nodejs:python3.11-nodejs20"                 # Container image for Modal backend
@@ -122,6 +123,22 @@ terminal:
 :::warning
 The agent has the same filesystem access as your user account. Use `hermes tools` to disable tools you don't want, or switch to Docker for sandboxing.
 :::
+
+#### Local HOME Policy
+
+Profiles scope Hermes state through `HERMES_HOME`, but local terminal commands normally keep your real operating-system `HOME` so existing shell startup files, package caches, SSH config, and editor settings keep working. Hermes also exposes `HERMES_REAL_HOME` to subprocesses when it can determine the real home path.
+
+Use `terminal.home_mode` when you need a different policy:
+
+```yaml
+terminal:
+  backend: local
+  home_mode: auto     # auto | real | profile
+```
+
+- `auto` is the default. Local host subprocesses use the real OS-user `HOME`; container or hosted backends may use backend-owned profile storage when they manage a persistent filesystem.
+- `real` forces local terminal and `execute_code` subprocesses to the real OS-user `HOME`.
+- `profile` forces local terminal and `execute_code` subprocesses to `$HERMES_HOME/home`, creating it when needed, while keeping `HERMES_REAL_HOME` available for tools that need to find the host user's original home directory.
 
 ### Docker Backend
 

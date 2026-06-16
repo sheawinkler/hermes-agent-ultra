@@ -1,5 +1,105 @@
 {
   "sha": {
+    "50943251400b": {
+      "disposition": "ported",
+      "notes": "Adopted upstream shop skill v1.0.1 directly: optional-skills/productivity/shop replaces shop-app and includes CLI/direct-API reference files for catalog, checkout, orders, safety, and legal guidance."
+    },
+    "d7668aaff5b7": {
+      "disposition": "ported",
+      "notes": "Adopted upstream shop metadata tightening: description is <=60 chars and the contributor credit is preserved in optional-skills/productivity/shop/SKILL.md."
+    },
+    "e3adbb5ae9d6": {
+      "disposition": "ported",
+      "notes": "Ported as a Rust-wide memory fix rather than an OpenViking-only Python plugin patch: MemoryManager now strips slash-skill scaffolding before provider prefetch, queued prefetch, or sync fan-out."
+    },
+    "c2c55c444339": {
+      "disposition": "ported",
+      "notes": "Ported in Rust: skill_orchestrator exposes the canonical user-instruction extractor for single-skill and bundle scaffolding, and memory_manager applies it once for every provider with regression coverage."
+    },
+    "cc8e5ec2afbf": {
+      "disposition": "superseded",
+      "notes": "Upstream migrates the Python Discord adapter into a bundled plugin. Ultra's live Discord runtime is Rust-native in crates/hermes-gateway/src/platforms/discord.rs and registered from crates/hermes-cli/src/main.rs; Python plugin migration is not a Rust runtime path."
+    },
+    "7849a3d73f2d": {
+      "disposition": "superseded",
+      "notes": "The upstream Python _platform_status/check_fn fallback does not exist in the Rust gateway. Rust platform state is explicit adapter registration plus PlatformAdapter::is_running, with Discord owned by crates/hermes-gateway/src/platforms/discord.rs."
+    },
+    "d8703e27f5c3": {
+      "disposition": "ported",
+      "notes": "Ported in this batch: website prebuild fetches the live unified skills index, extract-skills emits skills-meta.json, the Skills Hub renders index health/freshness, and npm run check:skills-index runs the local freshness gate via scripts/check-skills-index-freshness.mjs."
+    },
+    "2681c5a12d8d": {
+      "disposition": "ported",
+      "notes": "Ported in Rust CLI: hermes gateway start/status/restart now accept the stale hidden --platform compatibility flag while gateway lifecycle still operates on all configured adapters."
+    },
+    "cc14b74718aa": {
+      "disposition": "ported",
+      "notes": "Ported in this batch: profile create --clone-from now implies a config clone in crates/hermes-cli/src/main.rs, has parser/behavior regression coverage, and website profile docs show the clone-from-only form."
+    },
+    "a218a0f1569c": {
+      "disposition": "superseded",
+      "notes": "Upstream guards Python certifi CA bundle corruption. Ultra builds reqwest with rustls-tls/webpki roots in Cargo.toml and has no Python certifi startup path in the Rust agent or gateway."
+    },
+    "dc90ca4e1740": {
+      "disposition": "superseded",
+      "notes": "Upstream adds the same Python certifi CA guard during Python agent initialization. Ultra's Rust provider clients are constructed through rustls-backed reqwest, so the certifi failure mode is not present."
+    },
+    "7aaae7acd0d6": {
+      "disposition": "superseded",
+      "notes": "Upstream refines the Python SSL guard escape hatch. Ultra has no Python certifi guard path to bypass; TLS trust is owned by Rust reqwest/rustls and webpki roots."
+    },
+    "723c2331bd23": {
+      "disposition": "ported",
+      "notes": "Ported in this batch: terminal.home_mode is a typed Rust config field bridged through TERMINAL_HOME_MODE, local terminal/code subprocesses can use real or $HERMES_HOME/home, HERMES_REAL_HOME is exported, and docs/tests cover the policy."
+    },
+    "61ee2dbfdb40": {
+      "disposition": "superseded",
+      "notes": "Upstream fixes Python s6 profile gateway log directory handling. Ultra uses the Rust/tini-gosu container path documented in docker/entrypoint.sh and existing parity divergence, not upstream s6 stage2 hooks."
+    },
+    "975b9f0a5426": {
+      "disposition": "superseded",
+      "notes": "Upstream contributor docs recommend the Python standard installer. Ultra contributor docs intentionally use the Rust workspace flow in CONTRIBUTING.md with cargo build/test/install, so the upstream Python venv layout does not apply."
+    },
+    "c92a95a130cc": {
+      "disposition": "superseded",
+      "notes": "Desktop React model-picker placement has no apps/desktop runtime in Ultra. The Rust TUI owns model/provider selection in crates/hermes-cli/src/tui.rs and slash/model flows."
+    },
+    "989d5d0cb72a": {
+      "disposition": "superseded",
+      "notes": "Desktop model-status label decluttering targets absent apps/desktop files. Ultra's model labels and picker state are rendered by Rust TUI/CLI surfaces instead."
+    },
+    "0e81d2fb71c1": {
+      "disposition": "superseded",
+      "notes": "Desktop per-model effort preset UI targets absent apps/desktop files. Ultra owns model/provider controls through the Rust TUI model picker and CLI config surfaces."
+    },
+    "a0ec4f52b948": {
+      "disposition": "superseded",
+      "notes": "Desktop settings/provider disconnect UI targets absent apps/desktop files. Ultra already exposes Rust provider credential disconnect behavior through the TUI provider picker and auth state helpers."
+    },
+    "dd0e3e0a052a": {
+      "disposition": "superseded",
+      "notes": "Desktop thread padding is an apps/desktop React-only presentation change. Ultra has no desktop React runtime; CLI/TUI rendering is Rust-owned."
+    },
+    "5b3fa2636632": {
+      "disposition": "superseded",
+      "notes": "Photon/Spectrum remains a Python plus Node optional platform plugin and is not part of Ultra's Rust runtime surface; no Rust-native Photon adapter is scoped in this parity batch."
+    },
+    "a68ac0c49af1": {
+      "disposition": "superseded",
+      "notes": "Desktop /browser connect UI targets absent apps/desktop slash-command wiring. Ultra browser control is Rust-owned through CLI/TUI slash commands and hermes-tools browser backends."
+    },
+    "cb6b4127e795": {
+      "disposition": "superseded",
+      "notes": "Desktop composer model picker sticky state targets absent apps/desktop and tui_gateway Python files. Ultra tracks model/provider session state through Rust gateway runtime state and TUI model switch paths."
+    },
+    "7d938cc5c9c7": {
+      "disposition": "superseded",
+      "notes": "Upstream Python desktop/tui_gateway metadata restoration has no live Ultra path. Rust gateway status/model/provider metadata is explicit in crates/hermes-gateway/src/gateway.rs and Rust session state."
+    },
+    "80e4b8985ea9": {
+      "disposition": "superseded",
+      "notes": "Desktop composer model picker interaction polish targets absent apps/desktop React files. Ultra model picker interactions are owned by the Rust TUI."
+    },
     "bf8effad023b": {
       "disposition": "ported",
       "notes": "Rust config atomic writes now handle cross-device rename failures with a copy fallback that preserves same-directory temp cleanup; tests cover atomic writes and platform EXDEV detection."

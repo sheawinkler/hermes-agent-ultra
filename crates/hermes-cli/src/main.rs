@@ -468,6 +468,7 @@ async fn main() {
         CliCommand::Config { action, key, value } => run_config(cli, action, key, value).await,
         CliCommand::Gateway {
             action,
+            platform,
             system,
             all,
             force,
@@ -480,6 +481,7 @@ async fn main() {
             run_gateway(
                 cli,
                 action,
+                platform,
                 system,
                 all,
                 force,
@@ -2760,6 +2762,7 @@ fn migrate_legacy_gateway_services(dry_run: bool, yes: bool) -> Result<(), Agent
 async fn run_gateway(
     cli: Cli,
     action: Option<String>,
+    _platform: Option<String>,
     _system: bool,
     all: bool,
     force: bool,
@@ -2801,6 +2804,7 @@ async fn run_gateway(
             return Box::pin(run_gateway(
                 cli,
                 Some("run".to_string()),
+                None,
                 false,
                 all,
                 force,
@@ -14382,6 +14386,7 @@ async fn run_dashboard(
     run_gateway(
         cli,
         Some("run".to_string()),
+        None,
         false,
         false,
         false,
@@ -14848,16 +14853,21 @@ async fn run_profile(
                 )));
             }
 
+            let explicit_clone_from = clone_from
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .is_some();
             let source_name = clone_from
                 .as_deref()
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(|s| resolve_profile_name(s, &aliases))
                 .or_else(|| read_active_profile_name(&profiles_dir));
-            let source_value = if clone || clone_all {
+            let source_value = if clone || clone_all || explicit_clone_from {
                 let src = source_name.clone().ok_or_else(|| {
                     AgentError::Config(
-                        "profile create --clone/--clone-all requires --clone-from or an active profile"
+                        "profile create --clone/--clone-all/--clone-from requires a source profile"
                             .into(),
                     )
                 })?;
@@ -16963,6 +16973,67 @@ skills:
         assert!(
             !map.contains_key(&skills_key),
             "skills key should be stripped"
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_create_clone_from_implies_config_clone() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let profiles_dir = tmp.path().join("profiles");
+        std::fs::create_dir_all(&profiles_dir).expect("create profiles dir");
+
+        let source_profile = profiles_dir.join("coder.yaml");
+        std::fs::write(
+            &source_profile,
+            r#"
+name: coder
+model: anthropic/claude-sonnet-4
+personality: focused
+max_turns: 77
+"#,
+        )
+        .expect("write source profile");
+
+        run_profile(
+            cli,
+            Some("create".to_string()),
+            Some("target".to_string()),
+            None,
+            None,
+            None,
+            None,
+            false,
+            false,
+            false,
+            false,
+            Some("coder".to_string()),
+            true,
+            false,
+        )
+        .await
+        .expect("create profile");
+
+        let target_profile = profiles_dir.join("target.yaml");
+        let parsed: serde_yaml::Value = serde_yaml::from_str(
+            &std::fs::read_to_string(&target_profile).expect("read target profile"),
+        )
+        .expect("parse target profile");
+        let map = parsed.as_mapping().expect("mapping profile");
+        assert_eq!(
+            map.get(serde_yaml::Value::String("model".to_string()))
+                .and_then(|v| v.as_str()),
+            Some("anthropic/claude-sonnet-4")
+        );
+        assert_eq!(
+            map.get(serde_yaml::Value::String("personality".to_string()))
+                .and_then(|v| v.as_str()),
+            Some("focused")
+        );
+        assert_eq!(
+            map.get(serde_yaml::Value::String("max_turns".to_string()))
+                .and_then(|v| v.as_i64()),
+            Some(77)
         );
     }
 

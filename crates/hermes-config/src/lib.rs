@@ -25,7 +25,7 @@ pub use config::{
     GatewayConfig, LlmProviderConfig, McpServerEntry, PlatformDisplayConfig, ProfileConfig,
     ProxyConfig, QuickCommandConfig, SecurityConfig, SessionsMaintenanceConfig, SkillsSettings,
     SmartModelRoutingConfig, StaleAuxiliaryAssignment, TerminalBackendType, TerminalConfig,
-    ToolOutputConfig, ToolsSettings, WebConfig, WebsiteBlocklistConfig,
+    TerminalHomeMode, ToolOutputConfig, ToolsSettings, WebConfig, WebsiteBlocklistConfig,
     DEFAULT_TOOL_OUTPUT_MAX_BYTES, DEFAULT_TOOL_OUTPUT_MAX_LINES,
     DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH,
 };

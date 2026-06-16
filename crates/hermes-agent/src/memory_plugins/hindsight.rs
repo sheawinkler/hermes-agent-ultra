@@ -617,14 +617,16 @@ impl MemoryProviderPlugin for HindsightPlugin {
                 let retain_tags = merge_retain_tags(&cfg.retain_tags, &call_tags);
                 match hindsight_retain(
                     &client,
-                    &base,
-                    &bank,
-                    &cfg.api_key,
-                    content,
-                    ctx,
-                    cfg.retain_async,
-                    &retain_tags,
-                    cfg.observation_scopes.as_ref(),
+                    HindsightRetainRequest {
+                        base: &base,
+                        bank: &bank,
+                        api_key: &cfg.api_key,
+                        content,
+                        context: ctx,
+                        async_mode: cfg.retain_async,
+                        retain_tags: &retain_tags,
+                        observation_scopes: cfg.observation_scopes.as_ref(),
+                    },
                 ) {
                     Ok(()) => json!({"result": "Memory stored successfully."}).to_string(),
                     Err(e) => json!({"error": e}).to_string(),
@@ -1228,27 +1230,31 @@ fn hindsight_reflect(
         .to_string())
 }
 
-fn hindsight_retain(
-    client: &Client,
-    base: &str,
-    bank: &str,
-    api_key: &str,
-    content: &str,
-    context: Option<&str>,
+struct HindsightRetainRequest<'a> {
+    base: &'a str,
+    bank: &'a str,
+    api_key: &'a str,
+    content: &'a str,
+    context: Option<&'a str>,
     async_mode: bool,
-    retain_tags: &[String],
-    observation_scopes: Option<&Value>,
-) -> Result<(), String> {
-    let url = format!("{}/v1/default/banks/{}/memories", base, bank);
-    let mut item = json!({ "content": content });
-    if let Some(ctx) = context {
+    retain_tags: &'a [String],
+    observation_scopes: Option<&'a Value>,
+}
+
+fn hindsight_retain(client: &Client, request: HindsightRetainRequest<'_>) -> Result<(), String> {
+    let url = format!(
+        "{}/v1/default/banks/{}/memories",
+        request.base, request.bank
+    );
+    let mut item = json!({ "content": request.content });
+    if let Some(ctx) = request.context {
         item["context"] = json!(ctx);
     }
-    apply_retain_item_options(&mut item, retain_tags, observation_scopes);
-    let body = json!({ "items": [item], "async": async_mode });
+    apply_retain_item_options(&mut item, request.retain_tags, request.observation_scopes);
+    let body = json!({ "items": [item], "async": request.async_mode });
     let mut req = client.post(&url).json(&body);
-    if !api_key.is_empty() {
-        req = req.bearer_auth(api_key);
+    if !request.api_key.is_empty() {
+        req = req.bearer_auth(request.api_key);
     }
     let resp = req.send().map_err(|e| e.to_string())?;
     if !resp.status().is_success() {

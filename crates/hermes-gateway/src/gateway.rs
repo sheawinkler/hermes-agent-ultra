@@ -3269,8 +3269,10 @@ mod tests {
         files: Arc<Mutex<Vec<String>>>,
     }
 
+    type ThreadSendRecord = (String, String, Option<String>, bool);
+
     struct ThreadOptionTestAdapter {
-        sends: Arc<Mutex<Vec<(String, String, Option<String>, bool)>>>,
+        sends: Arc<Mutex<Vec<ThreadSendRecord>>>,
     }
 
     struct RecordingHook {

@@ -67,6 +67,9 @@ pub enum CliCommand {
     Gateway {
         /// Action: "run", "start", "stop", "restart", "status", "install", "uninstall", "setup", or "migrate-legacy".
         action: Option<String>,
+        /// Compatibility flag for stale upstream docs; gateway lifecycle commands operate on all configured adapters.
+        #[arg(long, hide = true)]
+        platform: Option<String>,
         /// Target system-level service scope when supported.
         #[arg(long)]
         system: bool,
@@ -1005,6 +1008,20 @@ mod tests {
     fn cli_effective_command_default() {
         let cli = Cli::try_parse_from(vec!["hermes"]).unwrap();
         assert!(matches!(cli.effective_command(), CliCommand::Hermes));
+    }
+
+    #[test]
+    fn cli_parse_gateway_platform_compat_flag() {
+        let cli = Cli::try_parse_from(vec!["hermes", "gateway", "start", "--platform", "photon"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(CliCommand::Gateway {
+                action: Some(ref action),
+                platform: Some(ref platform),
+                ..
+            }) if action == "start" && platform == "photon"
+        ));
     }
 
     #[test]
