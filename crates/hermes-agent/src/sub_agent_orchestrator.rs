@@ -111,6 +111,9 @@ pub struct SubAgentRequest {
     pub max_depth: u32,
     /// Parent budget remaining (USD) — exposed to the child for cost awareness.
     pub parent_budget_remaining_usd: Option<f64>,
+    /// Run the child detached and deliver completion through the background
+    /// delegation callback instead of blocking the parent tool turn.
+    pub background: bool,
 }
 
 /// Configuration for [`SubAgentOrchestrator`].
@@ -124,6 +127,7 @@ pub struct SubAgentOrchestratorConfig {
     pub hermes_home: PathBuf,
     pub parent_session_id: Option<String>,
     pub timeout: Duration,
+    pub background_delegation_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
 }
 
 /// In-process executor for `delegate_task` tool calls.
@@ -152,6 +156,11 @@ impl SubAgentOrchestrator {
                 hermes_home,
                 parent_session_id: parent.config.session_id.clone(),
                 timeout: Duration::from_secs(DEFAULT_SUB_AGENT_TIMEOUT_SECS),
+                background_delegation_callback: parent
+                    .callbacks
+                    .background_delegation_callback
+                    .clone()
+                    .or_else(|| parent.callbacks.background_review_callback.clone()),
             },
         }
     }
@@ -171,11 +180,50 @@ impl SubAgentOrchestrator {
     /// cycle.
     pub fn execute(self: &Arc<Self>, req: SubAgentRequest) -> BoxSendFuture<String> {
         let this = self.clone();
-        Box::pin(async move { this.execute_inner(req).await })
+        Box::pin(async move {
+            if req.background {
+                this.dispatch_background(req)
+            } else {
+                let sub_agent_id = format!("subagent-{}", uuid::Uuid::new_v4());
+                this.execute_inner(req, sub_agent_id).await
+            }
+        })
     }
 
-    async fn execute_inner(self: Arc<Self>, req: SubAgentRequest) -> String {
+    fn dispatch_background(self: Arc<Self>, req: SubAgentRequest) -> String {
         let sub_agent_id = format!("subagent-{}", uuid::Uuid::new_v4());
+        let task = req.task.clone();
+        let context = req.context.clone();
+        let toolset = req.toolset.clone();
+        let model = req.model.clone();
+        let depth = req.child_depth;
+        let max_depth = req.max_depth;
+        let callback = self.cfg.background_delegation_callback.clone();
+        let worker = self.clone();
+        let worker_sub_agent_id = sub_agent_id.clone();
+        tokio::spawn(async move {
+            let output = worker.execute_inner(req, worker_sub_agent_id).await;
+            if let Some(callback) = callback {
+                let summary = format_background_delegation_notification(&output);
+                callback(&summary);
+            }
+        });
+
+        json!({
+            "sub_agent_id": sub_agent_id,
+            "status": "dispatched",
+            "background": true,
+            "task": task,
+            "context": context,
+            "toolset": toolset,
+            "model": model,
+            "depth": depth,
+            "max_depth": max_depth,
+        })
+        .to_string()
+    }
+
+    async fn execute_inner(self: Arc<Self>, req: SubAgentRequest, sub_agent_id: String) -> String {
         let started_at = Utc::now();
 
         let mut lineage = SubAgentLineage {
@@ -223,6 +271,7 @@ impl SubAgentOrchestrator {
                 json!({
                     "sub_agent_id": sub_agent_id,
                     "status": "completed",
+                    "background": req.background,
                     "task": req.task,
                     "total_turns": result.total_turns,
                     "finished_naturally": result.finished_naturally,
@@ -251,6 +300,7 @@ impl SubAgentOrchestrator {
 
                 json!({
                     "sub_agent_id": sub_agent_id,
+                    "background": req.background,
                     "status": match status {
                         SubAgentStatus::Timeout => "timeout",
                         SubAgentStatus::Cancelled => "cancelled",
@@ -509,6 +559,48 @@ fn extract_final_assistant_text(messages: &[Message]) -> String {
         .unwrap_or_default()
 }
 
+fn format_background_delegation_notification(output: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+        return format!("ASYNC DELEGATION COMPLETE\n\nStatus: unknown\n\n{output}");
+    };
+    let task = value
+        .get("task")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("(unknown task)");
+    let status = value
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let sub_agent_id = value
+        .get("sub_agent_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let mut out = format!(
+        "ASYNC DELEGATION COMPLETE\n\nTask: {task}\nSub-agent: {sub_agent_id}\nStatus: {status}"
+    );
+    if let Some(result) = value
+        .get("result")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        out.push_str("\n\nResult:\n");
+        out.push_str(result);
+    }
+    if let Some(error) = value
+        .get("error")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        out.push_str("\n\nError:\n");
+        out.push_str(error);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -609,6 +701,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("parent".into()),
             timeout: Duration::from_secs(2),
+            background_delegation_callback: None,
         }));
 
         let out = orch
@@ -681,6 +774,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("parent".into()),
             timeout: Duration::from_millis(50),
+            background_delegation_callback: None,
         }));
         let out = orch
             .execute(SubAgentRequest {
@@ -708,6 +802,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn background_request_dispatches_handle_and_emits_completion_callback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let completions = Arc::new(Mutex::new(Vec::<String>::new()));
+        let completions_cb = completions.clone();
+        let orch = Arc::new(SubAgentOrchestrator::new(SubAgentOrchestratorConfig {
+            parent_config: AgentConfig {
+                max_turns: 2,
+                ..AgentConfig::default()
+            },
+            tool_registry: Arc::new(ToolRegistry::new()),
+            llm_provider: Arc::new(NoopProvider),
+            parent_credential_pool: None,
+            parent_interrupt: InterruptController::new(),
+            hermes_home: tmp.path().to_path_buf(),
+            parent_session_id: Some("parent".into()),
+            timeout: Duration::from_secs(2),
+            background_delegation_callback: Some(Arc::new(move |text: &str| {
+                completions_cb
+                    .lock()
+                    .expect("completion lock")
+                    .push(text.to_string());
+            })),
+        }));
+
+        let out = orch
+            .execute(SubAgentRequest {
+                task: "background task".into(),
+                child_depth: 1,
+                max_depth: 4,
+                background: true,
+                ..Default::default()
+            })
+            .await;
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["status"], "dispatched");
+        assert_eq!(parsed["background"], true);
+        let sub_agent_id = parsed["sub_agent_id"].as_str().unwrap().to_string();
+
+        for _ in 0..50 {
+            if !completions.lock().expect("completion lock").is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let completion = completions
+            .lock()
+            .expect("completion lock")
+            .pop()
+            .expect("background completion callback");
+        assert!(completion.contains("ASYNC DELEGATION COMPLETE"));
+        assert!(completion.contains("background task"));
+        assert!(completion.contains("Result:\ndone"));
+        assert!(tmp
+            .path()
+            .join("subagents")
+            .join(format!("{sub_agent_id}.json"))
+            .exists());
+    }
+
+    #[tokio::test]
     async fn cancel_path_reports_cancelled() {
         let parent_ctrl = InterruptController::new();
         parent_ctrl.interrupt(Some("stop".into())); // pre-cancel before spawn
@@ -722,6 +876,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: None,
             timeout: Duration::from_secs(2),
+            background_delegation_callback: None,
         }));
         let out = orch
             .execute(SubAgentRequest {
@@ -757,6 +912,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("root".into()),
             timeout: Duration::from_secs(1),
+            background_delegation_callback: None,
         });
         let child = orch.build_child_config(
             &SubAgentRequest {
@@ -800,6 +956,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("root".into()),
             timeout: Duration::from_secs(1),
+            background_delegation_callback: None,
         });
 
         let child = orch.build_child_config(
@@ -840,6 +997,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("root".into()),
             timeout: Duration::from_secs(1),
+            background_delegation_callback: None,
         });
 
         let child = orch.build_child_config(
@@ -878,6 +1036,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("root".into()),
             timeout: Duration::from_secs(1),
+            background_delegation_callback: None,
         });
 
         let child = orch.build_child_config(
@@ -918,6 +1077,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("root".into()),
             timeout: Duration::from_secs(1),
+            background_delegation_callback: None,
         }));
 
         let out = orch

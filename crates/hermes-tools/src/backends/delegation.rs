@@ -57,6 +57,7 @@ impl DelegationBackend for SignalDelegationBackend {
         child_depth: Option<u32>,
         max_depth: Option<u32>,
         parent_budget_remaining_usd: Option<f64>,
+        background: Option<bool>,
     ) -> Result<String, ToolError> {
         let effective_child_depth = child_depth.unwrap_or(self.current_depth + 1);
         let effective_max_depth = max_depth.unwrap_or(self.max_depth);
@@ -67,6 +68,7 @@ impl DelegationBackend for SignalDelegationBackend {
             )));
         }
         let sub_agent_id = format!("subagent-{}", uuid::Uuid::new_v4());
+        let background = background.unwrap_or(false);
         Ok(json!({
             "type": "delegation_request",
             "sub_agent_id": sub_agent_id,
@@ -77,7 +79,8 @@ impl DelegationBackend for SignalDelegationBackend {
             "child_depth": effective_child_depth,
             "max_depth": effective_max_depth,
             "parent_budget_remaining_usd": parent_budget_remaining_usd.or(self.parent_budget_remaining_usd),
-            "status": "pending",
+            "background": background,
+            "status": if background { "background_pending" } else { "pending" },
         })
         .to_string())
     }
@@ -109,6 +112,7 @@ impl DelegationBackend for RpcDelegationBackend {
         child_depth: Option<u32>,
         max_depth: Option<u32>,
         parent_budget_remaining_usd: Option<f64>,
+        background: Option<bool>,
     ) -> Result<String, ToolError> {
         let payload = json!({
             "task": task,
@@ -118,6 +122,7 @@ impl DelegationBackend for RpcDelegationBackend {
             "child_depth": child_depth,
             "max_depth": max_depth,
             "parent_budget_remaining_usd": parent_budget_remaining_usd,
+            "background": background.unwrap_or(false),
         });
         let resp = self
             .client
@@ -150,6 +155,7 @@ mod tests {
                 Some(99),
                 Some(99),
                 None,
+                None,
             )
             .await
             .expect("depth at configured max should be allowed");
@@ -158,18 +164,49 @@ mod tests {
         assert_eq!(value["child_depth"], 99);
         assert_eq!(value["max_depth"], 99);
         assert_eq!(value["status"], "pending");
+        assert_eq!(value["background"], false);
     }
 
     #[tokio::test]
     async fn signal_delegation_backend_rejects_only_above_configured_max_depth() {
         let backend = SignalDelegationBackend::new().with_depth(99, 99);
         let err = backend
-            .delegate("too deep", None, None, None, Some(100), Some(99), None)
+            .delegate(
+                "too deep",
+                None,
+                None,
+                None,
+                Some(100),
+                Some(99),
+                None,
+                None,
+            )
             .await
             .expect_err("child depth above configured max should be rejected");
 
         assert!(err
             .to_string()
             .contains("Delegation depth limit reached (100/99)"));
+    }
+
+    #[tokio::test]
+    async fn signal_delegation_backend_carries_background_dispatch_flag() {
+        let out = SignalDelegationBackend::new()
+            .delegate(
+                "run async",
+                None,
+                None,
+                None,
+                Some(1),
+                Some(4),
+                None,
+                Some(true),
+            )
+            .await
+            .expect("background dispatch should be allowed");
+        let value: Value = serde_json::from_str(&out).expect("delegation envelope json");
+
+        assert_eq!(value["background"], true);
+        assert_eq!(value["status"], "background_pending");
     }
 }

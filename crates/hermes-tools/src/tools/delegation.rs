@@ -25,6 +25,7 @@ pub trait DelegationBackend: Send + Sync {
         child_depth: Option<u32>,
         max_depth: Option<u32>,
         parent_budget_remaining_usd: Option<f64>,
+        background: Option<bool>,
     ) -> Result<String, ToolError>;
 }
 
@@ -65,6 +66,7 @@ impl ToolHandler for DelegateTaskHandler {
         let parent_budget_remaining_usd = params
             .get("parent_budget_remaining_usd")
             .and_then(|v| v.as_f64());
+        let background = params.get("background").and_then(|v| v.as_bool());
 
         self.backend
             .delegate(
@@ -75,6 +77,7 @@ impl ToolHandler for DelegateTaskHandler {
                 child_depth,
                 max_depth,
                 parent_budget_remaining_usd,
+                background,
             )
             .await
     }
@@ -130,6 +133,13 @@ impl ToolHandler for DelegateTaskHandler {
                 "description": "Remaining parent budget in USD to propagate to child orchestration"
             }),
         );
+        props.insert(
+            "background".into(),
+            json!({
+                "type": "boolean",
+                "description": "Run the delegated sub-agent asynchronously and return a handle immediately (default: false)"
+            }),
+        );
 
         tool_schema(
             "delegate_task",
@@ -155,6 +165,7 @@ mod tests {
             _child_depth: Option<u32>,
             _max_depth: Option<u32>,
             _parent_budget_remaining_usd: Option<f64>,
+            _background: Option<bool>,
         ) -> Result<String, ToolError> {
             Ok(format!("Delegated task: {}", task))
         }
@@ -167,6 +178,7 @@ mod tests {
         let rendered = serde_json::to_string(&handler.schema()).expect("schema json");
         assert!(rendered.contains("inherit"));
         assert!(rendered.contains("currently enabled parent tools"));
+        assert!(rendered.contains("background"));
     }
 
     #[tokio::test]

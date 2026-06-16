@@ -934,6 +934,11 @@ pub struct AgentCallbacks {
     ///
     /// Payload is a user-friendly summary string suitable for direct UI output.
     pub background_review_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    /// Called when `delegate_task(background=true)` completes out-of-band.
+    ///
+    /// Payload is a self-contained summary suitable for reinjection into the
+    /// originating UI or platform conversation.
+    pub background_delegation_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
     /// Called for lifecycle/status notices (context pressure, retries, etc.).
     pub status_callback: Option<Arc<dyn Fn(&str, &str) + Send + Sync>>,
 }
@@ -8234,6 +8239,10 @@ impl AgentLoop {
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(str::to_string);
+                let background = parsed
+                    .get("background")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let req = crate::sub_agent_orchestrator::SubAgentRequest {
                     task,
                     context: parsed
@@ -8253,6 +8262,7 @@ impl AgentLoop {
                     child_depth: current_delegate_depth + 1,
                     max_depth: max_delegate_depth,
                     parent_budget_remaining_usd,
+                    background,
                 };
                 // Orchestrator internally runs the child on its own
                 // `tokio::spawn` task, which erases the child future and breaks
