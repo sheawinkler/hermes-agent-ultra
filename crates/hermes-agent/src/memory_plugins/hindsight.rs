@@ -11,6 +11,8 @@
 //!   - `HINDSIGHT_BUDGET` (default: "mid")
 //!   - `HINDSIGHT_API_URL` (default: "https://api.hindsight.vectorize.io")
 //!   - `HINDSIGHT_MODE` (default: "cloud")
+//!   - `HINDSIGHT_RETAIN_TAGS` (comma-separated tags attached to retained memories)
+//!   - `HINDSIGHT_RETAIN_OBSERVATION_SCOPES` (per_tag/combined/all_combinations or JSON scopes)
 //!   - `$HERMES_HOME/hindsight/config.json` overrides
 
 use std::collections::HashMap;
@@ -45,7 +47,12 @@ fn retain_schema() -> Value {
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "The information to store."},
-                "context": {"type": "string", "description": "Short label (e.g. 'user preference', 'project decision')."}
+                "context": {"type": "string", "description": "Short label (e.g. 'user preference', 'project decision')."},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional per-call tags to merge with configured default retain tags."
+                }
             },
             "required": ["content"]
         }
@@ -104,6 +111,8 @@ struct HindsightConfig {
     recall_prompt_preamble: String,
     bank_mission: String,
     retain_async: bool,
+    retain_tags: Vec<String>,
+    observation_scopes: Option<Value>,
     timeout_secs: u64,
 }
 
@@ -128,6 +137,13 @@ impl HindsightConfig {
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
+            retain_tags: parse_retain_tags_value(&Value::String(
+                std::env::var("HINDSIGHT_RETAIN_TAGS").unwrap_or_default(),
+            ))
+            .unwrap_or_default(),
+            observation_scopes: parse_observation_scopes_value(&Value::String(
+                std::env::var("HINDSIGHT_RETAIN_OBSERVATION_SCOPES").unwrap_or_default(),
+            )),
             timeout_secs: std::env::var("HINDSIGHT_TIMEOUT")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
@@ -227,6 +243,15 @@ impl HindsightConfig {
                 }
                 if let Some(ra) = raw.get("retain_async").and_then(|v| v.as_bool()) {
                     config.retain_async = ra;
+                }
+                if let Some(tags) = raw.get("retain_tags").and_then(parse_retain_tags_value) {
+                    config.retain_tags = tags;
+                }
+                if let Some(scopes) = raw
+                    .get("observation_scopes")
+                    .and_then(parse_observation_scopes_value)
+                {
+                    config.observation_scopes = Some(scopes);
                 }
                 if let Some(timeout) = raw
                     .get("hindsight_timeout")
@@ -585,6 +610,11 @@ impl MemoryProviderPlugin for HindsightPlugin {
                     return json!({"error": "Missing required parameter: content"}).to_string();
                 }
                 let ctx = args.get("context").and_then(|v| v.as_str());
+                let call_tags = args
+                    .get("tags")
+                    .and_then(parse_retain_tags_value)
+                    .unwrap_or_default();
+                let retain_tags = merge_retain_tags(&cfg.retain_tags, &call_tags);
                 match hindsight_retain(
                     &client,
                     &base,
@@ -593,6 +623,8 @@ impl MemoryProviderPlugin for HindsightPlugin {
                     content,
                     ctx,
                     cfg.retain_async,
+                    &retain_tags,
+                    cfg.observation_scopes.as_ref(),
                 ) {
                     Ok(()) => json!({"result": "Memory stored successfully."}).to_string(),
                     Err(e) => json!({"error": e}).to_string(),
@@ -679,7 +711,9 @@ impl MemoryProviderPlugin for HindsightPlugin {
             {"key": "hindsight_timeout", "description": "HTTP timeout in seconds", "default": DEFAULT_TIMEOUT_SECS},
             {"key": "recall_budget", "description": "Recall thoroughness", "default": "mid", "choices": ["low", "mid", "high"]},
             {"key": "recall_types", "description": "Fact types returned by recall", "default": DEFAULT_RECALL_TYPE},
-            {"key": "memory_mode", "description": "Memory integration mode", "default": "hybrid", "choices": ["hybrid", "context", "tools"]}
+            {"key": "memory_mode", "description": "Memory integration mode", "default": "hybrid", "choices": ["hybrid", "context", "tools"]},
+            {"key": "retain_tags", "description": "Default tags applied to retained memories (comma-separated or list)", "default": ""},
+            {"key": "observation_scopes", "description": "Hindsight observation scoping: combined, per_tag, all_combinations, or JSON list of tag lists", "default": ""}
         ]))
     }
 
@@ -816,6 +850,97 @@ fn parse_recall_types_value(value: &Value) -> Option<Vec<String>> {
     }
 }
 
+fn push_unique_trimmed(items: &mut Vec<String>, value: &str) {
+    let trimmed = value.trim();
+    if !trimmed.is_empty() && !items.iter().any(|existing| existing == trimmed) {
+        items.push(trimmed.to_string());
+    }
+}
+
+fn parse_retain_tags_str(value: &str) -> Option<Vec<String>> {
+    let mut tags = Vec::new();
+    for item in value.split(',') {
+        push_unique_trimmed(&mut tags, item);
+    }
+    if tags.is_empty() {
+        None
+    } else {
+        Some(tags)
+    }
+}
+
+fn parse_retain_tags_value(value: &Value) -> Option<Vec<String>> {
+    if let Some(text) = value.as_str() {
+        return parse_retain_tags_str(text);
+    }
+    let items = value.as_array()?;
+    let mut tags = Vec::new();
+    for item in items.iter().filter_map(Value::as_str) {
+        push_unique_trimmed(&mut tags, item);
+    }
+    if tags.is_empty() {
+        None
+    } else {
+        Some(tags)
+    }
+}
+
+fn merge_retain_tags(default_tags: &[String], call_tags: &[String]) -> Vec<String> {
+    let mut tags = Vec::new();
+    for tag in default_tags.iter().chain(call_tags.iter()) {
+        push_unique_trimmed(&mut tags, tag);
+    }
+    tags
+}
+
+fn parse_observation_scopes_value(value: &Value) -> Option<Value> {
+    if let Some(text) = value.as_str() {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if matches!(trimmed, "per_tag" | "combined" | "all_combinations") {
+            return Some(Value::String(trimmed.to_string()));
+        }
+        if trimmed.starts_with('[') {
+            return serde_json::from_str::<Value>(trimmed)
+                .ok()
+                .and_then(|parsed| parse_observation_scopes_value(&parsed));
+        }
+        return None;
+    }
+
+    let items = value.as_array()?;
+    if items.iter().all(Value::is_string) {
+        let tags = parse_retain_tags_value(value)?;
+        return Some(json!([tags]));
+    }
+
+    let scopes = items
+        .iter()
+        .filter_map(parse_retain_tags_value)
+        .filter(|scope| !scope.is_empty())
+        .collect::<Vec<_>>();
+    if scopes.is_empty() {
+        None
+    } else {
+        Some(json!(scopes))
+    }
+}
+
+fn apply_retain_item_options(
+    item: &mut Value,
+    retain_tags: &[String],
+    observation_scopes: Option<&Value>,
+) {
+    if !retain_tags.is_empty() {
+        item["tags"] = json!(retain_tags);
+    }
+    if let Some(scopes) = observation_scopes {
+        item["observation_scopes"] = scopes.clone();
+    }
+}
+
 fn hindsight_recall_body(
     query: &str,
     budget: &str,
@@ -844,11 +969,14 @@ fn hindsight_sync_turn_body(
     async_mode: bool,
     document_id: Option<&str>,
     update_mode: Option<&str>,
+    retain_tags: &[String],
+    observation_scopes: Option<&Value>,
 ) -> Value {
     let mut item = json!({"content": content, "context": context});
     if let Some(update_mode) = update_mode {
         item["update_mode"] = json!(update_mode);
     }
+    apply_retain_item_options(&mut item, retain_tags, observation_scopes);
     let mut body = json!({
         "items": [item],
         "async": async_mode,
@@ -890,12 +1018,18 @@ fn retain_hindsight_turns(
     );
     let content = format!("[{}]", turns.join(","));
     let url = format!("{}/v1/default/banks/{}/memories", base, bank);
+    let lineage_tags = nonempty_str(session_id)
+        .map(|session_id| vec![format!("session:{session_id}")])
+        .unwrap_or_default();
+    let retain_tags = merge_retain_tags(&cfg.retain_tags, &lineage_tags);
     let body = hindsight_sync_turn_body(
         &content,
         &cfg.retain_context,
         cfg.retain_async,
         nonempty_str(&document_id),
         update_mode,
+        &retain_tags,
+        cfg.observation_scopes.as_ref(),
     );
     let mut req = client.post(&url).json(&body);
     if !cfg.api_key.is_empty() {
@@ -1102,12 +1236,15 @@ fn hindsight_retain(
     content: &str,
     context: Option<&str>,
     async_mode: bool,
+    retain_tags: &[String],
+    observation_scopes: Option<&Value>,
 ) -> Result<(), String> {
     let url = format!("{}/v1/default/banks/{}/memories", base, bank);
     let mut item = json!({ "content": content });
     if let Some(ctx) = context {
         item["context"] = json!(ctx);
     }
+    apply_retain_item_options(&mut item, retain_tags, observation_scopes);
     let body = json!({ "items": [item], "async": async_mode });
     let mut req = client.post(&url).json(&body);
     if !api_key.is_empty() {
@@ -1198,6 +1335,8 @@ mod tests {
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
+            retain_tags: Vec::new(),
+            observation_scopes: None,
             timeout_secs: DEFAULT_TIMEOUT_SECS,
         });
         assert!(plugin.get_tool_schemas().is_empty());
@@ -1225,6 +1364,8 @@ mod tests {
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
+            retain_tags: Vec::new(),
+            observation_scopes: None,
             timeout_secs: DEFAULT_TIMEOUT_SECS,
         };
 
@@ -1302,6 +1443,38 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_retain_tags_and_observation_scopes() {
+        assert_eq!(
+            parse_retain_tags_value(&json!("project:ultra, session:s1, project:ultra")),
+            Some(vec!["project:ultra".to_string(), "session:s1".to_string()])
+        );
+        assert_eq!(
+            parse_retain_tags_value(&json!(["alpha", " beta ", "", "alpha"])),
+            Some(vec!["alpha".to_string(), "beta".to_string()])
+        );
+        assert_eq!(
+            merge_retain_tags(
+                &["alpha".into(), "beta".into()],
+                &["beta".into(), "gamma".into()]
+            ),
+            vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]
+        );
+        assert_eq!(
+            parse_observation_scopes_value(&json!("per_tag")),
+            Some(json!("per_tag"))
+        );
+        assert_eq!(
+            parse_observation_scopes_value(&json!(["alpha", "beta"])),
+            Some(json!([["alpha", "beta"]]))
+        );
+        assert_eq!(
+            parse_observation_scopes_value(&json!("[[\"alpha\"],[\"alpha\",\"beta\"]]")),
+            Some(json!([["alpha"], ["alpha", "beta"]]))
+        );
+        assert_eq!(parse_observation_scopes_value(&json!("invalid")), None);
+    }
+
+    #[test]
     fn test_resolve_bank_id_template_sanitizes_and_collapses() {
         let bank = resolve_bank_id_template(
             "hermes-{profile}-{user}-{session}",
@@ -1345,15 +1518,31 @@ mod tests {
         let _bank_id = EnvGuard::remove("HINDSIGHT_BANK_ID");
         let _mode = EnvGuard::remove("HINDSIGHT_MODE");
         let _timeout = EnvGuard::remove("HINDSIGHT_TIMEOUT");
+        let _retain_tags = EnvGuard::remove("HINDSIGHT_RETAIN_TAGS");
+        let _observation_scopes = EnvGuard::remove("HINDSIGHT_RETAIN_OBSERVATION_SCOPES");
 
         let tmp = tempfile::tempdir().expect("tempdir");
         write_hindsight_config(
             tmp.path(),
-            &json!({"mode": "cloud", "api_key": "snake-secret", "timeout": 42}),
+            &json!({
+                "mode": "cloud",
+                "api_key": "snake-secret",
+                "timeout": 42,
+                "retain_tags": ["project:ultra", "session:s1", "project:ultra"],
+                "observation_scopes": [["project:ultra"], ["project:ultra", "session:s1"]]
+            }),
         );
         let cfg = HindsightConfig::load(tmp.path().to_str().expect("tmp path"));
         assert_eq!(cfg.api_key, "snake-secret");
         assert_eq!(cfg.timeout_secs, 42);
+        assert_eq!(
+            cfg.retain_tags,
+            vec!["project:ultra".to_string(), "session:s1".to_string()]
+        );
+        assert_eq!(
+            cfg.observation_scopes,
+            Some(json!([["project:ultra"], ["project:ultra", "session:s1"]]))
+        );
 
         write_hindsight_config(
             tmp.path(),
@@ -1418,12 +1607,19 @@ mod tests {
             false,
             Some("session-1-doc"),
             Some("append"),
+            &["project:ultra".to_string(), "session:session-1".to_string()],
+            Some(&json!("per_tag")),
         );
         assert_eq!(body["async"], false);
         assert_eq!(body["document_id"], "session-1-doc");
         assert_eq!(body["items"][0]["update_mode"], "append");
         assert_eq!(body["items"][0]["content"], content);
         assert_eq!(body["items"][0]["context"], "conversation");
+        assert_eq!(
+            body["items"][0]["tags"],
+            json!(["project:ultra", "session:session-1"])
+        );
+        assert_eq!(body["items"][0]["observation_scopes"], json!("per_tag"));
     }
 
     #[test]
@@ -1464,6 +1660,8 @@ mod tests {
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
+            retain_tags: Vec::new(),
+            observation_scopes: None,
             timeout_secs: DEFAULT_TIMEOUT_SECS,
         });
 
@@ -1497,6 +1695,8 @@ mod tests {
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
+            retain_tags: Vec::new(),
+            observation_scopes: None,
             timeout_secs: DEFAULT_TIMEOUT_SECS,
         });
         *plugin.session_id.lock().unwrap() = "old-session".into();
