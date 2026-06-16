@@ -51,20 +51,63 @@ pub fn description(dep: RuntimeDep) -> &'static str {
     }
 }
 
+/// Extra PATH directories under [`hermes_home`] where managed tools may live.
+pub fn supplemental_path_entries() -> Vec<PathBuf> {
+    let home = hermes_home();
+    let candidates = [
+        home.join("bin"),
+        home.join("node").join("bin"),
+        home.join("tools").join("bin"),
+    ];
+    candidates
+        .into_iter()
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+fn managed_binary(home: &std::path::Path, name: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        home.join(format!("{name}.exe"))
+    }
+    #[cfg(not(windows))]
+    {
+        home.join(name)
+    }
+}
+
+fn is_on_path_or_managed(name: &str, managed_dirs: &[PathBuf]) -> bool {
+    if which::which(name).is_ok() {
+        return true;
+    }
+    managed_dirs
+        .iter()
+        .any(|dir| managed_binary(dir, name).is_file())
+}
+
 /// Check whether a runtime dependency is available on the current system.
 ///
-/// Mirrors Python `_DEP_CHECKS[dep]()`.
+/// Mirrors Python `_DEP_CHECKS[dep]()`, extended with Hermes-managed install dirs.
 pub fn is_available(dep: RuntimeDep) -> bool {
+    let managed = supplemental_path_entries();
     match dep {
-        RuntimeDep::Node => which::which("node").is_ok(),
+        RuntimeDep::Node => is_on_path_or_managed("node", &managed),
         RuntimeDep::Browser => {
             which::which("agent-browser").is_ok()
                 || has_system_browser()
                 || has_hermes_agent_browser()
         }
-        RuntimeDep::Ripgrep => which::which("rg").is_ok(),
-        RuntimeDep::Ffmpeg => which::which("ffmpeg").is_ok(),
+        RuntimeDep::Ripgrep => is_on_path_or_managed("rg", &managed),
+        RuntimeDep::Ffmpeg => is_on_path_or_managed("ffmpeg", &managed),
     }
+}
+
+/// Return deps that are not currently available (for startup diagnostics).
+pub fn missing_deps(deps: &[RuntimeDep]) -> Vec<RuntimeDep> {
+    deps.iter()
+        .copied()
+        .filter(|dep| !is_available(*dep))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

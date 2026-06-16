@@ -33,7 +33,10 @@ pub use config::{
     SmartModelRoutingConfig, TerminalBackendType, TerminalConfig, ToolsSettings,
     normalize_service_tier,
 };
-pub use dep_check::{RuntimeDep, is_available as dep_is_available};
+pub use dep_check::{
+    RuntimeDep, is_available as dep_is_available, missing_deps as dep_missing,
+    supplemental_path_entries as dep_supplemental_path_entries,
+};
 pub use insights::{InsightsConfig, InsightsContributionConfig};
 pub use interest::InterestConfig;
 pub use loader::{
@@ -65,9 +68,9 @@ pub use paths::{
 };
 pub use platform::{PlatformConfig, UnauthorizedDmBehavior, extra_string, platform_token_or_extra};
 pub use server::{
-    ServerAuthConfig, ServerConfig, ServerLlmConfig, ServerLoginMethod,
-    DEFAULT_SERVER_LLM_MODEL, DEFAULT_WECHAT_FLOWY_SERVER_BASE,
-    default_wechat_app_id_for_channel, is_valid_wechat_open_app_id,
+    DEFAULT_SERVER_LLM_MODEL, DEFAULT_WECHAT_FLOWY_SERVER_BASE, ServerAuthConfig, ServerConfig,
+    ServerLlmConfig, ServerLoginMethod, default_wechat_app_id_for_channel,
+    is_valid_wechat_open_app_id,
 };
 pub use session::{DailyReset, IdleReset, SessionConfig, SessionResetPolicy, SessionType};
 pub use streaming::StreamingConfig;

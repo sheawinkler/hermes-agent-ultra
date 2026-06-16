@@ -148,6 +148,19 @@ pub(crate) async fn run_gateway(
                 msg.push_str("请先执行 `hermes gateway setup` 或 `hermes auth login <provider>` 修复后再启动。");
                 return Err(AgentError::Config(msg));
             }
+            let missing_runtime_deps =
+                hermes_config::dep_missing(hermes_config::dep_check::all_deps());
+            if !missing_runtime_deps.is_empty() {
+                let labels: Vec<String> = missing_runtime_deps
+                    .iter()
+                    .map(|dep| format!("{} ({})", dep, hermes_config::dep_check::description(*dep)))
+                    .collect();
+                tracing::warn!(
+                    deps = %labels.join(", "),
+                    "runtime dependencies missing on PATH; run `hermes gateway setup` to install, \
+                     or place binaries under $HERMES_HOME/bin"
+                );
+            }
             drop(_p2);
 
             let _p3 = _metrics.phase("pid_check");

@@ -3,6 +3,8 @@
 //! Values are set only when the corresponding environment variable is unset,
 //! so explicit user configuration always wins.
 
+use std::path::MAIN_SEPARATOR;
+
 /// Set an environment variable if it is not already defined.
 pub fn set_var_if_unset(key: &str, value: &str) {
     if std::env::var_os(key).is_none() {
@@ -11,8 +13,28 @@ pub fn set_var_if_unset(key: &str, value: &str) {
     }
 }
 
+/// Prepend Hermes-managed tool directories to the process `PATH`.
+pub fn prepend_hermes_tool_path_to_process() {
+    let supplemental = hermes_config::dep_supplemental_path_entries();
+    if supplemental.is_empty() {
+        return;
+    }
+    let current = std::env::var_os("PATH").map(|p| p.to_string_lossy().into_owned());
+    let mut parts: Vec<String> = supplemental
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    if let Some(current) = current.filter(|p| !p.trim().is_empty()) {
+        parts.push(current);
+    }
+    let joined = parts.join(&MAIN_SEPARATOR.to_string());
+    // SAFETY: Gateway startup is single-threaded before worker pools fan out.
+    unsafe { std::env::set_var("PATH", joined) };
+}
+
 /// Apply gateway-friendly defaults for browser and web tooling.
 pub fn apply_gateway_runtime_defaults() {
+    prepend_hermes_tool_path_to_process();
     set_var_if_unset("HERMES_BROWSER_AUTO_START", "1");
     set_var_if_unset("HERMES_DDGS_BACKENDS", "lite,html,yandex,mojeek");
     set_var_if_unset("HERMES_DDGS_TIMEOUT_SECS", "8");
