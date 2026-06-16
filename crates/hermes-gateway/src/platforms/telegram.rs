@@ -30,6 +30,9 @@ use crate::format::to_telegram_markdown_v2;
 /// Maximum message length for Telegram (4096 characters).
 const MAX_MESSAGE_LENGTH: usize = 4096;
 
+/// Bot API 10.1 rich-message raw markdown character cap.
+const RICH_MESSAGE_MAX_CHARS: usize = 32_768;
+
 /// Default long-polling timeout in seconds.
 const DEFAULT_POLL_TIMEOUT: u64 = 30;
 
@@ -92,6 +95,17 @@ pub struct TelegramConfig {
     /// Whether to parse HTML in messages.
     #[serde(default)]
     pub parse_html: bool,
+
+    /// Disable link previews on outbound Telegram text/rich messages.
+    #[serde(default)]
+    pub disable_link_previews: bool,
+
+    /// Use Bot API 10.1 sendRichMessage for eligible final text sends.
+    ///
+    /// Disabled by default because some Telegram clients still render rich
+    /// messages poorly even when the Bot API accepts them.
+    #[serde(default)]
+    pub rich_messages: bool,
 
     /// Long-polling timeout in seconds.
     #[serde(default = "default_poll_timeout")]
@@ -719,6 +733,8 @@ pub struct TelegramAdapter {
     /// Inline approval callback IDs mapped to gateway session keys.
     approval_state: Mutex<HashMap<u64, String>>,
     approval_counter: AtomicU64,
+    /// Latched off after the rich endpoint is proven unavailable.
+    rich_send_disabled: Mutex<bool>,
 }
 
 #[derive(Clone, Copy)]
@@ -770,6 +786,7 @@ impl TelegramAdapter {
             status_message_ids: Mutex::new(HashMap::new()),
             approval_state: Mutex::new(HashMap::new()),
             approval_counter: AtomicU64::new(1),
+            rich_send_disabled: Mutex::new(false),
         })
     }
 
@@ -879,6 +896,112 @@ impl TelegramAdapter {
         chunk_index: usize,
     ) -> bool {
         reply_to_message_id.is_some() && self.reply_to_mode().references_chunk(chunk_index)
+    }
+
+    fn rich_send_is_disabled(&self) -> bool {
+        self.rich_send_disabled
+            .lock()
+            .map(|guard| *guard)
+            .unwrap_or(true)
+    }
+
+    fn latch_rich_send_disabled(&self) {
+        if let Ok(mut disabled) = self.rich_send_disabled.lock() {
+            *disabled = true;
+        }
+    }
+
+    fn content_fits_rich_limits(content: &str) -> bool {
+        content.chars().count() <= RICH_MESSAGE_MAX_CHARS
+    }
+
+    fn has_telegram_desktop_details_math_crash_shape(content: &str) -> bool {
+        if content.trim().is_empty() || !content.to_ascii_lowercase().contains("<details") {
+            return false;
+        }
+        let details = regex::RegexBuilder::new(r"<details\b[^>]*>.*?</details>")
+            .case_insensitive(true)
+            .dot_matches_new_line(true)
+            .build();
+        let math = regex::RegexBuilder::new(
+            r"(\$\$.*?\$\$|\\\[.*?\\\]|\\\(.*?\\\)|\\(?:sum|frac|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|int|prod|sqrt|lim|infty|begin\{(?:equation|align|matrix|cases)\}))",
+        )
+        .case_insensitive(true)
+        .dot_matches_new_line(true)
+        .build();
+        let (Ok(details), Ok(math)) = (details, math) else {
+            return false;
+        };
+        let has_crash_shape = details
+            .find_iter(content)
+            .any(|block| math.is_match(block.as_str()));
+        has_crash_shape
+    }
+
+    fn should_attempt_rich_text(
+        &self,
+        text: &str,
+        keyboard: Option<&InlineKeyboardMarkup>,
+    ) -> bool {
+        self.config.rich_messages
+            && !self.rich_send_is_disabled()
+            && keyboard.is_none()
+            && !text.trim().is_empty()
+            && Self::content_fits_rich_limits(text)
+            && !Self::has_telegram_desktop_details_math_crash_shape(text)
+    }
+
+    fn rich_message_body(
+        &self,
+        chat_id: &str,
+        text: &str,
+        reply_to_message_id: Option<i64>,
+        message_thread_id: Option<i64>,
+    ) -> serde_json::Value {
+        let mut body = serde_json::json!({
+            "chat_id": chat_id,
+            "rich_message": {
+                "markdown": text,
+            },
+        });
+        if let Some(thread_id) = message_thread_id {
+            body["message_thread_id"] = serde_json::Value::Number(thread_id.into());
+        }
+        if let Some(reply_id) = reply_to_message_id {
+            body["reply_parameters"] = serde_json::json!({ "message_id": reply_id });
+        }
+        if self.config.disable_link_previews {
+            body["link_preview_options"] = serde_json::json!({ "is_disabled": true });
+        }
+        body
+    }
+
+    fn rich_capability_error(err: &GatewayError) -> bool {
+        let message = match err {
+            GatewayError::SendFailed(message)
+            | GatewayError::Platform(message)
+            | GatewayError::ConnectionFailed(message) => message.to_ascii_lowercase(),
+            _ => return false,
+        };
+        message.contains("no such method")
+            || message.contains("not implemented")
+            || ((message.contains("method") || message.contains("endpoint"))
+                && (message.contains("not found") || message.contains("does not exist")))
+    }
+
+    fn rich_fallback_error(err: &GatewayError) -> bool {
+        let message = match err {
+            GatewayError::SendFailed(message)
+            | GatewayError::Platform(message)
+            | GatewayError::ConnectionFailed(message) => message.to_ascii_lowercase(),
+            _ => return false,
+        };
+        message.contains("bad request")
+            || message.contains("unsupported")
+            || message.contains("not implemented")
+            || message.contains("no such method")
+            || ((message.contains("method") || message.contains("endpoint"))
+                && (message.contains("not found") || message.contains("does not exist")))
     }
 
     /// Merge media captions without using substring checks that drop distinct captions.
@@ -1135,6 +1258,16 @@ impl TelegramAdapter {
     ) -> Result<Vec<i64>, GatewayError> {
         let (chat_id, inferred_thread_id) = Self::split_gateway_chat_thread(chat_id);
         let message_thread_id = message_thread_id.or(inferred_thread_id);
+        if self.should_attempt_rich_text(text, keyboard.as_ref()) {
+            match self
+                .try_send_rich_text(chat_id, text, reply_to_message_id, message_thread_id)
+                .await?
+            {
+                Some(message_id) => return Ok(vec![message_id]),
+                None => {}
+            }
+        }
+
         let chunks = split_message(text, MAX_MESSAGE_LENGTH);
         let mut message_ids = Vec::new();
 
@@ -1147,6 +1280,10 @@ impl TelegramAdapter {
 
             if let Some(pm) = parse_mode {
                 body["parse_mode"] = serde_json::Value::String(pm.to_string());
+            }
+
+            if self.config.disable_link_previews {
+                body["disable_web_page_preview"] = serde_json::Value::Bool(true);
             }
 
             if let Some(thread_id) = message_thread_id {
@@ -1182,6 +1319,32 @@ impl TelegramAdapter {
         }
 
         Ok(message_ids)
+    }
+
+    async fn try_send_rich_text(
+        &self,
+        chat_id: &str,
+        text: &str,
+        reply_to_message_id: Option<i64>,
+        message_thread_id: Option<i64>,
+    ) -> Result<Option<i64>, GatewayError> {
+        let body = self.rich_message_body(chat_id, text, reply_to_message_id, message_thread_id);
+        let resp: TelegramResponse<SentMessage> = match self
+            .send_json_with_thread_fallback("sendRichMessage", body)
+            .await
+        {
+            Ok(resp) => resp,
+            Err(err) if Self::rich_fallback_error(&err) => {
+                if Self::rich_capability_error(&err) {
+                    self.latch_rich_send_disabled();
+                }
+                return Ok(None);
+            }
+            Err(err) => return Err(err),
+        };
+        resp.result
+            .map(|msg| Some(msg.message_id))
+            .ok_or_else(|| GatewayError::SendFailed("sendRichMessage returned no message".into()))
     }
 
     /// Edit an existing message's text.
@@ -1280,7 +1443,8 @@ impl TelegramAdapter {
         };
         let removed_thread = obj.remove("message_thread_id").is_some();
         let removed_reply = obj.remove("reply_to_message_id").is_some();
-        removed_thread || removed_reply
+        let removed_reply_parameters = obj.remove("reply_parameters").is_some();
+        removed_thread || removed_reply || removed_reply_parameters
     }
 
     fn gateway_error_thread_or_reply_missing(err: &GatewayError) -> bool {
@@ -2420,6 +2584,8 @@ mod tests {
             proxy: AdapterProxyConfig::default(),
             parse_markdown: false,
             parse_html: false,
+            disable_link_previews: false,
+            rich_messages: false,
             poll_timeout: 30,
             reply_to_mode: "first".into(),
             reactions: false,
@@ -2867,6 +3033,112 @@ mod tests {
             .and_then(|v| v.as_str())
             .unwrap()
             .contains("\\[world\\]\\_1"));
+    }
+
+    #[tokio::test]
+    async fn telegram_rich_message_uses_bot_api_10_1_payload_shape() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/sendRichMessage"))
+            .and(body_partial_json(serde_json::json!({
+                "chat_id": "-1001",
+                "message_thread_id": 42,
+                "rich_message": { "markdown": "| A | B |\n|---|---|\n| 1 | 2 |" },
+                "reply_parameters": { "message_id": 55 },
+                "link_preview_options": { "is_disabled": true }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": { "message_id": 91 }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut cfg = test_config();
+        cfg.rich_messages = true;
+        cfg.disable_link_previews = true;
+        let mut adapter = test_adapter(cfg);
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        let ids = adapter
+            .send_text(
+                "-1001:42",
+                "| A | B |\n|---|---|\n| 1 | 2 |",
+                Some("MarkdownV2"),
+                Some(55),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![91]);
+
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 1);
+        let body: Value = requests[0].body_json().expect("json body");
+        assert!(body.get("text").is_none());
+        assert!(body.get("parse_mode").is_none());
+        assert!(body.get("reply_to_message_id").is_none());
+        assert_eq!(
+            body.pointer("/rich_message/markdown")
+                .and_then(|v| v.as_str()),
+            Some("| A | B |\n|---|---|\n| 1 | 2 |")
+        );
+    }
+
+    #[tokio::test]
+    async fn telegram_rich_message_bad_request_falls_back_to_legacy_send() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/sendRichMessage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": false,
+                "description": "Bad Request: rich message is invalid"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/sendMessage"))
+            .and(body_partial_json(serde_json::json!({
+                "chat_id": "123",
+                "text": "plain fallback",
+                "disable_web_page_preview": true
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": { "message_id": 92 }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut cfg = test_config();
+        cfg.rich_messages = true;
+        cfg.disable_link_previews = true;
+        let mut adapter = test_adapter(cfg);
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        let ids = adapter
+            .send_text("123", "plain fallback", None, None)
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![92]);
+
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].url.path().ends_with("/sendRichMessage"));
+        assert!(requests[1].url.path().ends_with("/sendMessage"));
+    }
+
+    #[test]
+    fn telegram_rich_skips_desktop_details_math_crash_shape() {
+        assert!(
+            TelegramAdapter::has_telegram_desktop_details_math_crash_shape(
+                "<details><summary>Math</summary>$$x^2$$</details>"
+            )
+        );
+        assert!(
+            !TelegramAdapter::has_telegram_desktop_details_math_crash_shape(
+                "<details><summary>Plain</summary>No math here</details>"
+            )
+        );
     }
 
     #[tokio::test]
@@ -3759,6 +4031,8 @@ mod tests {
         assert!(cfg.polling);
         assert!(!cfg.parse_markdown);
         assert!(!cfg.parse_html);
+        assert!(!cfg.disable_link_previews);
+        assert!(!cfg.rich_messages);
         assert_eq!(cfg.poll_timeout, DEFAULT_POLL_TIMEOUT);
         assert_eq!(cfg.reply_to_mode, "first");
         assert!(cfg.webhook_secret.is_none());
@@ -3779,11 +4053,15 @@ mod tests {
             "token": "abc",
             "webhook_secret": "secret",
             "reply_to_mode": "all",
-            "reactions": true
+            "reactions": true,
+            "disable_link_previews": true,
+            "rich_messages": true
         }"#;
         let cfg: TelegramConfig = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.webhook_secret.as_deref(), Some("secret"));
         assert_eq!(cfg.reply_to_mode, "all");
         assert!(cfg.reactions);
+        assert!(cfg.disable_link_previews);
+        assert!(cfg.rich_messages);
     }
 }

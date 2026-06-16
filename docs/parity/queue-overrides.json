@@ -3315,6 +3315,448 @@
     "484f484c25bc": {
       "disposition": "superseded",
       "notes": "Upstream sidebar nav drag-region carving targets Electron desktop titlebar behavior in apps/desktop. Hermes Agent Ultra uses the Rust Ratatui CLI/TUI and has no Electron draggable titlebar or React sidebar rows."
+    },
+    "d62979a6f34f": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "79c3ed3cc91a": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "46d758bb3e07": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "2e874ef87926": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "b16e22b8f272": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "bbf020e709ec": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "e90672696ea7": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "0595af0ad19b": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "dd12a5403de9": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "1a3cd3d436a1": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "78ce91750ec6": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "d14f6c95632b": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "7c226cc57fe6": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "edc36f3a4589": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "3cf7d43262d4": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "7d183f64979f": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "bf090deed33e": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "f23a4b7bb3b8": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "18916376f198": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "7f302c91b240": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "1e755ff5568a": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "76b93869d8ed": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "77687156b4b8": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "b15dc58064eb": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "b82d2e549fa5": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "bdd3868b577a": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "266b5a19f128": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "5d6c16e97237": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "aa53a78d6703": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "425e777f54b8": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "0a865e5948cb": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "6b76284c7769": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "e986e3fc689c": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "b4ba3f5e3b37": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "630a4ef03c8e": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "b0288ae9b6ea": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "9cbb91abd3a8": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "49dd91d682a4": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "1eb13744b4ab": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "08d89e7aba14": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "8fe334b056d4": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "fbabf438a17c": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "bee13817f069": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "eae3836eb661": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "ae433634db56": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "f3b32e9f5220": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "368fcf1ff03b": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "1cb75b7971a7": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "37d717054ef6": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "9d2ec8d35a2a": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "98c294126baf": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "0f75e9904a8f": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "67233d1c2ad5": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "05b9c84ca4b1": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram adapter: crates/hermes-gateway/src/platforms/telegram.rs now supports opt-in Bot API 10.1 sendRichMessage with raw rich_message.markdown payloads, legacy fallback, link_preview_options, and feature-gated tests telegram_rich_message_uses_bot_api_10_1_payload_shape / telegram_rich_message_bad_request_falls_back_to_legacy_send."
+    },
+    "652dd9c9f248": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram adapter: rich sends use reply_parameters instead of reply_to_message_id, latch off proven endpoint capability failures, default rich_messages remains opt-in, and bad-request rich payload failures fall back to legacy sendMessage with tests."
+    },
+    "a59d5e37e8ab": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by later upstream policy and Rust final state: Telegram rich messages are deliberately opt-in via TelegramConfig.rich_messages instead of always on because client rendering remains uneven."
+    },
+    "12682d96b9c8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram config: rich_messages deserializes as an explicit opt-in flag with default false, verified by Telegram config tests and rich-message feature tests."
+    },
+    "a1f51feb72b4": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported/satisfied in Rust final architecture: rich delivery is opt-in and only attempted for eligible normal text sends, not status edits; StreamConsumer has no adapter-specific rich fresh-final hook to duplicate previews, and existing stream fresh-final tests preserve final-delivery state."
+    },
+    "a376ca00819e": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Hindsight plugin: HINDSIGHT_RETAIN_TAGS and HINDSIGHT_RETAIN_OBSERVATION_SCOPES/profile config parse into retain tags and observation_scopes, auto-retain includes session lineage tags, tool-call tags merge with defaults, and Hindsight tests cover payload/config normalization."
+    },
+    "bb5cb3283898": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Honcho setup/runtime: crates/hermes-cli/src/commands.rs and hermes_agent::memory_plugins::honcho own pinUserPeer identity mapping, legacy peerName behavior, runtimePeerPrefix, and userPeerAliases; Python Honcho CLI delta has no remaining runtime target."
+    },
+    "d7dfeed6dc42": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Honcho setup: setup_honcho_provider builds the gateway-gated identity tree for single/multi/hybrid deployments with aiPeer, pinUserPeer, runtimePeerPrefix, and aliases."
+    },
+    "99feb036077a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust Honcho configuration surface: pinUserPeer is the canonical runtime field and peerName is only emitted as a non-empty compatibility label from crates/hermes-cli/src/commands.rs."
+    },
+    "2708c33c7570": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust-first Honcho docs/tests surface; no real Telegram UID or named user example is required by the Rust Honcho setup path."
+    },
+    "1544813bfe56": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust Honcho setup/tests and release secret scan: the Rust setup path does not embed upstream example Telegram UID values and uses operator-supplied peer identity instead."
+    },
+    "c7513df4f9e4": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Honcho setup semantics: pinUserPeer is only true for the single-user/operator peer shape; multi/hybrid runtime peers are modeled through runtimePeerPrefix/userPeerAliases."
+    },
+    "c61815232abe": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust TUI model picker: crates/hermes-cli/src/tui.rs constructs provider:model selections and calls App::switch_model, so dashboard-side Python model update glue is not the active runtime path."
+    },
+    "8c3c08c50be8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported/superseded by the Rust TUI model/provider modal implementation in crates/hermes-cli/src/tui.rs; the Python tui_gateway cleanup target is not shipped as the runtime backend."
+    },
+    "bc3f4ed70fa5": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust TUI/App model switching: explicit provider:model selections flow through App::switch_model without the Python desktop/TUI redundant-switch backend."
+    },
+    "6b4073648ece": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust config loader precedence: crates/hermes-config/src/loader.rs loads gateway.json, then config.yaml, then cli-config.yaml, then env overrides with explicit layer order and tests."
+    },
+    "b6c7ebf028d8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported through Rust provider/profile routing: hermes-config normalizes provider config and hermes-agent provider profiles drive request-body behavior; the Python desktop/TUI backend is not the active runtime path."
+    },
+    "e256f4aae493": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust session/provider persistence boundaries: session state and provider selections are explicit Rust App/Gateway state rather than restoring a bare billing provider from Python tui_gateway state."
+    },
+    "643dc8279306": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust session/provider identity handling: custom provider identity is carried by hermes-config provider profiles and hermes-agent provider construction instead of Python runtime_provider persistence."
+    },
+    "2667601c05cd": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust message/session rendering: crates/hermes-agent session persistence stores reasoning_content and crates/hermes-cli/src/tui.rs fingerprints/renders reasoning-aware assistant messages."
+    },
+    "d842155da1e8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust session/profile scoping: hermes-config resolves effective HERMES_HOME/profile config before runtime state, and ACP/session stores cwd explicitly in Rust session models."
+    },
+    "9f33d673e9e6": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust session state persistence: ACP/session models store cwd and update_cwd contracts in Rust tests; Python tui_gateway profile-db persistence is not the shipped runtime path."
+    },
+    "ed20f5ed0605": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust explicit model switching: crates/hermes-cli/src/tui.rs provider/model modal calls App::switch_model directly, allowing operator-selected models to escape stale config defaults."
+    },
+    "2f9d18711fb9": {
+      "disposition": "superseded",
+      "owner": "local-gates",
+      "notes": "Superseded by Ultra local Rust gates: scripts/clippy-warning-gate.sh, check-runtime-placeholders, cargo tests, and parity generators define local CI; upstream pytest-timeout/GitHub workflow tuning is optional."
+    },
+    "8044bf0206c1": {
+      "disposition": "superseded",
+      "owner": "local-gates",
+      "notes": "Superseded by local deterministic gate scripts and optional GitHub CI policy; upstream test-duration upload behavior is not a Rust runtime requirement."
+    },
+    "573b964dc780": {
+      "disposition": "superseded",
+      "owner": "installer",
+      "notes": "Superseded by Ultra release installer: scripts/install.sh installs release binaries/cargo artifacts and does not use upstream in-place git stashing/update semantics."
+    },
+    "4373e802a1b9": {
+      "disposition": "superseded",
+      "owner": "local-gates",
+      "notes": "Superseded by Rust skills registry/index implementation plus local parity gates; GitHub Pages workflow cache behavior is optional for this repo."
+    },
+    "a4ee1f223d5f": {
+      "disposition": "superseded",
+      "owner": "installer",
+      "notes": "Superseded by Rust-first installer and no Node desktop runtime: scripts/install.sh manages binary PATH/install location without upstream managed-Node global npm package requirements."
+    },
+    "1db8f7ea8094": {
+      "disposition": "superseded",
+      "owner": "installer",
+      "notes": "Superseded by Ultra installer design: release binary installation does not depend on managed Node global prefix repair."
+    },
+    "30377e108ca8": {
+      "disposition": "superseded",
+      "owner": "local-gates",
+      "notes": "Superseded by Rust-first UI/runtime scope and optional GitHub CI; there is no Electron renderer build gate for the shipped Ultra runtime."
+    },
+    "9eb0bcd60fc6": {
+      "disposition": "superseded",
+      "owner": "local-gates",
+      "notes": "Superseded by local Rust build/test gates and optional official GitHub CI; upstream nix workflow removal has no Rust runtime port target."
+    },
+    "e0492aa2dca0": {
+      "disposition": "superseded",
+      "owner": "local-gates",
+      "notes": "Superseded by user policy and local gate scripts: official GitHub pull_request CI is optional, while local shell/Rust gates define the required validation before push."
+    },
+    "1899c8f507c3": {
+      "disposition": "ported",
+      "owner": "skills",
+      "notes": "Ported in skills/media/youtube-content: SKILL.md and scripts/fetch_transcript.py already use uv run / uv pip for youtube-transcript-api, matching the upstream helper execution contract."
+    },
+    "5f6be7f31bd7": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported/superseded by Rust-native Microsoft Teams pipeline in crates/hermes-tools/src/teams_pipeline.rs, including Graph auth/download, meeting jobs, Teams sink writer, and tests."
+    },
+    "49e743985aaf": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust provider profiles: crates/hermes-agent/src/provider.rs has MiniMax-M3 OpenAI reasoning contract tests and crates/hermes-agent/src/auxiliary_builder.rs registers MiniMax-M3 direct providers."
+    },
+    "1e25358a8f22": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/desktop ephemeral-port discovery is superseded by Rust gateway/TUI runtime; Ultra does not ship apps/desktop or the Python web_server dashboard backend as the primary runtime."
+    },
+    "8cf9d8689d56": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop composer reconnect UX is superseded by Rust TUI/gateway connection surfaces; Electron composer code is intentionally not part of the Rust-only runtime."
+    },
+    "28bf8fb47d38": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream dashboard profile-clone UI is superseded by Rust profile/config commands and TUI surfaces; apps/desktop/web profile UI code is not shipped in Ultra runtime."
+    },
+    "1b16c481708d": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop OAuth account-removal UI is superseded by Rust provider/auth config surfaces; Electron onboarding/settings UI is outside the Rust-only shipped runtime."
+    },
+    "715b691723c6": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop summarizing indicator is superseded by Rust TUI/gateway status surfaces; React assistant thread/desktop store code is not part of the shipped runtime."
+    },
+    "0428945b5b07": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop bootstrap profile-home behavior is superseded by Rust hermes-config home/profile resolution and installer setup; Electron bootstrap is not shipped."
+    },
+    "288f7026e332": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop/web Weixin labeling is superseded by Rust gateway platform adapters and TUI surfaces; React messaging page labels are outside the Rust runtime."
+    },
+    "92a456f711eb": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream esbuild/Node audit-loop cleanup is superseded by the Rust-first runtime and local Cargo gates; Node desktop/web package metadata is not a shipped runtime dependency."
+    },
+    "f7c1cbe66ffa": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop download-link docs are superseded by Ultra README/install docs and release installer; /desktop website routing is not a Rust runtime target."
+    },
+    "0441b7f19feb": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop remote-profile REST routing is superseded by Rust gateway/profile/auth surfaces; Electron connection-config and Python web_server endpoints are not the primary runtime."
+    },
+    "c6b0eb4de0e5": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop remote-artifact authenticated download is superseded by Rust gateway/media delivery boundaries; Electron artifacts UI and Python web_server files endpoint are outside the Rust-only runtime."
     }
   },
   "subject_patterns": [
