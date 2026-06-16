@@ -28,6 +28,7 @@ const MAX_MESSAGE_LENGTH: usize = 2000;
 
 /// Discord API base URL.
 const DISCORD_API_BASE: &str = "https://discord.com/api/v10";
+const DISCORD_APPLICATION_COMMAND_LIMIT: usize = 100;
 
 // ---------------------------------------------------------------------------
 // DiscordConfig
@@ -1251,8 +1252,12 @@ pub fn discord_auto_registered_commands(
         })
         .filter(|name| !name.is_empty())
         .collect::<BTreeSet<_>>();
+    let remaining_capacity = DISCORD_APPLICATION_COMMAND_LIMIT.saturating_sub(registered.len());
     let mut out = Vec::new();
     for spec in gateway_specs.into_iter().chain(plugin_specs) {
+        if out.len() >= remaining_capacity {
+            break;
+        }
         let key = spec
             .name
             .trim()
@@ -1933,6 +1938,15 @@ pub struct IncomingDiscordMessage {
     pub mention_user_ids: Vec<String>,
     pub reply_to_message_id: Option<String>,
     pub reply_to_text: Option<String>,
+    pub attachments: Vec<DiscordIncomingAttachment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordIncomingAttachment {
+    pub filename: String,
+    pub url: String,
+    pub content_type: Option<String>,
+    pub size: Option<u64>,
 }
 
 impl IncomingDiscordMessage {
@@ -1944,6 +1958,36 @@ impl IncomingDiscordMessage {
                 .iter()
                 .any(|mentioned| mentioned.trim() == needle)
     }
+}
+
+fn parse_discord_incoming_attachments(
+    value: Option<&serde_json::Value>,
+) -> Vec<DiscordIncomingAttachment> {
+    value
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let url = item.get("url")?.as_str()?.to_string();
+                    let filename = item
+                        .get("filename")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    Some(DiscordIncomingAttachment {
+                        filename,
+                        url,
+                        content_type: item
+                            .get("content_type")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string),
+                        size: item.get("size").and_then(|v| v.as_u64()),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -3096,6 +3140,11 @@ impl DiscordAdapter {
             .map(str::trim)
             .filter(|text| !text.is_empty())
             .map(String::from);
+        let mut attachments = parse_discord_incoming_attachments(data.get("attachments"));
+        attachments.extend(parse_discord_incoming_attachments(
+            data.get("referenced_message")
+                .and_then(|message| message.get("attachments")),
+        ));
 
         Some(IncomingDiscordMessage {
             channel_id,
@@ -3108,6 +3157,7 @@ impl DiscordAdapter {
             mention_user_ids,
             reply_to_message_id,
             reply_to_text,
+            attachments,
         })
     }
 
@@ -3685,6 +3735,7 @@ mod tests {
             mention_user_ids: Vec::new(),
             reply_to_message_id: None,
             reply_to_text: None,
+            attachments: Vec::new(),
         };
         assert!(DiscordAdapter::should_accept_message(
             &human,
@@ -3750,6 +3801,7 @@ mod tests {
             mention_user_ids: Vec::new(),
             reply_to_message_id: None,
             reply_to_text: None,
+            attachments: Vec::new(),
         };
         assert!(DiscordAdapter::should_accept_message(
             &msg,
@@ -4533,6 +4585,37 @@ mod tests {
     }
 
     #[test]
+    fn discord_auto_registration_caps_at_discord_command_limit() {
+        let gateway = (0..120)
+            .map(|idx| {
+                DiscordSlashRegistrationSpec::new(
+                    format!("gateway-{idx}"),
+                    format!("Gateway command {idx}"),
+                    None::<String>,
+                    format!("/gateway-{idx}"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let plugins = vec![DiscordSlashRegistrationSpec::new(
+            "plugin-extra",
+            "Plugin command",
+            None::<String>,
+            "/plugin-extra",
+        )];
+
+        let registered = discord_auto_registered_commands(["status", "thread"], gateway, plugins);
+        let names = registered
+            .iter()
+            .map(|spec| spec.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(registered.len(), DISCORD_APPLICATION_COMMAND_LIMIT - 2);
+        assert_eq!(names.first().copied(), Some("gateway-0"));
+        assert_eq!(names.last().copied(), Some("gateway-97"));
+        assert!(!names.contains(&"plugin-extra"));
+    }
+
+    #[test]
     fn discord_channel_skill_bindings_resolve_exact_parent_and_deduped_skills() {
         let bindings = DiscordChannelSkillBinding::list_from_json(Some(&serde_json::json!([
             {"id": "100", "skills": ["a", "b", "a", "c", "b"]},
@@ -4683,8 +4766,26 @@ mod tests {
             "mentions": [
                 { "id": "bot-self", "username": "Hermes" }
             ],
+            "attachments": [
+                {
+                    "filename": "current.txt",
+                    "url": "https://cdn.discordapp.com/current.txt",
+                    "content_type": "text/plain",
+                    "size": 11
+                }
+            ],
             "message_reference": { "message_id": "origin-1" },
-            "referenced_message": { "content": "original message" },
+            "referenced_message": {
+                "content": "original message",
+                "attachments": [
+                    {
+                        "filename": "image.png",
+                        "url": "https://cdn.discordapp.com/attachments/image.png",
+                        "content_type": "image/png",
+                        "size": 1234
+                    }
+                ]
+            },
             "author": {
                 "id": "user789",
                 "username": "testuser",
@@ -4703,6 +4804,13 @@ mod tests {
         assert!(msg.mentions_user("bot-self"));
         assert_eq!(msg.reply_to_message_id.as_deref(), Some("origin-1"));
         assert_eq!(msg.reply_to_text.as_deref(), Some("original message"));
+        assert_eq!(msg.attachments.len(), 2);
+        assert_eq!(msg.attachments[0].filename, "current.txt");
+        assert_eq!(msg.attachments[1].filename, "image.png");
+        assert_eq!(
+            msg.attachments[1].content_type.as_deref(),
+            Some("image/png")
+        );
     }
 
     #[test]

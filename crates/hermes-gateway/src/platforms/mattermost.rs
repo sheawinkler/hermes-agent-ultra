@@ -12,7 +12,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
 use hermes_core::errors::GatewayError;
-use hermes_core::traits::{ParseMode, PlatformAdapter};
+use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 
 use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
 
@@ -56,6 +56,12 @@ pub struct MattermostConfig {
     pub team_id: Option<String>,
     #[serde(default)]
     pub proxy: AdapterProxyConfig,
+    #[serde(default = "default_reply_to_mode")]
+    pub reply_to_mode: String,
+}
+
+fn default_reply_to_mode() -> String {
+    "off".to_string()
 }
 
 pub struct MattermostAdapter {
@@ -96,11 +102,18 @@ impl MattermostAdapter {
 
     /// Send a message via Mattermost REST API.
     pub async fn send_text(&self, channel_id: &str, text: &str) -> Result<String, GatewayError> {
+        self.send_text_with_thread(channel_id, text, None).await
+    }
+
+    async fn send_text_with_thread(
+        &self,
+        channel_id: &str,
+        text: &str,
+        thread_id: Option<&str>,
+    ) -> Result<String, GatewayError> {
         let url = format!("{}/api/v4/posts", self.config.server_url);
-        let body = serde_json::json!({
-            "channel_id": channel_id,
-            "message": text
-        });
+        let body =
+            mattermost_post_body(channel_id, text, None, self.thread_root_for_send(thread_id));
 
         let resp = self
             .client
@@ -128,6 +141,95 @@ impl MattermostAdapter {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string())
+    }
+
+    fn thread_root_for_send<'a>(&self, thread_id: Option<&'a str>) -> Option<&'a str> {
+        if self.config.reply_to_mode.eq_ignore_ascii_case("thread") {
+            thread_id.map(str::trim).filter(|id| !id.is_empty())
+        } else {
+            None
+        }
+    }
+
+    async fn send_file_with_thread(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+        thread_id: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        use crate::platforms::helpers::mime_from_extension;
+
+        let path = std::path::Path::new(file_path);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let mime = mime_from_extension(ext);
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+        let file_bytes = tokio::fs::read(file_path)
+            .await
+            .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
+
+        let upload_url = format!("{}/api/v4/files", self.config.server_url);
+        let part = reqwest::multipart::Part::bytes(file_bytes)
+            .file_name(file_name.to_string())
+            .mime_str(mime)
+            .map_err(|e| GatewayError::SendFailed(format!("MIME error: {e}")))?;
+        let form = reqwest::multipart::Form::new()
+            .text("channel_id", chat_id.to_string())
+            .part("files", part);
+
+        let resp = self
+            .client
+            .post(&upload_url)
+            .header("Authorization", format!("Bearer {}", self.config.token))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| GatewayError::SendFailed(format!("Mattermost file upload failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!(
+                "Mattermost upload error: {text}"
+            )));
+        }
+
+        let result: serde_json::Value = resp.json().await.map_err(|e| {
+            GatewayError::SendFailed(format!("Mattermost upload parse failed: {e}"))
+        })?;
+        let file_ids: Vec<String> = result
+            .get("file_infos")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|f| f.get("id").and_then(|id| id.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let post_url = format!("{}/api/v4/posts", self.config.server_url);
+        let body = mattermost_post_body(
+            chat_id,
+            caption.unwrap_or(""),
+            Some(file_ids),
+            self.thread_root_for_send(thread_id),
+        );
+
+        let resp = self
+            .client
+            .post(&post_url)
+            .header("Authorization", format!("Bearer {}", self.config.token))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| GatewayError::SendFailed(format!("Mattermost file post failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!(
+                "Mattermost file post error: {text}"
+            )));
+        }
+        Ok(())
     }
 
     /// Parse a Mattermost WebSocket event into an incoming message.
@@ -443,6 +545,25 @@ fn image_fallback_text(image_url: &str, caption: Option<&str>) -> String {
     }
 }
 
+fn mattermost_post_body(
+    channel_id: &str,
+    message: &str,
+    file_ids: Option<Vec<String>>,
+    root_id: Option<&str>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "channel_id": channel_id,
+        "message": message,
+    });
+    if let Some(file_ids) = file_ids {
+        body["file_ids"] = serde_json::json!(file_ids);
+    }
+    if let Some(root_id) = root_id.map(str::trim).filter(|id| !id.is_empty()) {
+        body["root_id"] = serde_json::json!(root_id);
+    }
+    body
+}
+
 #[async_trait]
 impl PlatformAdapter for MattermostAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
@@ -471,6 +592,28 @@ impl PlatformAdapter for MattermostAdapter {
         Ok(())
     }
 
+    async fn send_message_threaded(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+        thread_id: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        self.send_text_with_thread(chat_id, text, thread_id).await?;
+        Ok(())
+    }
+
+    async fn send_message_with_options(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        self.send_message_threaded(chat_id, text, parse_mode, options.thread_id.as_deref())
+            .await
+    }
+
     async fn edit_message(
         &self,
         _chat_id: &str,
@@ -486,79 +629,19 @@ impl PlatformAdapter for MattermostAdapter {
         file_path: &str,
         caption: Option<&str>,
     ) -> Result<(), GatewayError> {
-        use crate::platforms::helpers::mime_from_extension;
-
-        let path = std::path::Path::new(file_path);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let mime = mime_from_extension(ext);
-        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-        let file_bytes = tokio::fs::read(file_path)
+        self.send_file_with_thread(chat_id, file_path, caption, None)
             .await
-            .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
+    }
 
-        // Step 1: Upload file via Mattermost API
-        let upload_url = format!("{}/api/v4/files", self.config.server_url);
-        let part = reqwest::multipart::Part::bytes(file_bytes)
-            .file_name(file_name.to_string())
-            .mime_str(mime)
-            .map_err(|e| GatewayError::SendFailed(format!("MIME error: {e}")))?;
-        let form = reqwest::multipart::Form::new()
-            .text("channel_id", chat_id.to_string())
-            .part("files", part);
-
-        let resp = self
-            .client
-            .post(&upload_url)
-            .header("Authorization", format!("Bearer {}", self.config.token))
-            .multipart(form)
-            .send()
+    async fn send_file_with_options(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        self.send_file_with_thread(chat_id, file_path, caption, options.thread_id.as_deref())
             .await
-            .map_err(|e| GatewayError::SendFailed(format!("Mattermost file upload failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!(
-                "Mattermost upload error: {text}"
-            )));
-        }
-
-        let result: serde_json::Value = resp.json().await.map_err(|e| {
-            GatewayError::SendFailed(format!("Mattermost upload parse failed: {e}"))
-        })?;
-        let file_ids: Vec<String> = result
-            .get("file_infos")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|f| f.get("id").and_then(|id| id.as_str()).map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        // Step 2: Create a post with the uploaded file IDs
-        let post_url = format!("{}/api/v4/posts", self.config.server_url);
-        let body = serde_json::json!({
-            "channel_id": chat_id,
-            "message": caption.unwrap_or(""),
-            "file_ids": file_ids
-        });
-
-        let resp = self
-            .client
-            .post(&post_url)
-            .header("Authorization", format!("Bearer {}", self.config.token))
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!("Mattermost file post failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!(
-                "Mattermost file post error: {text}"
-            )));
-        }
-        Ok(())
     }
 
     async fn send_image_url(
@@ -667,6 +750,7 @@ mod tests {
             token: "test-token".to_string(),
             team_id: None,
             proxy: AdapterProxyConfig::default(),
+            reply_to_mode: "off".to_string(),
         })
         .unwrap()
     }
@@ -684,12 +768,42 @@ mod tests {
             token: "test-token".to_string(),
             team_id: None,
             proxy: AdapterProxyConfig::default(),
+            reply_to_mode: "off".to_string(),
         })
         .unwrap();
         assert_eq!(
             local.websocket_url(),
             "ws://127.0.0.1:8065/api/v4/websocket"
         );
+    }
+
+    #[test]
+    fn post_body_preserves_thread_root_when_present() {
+        let body = mattermost_post_body(
+            "channel-1",
+            "hello",
+            Some(vec!["file-1".to_string()]),
+            Some("root-post-1"),
+        );
+
+        assert_eq!(body["channel_id"], "channel-1");
+        assert_eq!(body["message"], "hello");
+        assert_eq!(body["file_ids"][0], "file-1");
+        assert_eq!(body["root_id"], "root-post-1");
+    }
+
+    #[test]
+    fn thread_root_for_send_requires_thread_reply_mode() {
+        let adapter = test_adapter();
+        assert_eq!(adapter.thread_root_for_send(Some("root-post-1")), None);
+
+        let mut threaded = test_adapter();
+        threaded.config.reply_to_mode = "thread".to_string();
+        assert_eq!(
+            threaded.thread_root_for_send(Some(" root-post-1 ")),
+            Some("root-post-1")
+        );
+        assert_eq!(threaded.thread_root_for_send(Some("   ")), None);
     }
 
     #[tokio::test]
