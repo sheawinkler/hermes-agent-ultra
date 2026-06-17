@@ -13,6 +13,7 @@ use hermes_core::Message;
 
 use crate::agent_config::EvolutionCounters;
 use crate::api_messages::ApiMessagesCacheKey;
+use crate::cache_diagnostics::PrefixShape;
 use crate::fallback::TurnFallbackState;
 use crate::session_persistence::SessionFlushCursor;
 use crate::session_state::SessionUsageMetrics;
@@ -60,6 +61,15 @@ pub struct AgentSharedState {
     pub(crate) codex_app_server_session: Option<CodexAppServerSession>,
     /// Last-known Nous `x-ratelimit-*` headers.
     pub(crate) last_nous_rate_limit_headers: Option<HashMap<String, String>>,
+
+    // === Prompt cache diagnostics ===
+    /// Prefix shape captured at the start of the previous turn.
+    /// Compared against the current turn's shape to explain cache misses.
+    pub(crate) last_prefix_shape: Option<PrefixShape>,
+    /// Cumulative session-level cache-hit tokens (from provider usage reports).
+    pub(crate) session_cache_hit: u64,
+    /// Cumulative session-level cache-miss tokens (from provider usage reports).
+    pub(crate) session_cache_miss: u64,
 }
 
 impl AgentSharedState {
@@ -89,6 +99,10 @@ impl AgentSharedState {
 
             codex_app_server_session: None,
             last_nous_rate_limit_headers: None,
+
+            last_prefix_shape: None,
+            session_cache_hit: 0,
+            session_cache_miss: 0,
         }
     }
 }

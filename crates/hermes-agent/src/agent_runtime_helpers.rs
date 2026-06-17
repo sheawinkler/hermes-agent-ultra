@@ -845,6 +845,13 @@ pub fn anthropic_prompt_cache_policy(
     if provider_is_alibaba_family && model_is_qwen {
         return (true, false);
     }
+    // DeepSeek: automatic server-side prefix caching via chat_completions.
+    // No client-side cache_control markers needed; the provider compares
+    // byte prefixes and only bills new tokens.
+    let is_deepseek_host = base_url_host_matches(base_url, "api.deepseek.com");
+    if provider_lower == "deepseek" || is_deepseek_host || model_lower.contains("deepseek") {
+        return (true, false);
+    }
     (false, false)
 }
 
@@ -1336,7 +1343,27 @@ pub fn prepare_wire_messages_for_api(
     let needs_pad = needs_thinking_reasoning_pad(provider, model, base_url);
     let mut out = sanitize_api_messages(messages);
     out = drop_thinking_only_and_merge_users(out);
-    reapply_reasoning_echo_for_provider(&mut out, needs_pad);
+    // DeepSeek: automatic prefix caching means re-sending reasoning_content
+    // changes the byte prefix every turn, destroying cache. The reasoning
+    // is billable prompt input with no cache benefit — drop it.
+    // (Reasonix agent.go#L646-L649: "re-sent reasoning is billable prompt
+    //  input for no cache or coherence gain")
+    let is_deepseek = provider.to_ascii_lowercase() == "deepseek"
+        || model.to_ascii_lowercase().contains("deepseek")
+        || base_url_host_matches(base_url, "api.deepseek.com");
+    if !is_deepseek {
+        reapply_reasoning_echo_for_provider(&mut out, needs_pad);
+    } else {
+        // Strip reasoning_content from all messages for DeepSeek.
+        // Re-sending reasoning is billable prompt input with no cache
+        // or coherence gain — and it changes the byte prefix, destroying
+        // the service-side automatic prefix cache.
+        for msg in &mut out {
+            if msg.role == MessageRole::Assistant {
+                msg.reasoning_content = None;
+            }
+        }
+    }
     out
 }
 

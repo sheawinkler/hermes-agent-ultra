@@ -35,6 +35,7 @@ pub mod auxiliary_builder;
 pub mod bedrock;
 pub mod budget;
 pub mod chat_completion_helpers;
+pub mod cache_diagnostics;
 pub mod code_index;
 pub mod codex_responses_adapter;
 pub mod codex_runtime;

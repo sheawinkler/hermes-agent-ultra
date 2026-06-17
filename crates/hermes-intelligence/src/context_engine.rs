@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 pub use crate::model_metadata::IMAGE_TOKEN_ESTIMATE;
@@ -74,6 +75,14 @@ pub struct DefaultContextEngine {
     /// removed messages to that endpoint. On any failure it falls back to
     /// deterministic heuristic summarization.
     pub use_llm_summary: bool,
+    /// Consecutive compaction count where post-compaction tokens still
+    /// exceed the target window. When this reaches 2, auto-compaction
+    /// is paused to prevent a stuck compaction loop that repeatedly
+    /// collapses context without relief and destroys the cache prefix.
+    pub consecutive_compacts: AtomicU32,
+    /// Whether auto-compaction is currently paused due to stuck detection.
+    /// Resets to false when a subsequent compression succeeds.
+    pub compact_stuck: AtomicBool,
 }
 
 impl DefaultContextEngine {
@@ -81,6 +90,8 @@ impl DefaultContextEngine {
         Self {
             keep_ratio: 0.33,
             use_llm_summary: false,
+            consecutive_compacts: AtomicU32::new(0),
+            compact_stuck: AtomicBool::new(false),
         }
     }
 
@@ -284,17 +295,50 @@ impl ContextEngine for DefaultContextEngine {
             return Err(ContextError::TooSmall(messages.len()));
         }
 
+        // Stuck guard: if auto-compaction has been paused because repeated
+        // compressions failed to bring the context under the target window,
+        // return the messages as-is rather than repeatedly collapsing the
+        // prefix (which destroys the cache for zero benefit).
+        if self.compact_stuck.load(Ordering::Relaxed) {
+            tracing::warn!(
+                "Compaction stuck — window too small, skipping auto-compaction to preserve cache prefix"
+            );
+            return Ok(messages.to_vec());
+        }
+
         let current_tokens = self.estimate_tokens(messages);
         if current_tokens <= target_tokens {
             return Ok(messages.to_vec());
         }
 
-        // Keep the last `keep_ratio` fraction of messages
-        let keep_count = std::cmp::max(2, (messages.len() as f64 * self.keep_ratio) as usize);
+        // Count leading compaction summaries that must never enter the
+        // removed region (Reasonix pinnedPrefixLen).  A later fold that
+        // re-summarizes an earlier digest would silently drop user facts
+        // and destroy the byte-stable cache prefix.
+        let pinned = messages
+            .iter()
+            .take_while(|m| is_compression_summary(m))
+            .count();
+
+        // Keep the last `keep_ratio` fraction of messages, but never
+        // fewer than `pinned` (protects existing digests).
+        let keep_count = std::cmp::max(
+            std::cmp::max(2, (messages.len() as f64 * self.keep_ratio) as usize),
+            pinned,
+        );
         let removed_count = messages.len() - keep_count;
 
-        // Count tokens in removed messages for the summary
-        let removed_tokens: u64 = messages[..removed_count]
+        // Count tokens in removed messages for the summary.
+        // Skip pinned digests (they must never be re-summarized).
+        let remove_start = pinned;
+        let remove_end = removed_count + pinned;
+        let effective_removed = if remove_end > remove_start && remove_end <= messages.len() {
+            remove_end - remove_start
+        } else {
+            // Nothing left to remove after protecting digests.
+            return Ok(messages.to_vec());
+        };
+        let removed_tokens: u64 = messages[remove_start..remove_end]
             .iter()
             .map(|m| {
                 let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("");
@@ -304,19 +348,23 @@ impl ContextEngine for DefaultContextEngine {
 
         let summary = self
             .maybe_generate_summary(
-                &messages[..removed_count],
-                removed_count,
+                &messages[remove_start..remove_end],
+                effective_removed,
                 removed_tokens,
                 keep_count,
             )
             .await;
 
-        let mut result = Vec::with_capacity(keep_count + 1);
+        // Build result: keep pinned digests at front, insert new summary,
+        // then append the tail messages.
+        let mut result = Vec::with_capacity(pinned + 1 + (messages.len() - remove_end));
+        // Preserve pinned compression-summary messages verbatim.
+        result.extend_from_slice(&messages[..pinned]);
         result.push(serde_json::json!({
-            "role": "system",
-            "content": summary,
+            "role": "user",
+            "content": format!("<compression-summary>\n{}\n</compression-summary>", summary),
         }));
-        result.extend_from_slice(&messages[removed_count..]);
+        result.extend_from_slice(&messages[remove_end..]);
 
         // If still over target, progressively remove more
         let new_tokens = self.estimate_tokens(&result);
@@ -330,11 +378,33 @@ impl ContextEngine for DefaultContextEngine {
                     additional_remove,
                 );
                 result[0] = serde_json::json!({
-                    "role": "system",
-                    "content": format!("{}\n{}", summary, second_summary),
+                    "role": "user",
+                    "content": format!("<compression-summary>\n{}\n{}\n</compression-summary>", summary, second_summary),
                 });
                 result.drain(1..=additional_remove);
             }
+        }
+
+        // Stuck detection: if the result is still over the target window,
+        // the context is too large to be compressed below the limit.
+        // After two consecutive failed attempts, pause auto-compaction
+        // to avoid an infinite collapse loop that destroys the cache prefix.
+        let final_tokens = self.estimate_tokens(&result);
+        if final_tokens > target_tokens {
+            let prev = self.consecutive_compacts.fetch_add(1, Ordering::Relaxed);
+            if prev >= 1 {
+                self.compact_stuck.store(true, Ordering::Relaxed);
+                tracing::warn!(
+                    consecutive_failures = prev + 1,
+                    final_tokens,
+                    target_tokens,
+                    "Compaction stuck: {} consecutive compactions failed to meet target; pausing auto-compaction",
+                    prev + 1,
+                );
+            }
+        } else {
+            self.consecutive_compacts.store(0, Ordering::Relaxed);
+            self.compact_stuck.store(false, Ordering::Relaxed);
         }
 
         Ok(result)
@@ -343,6 +413,21 @@ impl ContextEngine for DefaultContextEngine {
     fn name(&self) -> &str {
         "default"
     }
+}
+
+/// Returns `true` when a message is a compaction summary produced by a
+/// previous call to [`DefaultContextEngine::compress`].
+///
+/// These summaries are identified by the `<compression-summary>` XML tag
+/// prefix in their content and a `user` role (matching Reasonix's
+/// `isCompactionSummary` convention).  Once a fact reaches a digest it must
+/// never be re-summarized — that would silently drop user-stated facts and
+/// destroy the byte-stable cache prefix across compaction boundaries.
+fn is_compression_summary(msg: &Value) -> bool {
+    msg.get("role").and_then(|r| r.as_str()) == Some("user")
+        && msg.get("content")
+            .and_then(|c| c.as_str())
+            .is_some_and(|c| c.trim_start().starts_with("<compression-summary>"))
 }
 
 // ---------------------------------------------------------------------------

@@ -256,6 +256,9 @@ mod tests {
                 usage: None,
                 model: model.unwrap_or("test-title-model").to_string(),
                 finish_reason: Some("stop".into()),
+                response_id: None,
+                dropped_tool_names: None,
+                rate_limit_headers: None,
             })
         }
 
