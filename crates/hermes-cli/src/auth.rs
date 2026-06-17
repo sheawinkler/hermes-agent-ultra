@@ -296,6 +296,7 @@ struct NousAgentKeyResponse {
 struct CodexDeviceUserCodeResponse {
     user_code: Option<String>,
     device_auth_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_i64")]
     interval: Option<i64>,
 }
 
@@ -309,7 +310,38 @@ struct CodexDevicePollResponse {
 struct CodexTokenResponse {
     access_token: Option<String>,
     refresh_token: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_i64")]
     expires_in: Option<i64>,
+}
+
+fn deserialize_optional_i64<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let Some(value) = Option::<Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match value {
+        Value::Null => Ok(None),
+        Value::Number(number) => number
+            .as_i64()
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom("expected integer-compatible number")),
+        Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                trimmed
+                    .parse::<i64>()
+                    .map(Some)
+                    .map_err(serde::de::Error::custom)
+            }
+        }
+        other => Err(serde::de::Error::custom(format!(
+            "expected integer or numeric string, got {other}"
+        ))),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3214,6 +3246,35 @@ mod tests {
         let provider = format!("missing-{}", uuid::Uuid::new_v4().simple());
         let removed = clear_provider_auth_state(&provider).expect("clear");
         assert!(!removed);
+    }
+
+    #[test]
+    fn codex_oauth_numeric_fields_accept_number_or_string() {
+        let device_from_number: CodexDeviceUserCodeResponse =
+            serde_json::from_value(serde_json::json!({
+                "user_code": "ABCD-EFGH",
+                "device_auth_id": "device-auth-id",
+                "interval": 5
+            }))
+            .expect("numeric interval");
+        assert_eq!(device_from_number.interval, Some(5));
+
+        let device_from_string: CodexDeviceUserCodeResponse =
+            serde_json::from_value(serde_json::json!({
+                "user_code": "ABCD-EFGH",
+                "device_auth_id": "device-auth-id",
+                "interval": "5"
+            }))
+            .expect("string interval");
+        assert_eq!(device_from_string.interval, Some(5));
+
+        let token_from_string: CodexTokenResponse = serde_json::from_value(serde_json::json!({
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expires_in": "3600"
+        }))
+        .expect("string expires_in");
+        assert_eq!(token_from_string.expires_in, Some(3600));
     }
 
     #[test]
