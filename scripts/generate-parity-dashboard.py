@@ -68,23 +68,31 @@ def gate_status(value: Any) -> str:
     return "UNKNOWN"
 
 
-def format_failed_checks(gate: dict[str, Any]) -> str:
+def format_checks_by_status(gate: dict[str, Any], target_status: str) -> str:
     checks = gate.get("checks")
     if not isinstance(checks, list):
         return "none"
-    failed: list[str] = []
+    matches: list[str] = []
     for check in checks:
         if not isinstance(check, dict):
             continue
         metric = str(check.get("metric", "unknown_metric"))
         status = str(check.get("status", "unknown")).lower()
-        if status != "pass":
+        if status == target_status:
             actual = check.get("actual", "n/a")
             limit = check.get("limit", "n/a")
-            failed.append(f"{metric} (actual={actual}, limit={limit})")
-    if not failed:
+            matches.append(f"{metric} (actual={actual}, limit={limit})")
+    if not matches:
         return "none"
-    return "; ".join(failed)
+    return "; ".join(matches)
+
+
+def format_failed_checks(gate: dict[str, Any]) -> str:
+    return format_checks_by_status(gate, "fail")
+
+
+def format_warning_checks(gate: dict[str, Any]) -> str:
+    return format_checks_by_status(gate, "warn")
 
 
 def render_dashboard(
@@ -159,6 +167,7 @@ def render_dashboard(
     lines.append(f"- SOTA harness matrix: **{gate_status(harness_gate.get('pass'))}**")
     lines.append(f"- Release gate failures: {format_failed_checks(release_gate)}")
     lines.append(f"- CI gate failures: {format_failed_checks(ci_gate)}")
+    lines.append(f"- CI gate warnings: {format_warning_checks(ci_gate)}")
     lines.append("")
     lines.append("## Test Coverage Audit")
     lines.append("")

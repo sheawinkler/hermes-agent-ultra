@@ -115,7 +115,7 @@ const PARALLEL_BASE_URL_DEFAULT: &str = "https://api.parallel.ai";
 const PARALLEL_USER_AGENT: &str = "hermes-agent-web/1.0.0";
 const FIRECRAWL_BASE_URL_DEFAULT: &str = "https://api.firecrawl.dev";
 const XAI_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
-const XAI_WEB_MODEL_DEFAULT: &str = "grok-4.3";
+const XAI_WEB_MODEL_DEFAULT: &str = "grok-build-0.1";
 const XAI_WEB_TIMEOUT_SECS_DEFAULT: u64 = 90;
 
 fn secret_url_param(key: &str) -> bool {
@@ -2516,6 +2516,26 @@ mod web_search_env_tests {
         assert_eq!(search_backend_choice_from_env(), "fallback");
         std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "xai");
         assert_eq!(search_backend_choice_from_env(), "xai");
+    }
+
+    #[test]
+    fn xai_from_env_defaults_to_grok_build_model() {
+        let _scope = EnvScope::new();
+        std::env::set_var("XAI_API_KEY", "xai-key");
+        let backend = XaiWebSearchBackend::from_env().expect("xai backend from env");
+        assert_eq!(backend.model(), "grok-build-0.1");
+        assert_eq!(backend.base_url(), XAI_BASE_URL_DEFAULT);
+    }
+
+    #[test]
+    fn xai_from_env_honors_model_and_base_url_overrides() {
+        let _scope = EnvScope::new();
+        std::env::set_var("XAI_API_KEY", "xai-key");
+        std::env::set_var("XAI_BASE_URL", "https://proxy.example.com/xai/");
+        std::env::set_var("HERMES_WEB_XAI_MODEL", "grok-custom");
+        let backend = XaiWebSearchBackend::from_env().expect("xai backend from env");
+        assert_eq!(backend.model(), "grok-custom");
+        assert_eq!(backend.base_url(), "https://proxy.example.com/xai");
     }
 
     #[test]

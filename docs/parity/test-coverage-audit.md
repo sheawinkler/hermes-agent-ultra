@@ -1,6 +1,6 @@
 # Test Coverage Audit
 
-Generated: `2026-06-12T11:29:23.268813+00:00`
+Generated: `2026-06-16T23:55:56.850514+00:00`
 
 ## Gate
 
@@ -12,16 +12,16 @@ Generated: `2026-06-12T11:29:23.268813+00:00`
 
 | Metric | Value |
 | --- | ---: |
-| `tracked_behavior_rows` | 415 |
-| `covered_behavior_rows` | 415 |
+| `tracked_behavior_rows` | 419 |
+| `covered_behavior_rows` | 419 |
 | `tracked_behavior_coverage_ratio` | 1.0 |
 | `rust_test_files` | 308 |
-| `rust_test_functions` | 3465 |
-| `coverage_manifest_entries` | 405 |
-| `coverage_manifest_entries_with_valid_rust_tests` | 405 |
+| `rust_test_functions` | 3535 |
+| `coverage_manifest_entries` | 409 |
+| `coverage_manifest_entries_with_valid_rust_tests` | 409 |
 | `missing_rust_test_refs` | 0 |
 | `queue_pending` | 0 |
-| `queue_total` | 5659 |
+| `queue_total` | 6132 |
 | `test_intents_total` | 10 |
 | `test_intents_mapped` | 10 |
 
@@ -30,8 +30,8 @@ Generated: `2026-06-12T11:29:23.268813+00:00`
 | Manifest | Entries | Valid Rust-test entries | Referenced Rust tests | Missing refs |
 | --- | ---: | ---: | ---: | ---: |
 | `docs/parity/python-test-suite-coverage.json` | 192 | 192 | 91 | 0 |
-| `docs/parity/hermes-cli-test-coverage.json` | 114 | 114 | 65 | 0 |
-| `docs/parity/ui-tui-source-coverage.json` | 99 | 99 | 55 | 0 |
+| `docs/parity/hermes-cli-test-coverage.json` | 116 | 116 | 69 | 0 |
+| `docs/parity/ui-tui-source-coverage.json` | 101 | 101 | 55 | 0 |
 
 ## Test Intent Domains
 
@@ -58,8 +58,12 @@ Generated: `2026-06-12T11:29:23.268813+00:00`
 - `nonzero_tree_drift`: max_upstream_patch_missing remains nonzero in parity matrix
 - `nonzero_tree_drift`: max_files_only_upstream remains nonzero in parity matrix
 
+## Completed Sigma Harness Moves
+
+- **Coverage trend ledger**: `docs/parity/harness-trend-ledger.json`, `docs/parity/harness-trend-ledger.md`
+- **ContextLattice replay evidence index**: `docs/parity/contextlattice-replay-evidence-index.json`, `docs/parity/contextlattice-replay-evidence-index.md`
+- **Cross-version harness budget**: `docs/parity/harness-budget.json`, `docs/parity/harness-budget.md`
+
 ## Next Sigma Harness Moves
 
-- **Coverage trend ledger**: Track behavior coverage over time so new upstream rows or local harness regressions create visible deltas before release prep.
-- **ContextLattice replay evidence index**: Index passing and failing replay artifacts into ContextLattice so agents can retrieve exact harness evidence instead of rediscovering it from scratch.
-- **Cross-version harness budget**: Record runtime and fixture-count budgets across releases so SOTA harness growth stays deterministic, bounded, and reviewable.
+- none

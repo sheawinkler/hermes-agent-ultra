@@ -16,6 +16,32 @@ from typing import Any
 
 RUST_TEST_ATTR_RE = re.compile(r"#\[\s*(?:tokio::)?test(?:\([^]]*\))?\s*\]")
 RUST_FN_RE = re.compile(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+HARNESS_HARDENING_MOVES = [
+    {
+        "title": "Coverage trend ledger",
+        "rationale": "Track behavior coverage over time so new upstream rows or local harness regressions create visible deltas before release prep.",
+        "artifacts": [
+            "docs/parity/harness-trend-ledger.json",
+            "docs/parity/harness-trend-ledger.md",
+        ],
+    },
+    {
+        "title": "ContextLattice replay evidence index",
+        "rationale": "Index passing and failing replay artifacts into ContextLattice so agents can retrieve exact harness evidence instead of rediscovering it from scratch.",
+        "artifacts": [
+            "docs/parity/contextlattice-replay-evidence-index.json",
+            "docs/parity/contextlattice-replay-evidence-index.md",
+        ],
+    },
+    {
+        "title": "Cross-version harness budget",
+        "rationale": "Record runtime and fixture-count budgets across releases so SOTA harness growth stays deterministic, bounded, and reviewable.",
+        "artifacts": [
+            "docs/parity/harness-budget.json",
+            "docs/parity/harness-budget.md",
+        ],
+    },
+]
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -226,10 +252,24 @@ def render_md(payload: dict[str, Any]) -> str:
     else:
         lines.append("- none")
     lines.append("")
+    lines.append("## Completed Sigma Harness Moves")
+    lines.append("")
+    completed_moves = payload.get("completed_sigma_harness_moves", [])
+    if completed_moves:
+        for item in completed_moves:
+            artifacts = ", ".join(f"`{path}`" for path in item["artifacts"])
+            lines.append(f"- **{item['title']}**: {artifacts}")
+    else:
+        lines.append("- none")
+    lines.append("")
     lines.append("## Next Sigma Harness Moves")
     lines.append("")
-    for item in payload["next_sigma_harness_moves"]:
-        lines.append(f"- **{item['title']}**: {item['rationale']}")
+    next_moves = payload["next_sigma_harness_moves"]
+    if next_moves:
+        for item in next_moves:
+            lines.append(f"- **{item['title']}**: {item['rationale']}")
+    else:
+        lines.append("- none")
     lines.append("")
     return "\n".join(lines)
 
@@ -406,6 +446,18 @@ def main() -> int:
         "divergence_review_overdue": int(divergence_summary.get("review_overdue", 0) or 0),
     }
 
+    hardening_moves: list[dict[str, Any]] = []
+    for move in HARNESS_HARDENING_MOVES:
+        artifacts = list(move["artifacts"])
+        complete = all((repo_root / artifact).exists() for artifact in artifacts)
+        row = {
+            "title": move["title"],
+            "rationale": move["rationale"],
+            "artifacts": artifacts,
+            "status": "complete" if complete else "pending",
+        }
+        hardening_moves.append(row)
+
     payload = {
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "schema_version": 1,
@@ -427,19 +479,11 @@ def main() -> int:
         "coverage_manifests": manifest_rows,
         "critical_gaps": critical_gaps,
         "advisory_gaps": advisory_gaps,
+        "completed_sigma_harness_moves": [
+            row for row in hardening_moves if row["status"] == "complete"
+        ],
         "next_sigma_harness_moves": [
-            {
-                "title": "Coverage trend ledger",
-                "rationale": "Track behavior coverage over time so new upstream rows or local harness regressions create visible deltas before release prep.",
-            },
-            {
-                "title": "ContextLattice replay evidence index",
-                "rationale": "Index passing and failing replay artifacts into ContextLattice so agents can retrieve exact harness evidence instead of rediscovering it from scratch.",
-            },
-            {
-                "title": "Cross-version harness budget",
-                "rationale": "Record runtime and fixture-count budgets across releases so SOTA harness growth stays deterministic, bounded, and reviewable.",
-            },
+            row for row in hardening_moves if row["status"] == "pending"
         ],
     }
 

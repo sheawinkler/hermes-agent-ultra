@@ -16,6 +16,36 @@
       "disposition": "ported",
       "notes": "Ported in Rust: skill_orchestrator exposes the canonical user-instruction extractor for single-skill and bundle scaffolding, and memory_manager applies it once for every provider with regression coverage."
     },
+    "44e5848e7418": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream streams subagent text into Electron watch windows and Python tui_gateway mirrors. Ultra has no apps/desktop runtime; Rust subagent/process progress is owned by hermes-agent and hermes-gateway/TUI status surfaces, so the Python/React watch-window mirror is outside the Rust-only runtime."
+    },
+    "bbc842d31ec8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: xAI direct setup/catalog defaults now prefer xai:grok-build-0.1, the Rust xAI web-search backend defaults HERMES_WEB_XAI_MODEL to grok-build-0.1, and focused CLI/tools tests pin the default while keeping grok-4.3 selectable."
+    },
+    "f4ef70f6fc62": {
+      "disposition": "ported",
+      "owner": "docs",
+      "notes": "Ported to Ultra docs without reviving Python runtime paths: website provider/env docs describe grok-build-0.1 as the direct xAI and web-search default, and the bundled Grok Build skill already records default = grok-build-0.1."
+    },
+    "1b962f001e78": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust model picker already passes configured llm_providers.<provider>.base_url into fetch_openai_compatible_live_models before fallback; this slice adds a regression for the resolved base URL /models request builder."
+    },
+    "d1ecebcbfd8c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream repairs Electron binary re-download for Python/PowerShell/shell desktop packaging. Ultra does not ship the Electron desktop packaging path as Rust runtime; local release/build gates use the Rust workspace and repository scripts instead."
+    },
+    "b7f0c9cd52fe": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop sticky model picker and Settings reasoning/speed controls target React desktop stores. Ultra owns model/provider selection, reasoning, and service_tier defaults through Rust CLI/TUI/gateway config and status surfaces with existing /fast and reasoning coverage."
+    },
     "cc8e5ec2afbf": {
       "disposition": "superseded",
       "notes": "Upstream migrates the Python Discord adapter into a bundled plugin. Ultra's live Discord runtime is Rust-native in crates/hermes-gateway/src/platforms/discord.rs and registered from crates/hermes-cli/src/main.rs; Python plugin migration is not a Rust runtime path."

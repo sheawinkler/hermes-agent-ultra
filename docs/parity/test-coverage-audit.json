@@ -25,6 +25,35 @@
     "pass": true
   },
   "audit_unit": "upstream_behavior_or_test_intent",
+  "completed_sigma_harness_moves": [
+    {
+      "artifacts": [
+        "docs/parity/harness-trend-ledger.json",
+        "docs/parity/harness-trend-ledger.md"
+      ],
+      "rationale": "Track behavior coverage over time so new upstream rows or local harness regressions create visible deltas before release prep.",
+      "status": "complete",
+      "title": "Coverage trend ledger"
+    },
+    {
+      "artifacts": [
+        "docs/parity/contextlattice-replay-evidence-index.json",
+        "docs/parity/contextlattice-replay-evidence-index.md"
+      ],
+      "rationale": "Index passing and failing replay artifacts into ContextLattice so agents can retrieve exact harness evidence instead of rediscovering it from scratch.",
+      "status": "complete",
+      "title": "ContextLattice replay evidence index"
+    },
+    {
+      "artifacts": [
+        "docs/parity/harness-budget.json",
+        "docs/parity/harness-budget.md"
+      ],
+      "rationale": "Record runtime and fixture-count budgets across releases so SOTA harness growth stays deterministic, bounded, and reviewable.",
+      "status": "complete",
+      "title": "Cross-version harness budget"
+    }
+  ],
   "coverage_manifests": [
     {
       "entries": 192,
@@ -38,30 +67,30 @@
       "valid_entries_with_rust_tests": 192
     },
     {
-      "entries": 114,
+      "entries": 116,
       "missing_rust_test_refs": [],
       "missing_rust_tests_entries": [],
       "path": "docs/parity/hermes-cli-test-coverage.json",
-      "referenced_rust_tests": 65,
+      "referenced_rust_tests": 69,
       "status_counts": {
-        "covered_by_rust_contracts": 114
+        "covered_by_rust_contracts": 116
       },
-      "valid_entries_with_rust_tests": 114
+      "valid_entries_with_rust_tests": 116
     },
     {
-      "entries": 99,
+      "entries": 101,
       "missing_rust_test_refs": [],
       "missing_rust_tests_entries": [],
       "path": "docs/parity/ui-tui-source-coverage.json",
       "referenced_rust_tests": 55,
       "status_counts": {
-        "covered_by_rust_primary_tui_contracts": 99
+        "covered_by_rust_primary_tui_contracts": 101
       },
-      "valid_entries_with_rust_tests": 99
+      "valid_entries_with_rust_tests": 101
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-12T11:29:23.268813+00:00",
+  "generated_at_utc": "2026-06-16T23:55:56.850514+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -512,20 +541,7 @@
       ]
     }
   ],
-  "next_sigma_harness_moves": [
-    {
-      "rationale": "Track behavior coverage over time so new upstream rows or local harness regressions create visible deltas before release prep.",
-      "title": "Coverage trend ledger"
-    },
-    {
-      "rationale": "Index passing and failing replay artifacts into ContextLattice so agents can retrieve exact harness evidence instead of rediscovering it from scratch.",
-      "title": "ContextLattice replay evidence index"
-    },
-    {
-      "rationale": "Record runtime and fixture-count budgets across releases so SOTA harness growth stays deterministic, bounded, and reviewable.",
-      "title": "Cross-version harness budget"
-    }
-  ],
+  "next_sigma_harness_moves": [],
   "schema_version": 1,
   "source_artifacts": {
     "coverage_manifests": [
@@ -539,21 +555,21 @@
     "upstream_missing_queue": "docs/parity/upstream-missing-queue.json"
   },
   "summary": {
-    "coverage_manifest_entries": 405,
-    "coverage_manifest_entries_with_valid_rust_tests": 405,
-    "covered_behavior_rows": 415,
+    "coverage_manifest_entries": 409,
+    "coverage_manifest_entries_with_valid_rust_tests": 409,
+    "covered_behavior_rows": 419,
     "divergence_errors": 0,
     "divergence_review_overdue": 0,
     "divergence_unowned": 0,
     "missing_rust_test_refs": 0,
     "queue_pending": 0,
-    "queue_total": 5659,
+    "queue_total": 6132,
     "rust_test_files": 308,
-    "rust_test_functions": 3465,
+    "rust_test_functions": 3535,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,
     "tracked_behavior_coverage_ratio": 1.0,
-    "tracked_behavior_rows": 415
+    "tracked_behavior_rows": 419
   }
 }

@@ -1,0 +1,27 @@
+# Harness Trend Ledger
+
+Generated: `2026-06-17T00:23:10.635258+00:00`
+
+## Latest
+
+| Metric | Value |
+| --- | ---: |
+| `queue_pending` | 0 |
+| `queue_total` | 6132 |
+| `tracked_behavior_coverage_ratio` | 1.0 |
+| `tracked_behavior_rows` | 419 |
+| `covered_behavior_rows` | 419 |
+| `rust_test_functions` | 3535 |
+| `coverage_manifest_entries` | 409 |
+| `sota_domain_coverage_ratio` | 1.0 |
+| `sota_direct_rust_tests` | 12 |
+| `sota_workflow_replay_steps` | 5 |
+| `sota_protocol_cases` | 7 |
+| `sota_fault_scenarios` | 6 |
+
+## Entries
+
+| Recorded | Local head | Queue pending | Coverage | SOTA domains |
+| --- | --- | ---: | ---: | ---: |
+| `2026-06-16T23:55:57.199012+00:00` | `21d60d476c63` | 0 | 1.0 | 1.0 |
+| `2026-06-17T00:23:10.633854+00:00` | `21d60d476c63` | 0 | 1.0 | 1.0 |

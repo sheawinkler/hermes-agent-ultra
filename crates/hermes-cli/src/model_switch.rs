@@ -138,6 +138,7 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
             "deepseek-ai/deepseek-v3-2",
         ],
     ),
+    ("xai", &["grok-build-0.1", "grok-4.3", "grok-3-mini"]),
     (
         "kilocode",
         &[
@@ -957,14 +958,18 @@ fn openai_compatible_catalog_credentials(provider: &str) -> Option<(String, Stri
     Some((base_url, token))
 }
 
+fn openai_compatible_models_url(base_url: &str) -> String {
+    format!(
+        "{}/models?output_modalities=all",
+        base_url.trim_end_matches('/')
+    )
+}
+
 async fn fetch_openai_compatible_live_models(base_url: &str, api_key: Option<&str>) -> Vec<String> {
     if cfg!(test) {
         return Vec::new();
     }
-    let url = format!(
-        "{}/models?output_modalities=all",
-        base_url.trim_end_matches('/')
-    );
+    let url = openai_compatible_models_url(base_url);
     let client = reqwest::Client::new();
     let mut request = client.get(url);
     if let Some(key) = api_key.map(str::trim).filter(|v| !v.is_empty()) {
@@ -1502,6 +1507,8 @@ mod tests {
 
     #[test]
     fn direct_api_provider_curated_models_cover_upstream_provider_tests() {
+        assert_eq!(provider_curated_models("xai")[0], "grok-build-0.1");
+        assert!(provider_curated_models("xai").contains(&"grok-4.3"));
         assert!(provider_curated_models("gmi").contains(&"zai-org/GLM-5.1-FP8"));
         assert!(provider_curated_models("gmicloud").contains(&"deepseek-ai/DeepSeek-V3.2"));
         assert!(provider_curated_models("arcee-ai").contains(&"trinity-mini"));
@@ -1549,6 +1556,14 @@ mod tests {
         assert!(provider_picker_description("google-gemini-cli").contains("Code Assist OAuth flow"));
         assert!(provider_picker_description("xai").contains("Grok"));
         assert!(provider_picker_description("qwen-oauth").contains("Reuses local Qwen CLI login"));
+    }
+
+    #[test]
+    fn openai_compatible_live_model_url_uses_resolved_base_url() {
+        assert_eq!(
+            super::openai_compatible_models_url("https://gateway.example.com/custom/v1/"),
+            "https://gateway.example.com/custom/v1/models?output_modalities=all"
+        );
     }
 
     #[tokio::test]
