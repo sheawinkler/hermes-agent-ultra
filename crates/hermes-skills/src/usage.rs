@@ -608,6 +608,7 @@ const BUNDLED_SKILL_NAMES_FALLBACK: &[&str] = &[
     "test-driven-development",
     "touchdesigner-mcp",
     "trading-debate",
+    "trading-cron",
     "trading-research",
     "webhook-subscriptions",
     "weights-and-biases",

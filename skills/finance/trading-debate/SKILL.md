@@ -73,7 +73,7 @@ delegate_task({
 
 ```
 delegate_task({
-  "task": "You are the BEAR analyst on an investment committee. Argue AGAINST or for CAUTION based ONLY on the provided run_card and context. Stress max_drawdown, overfitting, sample period, trade_count, and data limitations (HK/US stub = mock OHLCV). List 3-5 bearish evidence bullets.",
+  "task": "You are the BEAR analyst on an investment committee. Argue AGAINST or for CAUTION based ONLY on the provided run_card and context. Stress max_drawdown, overfitting, sample period, trade_count, and data limitations (US/HK OHLCV not supported for backtest). List 3-5 bearish evidence bullets.",
   "context": "<same run_card summary as bull>\\n<optional web_search headlines>"
 })
 ```

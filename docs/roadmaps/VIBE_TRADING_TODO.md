@@ -1,7 +1,7 @@
 # Trading Rust 重写 — TODO 进度
 
 > **更新时间**：2026-06-17  
-> **总体状态**：P0 ✅ 已完成，P1 核心增强 ✅ → Skills 分工 + trading-debate ✅ → Hermes 集成（memory/cron）待做
+> **总体状态**：P0 ✅ 已完成，P1 核心增强 ✅（含 Hermes memory/session_search/cron 集成）→ Skills 分工 + trading-debate ✅
 
 ---
 
@@ -124,14 +124,14 @@
   - 验收：通过 `delegate_task` 并行触发 bull 和 bear agent。
   - 验收：输入包含 symbol、strategy、run_card 摘要。
   - 验收：输出统一格式（如 `{"bull": "...", "bear": "...", "consensus": "..."}`）。
-- [ ] 记忆：风险偏好、标的池
+- [x] 记忆：风险偏好、标的池
   - 验收：使用 `memory` tool 存储用户风险等级（保守/稳健/积极）。
   - 验收：使用 `memory` tool 存储用户关注标的列表。
   - 验收：回测前自动读取风险偏好并提示。
-- [ ] 历史：`session_search` 上次回测结论
+- [x] 历史：`session_search` 上次回测结论
   - 验收：通过 `session_search` 找到最近 7 天内包含 `run_backtest` 的会话。
   - 验收：能提取上次回测的 symbol、strategy、total_return_pct。
-- [ ] 定时：`cronjob` 收盘复盘
+- [x] 定时：`cronjob` 收盘复盘
   - 验收：支持 `hermes cron` 配置每日收盘后运行预设 symbol 回测。
   - 验收：输出保存到 `~/.hermes/trading/runs/`。
 
@@ -170,7 +170,7 @@
 ### 新增 Skills
 - [ ] `trading-journal` — CSV 路径 + analyze_trade_journal
 - [ ] `trading-factor` — 何时 run_factor_ic；IC 局限
-- [ ] `trading-cron` — cronjob 收盘/周报配方
+- [x] `trading-cron` — cronjob 收盘/周报配方
 - [ ] 更新 `trading-research` — benchmark、因子、只读账户
 
 ### MCP & 离线
@@ -236,6 +236,7 @@
 | 注册 | `crates/hermes-tools/src/register/trading.rs` |
 | Skill | `skills/finance/trading-research/SKILL.md` |
 | Skill | `skills/finance/trading-debate/SKILL.md` |
+| Skill | `skills/finance/trading-cron/SKILL.md` |
 | Skill | `optional-skills/finance/stocks/SKILL.md` |
 | Parity | `crates/hermes-parity-tests/fixtures/trading_*/` |
 | 路线图 | `docs/roadmaps/VIBE_TRADING_RUST_REWRITE.md` |
