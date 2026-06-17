@@ -1,32 +1,33 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-16T02:12:15.001297+00:00`_
+_Generated from source artifacts: `2026-06-16T23:55:56.941688+00:00`_
 
 ## Snapshot
 
 - Upstream target: `upstream/main` @ `55cb4103beba5822303c06b662635e1491ae72f5`
 - Workstream snapshot generated: `2026-06-13T16:15:14-06:00`
 - Parity matrix generated: `2026-06-12T11:29:13.798398+00:00`
-- Queue snapshot generated: `2026-06-16T02:12:02.309717+00:00`
-- Proof snapshot generated: `2026-06-16T02:12:15.001297+00:00`
+- Queue snapshot generated: `2026-06-16T23:55:38.405701+00:00`
+- Proof snapshot generated: `2026-06-16T23:55:56.941688+00:00`
 
 ## Gate Status
 
-- Release gate: **FAIL**
-- CI/tree-drift gate: **FAIL**
+- Release gate: **PASS**
+- CI/tree-drift gate: **PASS**
 - Test coverage audit: **PASS**
 - SOTA harness matrix: **PASS**
-- Release gate failures: max_queue_pending_commits (actual=121.0, limit=0)
-- CI gate failures: max_commits_behind (actual=5880.0, limit=5500); max_upstream_patch_missing (actual=5657.0, limit=5000); max_queue_pending_commits (actual=121.0, limit=100)
+- Release gate failures: none
+- CI gate failures: none
+- CI gate warnings: max_commits_behind (actual=5880.0, limit=5500); max_upstream_patch_missing (actual=5657.0, limit=5000)
 
 ## Test Coverage Audit
 
 | Metric | Value |
 | --- | ---: |
-| Tracked behavior rows | 415 |
-| Covered behavior rows | 415 |
+| Tracked behavior rows | 419 |
+| Covered behavior rows | 419 |
 | Tracked behavior coverage ratio | 1.0000 |
-| Rust test functions | 3465 |
+| Rust test functions | 3535 |
 | Missing Rust test refs | 0 |
 | Critical gaps | 0 |
 
@@ -45,10 +46,10 @@ _Generated from source artifacts: `2026-06-16T02:12:15.001297+00:00`_
 
 | Metric | Value |
 | --- | ---: |
-| Total commits in queue | 5956 |
-| Pending | 121 |
-| Ported | 266 |
-| Superseded | 5499 |
+| Total commits in queue | 6132 |
+| Pending | 0 |
+| Ported | 316 |
+| Superseded | 5742 |
 
 ## Tree/Patch Drift
 

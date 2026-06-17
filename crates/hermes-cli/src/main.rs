@@ -10590,7 +10590,7 @@ const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
     },
     SetupModelOption {
         provider: "xai",
-        model: "xai:grok-3-mini",
+        model: "xai:grok-build-0.1",
         label: "xAI",
     },
     SetupModelOption {
@@ -16492,6 +16492,22 @@ mod tests {
         assert_eq!(minimax_cn.model, "minimax-cn:MiniMax-M3");
         assert!(!minimax.model.to_ascii_lowercase().contains("highspeed"));
         assert!(!minimax_cn.model.to_ascii_lowercase().contains("highspeed"));
+    }
+
+    #[test]
+    fn setup_xai_defaults_to_grok_build() {
+        let providers = setup_provider_defaults();
+        let xai = providers
+            .iter()
+            .find(|option| option.provider == "xai")
+            .expect("xai setup option");
+
+        assert_eq!(xai.model, "xai:grok-build-0.1");
+        assert_eq!(
+            setup_provider_default_base_url("xai"),
+            Some("https://api.x.ai/v1")
+        );
+        assert_eq!(setup_provider_env_keys("xai"), &["XAI_API_KEY"]);
     }
 
     #[test]

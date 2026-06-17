@@ -17,6 +17,7 @@ python3 scripts/validate-intentional-divergence.py --check --allow-warnings
 python3 scripts/generate-upstream-patch-queue.py --max-commits 0
 python3 scripts/generate-global-parity-proof.py --check-ci
 python3 scripts/generate-gpar-01-04-proof.py
+python3 scripts/generate-sota-harness-hardening.py --check
 python3 scripts/generate-parity-dashboard.py
 python3 scripts/run-upstream-surface-coverage-gate.py --upstream-ref upstream/main
 ```
@@ -36,6 +37,9 @@ By default this command fetches upstream directly from GitHub
 - `test-coverage-audit.md`: human-readable coverage audit, advisory gaps, and next harness moves
 - `sota-harness-matrix.json`: release-gated matrix for workflow replay, protocol differential contracts, and fault injection
 - `sota-harness-matrix.md`: human-readable SOTA harness domain summary
+- `harness-trend-ledger.json` / `harness-trend-ledger.md`: coverage and SOTA harness trend ledger
+- `contextlattice-replay-evidence-index.json` / `contextlattice-replay-evidence-index.md`: ContextLattice replay evidence index for SOTA harness proofs
+- `harness-budget.json` / `harness-budget.md`: cross-version review budgets for queue, coverage, and harness growth
 - `adapter-feature-matrix.json`: platform adapter + memory plugin matrix
 - `adapter-feature-matrix.md`: human-readable adapter matrix
 - `divergence-validation.json`: ownership/review freshness and coverage checks for intentional divergences

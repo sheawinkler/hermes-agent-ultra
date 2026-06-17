@@ -324,7 +324,7 @@ When using the Z.AI / GLM provider, Hermes automatically probes multiple endpoin
 
 ### xAI (Grok) — Responses API + Prompt Caching
 
-xAI is wired through the Responses API (`codex_responses` transport) for automatic reasoning support on Grok 4 models — no `reasoning_effort` parameter needed, the server reasons by default. Set `XAI_API_KEY` in `~/.hermes/.env` and pick xAI in `hermes model`, or drop `grok` as a shortcut into `/model grok-4-1-fast-reasoning`.
+xAI is wired through the Responses API (`codex_responses` transport) for automatic reasoning support on Grok models. Direct xAI setup defaults to `grok-build-0.1`; `grok-4.3` remains selectable. Set `XAI_API_KEY` in `~/.hermes/.env` and pick xAI in `hermes model`, or use `/model xai:grok-build-0.1`.
 
 When using xAI as a provider (any base URL containing `x.ai`), Hermes automatically enables prompt caching by sending the `x-grok-conv-id` header with every API request. This routes requests to the same server within a conversation session, allowing xAI's infrastructure to reuse cached system prompts and conversation history.
 

@@ -1,0 +1,135 @@
+{
+  "contextlattice_checkpoint_template": {
+    "command": "contextlattice_write -p hermes-agent-ultra -t parity/sota -f docs/parity/contextlattice-replay-evidence-index.md --stdin",
+    "project": "hermes-agent-ultra",
+    "topic": "parity/sota"
+  },
+  "generated_at_utc": "2026-06-17T00:23:10.635281+00:00",
+  "latest_gate_state": {
+    "ci_gate_pass": true,
+    "queue_pending": 0,
+    "release_gate_pass": true,
+    "sota_harness_gate_pass": true,
+    "test_coverage_gate_pass": true
+  },
+  "purpose": "Index replay, protocol, and fault-injection evidence so ContextLattice checkpoints can point to exact local artifacts.",
+  "replay_evidence_groups": [
+    {
+      "contextlattice_topic": "hermes-agent-ultra/parity/sota/workflow-replay-and-terminal-snapshots",
+      "fixtures": [
+        "crates/hermes-parity-tests/tests/fixtures/sota_workflow_replay.json"
+      ],
+      "id": "workflow-replay-and-terminal-snapshots",
+      "required_capabilities": [
+        "cli workflow replay",
+        "normalized stdout snapshots",
+        "non-TTY/PTY diagnostic snapshot"
+      ],
+      "retrieval_query": "Hermes Agent Ultra SOTA harness evidence for workflow-replay-and-terminal-snapshots including fixtures, Rust tests, failures, and queue status",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/tests/e2e_sota_workflow_replay.rs",
+          "name": "sota_workflow_replay_fixture_is_well_formed"
+        },
+        {
+          "file": "crates/hermes-cli/tests/e2e_sota_workflow_replay.rs",
+          "name": "sota_workflow_replay_executes_cli_journey_snapshots"
+        }
+      ],
+      "status": "covered_by_rust_contracts",
+      "title": "User workflow replay and terminal snapshots",
+      "why": "Protects operator journeys by replaying real CLI commands and normalized terminal-facing diagnostics."
+    },
+    {
+      "contextlattice_topic": "hermes-agent-ultra/parity/sota/protocol-differential-contracts",
+      "fixtures": [
+        "crates/hermes-parity-tests/tests/fixtures/protocol_differential_contracts.json"
+      ],
+      "id": "protocol-differential-contracts",
+      "required_capabilities": [
+        "ACP method alias normalization",
+        "ACP JSON-RPC response serialization",
+        "MCP initialize capability envelope",
+        "MCP argument coercion",
+        "gateway slash-command normalization"
+      ],
+      "retrieval_query": "Hermes Agent Ultra SOTA harness evidence for protocol-differential-contracts including fixtures, Rust tests, failures, and queue status",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-parity-tests/tests/protocol_differential_contracts.rs",
+          "name": "protocol_differential_fixture_is_complete_and_unique"
+        },
+        {
+          "file": "crates/hermes-parity-tests/tests/protocol_differential_contracts.rs",
+          "name": "protocol_differential_fixture_matches_runtime_serialization"
+        }
+      ],
+      "status": "covered_by_rust_contracts",
+      "title": "Protocol differential contracts",
+      "why": "Normalizes ACP, MCP, and gateway protocol surfaces against fixture expectations before transport-specific details hide regressions."
+    },
+    {
+      "contextlattice_topic": "hermes-agent-ultra/parity/sota/fault-injection-matrix",
+      "fixtures": [
+        "crates/hermes-agent/src/testdata/adapter_chaos_profiles.json"
+      ],
+      "id": "fault-injection-matrix",
+      "required_capabilities": [
+        "timeout recovery",
+        "HTTP 5xx failover",
+        "rate limit exhaustion",
+        "connection reset recovery",
+        "auth expiry fail-closed",
+        "malformed tool payload retry without tools",
+        "partial stream drop recovery"
+      ],
+      "retrieval_query": "Hermes Agent Ultra SOTA harness evidence for fault-injection-matrix including fixtures, Rust tests, failures, and queue status",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "chaos_harness_fixture_is_seeded_and_unique"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "chaos_harness_profiles_verify_retry_and_fallback"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "classify_error_plain_disconnect_stays_retryable"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "maybe_nous_401_diagnostic_returns_hint_for_nous_auth_failures"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "tool_payload_validation_error_detector_matches_known_provider_signatures"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "stream_mid_tool_call_silent_retry_recovers_tool_call"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "stream_text_only_drop_does_not_retry"
+        },
+        {
+          "file": "crates/hermes-parity-tests/tests/sota_harness_contracts.rs",
+          "name": "fault_injection_matrix_covers_required_classes"
+        }
+      ],
+      "status": "covered_by_rust_contracts",
+      "title": "Fault-injection matrix",
+      "why": "Exercises retry, failover, fail-closed auth, stream recovery, and malformed tool-payload recovery behavior in the Rust runtime."
+    }
+  ],
+  "schema_version": 1,
+  "source_artifacts": {
+    "global_parity_proof": "docs/parity/global-parity-proof.json",
+    "harness_budget": "docs/parity/harness-budget.json",
+    "harness_trend_ledger": "docs/parity/harness-trend-ledger.json",
+    "sota_harness_matrix": "docs/parity/sota-harness-matrix.json",
+    "test_coverage_audit": "docs/parity/test-coverage-audit.json",
+    "upstream_missing_queue": "docs/parity/upstream-missing-queue.json"
+  }
+}
