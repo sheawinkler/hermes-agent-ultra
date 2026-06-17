@@ -4342,6 +4342,13 @@ fn is_submit_shortcut(key: &KeyEvent, _input: &str) -> bool {
     use crossterm::event::{KeyCode, KeyModifiers};
     let mods = key.modifiers;
 
+    // Some PTY harnesses deliver Enter as a raw CR/LF character rather than
+    // `KeyCode::Enter`; accept both so interactive smoke tests and terminals
+    // with reduced key translation still submit slash commands.
+    if matches!(key.code, KeyCode::Char('\r' | '\n')) {
+        return true;
+    }
+
     if key.code == KeyCode::Enter {
         if mods.contains(KeyModifiers::SHIFT) {
             return false;
@@ -5212,12 +5219,16 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
     let mut last_pet_tick = Instant::now();
     app.set_stream_handle(Some(StreamHandle::from(tui.stream_sender())));
 
-    // Spawn crossterm event reader
+    // Spawn crossterm event reader on a dedicated thread. Crossterm polling and
+    // reads are synchronous; running them on the Tokio runtime can make abort
+    // + await hang during TUI shutdown if the task is inside a terminal read.
     let event_sender = tui.event_sender();
-    let event_task = tokio::spawn(async move {
-        loop {
+    let event_shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let event_shutdown_for_thread = std::sync::Arc::clone(&event_shutdown);
+    let event_thread = std::thread::spawn(move || {
+        while !event_shutdown_for_thread.load(std::sync::atomic::Ordering::Relaxed) {
             if crate::checklist::embedded_picker_active() {
-                tokio::time::sleep(Duration::from_millis(16)).await;
+                std::thread::sleep(Duration::from_millis(16));
                 continue;
             }
             if crossterm::event::poll(Duration::from_millis(16)).unwrap_or(false) {
@@ -5285,7 +5296,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
     let mut active_agent_task: Option<JoinHandle<()>> = None;
 
     // Main event loop
-    while app.running {
+    'main_loop: while app.running {
         tui.set_mouse_capture(app.mouse_enabled())
             .map_err(|e| AgentError::Config(e.to_string()))?;
 
@@ -5332,7 +5343,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                 tui.event_sender().send(Event::Interrupt).ok();
                             }
                             app.running = false;
-                            break;
+                            break 'main_loop;
                         }
 
                         if state.modal_active() {
@@ -5363,7 +5374,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                             app.interrupt_controller.interrupt(None);
                             abort_and_join_task(&mut active_agent_task).await;
                             app.running = false;
-                            break;
+                            break 'main_loop;
                         }
                         let input_changed_by_key = state.input != input_before_key;
 
@@ -5470,8 +5481,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                             state.status_message.clear();
                                             state.completions.clear();
                                             state.completion_index = None;
-                                            needs_redraw = true;
-                                            continue;
+                                            break 'main_loop;
                                         }
                                         state.begin_processing_cycle(&app.current_model);
                                         state.mark_blocking_action(format!(
@@ -5672,7 +5682,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         state.stream_needs_break = false;
                         state.active_tools.clear();
                         app.running = false;
-                        break;
+                        break 'main_loop;
                     }
                     Some(Event::Shutdown) => {
                         app.interrupt_controller.interrupt(None);
@@ -5683,14 +5693,14 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         state.stream_needs_break = false;
                         state.active_tools.clear();
                         app.running = false;
-                        break;
+                        break 'main_loop;
                     }
                     Some(Event::StreamDelta(_)) | Some(Event::StreamChunk(_)) | Some(Event::AgentDone) => {
                         // Stream events are consumed on the dedicated stream lane.
                     }
                     None => {
                         // Channel closed
-                        break;
+                        break 'main_loop;
                     }
                 }
             }
@@ -5761,9 +5771,11 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
             "Rust disk-cleanup session-end quick pass completed"
         );
     }
-    event_task.abort();
+    event_shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+    if event_thread.is_finished() {
+        let _ = event_thread.join();
+    }
     signal_task.abort();
-    let _ = event_task.await;
     let _ = signal_task.await;
 
     // Restore terminal
@@ -5902,6 +5914,28 @@ mod tests {
             }],
         ));
         assert!(!should_render_completions_popup(&state));
+    }
+
+    #[test]
+    fn test_submit_shortcut_accepts_raw_cr_lf_fallbacks() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let raw_cr = KeyEvent::new(KeyCode::Char('\r'), KeyModifiers::empty());
+        let raw_lf = KeyEvent::new(KeyCode::Char('\n'), KeyModifiers::empty());
+
+        assert!(is_submit_shortcut(&raw_cr, "/quit"));
+        assert!(is_submit_shortcut(&raw_lf, "/quit"));
+    }
+
+    #[test]
+    fn test_ctrl_c_accepts_raw_etx_fallback() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let raw_etx = KeyEvent::new(KeyCode::Char('\u{3}'), KeyModifiers::empty());
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+
+        assert!(is_ctrl_c(&raw_etx));
+        assert!(is_ctrl_c(&ctrl_c));
     }
 
     #[test]
