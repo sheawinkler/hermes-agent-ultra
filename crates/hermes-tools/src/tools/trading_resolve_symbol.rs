@@ -31,6 +31,7 @@ impl ToolHandler for ResolveAShareSymbolHandler {
         serde_json::to_string_pretty(&json!({
             "query": query,
             "symbol": symbol,
+            "_orchestration": "Call analyze_stock(symbol, use_providers=true) next for valuation/DCF/scoring — before web_search.",
         }))
         .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
     }
@@ -47,7 +48,8 @@ impl ToolHandler for ResolveAShareSymbolHandler {
 
         tool_schema(
             "resolve_a_share_symbol",
-            "Resolve A-share Chinese name or partial code to canonical symbol (600519.SH / 000001.SZ).",
+            "Resolve A-share Chinese name or 6-digit code to canonical symbol (600519.SH / 000001.SZ). \
+             After resolution, call analyze_stock for fundamentals/valuation — not web_search first.",
             JsonSchema::object(props, vec!["query".into()]),
         )
     }

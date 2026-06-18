@@ -3,12 +3,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::research::report::labels::dimension_display_name;
 use crate::research::types::FeatureVector;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DimScore {
     pub score: u8,
     pub weight: u8,
+    #[serde(default)]
+    pub display_name: String,
     pub label: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing: Vec<String>,
@@ -105,6 +108,7 @@ pub fn score_dimensions(
         DimScore {
             score: score_1 as u8,
             weight: 5,
+            display_name: String::new(),
             label: format!("ROE {last_roe:.1}% · 营收增速 {growth:+.1}% · 负债率 {debt:.0}%"),
             missing: missing_1,
             reasons_pass: vec![],
@@ -152,6 +156,7 @@ pub fn score_dimensions(
         DimScore {
             score: score_2 as u8,
             weight: 4,
+            display_name: String::new(),
             label: format!("{stage} · 均线{ma_align}"),
             missing: if stage.is_empty() {
                 vec!["stage".into()]
@@ -178,6 +183,7 @@ pub fn score_dimensions(
                 5
             },
             weight: 4,
+            display_name: String::new(),
             label: "同行对比".into(),
             missing: vec![],
             reasons_pass: vec![],
@@ -203,6 +209,7 @@ pub fn score_dimensions(
         DimScore {
             score: score_6.clamp(1, 10) as u8,
             weight: 3,
+            display_name: String::new(),
             label: format!("券商研报 {research_count} 篇"),
             missing: if research_count == 0 {
                 vec!["research_reports".into()]
@@ -239,6 +246,7 @@ pub fn score_dimensions(
         DimScore {
             score: score_7.clamp(1, 10) as u8,
             weight: 4,
+            display_name: String::new(),
             label: format!("{ind_name} · 增速 {ind_growth:+.1}% · 行业PE {ind_pe:.1}"),
             missing: if ind_name == "—" {
                 vec!["industry".into()]
@@ -281,6 +289,7 @@ pub fn score_dimensions(
         DimScore {
             score: score_10,
             weight: 5,
+            display_name: String::new(),
             label: format!(
                 "PE {} · 5 年 {pe_q} 分位",
                 val.get("pe_ttm")
@@ -328,6 +337,7 @@ pub fn score_dimensions(
         DimScore {
             score: score_12.clamp(1, 10) as u8,
             weight: 4,
+            display_name: String::new(),
             label: format!("主力 5日 {main_5d:.2} 亿 · 户数变化 {holder_chg:+.1}%"),
             missing: if main_5d == 0.0 && holder_chg == 0.0 {
                 vec!["capital_flow".into()]
@@ -345,6 +355,7 @@ pub fn score_dimensions(
         DimScore {
             score: 6,
             weight: 4,
+            display_name: String::new(),
             label: "事件驱动".into(),
             missing: vec![],
             reasons_pass: vec![],
@@ -361,6 +372,7 @@ pub fn score_dimensions(
         DimScore {
             score: (5 + (lhb_count / 2).min(3)).min(10) as u8,
             weight: 4,
+            display_name: String::new(),
             label: format!("近 30 天上榜 {lhb_count} 次"),
             missing: vec![],
             reasons_pass: vec![],
@@ -388,6 +400,7 @@ pub fn score_dimensions(
         DimScore {
             score: trap_score.clamp(1, 10) as u8,
             weight: 5,
+            display_name: String::new(),
             label: trap_label,
             missing: if events.is_null() {
                 vec!["events".into()]
@@ -399,6 +412,13 @@ pub fn score_dimensions(
         },
     );
     out.insert("19_contests".into(), neutral_dim(5, 4, "实盘比赛"));
+
+    let dim_keys: Vec<String> = out.keys().cloned().collect();
+    for key in dim_keys {
+        if let Some(d) = out.get_mut(&key) {
+            d.display_name = dimension_display_name(&key);
+        }
+    }
 
     let total_weighted: f64 = out.values().map(|d| f64::from(d.score * d.weight)).sum();
     let total_weight: f64 = out.values().map(|d| f64::from(d.weight)).sum();
@@ -419,6 +439,7 @@ fn neutral_dim(score: u8, weight: u8, label: &str) -> DimScore {
     DimScore {
         score,
         weight,
+        display_name: String::new(),
         label: label.into(),
         missing: vec![],
         reasons_pass: vec![],

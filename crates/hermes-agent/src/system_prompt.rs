@@ -476,6 +476,9 @@ impl AgentLoop {
         if tool_names.contains("kanban_show") {
             tool_guidance.push(KANBAN_GUIDANCE);
         }
+        if tool_names.contains("analyze_stock") {
+            tool_guidance.push(crate::prompt_builder::EQUITY_RESEARCH_ORCHESTRATION_GUIDANCE);
+        }
         if tool_names.contains("computer_use") {
             tool_guidance.push(COMPUTER_USE_GUIDANCE);
         }

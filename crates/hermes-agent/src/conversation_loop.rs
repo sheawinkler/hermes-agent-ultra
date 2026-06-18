@@ -717,7 +717,7 @@ async fn run_with_message_prelude(
         persist_user_idx,
         replay,
         task_hint,
-        first_user,
+        first_user.clone(),
         review_memory_at_end,
         budget_cap,
         agent.config().checkpoints_enabled,
@@ -726,6 +726,16 @@ async fn run_with_message_prelude(
         web_auxiliary,
         stream_scrubber,
     );
+    if turn_ctx.equity_research_gate.is_enabled() {
+        if let Some(sym) = hermes_tools::try_resolve_a_share_from_user_message(&first_user).await {
+            tracing::info!(symbol = %sym, "equity research: seeded symbol from user message");
+            turn_ctx.equity_research_gate.seed_pending_symbol(&sym);
+            turn_ctx.ctx.add_message(Message::system(format!(
+                "Listed-equity: resolved A-share symbol {sym} from the user's message. \
+                 Call analyze_stock(symbol=\"{sym}\", use_providers=true) before web_search or get_market_data for research."
+            )));
+        }
+    }
     let mut state = TurnState::Guard;
     loop {
         match state {

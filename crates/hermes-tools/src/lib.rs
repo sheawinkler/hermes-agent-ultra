@@ -17,6 +17,7 @@ pub mod code_execution_ptc;
 pub mod code_execution_stubs;
 pub mod concurrency;
 pub mod dispatch;
+pub mod equity_research_seed;
 pub mod kanban;
 pub mod kanban_failure;
 pub mod media_extract;
@@ -54,6 +55,7 @@ pub use toolset::{Toolset, ToolsetError, ToolsetManager};
 // Re-export dispatch
 pub use checkpoint_manager::{CheckpointManager, checkpoint_shadow_dir_id};
 pub use dispatch::{DispatchedResult, dispatch_single, dispatch_tools};
+pub use equity_research_seed::try_resolve_a_share_from_user_message;
 pub use kanban::{KANBAN_TASK_ENV, kanban_block_reason, kanban_task_from_env};
 pub use kanban_failure::{
     KanbanFailureOptions, KanbanFailureOutcome, record_iteration_budget_exhausted,

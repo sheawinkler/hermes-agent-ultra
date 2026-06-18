@@ -42,7 +42,17 @@ impl ToolHandler for GetQuoteHandler {
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to fetch quote: {e}")))?;
 
-        serde_json::to_string_pretty(&data)
+        let mut out = serde_json::to_value(&data)
+            .map_err(|e| ToolError::ExecutionFailed(format!("Serialization error: {e}")))?;
+        if is_a_share_symbol(symbol) {
+            if let Some(obj) = out.as_object_mut() {
+                obj.insert(
+                    "_orchestration".into(),
+                    json!("For A-share valuation/fundamentals on this symbol, call analyze_stock(symbol, use_providers=true) next — before web_search."),
+                );
+            }
+        }
+        serde_json::to_string_pretty(&out)
             .map_err(|e| ToolError::ExecutionFailed(format!("Serialization error: {e}")))
     }
 
@@ -74,8 +84,14 @@ impl ToolHandler for GetQuoteHandler {
         tool_schema(
             "get_quote",
             "Fetch live spot price quote. Supports US/HK (Yahoo), A-share (Eastmoney), and crypto (Binance). \
-             Use source=auto. Crypto: BTC-USDT not BTC-USD. No API key or Python. Yahoo may be geo-blocked without VPN.",
+             Use source=auto. Crypto: BTC-USDT not BTC-USD. \
+             For A-share **fundamentals/valuation/DCF** requests, prefer `analyze_stock` (not get_quote + web_search). \
+             Use get_quote alone only when the user wants spot price with no research narrative.",
             JsonSchema::object(props, vec!["symbol".into()]),
         )
     }
+}
+
+fn is_a_share_symbol(sym: &str) -> bool {
+    sym.ends_with(".SH") || sym.ends_with(".SZ")
 }

@@ -273,6 +273,15 @@ output (made-up data, invented file contents, synthesised API responses) \
 for results you couldn't actually produce. Reporting a blocker honestly \
 is always better than inventing a result.";
 
+/// Injected when `analyze_stock` is in the active toolset (not user-keyword routing).
+pub const EQUITY_RESEARCH_ORCHESTRATION_GUIDANCE: &str = "# Listed equity research (tool order)\n\
+When the user wants **fundamentals, valuation, investment merit, DCF, peers, or buy/hold/sell** on a **listed stock**:\n\
+1. Resolve symbol if needed (`resolve_a_share_symbol` for Chinese names/codes).\n\
+2. Call **`analyze_stock`** first (`use_providers=true` default). It fetches hard data, DCF, 19-dim scoring, and persona panel.\n\
+3. Call **`web_search` / `web_extract` only after** `analyze_stock`, to fill gaps in `data_confidence.missing` or qualitative dims (macro, policy, moat).\n\
+4. Use **`get_quote` alone** only for **spot price** with no valuation narrative.\n\
+Do not answer listed-stock investment questions from web snippets alone when `analyze_stock` is available.";
+
 // OpenAI GPT/Codex-specific execution guidance.  Addresses known failure modes
 // where GPT models abandon work on partial results, skip prerequisite lookups,
 // hallucinate instead of using tools, and declare "done" without verification.

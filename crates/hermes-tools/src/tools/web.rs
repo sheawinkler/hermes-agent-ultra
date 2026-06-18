@@ -102,7 +102,9 @@ impl ToolHandler for WebSearchHandler {
 
         tool_schema(
             "web_search",
-            "Search the web using the configured provider (Exa/Tavily/SearXNG/DuckDuckGo). Returns relevant results with titles, URLs, and snippets. DuckDuckGo is used by default when no API key is configured.",
+            "Search the web using the configured provider (Exa/Tavily/SearXNG/DuckDuckGo). Returns relevant results with titles, URLs, and snippets. \
+             For **listed-stock fundamentals/valuation**, call analyze_stock first; use web_search only after it returns to fill data_confidence gaps. \
+             DuckDuckGo is used by default when no API key is configured.",
             JsonSchema::object(props, vec!["query".into()]),
         )
     }
@@ -159,7 +161,8 @@ impl ToolHandler for WebExtractHandler {
 
         tool_schema(
             "web_extract",
-            "Extract clean content from a web page using Firecrawl. Returns the page text and optional links.",
+            "Extract clean content from a web page using Firecrawl. Returns the page text and optional links. \
+             For listed-stock research, call analyze_stock before web_extract unless filling a specific URL gap after analyze_stock.",
             JsonSchema::object(props, vec!["url".into()]),
         )
     }

@@ -48,6 +48,7 @@ pub mod conversation_loop;
 pub mod copilot_acp;
 pub mod credential_pool;
 pub mod credential_pool_recovery;
+pub mod equity_research_gate;
 mod error_classifier;
 pub mod evolution_ledger;
 pub mod fallback;

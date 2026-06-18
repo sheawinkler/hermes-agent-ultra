@@ -1,6 +1,6 @@
 ---
 name: equity-research
-description: "A-share stock analysis (分析一下/值不值得买/深度研报). DCF + scoring + 66-investor panel via analyze_stock. Slash: /equity-research 山西汾酒"
+description: "A-share equity research: DCF, 19-dim scoring, 66-investor panel via analyze_stock. Slash: /equity-research <name|symbol>"
 version: 0.1.0
 author: Hermes Agent
 license: MIT
@@ -22,20 +22,20 @@ Complements optional `dcf-model` (Excel) and `trading-research` (OHLCV/backtest)
 
 ## When to Use
 
-- User asks to **分析 / 分析一下 / 值不值得买 / 怎么样** a stock (by name or code)
-- User asks for **深度分析 / 研报 / DCF 估值 / 投资委员会** on a stock
+- User wants **fundamentals, valuation, DCF, investment merit, or peer comparison** on a listed stock (name or code)
 - User invokes **`/equity-research`** (optional args: stock name or symbol)
 - User wants structured JSON with `data_confidence`, `used_fallback`, persona votes
-- A-share fundamentals + valuation pipeline (600519.SH, 000001.SZ, etc.)
+- A-share pipeline (600519.SH, 000001.SZ, etc.)
 
 ## Agent Workflow
 
-No gateway keyword routing — **you** decide whether this skill applies:
+No gateway keyword routing — decide from **intent** (valuation vs spot price vs backtest):
 
-1. Read `<available_skills>` or call `skills_list` when the user asks to **analyze** a stock.
-2. If the request is **fundamental/valuation research** (not spot price, not backtest), call `skill_view(name="equity-research")` and follow this skill.
-3. Resolve Chinese name → symbol when needed (`山西汾酒` → `600809.SH`) via `get_quote` or `web_search`, then **`analyze_stock`**.
-4. If user typed **`/equity-research …`**, treat the skill as already loaded and execute the workflow below.
+1. If the request is **fundamental/valuation research**, call `skill_view(name="equity-research")` when unsure of the workflow.
+2. **`resolve_a_share_symbol`** when the user gives a Chinese name or bare 6-digit code.
+3. **`analyze_stock(symbol, use_providers=true)`** — always **before** `web_search` for research requests.
+4. **`web_search`** only after `analyze_stock`, when `data_confidence` flags gaps.
+5. If user typed **`/equity-research …`**, treat the skill as loaded and run the workflow below.
 
 ## When NOT to Use
 
@@ -53,15 +53,14 @@ No gateway keyword routing — **you** decide whether this skill applies:
 
 **Symbol format:** A-shares use `.SH` / `.SZ` (e.g. `600519.SH`). Do **not** use Yahoo suffix `.SS` — Hermes normalizes it, but prefer `.SH` in tool calls.
 
-1. **`resolve_a_share_symbol(query)`** — when user gives Chinese name (e.g. `牧原股份`, `山西汾酒`), resolve to canonical symbol **before** quote/analysis
-2. **`get_quote(symbol)`** — live price + PE (A-share: **akshare-rs** primary → Eastmoney push2 → Tencent qt fallback)
-   - If Eastmoney quote API fails → note as blocked, continue to fallback section below
-3. **`analyze_stock(symbol, use_providers=true)`** — default runs 22-dim HTTP fetchers + DCF/scoring/panel; returns `raw_dims`, `data_confidence`, `used_fallback`
+1. **`resolve_a_share_symbol(query)`** — when user gives Chinese name (e.g. `牧原股份`, `山西汾酒`), resolve to canonical symbol
+2. **`analyze_stock(symbol, use_providers=true)`** — **next** (before web). Runs 22-dim HTTP fetchers + DCF/scoring/panel; returns `raw_dims`, `data_confidence`, `used_fallback`
    - Only pass manual `fundamentals` / `peers` when providers failed or user supplied research notes
-4. **`web_search`** — **required** when `data_confidence.score < 0.5` OR `missing_dims` includes macro/policy/moat/chain:
+3. **`get_quote(symbol)`** — optional spot check; not a substitute for `analyze_stock` on research requests
+4. **`web_search`** — **after** `analyze_stock`, when `data_confidence.score < 0.5` OR `missing_dims` includes macro/policy/moat/chain:
    - supplement revenue, FCF, debt, ROE, peers, industry, policy headlines
    - Chinese queries via bing_cn may return unrelated results ("贵州" tourism when searching for Moutai). Use English queries like `"Kweichow Moutai 600519 market cap"` for financial data.
-5. **LLM narrative** — write conclusion citing:
+5. **LLM narrative** — after pasting **`summary_markdown`** from `analyze_stock` (full 19 dims + 66 judges; do not shorten to 9 rows), add conclusion citing:
    - `data_confidence.score` and `missing_dims`
    - `used_fallback` (never hide proxy/Fallback paths)
    - DCF `verdict` + persona `panel_consensus`
@@ -83,7 +82,8 @@ If both fail (push2.eastmoney.com unreachable):
 
 - If `data_confidence.score < 0.5`: **do not** claim "institutional-grade" — say data is partial; run `web_search` for gaps before final narrative
 - Always surface `used_fallback` fields in the user-facing summary
-- Persona **commentary** is LLM-generated; Rust output is `{id, vote, score, cited_rule}` only
+- Persona **commentary** is LLM-generated; Rust output is `{id, vote, score, cited_rule}` for all **66** investors in `personas.investors`
+- **`summary_markdown`** in tool JSON is the canonical chat table — paste verbatim before your narrative
 - `use_providers` defaults **true**; set `false` only for quote-only smoke tests
 - Prefer `format: "html"` + `narrative` when user asks for 研报 / readable report
 

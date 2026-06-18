@@ -224,6 +224,9 @@ pub(crate) struct TurnContext {
     pub web_research_ctrl: Option<WebResearchController>,
     pub web_auxiliary: Option<Arc<AuxiliaryClient>>,
 
+    // --- Listed-equity tool ordering (analyze_stock before web) ---
+    pub equity_research_gate: crate::equity_research_gate::EquityResearchGate,
+
     // --- Checkpoint manager ---
     pub checkpoint_mgr: hermes_tools::CheckpointManager,
 
@@ -265,6 +268,10 @@ impl TurnContext {
         stream_scrubber: Option<ThinkBlockScrubber>,
     ) -> Self {
         let governor_window_limit = governor_window_size();
+        let equity_research_gate =
+            crate::equity_research_gate::EquityResearchGate::from_tool_schemas(
+                tool_schemas.as_ref(),
+            );
         TurnContext {
             ctx,
             system_content,
@@ -332,6 +339,7 @@ impl TurnContext {
             stream_scrubber,
             web_research_ctrl,
             web_auxiliary,
+            equity_research_gate,
             checkpoint_mgr: hermes_tools::CheckpointManager::new(
                 checkpoints_enabled,
                 hermes_home.as_deref().map(Path::new),
@@ -1664,6 +1672,14 @@ async fn turn_execute_tools(agent: &AgentLoop, tc: &mut TurnContext) -> TurnStat
     // Cap concurrent delegate_task calls
     crate::tool_executor::cap_delegates(agent, &mut tool_calls);
 
+    let equity_deferred_results = tc.equity_research_gate.gate_tool_calls(&mut tool_calls);
+    if !equity_deferred_results.is_empty() {
+        tracing::info!(
+            blocked = equity_deferred_results.len(),
+            "equity research gate deferred web tool call(s)"
+        );
+    }
+
     // Web research
     let deferred_web_budget_results = if let Some(ref mut ctrl) = tc.web_research_ctrl {
         ctrl.ensure_plan_on_first_web(tc.web_auxiliary.as_ref(), &tc.first_user, &tool_calls)
@@ -1704,6 +1720,10 @@ async fn turn_execute_tools(agent: &AgentLoop, tc: &mut TurnContext) -> TurnStat
 
     let contextlattice_connect_intent = detect_contextlattice_connect_intent(tc.ctx.get_messages());
     if tool_calls.is_empty() {
+        for result in equity_deferred_results {
+            tc.ctx
+                .add_message(Message::tool_result(&result.tool_call_id, &result.content));
+        }
         for (_, result) in deferred_web_budget_results {
             tc.ctx
                 .add_message(Message::tool_result(&result.tool_call_id, &result.content));
@@ -1821,6 +1841,11 @@ async fn turn_execute_tools(agent: &AgentLoop, tc: &mut TurnContext) -> TurnStat
         if ctrl.record_results(&tool_calls, &results) {
             tc.active_tool_schemas = Arc::from(ctrl.filter_tool_schemas(tc.tool_schemas.as_ref()));
         }
+    }
+    tc.equity_research_gate
+        .record_tool_batch(&tool_calls, &results);
+    if !equity_deferred_results.is_empty() {
+        results.extend(equity_deferred_results);
     }
     if !deferred_web_budget_results.is_empty() {
         results.extend(

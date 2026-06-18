@@ -2,6 +2,8 @@
 
 use serde_json::Value;
 
+use super::labels::{DIM_ORDER, dimension_display_name};
+
 use super::svg::{render_svg_gauge, render_svg_percentile};
 
 /// Render minimal HTML table report.
@@ -103,14 +105,63 @@ th,td{{border:1px solid #ccc;padding:8px;text-align:left}}
         .and_then(|v| v.as_object())
     {
         html.push_str("<h2>19 维评分</h2><table><tr><th>维度</th><th>分数</th><th>说明</th></tr>");
-        for (k, v) in dims {
+        for key in DIM_ORDER {
+            let Some(v) = dims.get(*key) else {
+                continue;
+            };
             let score = v.get("score").and_then(|s| s.as_u64()).unwrap_or(0);
-            let label = v.get("label").and_then(|s| s.as_str()).unwrap_or("—");
+            let label = v
+                .get("label")
+                .and_then(|s| s.as_str())
+                .or_else(|| v.get("display_name").and_then(|s| s.as_str()))
+                .unwrap_or("—");
+            let name = v
+                .get("display_name")
+                .and_then(|s| s.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| dimension_display_name(key));
             html.push_str(&format!(
-                "<tr><td>{k}</td><td>{score}/10</td><td>{label}</td></tr>"
+                "<tr><td>{name}</td><td>{score}/10</td><td>{label}</td></tr>"
             ));
         }
         html.push_str("</table>");
+    }
+
+    if let Some(personas) = analysis.get("personas") {
+        if let Some(vd) = personas.get("vote_distribution") {
+            html.push_str("<h2>66 位评委投票</h2><table><tr><th>类别</th><th>人数</th></tr>");
+            for (k, label) in [
+                ("strongly_buy", "强烈买入"),
+                ("buy", "买入"),
+                ("watch", "关注"),
+                ("wait", "观望"),
+                ("avoid", "回避"),
+                ("skip", "跳过"),
+            ] {
+                let n = vd.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+                html.push_str(&format!("<tr><td>{label}</td><td>{n}</td></tr>"));
+            }
+            html.push_str("</table>");
+        }
+        if let Some(investors) = personas.get("investors").and_then(|v| v.as_array()) {
+            html.push_str(
+                "<h2>评委明细</h2><table><tr><th>评委</th><th>结论</th><th>分数</th></tr>",
+            );
+            for inv in investors {
+                let id = inv.get("id").and_then(|v| v.as_str()).unwrap_or("—");
+                let vote = inv.get("vote").and_then(|v| v.as_str()).unwrap_or("—");
+                let score = inv
+                    .get("score")
+                    .and_then(|v| v.as_f64())
+                    .map(|s| format!("{s:.0}"))
+                    .unwrap_or_else(|| "—".into());
+                html.push_str(&format!(
+                    "<tr><td>{id}</td><td>{vote}</td><td>{score}</td></tr>"
+                ));
+            }
+            html.push_str("</table>");
+        }
     }
 
     if let Some(text) = narrative {

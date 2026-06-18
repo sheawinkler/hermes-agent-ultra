@@ -8,6 +8,7 @@ use crate::research::models::{
     CompsPeer, CompsTarget, ThreeStmtResult, build_comps_table, compute_dcf, project_three_stmt,
     quick_lbo,
 };
+use crate::research::report::render_summary_markdown;
 use crate::research::scoring::{generate_panel, score_dimensions};
 use crate::research::types::{DataConfidence, FeatureVector, FundamentalsSnapshot};
 
@@ -23,6 +24,8 @@ pub struct AnalyzeStockResult {
     pub data_confidence: DataConfidence,
     pub missing_dims: Vec<String>,
     pub used_fallback: Vec<String>,
+    /// Deterministic 19-dim + 66-panel Markdown for chat (do not shorten).
+    pub summary_markdown: String,
 }
 
 /// Run full analysis pipeline on a fundamentals snapshot.
@@ -79,6 +82,10 @@ pub fn analyze_stock(
         .flat_map(|d| d.missing.clone())
         .collect();
     let panel = generate_panel(&scored, &features);
+    let data_confidence = DataConfidence::from_snapshot(snap);
+    let dcf_verdict = Some(dcf.verdict.as_str());
+    let summary_markdown =
+        render_summary_markdown(&snap.symbol, &scored, &panel, &data_confidence, dcf_verdict);
 
     AnalyzeStockResult {
         symbol: snap.symbol.clone(),
@@ -88,9 +95,10 @@ pub fn analyze_stock(
         lbo: serde_json::to_value(&lbo).unwrap_or(Value::Null),
         scores: serde_json::to_value(&scored).unwrap_or(Value::Null),
         personas: serde_json::to_value(&panel).unwrap_or(Value::Null),
-        data_confidence: DataConfidence::from_snapshot(snap),
+        data_confidence,
         missing_dims,
         used_fallback,
+        summary_markdown,
     }
 }
 

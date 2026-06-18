@@ -103,6 +103,7 @@ pub const TOOLSET_TRADING_QUOTE: &[&str] = &["get_quote"];
 /// Full quantitative research tools (OHLCV, backtest, strategies).
 pub const TOOLSET_TRADING: &[&str] = &[
     "get_quote",
+    "resolve_a_share_symbol",
     "get_market_data",
     "run_backtest",
     "get_backtest_report",

@@ -62,8 +62,16 @@ impl ToolHandler for AnalyzeStockHandler {
             return Ok(render_html_report(&val, narrative));
         }
 
-        serde_json::to_string_pretty(&result)
-            .map_err(|e| ToolError::ExecutionFailed(format!("Serialization error: {e}")))
+        if format == "markdown" {
+            return Ok(result.summary_markdown);
+        }
+
+        let json_body = serde_json::to_string_pretty(&result)
+            .map_err(|e| ToolError::ExecutionFailed(format!("Serialization error: {e}")))?;
+        Ok(format!(
+            "{}\n\n<!-- full JSON below; do not replace the markdown tables above -->\n{}",
+            result.summary_markdown, json_body
+        ))
     }
 
     fn schema(&self) -> ToolSchema {
@@ -79,7 +87,7 @@ impl ToolHandler for AnalyzeStockHandler {
             "fundamentals".into(),
             json!({
                 "type": "object",
-                "description": "Optional fundamentals JSON from web_search to enrich analysis"
+                "description": "Optional fundamentals JSON to enrich analysis when use_providers=false"
             }),
         );
         props.insert(
@@ -100,8 +108,8 @@ impl ToolHandler for AnalyzeStockHandler {
             "format".into(),
             json!({
                 "type": "string",
-                "enum": ["json", "html"],
-                "description": "Output format (default json)"
+                "enum": ["json", "markdown", "html"],
+                "description": "json (default): summary_markdown + full JSON; markdown: 19-dim + 66-judge tables only; html: one-page report"
             }),
         );
         props.insert(
@@ -114,7 +122,10 @@ impl ToolHandler for AnalyzeStockHandler {
 
         tool_schema(
             "analyze_stock",
-            "Run institutional equity research: DCF, comps, scoring, 66-investor panel. Returns data_confidence and used_fallback.",
+            "Primary tool for listed-stock research: DCF, comps, 19-dim scoring, 66-investor persona panel. \
+             Fetches A-share hard data via providers (default use_providers=true). \
+             Call this **before** web_search when the user wants valuation, fundamentals, or investment merit. \
+             Returns tool output starting with `summary_markdown` (exactly 19 dimension rows + 66 judges — do not rewrite as a shorter table).",
             JsonSchema::object(props, vec!["symbol".into()]),
         )
     }
