@@ -540,6 +540,7 @@ const BUNDLED_SKILL_NAMES_FALLBACK: &[&str] = &[
     "debugging-hermes-tui-commands",
     "design-md",
     "dogfood",
+    "equity-research",
     "dspy",
     "evaluating-llms-harness",
     "excalidraw",

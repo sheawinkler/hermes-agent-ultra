@@ -31,11 +31,11 @@ backtests without any API key or Python dependency.
 
 ## When NOT to Use
 
-- User asks for **news or research reports** → use `web_search`
+- User asks for **news or research reports** → use `web_search` or **`equity-research`** (structured DCF/panel)
 - User asks for **real-time quote only** (no backtest/history pipeline) → use bundled **`spot-quote`** skill + **`get_quote`**; `web_search` only on failure (e.g. Yahoo blocked without VPN) or for retail goods (shoes, rent, etc.)
 - User asks for **investment-committee bull/bear debate** → use **`trading-debate`** (after `run_backtest`)
 - User asks to **place orders or trade** → not supported
-- User asks about **fundamentals** (PE, revenue) → use `web_search`
+- User asks about **fundamentals** (PE, revenue) → use `web_search` or **`equity-research`** for structured DCF/panel
 - User asks for **US/HK historical K-line or backtest** → use **`get_quote`** for spot only; historical OHLCV not supported yet
 - User asks for **scheduled / cron close review** → **`trading-cron`** skill
 - User asks about markets not supported (futures, options, forex) → inform limitation

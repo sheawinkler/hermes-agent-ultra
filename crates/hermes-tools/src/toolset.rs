@@ -108,6 +108,7 @@ pub const TOOLSET_TRADING: &[&str] = &[
     "get_backtest_report",
     "list_strategies",
     "create_strategy",
+    "analyze_stock",
 ];
 
 // ---------------------------------------------------------------------------

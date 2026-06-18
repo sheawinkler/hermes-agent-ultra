@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "fixture_group": "trading_research",
+  "cases": [
+    {
+      "id": "wacc_default",
+      "op": "compute_wacc",
+      "input": {},
+      "expected": { "wacc": 0.0696 }
+    },
+    {
+      "id": "dcf_smoke",
+      "op": "compute_dcf",
+      "input": {
+        "symbol": "TEST",
+        "price": 18.5,
+        "market_cap_yi": 260,
+        "shares_outstanding_yi": 14.0,
+        "revenue_latest_yi": 52,
+        "net_margin": 12.5,
+        "pe": 35,
+        "pb": 2.8,
+        "total_debt_yi": 10,
+        "cash_yi": 40,
+        "fcf_latest_yi": 6.5,
+        "ebitda_yi": 10,
+        "equity_yi": 92
+      },
+      "expected": {
+        "intrinsic_per_share": 18.39,
+        "safety_margin_pct": -0.6,
+        "center_cell": 18.39,
+        "base_fcf_yi": 6.5
+      }
+    },
+    {
+      "id": "comps_peers",
+      "op": "build_comps",
+      "input": {
+        "target": { "price": 18.5, "pe": 35, "pb": 2.8, "eps": 0.53, "bvps": 6.6 },
+        "peers": [
+          { "pe": 28, "pb": 2.1, "ps": 3, "roe": 18, "net_margin": 14, "revenue_growth": 12 },
+          { "pe": 32, "pb": 2.5, "ps": 3.5, "roe": 16, "net_margin": 12, "revenue_growth": 10 }
+        ]
+      },
+      "expected": { "median_pe": 30.0, "implied_pe": 15.9 }
+    },
+    {
+      "id": "lbo_smoke",
+      "op": "quick_lbo",
+      "input": {
+        "symbol": "TEST",
+        "revenue_latest_yi": 52,
+        "net_margin": 12.5,
+        "ebitda_yi": 10
+      },
+      "expected": { "irr_pct": 21.7, "moic": 2.67 }
+    },
+    {
+      "id": "three_stmt_smoke",
+      "op": "project_three_stmt",
+      "input": { "symbol": "TEST", "revenue_latest_yi": 52, "equity_yi": 92 },
+      "expected": { "y5_ni": 9.82 }
+    }
+  ]
+}
