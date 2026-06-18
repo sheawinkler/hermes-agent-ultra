@@ -8,6 +8,7 @@ use tracing::warn;
 use crate::error::ServerClientError;
 use crate::flowy::DeviceActivateRequest;
 use crate::platform;
+use super::GeoIpInfo;
 
 #[derive(Debug, Clone)]
 pub struct DeviceFingerprint {
@@ -42,8 +43,9 @@ pub fn collect_fingerprint(
 pub fn build_activate_request(
     channel: &str,
     fingerprint: &DeviceFingerprint,
+    geo: Option<&GeoIpInfo>,
 ) -> DeviceActivateRequest {
-    DeviceActivateRequest {
+    let mut request = DeviceActivateRequest {
         channel: channel.to_string(),
         mac: fingerprint.mac.clone(),
         sn: fingerprint.sn.clone(),
@@ -53,13 +55,64 @@ pub fn build_activate_request(
         os_version: platform::os_version_string(),
         xpu_brand: None,
         public_ip: String::new(),
+        country: String::new(),
         country_code: String::new(),
+        province: String::new(),
+        city: String::new(),
+        region: String::new(),
+        operator: String::new(),
         postal: "0".to_string(),
         latitude: "0".to_string(),
         longitude: "0".to_string(),
         isp: String::new(),
         timezone: String::new(),
         currency: String::new(),
+    };
+
+    if let Some(geo) = geo {
+        apply_geo(&mut request, geo);
+    }
+
+    request
+}
+
+fn apply_geo(request: &mut DeviceActivateRequest, geo: &GeoIpInfo) {
+    if !geo.public_ip.is_empty() {
+        request.public_ip = geo.public_ip.clone();
+    }
+    if !geo.country.is_empty() {
+        request.country = geo.country.clone();
+    }
+    if !geo.country_code.is_empty() {
+        request.country_code = geo.country_code.clone();
+    }
+    if !geo.province.is_empty() {
+        request.province = geo.province.clone();
+    }
+    if !geo.city.is_empty() {
+        request.city = geo.city.clone();
+    }
+    if !geo.region.is_empty() {
+        request.region = geo.region.clone();
+    }
+    if !geo.operator.is_empty() {
+        request.operator = geo.operator.clone();
+        request.isp = geo.operator.clone();
+    }
+    if !geo.postal.is_empty() {
+        request.postal = geo.postal.clone();
+    }
+    if !geo.latitude.is_empty() {
+        request.latitude = geo.latitude.clone();
+    }
+    if !geo.longitude.is_empty() {
+        request.longitude = geo.longitude.clone();
+    }
+    if !geo.timezone.is_empty() {
+        request.timezone = geo.timezone.clone();
+    }
+    if !geo.currency.is_empty() {
+        request.currency = geo.currency.clone();
     }
 }
 
@@ -218,5 +271,26 @@ mod tests {
         assert_eq!(fp.sn, "SN123");
         assert!(!fp.mac.is_empty());
         assert!(!fp.cpu_chip_id.is_empty());
+    }
+
+    #[test]
+    fn apply_geo_fills_activation_fields() {
+        let fp = collect_fingerprint(Some("SN1")).expect("fp");
+        let geo = GeoIpInfo {
+            public_ip: "203.0.113.1".into(),
+            country: "China".into(),
+            country_code: "CN".into(),
+            province: "Beijing".into(),
+            city: "Beijing".into(),
+            region: "Beijing".into(),
+            operator: "China Mobile".into(),
+            ..Default::default()
+        };
+        let req = build_activate_request("flowy", &fp, Some(&geo));
+        assert_eq!(req.country, "China");
+        assert_eq!(req.province, "Beijing");
+        assert_eq!(req.operator, "China Mobile");
+        assert_eq!(req.isp, "China Mobile");
+        assert_eq!(req.public_ip, "203.0.113.1");
     }
 }

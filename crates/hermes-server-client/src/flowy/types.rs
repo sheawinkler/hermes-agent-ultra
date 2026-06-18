@@ -189,7 +189,17 @@ pub struct DeviceActivateRequest {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub public_ip: String,
     #[serde(skip_serializing_if = "String::is_empty")]
+    pub country: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub country_code: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub province: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub city: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub region: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub operator: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub postal: String,
     #[serde(skip_serializing_if = "String::is_empty")]

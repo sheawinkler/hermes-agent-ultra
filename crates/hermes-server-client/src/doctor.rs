@@ -2,6 +2,7 @@
 
 use hermes_config::ServerConfig;
 
+use crate::activation::DeviceActivation;
 use crate::auth::AuthManager;
 use crate::session::TokenSource;
 
@@ -103,6 +104,36 @@ pub async fn run_doctor(
                                         profile.id
                                     ),
                                 });
+                                match DeviceActivation::new(&hermes_home)
+                                    .try_activate_for_user(
+                                        manager.api(),
+                                        manager.session(),
+                                        profile.id,
+                                    )
+                                    .await {
+                                    Ok(true) => {
+                                        checks.push(DoctorCheck {
+                                            name: "device.activation",
+                                            ok: true,
+                                            detail: "device activation reported for this user/version"
+                                                .to_string(),
+                                        });
+                                    }
+                                    Ok(false) => {
+                                        checks.push(DoctorCheck {
+                                            name: "device.activation",
+                                            ok: true,
+                                            detail: "device activation already up to date".to_string(),
+                                        });
+                                    }
+                                    Err(err) => {
+                                        checks.push(DoctorCheck {
+                                            name: "device.activation",
+                                            ok: false,
+                                            detail: format!("activation failed: {err}"),
+                                        });
+                                    }
+                                }
                             }
                             Err(err) => {
                                 checks.push(DoctorCheck {

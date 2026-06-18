@@ -114,7 +114,7 @@ impl AuthManager {
 
         let activation = DeviceActivation::new(&self.hermes_home);
         if let Err(err) = activation
-            .try_activate_after_login(&self.api, &self.session)
+            .try_activate_for_user(&self.api, &self.session, profile.id)
             .await
         {
             warn!(error = %err, "device activation failed after login");
@@ -151,6 +151,18 @@ impl AuthManager {
         let profile = self.api.get_user_me(&self.session).await?;
         self.profile_store.save(&profile).await?;
         Ok(profile)
+    }
+
+    /// Best-effort activation for the current user and app version (no-op if already reported).
+    pub async fn ensure_device_activation(&self) -> Result<bool, ServerClientError> {
+        let status = self.whoami().await?;
+        if !status.is_logged_in() {
+            return Ok(false);
+        }
+        let profile = self.fetch_profile().await?;
+        DeviceActivation::new(&self.hermes_home)
+            .try_activate_for_user(&self.api, &self.session, profile.id)
+            .await
     }
 
     pub async fn cached_profile(&self) -> Result<Option<UserMe>, ServerClientError> {
