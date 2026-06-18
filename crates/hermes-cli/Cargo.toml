@@ -25,6 +25,7 @@ hermes-core = { workspace = true }
 hermes-agent = { workspace = true }
 hermes-tools = { workspace = true, features = ["full"] }
 hermes-config = { workspace = true }
+hermes-bundled-rg = { workspace = true }
 hermes-gateway = { workspace = true, features = [
     "telegram",
     "discord",

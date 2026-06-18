@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use hermes_bundled_rg;
 use hermes_config::hermes_home;
 use reqwest::Client;
 use serde::Deserialize;
@@ -36,6 +37,22 @@ fn rg_binary_name() -> &'static str {
     if cfg!(windows) { "rg.exe" } else { "rg" }
 }
 
+fn materialize_bundled(dest: &Path) -> Result<(), InstallError> {
+    hermes_bundled_rg::materialize(dest).map_err(|e| InstallError::Download(e.to_string()))
+}
+
+fn network_fallback_enabled() -> bool {
+    std::env::var("HERMES_RG_NETWORK_FALLBACK")
+        .ok()
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn ripgrep_target_suffix() -> Result<&'static str, InstallError> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("windows", "x86_64") => Ok("x86_64-pc-windows-msvc"),
@@ -63,27 +80,36 @@ async fn resolve_ripgrep_asset(client: &Client) -> Result<(String, String), Inst
         }
     }
 
-    let resp = client
-        .get("https://api.github.com/repos/BurntSushi/ripgrep/releases/latest")
-        .header("User-Agent", "hermes-agent-ultra/dep-install")
-        .send()
-        .await
-        .map_err(|e| InstallError::Version(e.to_string()))?;
-    let release: GhRelease = resp
-        .json()
-        .await
-        .map_err(|e| InstallError::Version(e.to_string()))?;
-    let tag = release.tag_name.clone();
-    let asset_name = format!("ripgrep-{}-{suffix}.{ext}", tag.trim_start_matches('v'));
-    let direct = release
-        .assets
-        .iter()
-        .find(|asset| asset.name == asset_name)
-        .map(|asset| asset.browser_download_url.clone())
-        .unwrap_or_else(|| {
-            format!("https://github.com/BurntSushi/ripgrep/releases/download/{tag}/{asset_name}")
-        });
-    Ok((asset_name, direct))
+    let bundled = hermes_bundled_rg::version();
+    let archive = format!("ripgrep-{bundled}-{suffix}.{ext}");
+    let url =
+        format!("https://github.com/BurntSushi/ripgrep/releases/download/{bundled}/{archive}");
+    if network_fallback_enabled() {
+        let resp = client
+            .get("https://api.github.com/repos/BurntSushi/ripgrep/releases/latest")
+            .header("User-Agent", "hermes-agent-ultra/dep-install")
+            .send()
+            .await
+            .map_err(|e| InstallError::Version(e.to_string()))?;
+        let release: GhRelease = resp
+            .json()
+            .await
+            .map_err(|e| InstallError::Version(e.to_string()))?;
+        let tag = release.tag_name.clone();
+        let asset_name = format!("ripgrep-{}-{suffix}.{ext}", tag.trim_start_matches('v'));
+        let direct = release
+            .assets
+            .iter()
+            .find(|asset| asset.name == asset_name)
+            .map(|asset| asset.browser_download_url.clone())
+            .unwrap_or_else(|| {
+                format!(
+                    "https://github.com/BurntSushi/ripgrep/releases/download/{tag}/{asset_name}"
+                )
+            });
+        return Ok((asset_name, direct));
+    }
+    Ok((archive, url))
 }
 
 fn archive_ext() -> &'static str {
@@ -103,12 +129,8 @@ fn ripgrep_mirrors(primary: &str, tag: &str, archive: &str) -> Vec<String> {
     }
 }
 
-pub async fn ensure_ripgrep(quiet: bool) -> Result<PathBuf, InstallError> {
+async fn ensure_ripgrep_network(quiet: bool) -> Result<PathBuf, InstallError> {
     let dest = managed_rg_path();
-    if dest.is_file() {
-        return Ok(dest);
-    }
-
     let client = http_client()?;
     let (archive, primary_url) = resolve_ripgrep_asset(&client).await?;
     let tag = archive
@@ -133,9 +155,47 @@ pub async fn ensure_ripgrep(quiet: bool) -> Result<PathBuf, InstallError> {
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     if !quiet {
-        info!(path = %dest.display(), "ripgrep installed");
+        info!(path = %dest.display(), "ripgrep installed from network");
     }
     Ok(dest)
+}
+
+pub async fn ensure_ripgrep(quiet: bool) -> Result<PathBuf, InstallError> {
+    let dest = managed_rg_path();
+    if dest.is_file() {
+        return Ok(dest);
+    }
+
+    std::fs::create_dir_all(hermes_home().join("bin"))?;
+    let dest_for_bundle = dest.clone();
+    match tokio::task::spawn_blocking(move || materialize_bundled(&dest_for_bundle)).await {
+        Ok(Ok(())) if dest.is_file() => {
+            if !quiet {
+                info!(
+                    path = %dest.display(),
+                    version = hermes_bundled_rg::version(),
+                    "ripgrep materialized from build-time bundle"
+                );
+            }
+            return Ok(dest);
+        }
+        Ok(Err(e)) if !quiet => {
+            tracing::debug!(error = %e, "bundled ripgrep materialize failed");
+        }
+        Err(e) if !quiet => {
+            tracing::debug!(error = %e, "bundled ripgrep task join failed");
+        }
+        _ => {}
+    }
+
+    if network_fallback_enabled() {
+        return ensure_ripgrep_network(quiet).await;
+    }
+
+    Err(InstallError::Download(
+        "bundled ripgrep unavailable; set HERMES_RG_NETWORK_FALLBACK=1 to download at runtime"
+            .into(),
+    ))
 }
 
 #[cfg(test)]

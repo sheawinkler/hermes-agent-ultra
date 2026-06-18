@@ -113,6 +113,7 @@ fn main_thread_entry() -> Result<(), i32> {
 }
 
 async fn async_main(cli: Cli) {
+    hermes_cli::runtime_dep_install::register_dep_gate_hooks();
     dispatch::run(cli).await;
 }
 

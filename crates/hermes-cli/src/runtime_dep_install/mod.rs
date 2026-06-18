@@ -1,6 +1,7 @@
 //! Silent runtime dependency installation.
 
 mod browser;
+mod coordinator;
 mod download;
 mod ffmpeg;
 mod node;
@@ -11,6 +12,7 @@ use hermes_config::dep_check::{RuntimeDep, is_available};
 use tracing::{debug, info, warn};
 
 pub use browser::ensure_browser;
+pub use coordinator::register_dep_gate_hooks;
 pub use download::InstallError;
 pub use ffmpeg::ensure_ffmpeg;
 pub use node::ensure_node;

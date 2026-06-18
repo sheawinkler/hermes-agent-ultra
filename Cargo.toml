@@ -12,6 +12,7 @@ members = [
     "crates/hermes-mcp",
     "crates/hermes-environments",
     "crates/hermes-config",
+    "crates/hermes-bundled-rg",
     "crates/hermes-intelligence",
     "crates/hermes-acp",
     "crates/hermes-eval",
@@ -48,6 +49,7 @@ hermes-skills = { path = "crates/hermes-skills" }
 hermes-mcp = { path = "crates/hermes-mcp" }
 hermes-environments = { path = "crates/hermes-environments" }
 hermes-config = { path = "crates/hermes-config" }
+hermes-bundled-rg = { path = "crates/hermes-bundled-rg" }
 hermes-intelligence = { path = "crates/hermes-intelligence" }
 hermes-acp = { path = "crates/hermes-acp" }
 hermes-eval = { path = "crates/hermes-eval" }

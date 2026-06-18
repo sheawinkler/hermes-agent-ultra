@@ -206,6 +206,27 @@ impl AgentLoop {
                 results.push(ToolResult::err(&tool_call_id, msg));
                 continue;
             }
+            let deps = hermes_config::deps_for_tool(&tool_name);
+            if !deps.is_empty()
+                && deps
+                    .iter()
+                    .any(|dep| !hermes_config::dep_is_available(*dep))
+            {
+                let status_cb = self.callbacks.status_callback.clone();
+                let notify = Arc::new(move |msg: String| {
+                    if let Some(cb) = &status_cb {
+                        cb("dep_install", &msg);
+                    }
+                });
+                if !hermes_config::await_tool_deps(&tool_name, notify).await {
+                    let missing = hermes_config::dep_gate::missing_dep_labels(deps);
+                    results.push(ToolResult::err(
+                        &tool_call_id,
+                        format!("运行时依赖安装未完成 ({missing})，无法执行 `{tool_name}`"),
+                    ));
+                    continue;
+                }
+            }
             if tool_name == "delegate_task" {
                 if current_delegate_depth >= max_delegate_depth {
                     results.push(ToolResult::err(
