@@ -1,12 +1,20 @@
-//! Silent runtime dependency installation (ffmpeg and future deps).
+//! Silent runtime dependency installation.
 
+mod browser;
+mod download;
 mod ffmpeg;
+mod node;
 mod probe;
+mod ripgrep;
 
 use hermes_config::dep_check::{RuntimeDep, is_available};
 use tracing::{debug, info, warn};
 
+pub use browser::ensure_browser;
+pub use download::InstallError;
 pub use ffmpeg::ensure_ffmpeg;
+pub use node::ensure_node;
+pub use ripgrep::ensure_ripgrep;
 
 const AUTO_ENSURE_ENV: &str = "HERMES_AUTO_ENSURE_DEPS";
 
@@ -30,31 +38,33 @@ pub async fn ensure_runtime_dep(dep: RuntimeDep, quiet: bool) -> bool {
         return true;
     }
 
-    let ok = match dep {
-        RuntimeDep::Ffmpeg => ensure_ffmpeg(quiet).await.is_ok(),
-        RuntimeDep::Node | RuntimeDep::Browser | RuntimeDep::Ripgrep => {
-            if !quiet {
-                eprintln!(
-                    "Automatic install for {dep} is not implemented yet; run `hermes gateway setup`."
-                );
-            } else {
-                warn!(
-                    %dep,
-                    "automatic install not implemented; run `hermes gateway setup`"
-                );
-            }
-            false
-        }
+    let result: Result<(), InstallError> = match dep {
+        RuntimeDep::Ffmpeg => ensure_ffmpeg(quiet)
+            .await
+            .map(|_| ())
+            .map_err(|e| InstallError::Download(e.to_string())),
+        RuntimeDep::Node => ensure_node(quiet).await.map(|_| ()),
+        RuntimeDep::Ripgrep => ensure_ripgrep(quiet).await.map(|_| ()),
+        RuntimeDep::Browser => ensure_browser(quiet).await.map(|_| ()),
     };
 
-    if ok && is_available(dep) {
+    let ok = result.is_ok();
+    if let Err(e) = result {
+        if quiet {
+            warn!(%dep, error = %e, "runtime dependency auto-install failed");
+        } else {
+            eprintln!("Failed to install {dep}: {e}");
+        }
+    } else if is_available(dep) {
         if !quiet {
             info!(%dep, "runtime dependency installed");
         }
-        true
     } else {
-        false
+        warn!(%dep, "install finished but dependency still not detected");
+        return false;
     }
+
+    ok && is_available(dep)
 }
 
 /// Ensure all missing deps when [`auto_ensure_enabled`] is true.
