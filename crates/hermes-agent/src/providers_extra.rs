@@ -21,9 +21,6 @@ fn openrouter_compatible_extra_body(extra_body: Option<&Value>) -> Option<Value>
     };
 
     let mut cleaned = map.clone();
-    cleaned.remove("strict_tool_calls");
-    cleaned.remove("strict_api");
-    cleaned.remove("provider_strict");
 
     // Nous' inference API is OpenRouter-compatible. Use the documented
     // cross-provider reasoning object instead of leaking provider-specific or
@@ -497,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn nous_extra_body_uses_openrouter_reasoning_shape_and_strips_local_controls() {
+    fn nous_extra_body_uses_openrouter_reasoning_shape_and_preserves_local_controls() {
         let extra = serde_json::json!({
             "strict_api": true,
             "provider_strict": true,
@@ -505,8 +502,8 @@ mod tests {
             "temperature": 0.1
         });
         let cleaned = openrouter_compatible_extra_body(Some(&extra)).expect("cleaned body");
-        assert!(cleaned.get("strict_api").is_none());
-        assert!(cleaned.get("provider_strict").is_none());
+        assert_eq!(cleaned["strict_api"], true);
+        assert_eq!(cleaned["provider_strict"], true);
         assert!(cleaned.get("reasoning_effort").is_none());
         assert_eq!(cleaned["reasoning"]["effort"], "xhigh");
         assert_eq!(cleaned["temperature"], 0.1);
