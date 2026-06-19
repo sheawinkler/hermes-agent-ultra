@@ -7637,7 +7637,7 @@ async fn fresh_nous_login_and_save(
     let state = login_nous_device_code(NousDeviceCodeOptions::default()).await?;
     let auth_path = save_nous_auth_state(&state)?;
     let resolved = resolve_nous_runtime_credentials(
-        true,
+        false,
         true,
         NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
         DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
@@ -8052,13 +8052,17 @@ fn portal_action_kind(action: Option<&str>) -> Result<PortalActionKind, AgentErr
     }
 }
 
+fn portal_setup_auth_action() -> &'static str {
+    "login"
+}
+
 async fn run_portal(cli: Cli, action: Option<String>) -> Result<(), AgentError> {
     match portal_action_kind(action.as_deref())? {
         PortalActionKind::Setup => {
             println!("Nous Portal setup ({DEFAULT_NOUS_PORTAL_URL})");
             run_auth(
                 cli,
-                Some("setup".to_string()),
+                Some(portal_setup_auth_action().to_string()),
                 Some("nous".to_string()),
                 None,
                 None,
@@ -15336,6 +15340,11 @@ mod tests {
                 PortalActionKind::Setup
             );
         }
+    }
+
+    #[test]
+    fn portal_setup_dispatches_to_auth_login() {
+        assert_eq!(portal_setup_auth_action(), "login");
     }
 
     #[test]
