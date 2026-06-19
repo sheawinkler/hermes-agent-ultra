@@ -1239,6 +1239,52 @@ fn set_nous_agent_key_from_invoke_jwt(state: &mut NousAuthState) {
     state.agent_key_obtained_at = Some(obtained_at);
 }
 
+pub fn nous_auth_state_from_runtime_token(
+    access_token: &str,
+    refresh_token: Option<String>,
+    token_type: Option<&str>,
+    scope: Option<String>,
+    expires_at: Option<String>,
+) -> Result<NousAuthState, AgentError> {
+    let access_token = access_token.trim().to_string();
+    let scope = scope
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| DEFAULT_NOUS_SCOPE.to_string());
+    let now = Utc::now();
+    let mut state = NousAuthState {
+        portal_base_url: env_or_default("NOUS_PORTAL_BASE_URL", DEFAULT_NOUS_PORTAL_URL)
+            .trim_end_matches('/')
+            .to_string(),
+        inference_base_url: env_or_default("NOUS_INFERENCE_BASE_URL", DEFAULT_NOUS_INFERENCE_URL)
+            .trim_end_matches('/')
+            .to_string(),
+        client_id: DEFAULT_NOUS_CLIENT_ID.to_string(),
+        scope: Some(scope),
+        token_type: token_type
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Bearer")
+            .to_string(),
+        access_token,
+        refresh_token,
+        obtained_at: now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        expires_at,
+        expires_in: None,
+        agent_key: None,
+        agent_key_id: None,
+        agent_key_expires_at: None,
+        agent_key_expires_in: None,
+        agent_key_reused: None,
+        agent_key_obtained_at: None,
+    };
+    assert_nous_invoke_jwt_usable(&state, None, NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS)?;
+    set_nous_agent_key_from_invoke_jwt(&mut state);
+    Ok(state)
+}
+
 fn assert_nous_invoke_jwt_usable(
     state: &NousAuthState,
     access_token: Option<&str>,
