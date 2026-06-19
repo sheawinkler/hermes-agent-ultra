@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD as BASE64_URL_SAFE_NO_PAD;
+use base64::engine::general_purpose::{
+    URL_SAFE as BASE64_URL_SAFE, URL_SAFE_NO_PAD as BASE64_URL_SAFE_NO_PAD,
+};
 use base64::Engine as _;
 use chrono::Utc;
 use hermes_core::AgentError;
@@ -17,7 +19,9 @@ use sha2::{Digest, Sha256};
 pub const DEFAULT_NOUS_PORTAL_URL: &str = "https://portal.nousresearch.com";
 pub const DEFAULT_NOUS_INFERENCE_URL: &str = "https://inference-api.nousresearch.com/v1";
 pub const DEFAULT_NOUS_CLIENT_ID: &str = "hermes-cli";
-pub const DEFAULT_NOUS_SCOPE: &str = "inference:mint_agent_key";
+pub const DEFAULT_NOUS_SCOPE: &str = NOUS_INFERENCE_INVOKE_SCOPE;
+pub const NOUS_INFERENCE_INVOKE_SCOPE: &str = "inference:invoke";
+pub const NOUS_AUTH_PATH_INVOKE_JWT: &str = "invoke_jwt";
 pub const DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS: u32 = 30 * 60;
 pub const NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS: i64 = 120;
 const NOUS_DEVICE_AUTH_POLL_INTERVAL_CAP_SECONDS: u64 = 1;
@@ -275,18 +279,6 @@ struct NousTokenResponse {
     token_type: Option<String>,
     scope: Option<String>,
     expires_in: Option<i64>,
-    inference_base_url: Option<String>,
-    error: Option<String>,
-    error_description: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NousAgentKeyResponse {
-    api_key: Option<String>,
-    key_id: Option<String>,
-    expires_at: Option<String>,
-    expires_in: Option<i64>,
-    reused: Option<bool>,
     inference_base_url: Option<String>,
     error: Option<String>,
     error_description: Option<String>,
@@ -1120,19 +1112,155 @@ fn timestamp_is_expiring(expires_at: Option<&str>, skew_seconds: i64) -> bool {
     remaining <= skew_seconds.max(0)
 }
 
-fn nous_agent_key_is_usable(state: &NousAuthState, min_ttl_seconds: u32) -> bool {
-    if state
-        .agent_key
-        .as_deref()
-        .map(str::trim)
-        .is_none_or(|v| v.is_empty())
-    {
+fn decode_jwt_claims(token: &str) -> Option<Value> {
+    let payload = token.trim().split('.').nth(1)?;
+    let decoded = BASE64_URL_SAFE_NO_PAD
+        .decode(payload)
+        .or_else(|_| BASE64_URL_SAFE.decode(payload))
+        .ok()?;
+    serde_json::from_slice(&decoded).ok()
+}
+
+fn collect_scope_values(scopes: &mut HashSet<String>, value: Option<&Value>) {
+    match value {
+        Some(Value::String(raw)) => {
+            for part in raw.replace(',', " ").split_whitespace() {
+                let cleaned = part.trim();
+                if !cleaned.is_empty() {
+                    scopes.insert(cleaned.to_string());
+                }
+            }
+        }
+        Some(Value::Array(values)) => {
+            for item in values {
+                collect_scope_values(scopes, Some(item));
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_scope_string(scopes: &mut HashSet<String>, value: Option<&str>) {
+    if let Some(raw) = value {
+        collect_scope_values(scopes, Some(&Value::String(raw.to_string())));
+    }
+}
+
+fn nous_invoke_jwt_status(
+    token: &str,
+    scope: Option<&str>,
+    expires_at: Option<&str>,
+    min_ttl_seconds: i64,
+) -> Option<&'static str> {
+    let Some(claims) = decode_jwt_claims(token) else {
+        return Some("access_token_not_jwt");
+    };
+    let mut scopes = HashSet::new();
+    collect_scope_string(&mut scopes, scope);
+    collect_scope_values(&mut scopes, claims.get("scope"));
+    collect_scope_values(&mut scopes, claims.get("scp"));
+    if !scopes.contains(NOUS_INFERENCE_INVOKE_SCOPE) {
+        return Some("missing_inference_invoke_scope");
+    }
+
+    let skew = min_ttl_seconds.max(0);
+    if let Some(exp) = claims.get("exp").and_then(Value::as_f64) {
+        if exp <= (Utc::now().timestamp() + skew) as f64 {
+            return Some("invoke_jwt_expiring");
+        }
+        return None;
+    }
+    if timestamp_is_expiring(expires_at, skew) {
+        return Some("invoke_jwt_expiry_unknown_or_expiring");
+    }
+    None
+}
+
+#[cfg(test)]
+fn nous_invoke_jwt_is_usable(
+    token: &str,
+    scope: Option<&str>,
+    expires_at: Option<&str>,
+    min_ttl_seconds: i64,
+) -> bool {
+    if token.trim().is_empty() {
         return false;
     }
-    !timestamp_is_expiring(
-        state.agent_key_expires_at.as_deref(),
-        i64::from(min_ttl_seconds.max(60)),
-    )
+    nous_invoke_jwt_status(token, scope, expires_at, min_ttl_seconds).is_none()
+}
+
+fn nous_jwt_expires_at(token: &str, fallback_expires_at: Option<&str>) -> Option<String> {
+    if let Some(claims) = decode_jwt_claims(token) {
+        if let Some(exp) = claims.get("exp").and_then(Value::as_i64) {
+            if let Some(dt) = chrono::DateTime::<Utc>::from_timestamp(exp, 0) {
+                return Some(dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+            }
+        }
+    }
+    fallback_expires_at
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
+fn set_nous_agent_key_from_invoke_jwt(state: &mut NousAuthState) {
+    let access_token = state.access_token.trim().to_string();
+    if access_token.is_empty() {
+        return;
+    }
+    let obtained_at = if state.agent_key.as_deref() == Some(access_token.as_str()) {
+        state
+            .agent_key_obtained_at
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    } else {
+        None
+    }
+    .unwrap_or_else(|| Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+
+    let expires_at = nous_jwt_expires_at(&access_token, state.expires_at.as_deref());
+    let expires_in = expires_at
+        .as_deref()
+        .and_then(parse_iso_timestamp_utc)
+        .map(|dt| (dt - Utc::now()).num_seconds().max(0))
+        .or(state.expires_in);
+
+    if let Some(value) = expires_at.clone() {
+        state.expires_at = Some(value);
+        state.expires_in = expires_in;
+    }
+    state.agent_key = Some(access_token);
+    state.agent_key_id = None;
+    state.agent_key_expires_at = expires_at;
+    state.agent_key_expires_in = expires_in;
+    state.agent_key_reused = Some(false);
+    state.agent_key_obtained_at = Some(obtained_at);
+}
+
+fn assert_nous_invoke_jwt_usable(
+    state: &NousAuthState,
+    access_token: Option<&str>,
+    min_ttl_seconds: i64,
+) -> Result<(), AgentError> {
+    let token = access_token.unwrap_or(state.access_token.as_str()).trim();
+    let reason = if token.is_empty() {
+        Some("access_token_not_jwt")
+    } else {
+        nous_invoke_jwt_status(
+            token,
+            state.scope.as_deref(),
+            state.expires_at.as_deref(),
+            min_ttl_seconds,
+        )
+    };
+    if let Some(reason) = reason {
+        return Err(AgentError::AuthFailed(format!(
+            "Nous Portal access token is not a usable inference JWT ({reason}). Re-authenticate with: hermes auth add nous"
+        )));
+    }
+    Ok(())
 }
 
 async fn refresh_nous_access_token(
@@ -1219,75 +1347,11 @@ async fn refresh_nous_access_token(
     Ok(())
 }
 
-async fn mint_nous_agent_key(
-    state: &mut NousAuthState,
-    client: &reqwest::Client,
-    min_key_ttl_seconds: u32,
-) -> Result<(), AgentError> {
-    let access_token = state.access_token.trim().to_string();
-    if access_token.is_empty() {
-        return Err(AgentError::AuthFailed(
-            "No Nous OAuth access token available to mint runtime agent key.".into(),
-        ));
-    }
-    let portal_base_url = state.portal_base_url.trim_end_matches('/').to_string();
-    let response = client
-        .post(format!("{portal_base_url}/api/oauth/agent-key"))
-        .bearer_auth(access_token)
-        .json(&serde_json::json!({
-            "min_ttl_seconds": min_key_ttl_seconds.max(60),
-        }))
-        .send()
-        .await
-        .map_err(|e| AgentError::AuthFailed(format!("Nous agent key mint failed: {}", e)))?;
-    let status = response.status();
-    let body = response.text().await.map_err(|e| {
-        AgentError::AuthFailed(format!("Nous agent key mint response read failed: {}", e))
-    })?;
-    if !status.is_success() {
-        let parsed = serde_json::from_str::<NousAgentKeyResponse>(&body).ok();
-        let detail = parsed
-            .and_then(|payload| payload.error_description.or(payload.error))
-            .or_else(|| extract_error_message(&body))
-            .unwrap_or(body);
-        return Err(AgentError::AuthFailed(format!(
-            "Nous agent key mint failed ({}): {}",
-            status, detail
-        )));
-    }
-    let payload: NousAgentKeyResponse = serde_json::from_str(&body)
-        .map_err(|e| AgentError::AuthFailed(format!("invalid Nous agent key response: {}", e)))?;
-    let agent_key = payload
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| AgentError::AuthFailed("Nous agent key response missing api_key".into()))?
-        .to_string();
-
-    state.agent_key = Some(agent_key);
-    state.agent_key_id = payload.key_id;
-    state.agent_key_expires_at = payload.expires_at;
-    state.agent_key_expires_in = payload.expires_in;
-    state.agent_key_reused = payload.reused;
-    state.agent_key_obtained_at =
-        Some(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
-    if let Some(inference_url) = payload
-        .inference_base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        state.inference_base_url = inference_url.trim_end_matches('/').to_string();
-    }
-    Ok(())
-}
-
 pub async fn resolve_nous_runtime_credentials(
     force_refresh: bool,
     refresh_if_expiring: bool,
     refresh_skew_seconds: i64,
-    min_key_ttl_seconds: u32,
+    _min_key_ttl_seconds: u32,
 ) -> Result<NousRuntimeCredentials, AgentError> {
     let mut state = if let Some(raw_state) = read_provider_auth_state("nous")? {
         parse_nous_oauth_state(raw_state).ok_or_else(|| {
@@ -1333,38 +1397,34 @@ pub async fn resolve_nous_runtime_credentials(
         .build()
         .map_err(|e| AgentError::Io(format!("build Nous OAuth client: {}", e)))?;
 
-    let min_key_ttl_seconds = min_key_ttl_seconds.max(60);
-    let mut used_cached_key = true;
-
-    let should_refresh_access = force_refresh
-        || (refresh_if_expiring
-            && timestamp_is_expiring(state.expires_at.as_deref(), refresh_skew_seconds));
+    let invoke_jwt_status = nous_invoke_jwt_status(
+        &state.access_token,
+        state.scope.as_deref(),
+        state.expires_at.as_deref(),
+        refresh_skew_seconds,
+    );
+    let should_refresh_access =
+        force_refresh || (refresh_if_expiring && invoke_jwt_status.is_some());
     if should_refresh_access {
-        refresh_nous_access_token(&mut state, &client).await?;
-        used_cached_key = false;
-    }
-
-    let should_mint = force_refresh || !nous_agent_key_is_usable(&state, min_key_ttl_seconds);
-    if should_mint {
-        if let Err(err) = mint_nous_agent_key(&mut state, &client, min_key_ttl_seconds).await {
-            let err_text = err.to_string().to_ascii_lowercase();
-            let can_retry_refresh = state
-                .refresh_token
-                .as_deref()
-                .map(str::trim)
-                .is_some_and(|v| !v.is_empty())
-                && (err_text.contains("invalid_token")
-                    || err_text.contains("invalid grant")
-                    || err_text.contains("401"));
-            if can_retry_refresh {
-                refresh_nous_access_token(&mut state, &client).await?;
-                mint_nous_agent_key(&mut state, &client, min_key_ttl_seconds).await?;
+        if state
+            .refresh_token
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(|v| v.is_empty())
+        {
+            let reason = if force_refresh {
+                "force_refresh"
             } else {
-                return Err(err);
-            }
+                invoke_jwt_status.unwrap_or("access_unusable")
+            };
+            return Err(AgentError::AuthFailed(format!(
+                "Nous Portal access token is not a usable inference JWT ({reason}) and no refresh token is available. Re-authenticate with: hermes auth add nous"
+            )));
         }
-        used_cached_key = false;
+        refresh_nous_access_token(&mut state, &client).await?;
     }
+    assert_nous_invoke_jwt_usable(&state, None, refresh_skew_seconds)?;
+    set_nous_agent_key_from_invoke_jwt(&mut state);
 
     state.inference_base_url = state.inference_base_url.trim_end_matches('/').to_string();
     let _ = save_nous_auth_state(&state)?;
@@ -1392,11 +1452,7 @@ pub async fn resolve_nous_runtime_credentials(
         key_id: state.agent_key_id,
         expires_at,
         expires_in,
-        source: if used_cached_key {
-            "cache".to_string()
-        } else {
-            "portal".to_string()
-        },
+        source: NOUS_AUTH_PATH_INVOKE_JWT.to_string(),
         refresh_token: state.refresh_token,
         token_type: state.token_type,
         scope: state.scope,
@@ -2710,8 +2766,6 @@ pub async fn login_nous_device_code(
     } else {
         15.0
     };
-    let min_key_ttl_seconds = options.min_key_ttl_seconds.max(60);
-
     let client = reqwest::Client::builder()
         .user_agent(format!("hermes-agent-ultra/{}", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs_f64(timeout_secs))
@@ -2881,49 +2935,8 @@ pub async fn login_nous_device_code(
         (now + chrono::Duration::seconds(secs)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
     });
 
-    let mint_resp = client
-        .post(format!("{portal_base_url}/api/oauth/agent-key"))
-        .bearer_auth(&access_token)
-        .json(&serde_json::json!({
-            "min_ttl_seconds": min_key_ttl_seconds,
-        }))
-        .send()
-        .await
-        .map_err(|e| AgentError::AuthFailed(format!("agent key mint request failed: {}", e)))?;
-    let mint_status = mint_resp.status();
-    let mint_body = mint_resp.text().await.map_err(|e| {
-        AgentError::AuthFailed(format!("agent key mint response read failed: {}", e))
-    })?;
-    if !mint_status.is_success() {
-        let parsed = serde_json::from_str::<NousAgentKeyResponse>(&mint_body).ok();
-        let detail = parsed
-            .and_then(|payload| payload.error_description.or(payload.error))
-            .or_else(|| extract_error_message(&mint_body))
-            .unwrap_or(mint_body);
-        if detail.contains("subscription_required") {
-            return Err(AgentError::AuthFailed(format!(
-                "Nous subscription required. Subscribe at {}/billing",
-                portal_base_url
-            )));
-        }
-        return Err(AgentError::AuthFailed(format!(
-            "Nous agent key mint failed ({}): {}",
-            mint_status, detail
-        )));
-    }
-    let mint_payload: NousAgentKeyResponse = serde_json::from_str(&mint_body)
-        .map_err(|e| AgentError::AuthFailed(format!("invalid agent key response: {}", e)))?;
-    let agent_key = mint_payload
-        .api_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| AgentError::AuthFailed("agent key mint response missing api_key".into()))?
-        .to_string();
-
-    let resolved_inference_url = mint_payload
+    let resolved_inference_url = token_payload
         .inference_base_url
-        .or(token_payload.inference_base_url)
         .map(|v| v.trim().trim_end_matches('/').to_string())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| {
@@ -2932,7 +2945,7 @@ pub async fn login_nous_device_code(
                 .to_string()
         });
 
-    Ok(NousAuthState {
+    let mut state = NousAuthState {
         portal_base_url,
         inference_base_url: resolved_inference_url,
         client_id,
@@ -2945,13 +2958,16 @@ pub async fn login_nous_device_code(
         obtained_at: now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         expires_at: access_expires_at,
         expires_in: access_expires_in,
-        agent_key: Some(agent_key),
-        agent_key_id: mint_payload.key_id,
-        agent_key_expires_at: mint_payload.expires_at,
-        agent_key_expires_in: mint_payload.expires_in,
-        agent_key_reused: mint_payload.reused,
-        agent_key_obtained_at: Some(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
-    })
+        agent_key: None,
+        agent_key_id: None,
+        agent_key_expires_at: None,
+        agent_key_expires_in: None,
+        agent_key_reused: None,
+        agent_key_obtained_at: None,
+    };
+    assert_nous_invoke_jwt_usable(&state, None, NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS)?;
+    set_nous_agent_key_from_invoke_jwt(&mut state);
+    Ok(state)
 }
 
 pub async fn login_openai_codex_device_code(
@@ -3173,6 +3189,40 @@ mod tests {
     use super::*;
     use crate::test_env_lock;
 
+    fn nous_test_jwt(seconds: i64, scope: Value) -> String {
+        let header = serde_json::json!({ "alg": "none", "typ": "JWT" });
+        let claims = serde_json::json!({
+            "exp": Utc::now().timestamp() + seconds,
+            "scope": scope,
+        });
+        format!(
+            "{}.{}.sig",
+            BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).expect("header json")),
+            BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).expect("claims json"))
+        )
+    }
+
+    fn nous_test_state(access_token: String) -> NousAuthState {
+        NousAuthState {
+            portal_base_url: DEFAULT_NOUS_PORTAL_URL.to_string(),
+            inference_base_url: DEFAULT_NOUS_INFERENCE_URL.to_string(),
+            client_id: DEFAULT_NOUS_CLIENT_ID.to_string(),
+            scope: Some(DEFAULT_NOUS_SCOPE.to_string()),
+            token_type: "Bearer".to_string(),
+            access_token,
+            refresh_token: Some("refresh".to_string()),
+            obtained_at: Utc::now().to_rfc3339(),
+            expires_at: None,
+            expires_in: None,
+            agent_key: None,
+            agent_key_id: None,
+            agent_key_expires_at: None,
+            agent_key_expires_in: None,
+            agent_key_reused: None,
+            agent_key_obtained_at: None,
+        }
+    }
+
     #[test]
     fn nous_runtime_api_key_prefers_agent_key() {
         let state = NousAuthState {
@@ -3204,41 +3254,145 @@ mod tests {
     }
 
     #[test]
-    fn nous_agent_key_usable_requires_future_expiry() {
-        let mut state = NousAuthState {
-            portal_base_url: DEFAULT_NOUS_PORTAL_URL.to_string(),
-            inference_base_url: DEFAULT_NOUS_INFERENCE_URL.to_string(),
-            client_id: DEFAULT_NOUS_CLIENT_ID.to_string(),
-            scope: Some(DEFAULT_NOUS_SCOPE.to_string()),
-            token_type: "Bearer".to_string(),
-            access_token: "portal-access".to_string(),
-            refresh_token: Some("refresh".to_string()),
-            obtained_at: Utc::now().to_rfc3339(),
-            expires_at: None,
-            expires_in: None,
-            agent_key: Some("agent-key".to_string()),
-            agent_key_id: None,
-            agent_key_expires_at: Some(
-                (Utc::now() + chrono::Duration::minutes(20))
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    fn nous_invoke_jwt_usable_uses_invoke_scope_and_jwt_expiry() {
+        let token = nous_test_jwt(900, Value::String(NOUS_INFERENCE_INVOKE_SCOPE.to_string()));
+        assert!(nous_invoke_jwt_is_usable(
+            &token,
+            Some(DEFAULT_NOUS_SCOPE),
+            None,
+            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+        ));
+        assert_eq!(
+            nous_invoke_jwt_status(
+                &nous_test_jwt(900, Value::String("profile".to_string())),
+                None,
+                None,
+                NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
             ),
-            agent_key_expires_in: None,
-            agent_key_reused: None,
-            agent_key_obtained_at: None,
-        };
-        assert!(nous_agent_key_is_usable(&state, 300));
+            Some("missing_inference_invoke_scope")
+        );
+        assert_eq!(
+            nous_invoke_jwt_status(
+                &nous_test_jwt(30, Value::String(NOUS_INFERENCE_INVOKE_SCOPE.to_string())),
+                None,
+                None,
+                NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+            ),
+            Some("invoke_jwt_expiring")
+        );
+    }
 
-        state.agent_key_expires_at = Some(
-            (Utc::now() + chrono::Duration::seconds(30))
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    #[test]
+    fn nous_invoke_jwt_selection_mirrors_access_token_to_agent_key_fields() {
+        let token = nous_test_jwt(900, serde_json::json!([NOUS_INFERENCE_INVOKE_SCOPE]));
+        let mut state = nous_test_state(token.clone());
+        state.expires_at = Some("2000-01-01T00:00:00Z".to_string());
+        state.agent_key = Some("legacy-opaque-agent-key".to_string());
+        state.agent_key_expires_at = Some("2099-01-01T00:00:00Z".to_string());
+
+        assert_nous_invoke_jwt_usable(&state, None, NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS)
+            .expect("invoke jwt usable");
+        set_nous_agent_key_from_invoke_jwt(&mut state);
+
+        assert_eq!(state.agent_key.as_deref(), Some(token.as_str()));
+        assert_eq!(state.agent_key_id, None);
+        assert_eq!(state.agent_key_reused, Some(false));
+        let mirrored_expiry = state
+            .agent_key_expires_at
+            .as_deref()
+            .and_then(parse_iso_timestamp_utc)
+            .expect("jwt expiry mirrored");
+        assert!(mirrored_expiry > Utc::now() + chrono::Duration::seconds(600));
+        assert_eq!(state.expires_at, state.agent_key_expires_at);
+    }
+
+    #[tokio::test]
+    async fn resolve_nous_runtime_credentials_selects_invoke_jwt_without_mint() {
+        let _guard = test_env_lock::lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let auth_path = tmp.path().join("auth.json");
+        let prev_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        let prev_nous_file = std::env::var("HERMES_NOUS_OAUTH_FILE").ok();
+        std::env::set_var("HERMES_AUTH_FILE", auth_path.to_string_lossy().to_string());
+        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
+
+        let token = nous_test_jwt(900, Value::String(NOUS_INFERENCE_INVOKE_SCOPE.to_string()));
+        let mut state = nous_test_state(token.clone());
+        state.agent_key = Some("legacy-opaque-agent-key".to_string());
+        state.agent_key_expires_at = Some("2099-01-01T00:00:00Z".to_string());
+        save_nous_auth_state(&state).expect("save nous state");
+
+        let resolved = resolve_nous_runtime_credentials(
+            false,
+            true,
+            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+        )
+        .await
+        .expect("resolve nous runtime credentials");
+        assert_eq!(resolved.api_key, token);
+        assert_eq!(resolved.source, NOUS_AUTH_PATH_INVOKE_JWT);
+        assert!(resolved.expires_in.unwrap_or_default() > 600);
+
+        let saved = read_provider_auth_state("nous")
+            .expect("read saved state")
+            .expect("saved state");
+        assert_eq!(
+            saved.get("agent_key").and_then(Value::as_str),
+            Some(resolved.api_key.as_str())
         );
         assert!(
-            !nous_agent_key_is_usable(&state, 120),
-            "expiring key should be treated as unusable"
+            saved.get("agent_key_id").is_none(),
+            "invoke JWT path should not preserve legacy agent key id"
         );
 
-        state.agent_key = None;
-        assert!(!nous_agent_key_is_usable(&state, 120));
+        match prev_auth_file {
+            Some(v) => std::env::set_var("HERMES_AUTH_FILE", v),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
+        }
+        match prev_nous_file {
+            Some(v) => std::env::set_var("HERMES_NOUS_OAUTH_FILE", v),
+            None => std::env::remove_var("HERMES_NOUS_OAUTH_FILE"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_nous_runtime_credentials_rejects_missing_invoke_scope() {
+        let _guard = test_env_lock::lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let auth_path = tmp.path().join("auth.json");
+        let prev_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        let prev_nous_file = std::env::var("HERMES_NOUS_OAUTH_FILE").ok();
+        std::env::set_var("HERMES_AUTH_FILE", auth_path.to_string_lossy().to_string());
+        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
+
+        let token = nous_test_jwt(900, Value::String("profile".to_string()));
+        let mut state = nous_test_state(token);
+        state.scope = Some("profile".to_string());
+        state.refresh_token = None;
+        save_nous_auth_state(&state).expect("save nous state");
+
+        let err = resolve_nous_runtime_credentials(
+            false,
+            true,
+            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+        )
+        .await
+        .expect_err("missing invoke scope should fail");
+        assert!(
+            err.to_string().contains("missing_inference_invoke_scope"),
+            "unexpected error: {err}"
+        );
+
+        match prev_auth_file {
+            Some(v) => std::env::set_var("HERMES_AUTH_FILE", v),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
+        }
+        match prev_nous_file {
+            Some(v) => std::env::set_var("HERMES_NOUS_OAUTH_FILE", v),
+            None => std::env::remove_var("HERMES_NOUS_OAUTH_FILE"),
+        }
     }
 
     #[test]
