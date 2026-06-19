@@ -24,16 +24,17 @@ use hermes_cli::auth::{
     discover_existing_openai_codex_oauth, discover_existing_openai_oauth,
     get_anthropic_oauth_status, get_gemini_oauth_auth_status, get_qwen_auth_status,
     login_anthropic_oauth, login_google_gemini_cli_oauth, login_nous_device_code,
-    login_openai_codex_device_code, login_openai_device_code, read_provider_auth_state,
-    resolve_gemini_oauth_runtime_credentials, resolve_nous_runtime_credentials,
-    resolve_qwen_runtime_credentials, save_codex_auth_state, save_nous_auth_state,
-    save_openai_auth_state, save_provider_auth_state, AnthropicOAuthLoginOptions,
-    CodexDeviceCodeOptions, GeminiOAuthLoginOptions, NousAuthState, NousDeviceCodeOptions,
-    NousRuntimeCredentials, ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL,
-    CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL,
-    DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS, DEFAULT_NOUS_CLIENT_ID, DEFAULT_NOUS_INFERENCE_URL,
-    DEFAULT_NOUS_PORTAL_URL, DEFAULT_OPENAI_BASE_URL, NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-    QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_OAUTH_CLIENT_ID, QWEN_OAUTH_TOKEN_URL,
+    login_openai_codex_device_code, login_openai_device_code, nous_auth_state_from_runtime_token,
+    read_provider_auth_state, resolve_gemini_oauth_runtime_credentials,
+    resolve_nous_runtime_credentials, resolve_qwen_runtime_credentials, save_codex_auth_state,
+    save_nous_auth_state, save_openai_auth_state, save_provider_auth_state,
+    AnthropicOAuthLoginOptions, CodexDeviceCodeOptions, GeminiOAuthLoginOptions, NousAuthState,
+    NousDeviceCodeOptions, NousRuntimeCredentials, ANTHROPIC_OAUTH_CLIENT_ID,
+    ANTHROPIC_OAUTH_TOKEN_URL, CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL,
+    DEFAULT_CODEX_BASE_URL, DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS, DEFAULT_NOUS_CLIENT_ID,
+    DEFAULT_NOUS_INFERENCE_URL, DEFAULT_NOUS_PORTAL_URL, DEFAULT_OPENAI_BASE_URL,
+    NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+    QWEN_OAUTH_CLIENT_ID, QWEN_OAUTH_TOKEN_URL,
 };
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
@@ -362,6 +363,12 @@ async fn main() {
                         provider, verify_err
                     );
                 }
+                if let Err(hydrate_err) = hydrate_provider_env_from_vault_for_cli(&cli).await {
+                    eprintln!(
+                        "Warning: automatic credential hydration after `auth verify {}` failed: {}",
+                        provider, hydrate_err
+                    );
+                }
                 result = hermes_cli::commands::handle_cli_chat(
                     Some(cli.oneshot.clone().unwrap_or_default()),
                     None,
@@ -401,6 +408,14 @@ async fn main() {
                                     login_err
                                 );
                             } else {
+                                if let Err(hydrate_err) =
+                                    hydrate_provider_env_from_vault_for_cli(&cli).await
+                                {
+                                    eprintln!(
+                                        "Warning: automatic credential hydration after `auth login nous` failed: {}",
+                                        hydrate_err
+                                    );
+                                }
                                 result = hermes_cli::commands::handle_cli_chat(
                                     Some(cli.oneshot.clone().unwrap_or_default()),
                                     None,
@@ -6442,41 +6457,36 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
     }
     let store = FileTokenStore::new(path).await?;
     let manager = AuthManager::new(store.clone());
-    let mut hydrated_nous_from_vault = false;
 
-    if let Some((_provider, token)) = lookup_secret_from_vault(&store, "nous").await {
-        std::env::set_var("NOUS_API_KEY", token);
-        hydrated_nous_from_vault = true;
-    }
-
-    if !hydrated_nous_from_vault {
-        match resolve_nous_runtime_credentials(
-            false,
-            true,
-            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-        )
-        .await
-        {
-            Ok(creds) => {
-                std::env::set_var("NOUS_API_KEY", creds.api_key.clone());
-                if !creds.base_url.trim().is_empty() {
-                    std::env::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
-                }
-                let expires_at = parse_rfc3339_utc(creds.expires_at.as_deref());
-                let _ = manager
-                    .save_credential(OAuthCredential {
-                        provider: "nous".to_string(),
-                        access_token: creds.api_key,
-                        refresh_token: creds.refresh_token,
-                        token_type: creds.token_type,
-                        scope: creds.scope,
-                        expires_at,
-                    })
-                    .await;
+    match resolve_nous_runtime_credentials(
+        false,
+        true,
+        NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+        DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+    )
+    .await
+    {
+        Ok(creds) => {
+            std::env::set_var("NOUS_API_KEY", creds.api_key.clone());
+            if !creds.base_url.trim().is_empty() {
+                std::env::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
             }
-            Err(err) => {
-                tracing::debug!("Nous runtime credential refresh skipped: {}", err);
+            let expires_at = parse_rfc3339_utc(creds.expires_at.as_deref());
+            let _ = manager
+                .save_credential(OAuthCredential {
+                    provider: "nous".to_string(),
+                    access_token: creds.api_key,
+                    refresh_token: creds.refresh_token,
+                    token_type: creds.token_type,
+                    scope: creds.scope,
+                    expires_at,
+                })
+                .await;
+        }
+        Err(err) => {
+            tracing::debug!("Nous runtime credential refresh skipped: {}", err);
+            if let Some((_provider, token)) = lookup_secret_from_vault(&store, "nous").await {
+                std::env::set_var("NOUS_API_KEY", token);
             }
         }
     }
@@ -7753,6 +7763,43 @@ async fn verify_single_oauth_provider(
                 return Ok(result);
             }
             Err(err) => {
+                if let Some(credential) = stored_credential.as_ref() {
+                    let expires_at = credential.expires_at.as_ref().map(|dt| dt.to_rfc3339());
+                    if let Ok(state) = nous_auth_state_from_runtime_token(
+                        &credential.access_token,
+                        credential.refresh_token.clone(),
+                        Some(credential.token_type.as_str()),
+                        credential.scope.clone(),
+                        expires_at,
+                    ) {
+                        let _ = save_nous_auth_state(&state)?;
+                        if let Ok(creds) = resolve_nous_runtime_credentials(
+                            false,
+                            true,
+                            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+                            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+                        )
+                        .await
+                        {
+                            let expires_at_text = creds.expires_at.clone();
+                            manager
+                                .save_credential(OAuthCredential {
+                                    provider: "nous".to_string(),
+                                    access_token: creds.api_key.clone(),
+                                    refresh_token: creds.refresh_token.clone(),
+                                    token_type: creds.token_type.clone(),
+                                    scope: creds.scope.clone(),
+                                    expires_at: parse_rfc3339_utc(expires_at_text.as_deref()),
+                                })
+                                .await?;
+                            result.outcome = AuthVerifyOutcome::ValidRefreshed;
+                            result.source = "vault_invoke_jwt".to_string();
+                            result.expires_at = expires_at_text;
+                            result.credential_present = true;
+                            return Ok(result);
+                        }
+                    }
+                }
                 result.outcome = if env_present || stored_present || auth_state_present {
                     AuthVerifyOutcome::RefreshFailed
                 } else {
@@ -15247,6 +15294,22 @@ mod tests {
         ])
     }
 
+    fn test_nous_invoke_jwt(seconds: i64) -> String {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine as _;
+
+        let header = serde_json::json!({ "alg": "none", "typ": "JWT" });
+        let claims = serde_json::json!({
+            "exp": chrono::Utc::now().timestamp() + seconds,
+            "scope": "inference:invoke",
+        });
+        format!(
+            "{}.{}.sig",
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).expect("header json")),
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).expect("claims json"))
+        )
+    }
+
     fn make_platform(enabled: bool, token: Option<&str>) -> PlatformConfig {
         let mut cfg = PlatformConfig {
             enabled,
@@ -16679,6 +16742,7 @@ mod tests {
 
     #[tokio::test]
     async fn hydrate_provider_env_from_vault_overrides_oauth_provider_env() {
+        let _guard = env_lock();
         use clap::Parser;
 
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -16719,6 +16783,146 @@ mod tests {
         match previous {
             Some(value) => std::env::set_var("NOUS_API_KEY", value),
             None => std::env::remove_var("NOUS_API_KEY"),
+        }
+    }
+
+    #[tokio::test]
+    async fn hydrate_provider_env_prefers_current_nous_oauth_over_stale_vault() {
+        let _guard = env_lock();
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config_dir = tmp.path().join("cfg");
+        std::fs::create_dir_all(&config_dir).expect("create cfg dir");
+        let cli = Cli::parse_from([
+            "hermes-agent-ultra",
+            "--config-dir",
+            config_dir.to_str().expect("cfg path utf8"),
+        ]);
+
+        let vault_path = secret_vault_path_for_cli(&cli);
+        let store = FileTokenStore::new(vault_path).await.expect("vault store");
+        let manager = AuthManager::new(store);
+        manager
+            .save_credential(OAuthCredential {
+                provider: "nous".to_string(),
+                access_token: "vault-stale-key".to_string(),
+                refresh_token: None,
+                token_type: "bearer".to_string(),
+                scope: None,
+                expires_at: None,
+            })
+            .await
+            .expect("save vault credential");
+
+        let oauth_token = test_nous_invoke_jwt(900);
+
+        let previous_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        let previous_nous_key = std::env::var("NOUS_API_KEY").ok();
+        let auth_path = tmp.path().join("auth.json");
+        std::env::set_var("HERMES_AUTH_FILE", auth_path.to_string_lossy().to_string());
+        std::env::set_var("NOUS_API_KEY", "env-stale-key");
+        save_nous_auth_state(&NousAuthState {
+            portal_base_url: DEFAULT_NOUS_PORTAL_URL.to_string(),
+            inference_base_url: DEFAULT_NOUS_INFERENCE_URL.to_string(),
+            client_id: DEFAULT_NOUS_CLIENT_ID.to_string(),
+            scope: Some("inference:invoke".to_string()),
+            token_type: "Bearer".to_string(),
+            access_token: oauth_token.clone(),
+            refresh_token: None,
+            obtained_at: chrono::Utc::now().to_rfc3339(),
+            expires_at: None,
+            expires_in: None,
+            agent_key: None,
+            agent_key_id: None,
+            agent_key_expires_at: None,
+            agent_key_expires_in: None,
+            agent_key_reused: None,
+            agent_key_obtained_at: None,
+        })
+        .expect("save nous oauth state");
+
+        hydrate_provider_env_from_vault_for_cli(&cli)
+            .await
+            .expect("hydrate env");
+        assert_eq!(
+            std::env::var("NOUS_API_KEY").as_deref(),
+            Ok(oauth_token.as_str())
+        );
+
+        match previous_auth_file {
+            Some(value) => std::env::set_var("HERMES_AUTH_FILE", value),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
+        }
+        match previous_nous_key {
+            Some(value) => std::env::set_var("NOUS_API_KEY", value),
+            None => std::env::remove_var("NOUS_API_KEY"),
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_verify_nous_repairs_stale_singleton_from_vault_invoke_jwt() {
+        let _guard = env_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let auth_path = tmp.path().join("auth.json");
+        let vault_path = tmp.path().join("tokens.json");
+        let store = FileTokenStore::new(&vault_path).await.expect("vault store");
+        let manager = AuthManager::new(store.clone());
+        let oauth_token = test_nous_invoke_jwt(900);
+
+        manager
+            .save_credential(OAuthCredential {
+                provider: "nous".to_string(),
+                access_token: oauth_token.clone(),
+                refresh_token: None,
+                token_type: "Bearer".to_string(),
+                scope: Some("inference:invoke".to_string()),
+                expires_at: None,
+            })
+            .await
+            .expect("save vault credential");
+
+        let previous_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        std::env::set_var("HERMES_AUTH_FILE", auth_path.to_string_lossy().to_string());
+        save_nous_auth_state(&NousAuthState {
+            portal_base_url: DEFAULT_NOUS_PORTAL_URL.to_string(),
+            inference_base_url: DEFAULT_NOUS_INFERENCE_URL.to_string(),
+            client_id: DEFAULT_NOUS_CLIENT_ID.to_string(),
+            scope: Some("profile".to_string()),
+            token_type: "Bearer".to_string(),
+            access_token: "header.eyJzY29wZSI6InByb2ZpbGUiLCJleHAiOjQ3Mzk4NTYwMDB9.sig".to_string(),
+            refresh_token: None,
+            obtained_at: chrono::Utc::now().to_rfc3339(),
+            expires_at: None,
+            expires_in: None,
+            agent_key: None,
+            agent_key_id: None,
+            agent_key_expires_at: None,
+            agent_key_expires_in: None,
+            agent_key_reused: None,
+            agent_key_obtained_at: None,
+        })
+        .expect("save stale nous state");
+
+        let result = verify_single_oauth_provider("nous", &store, &manager)
+            .await
+            .expect("verify nous");
+        assert_eq!(result.outcome, AuthVerifyOutcome::ValidRefreshed);
+        assert_eq!(result.source, "vault_invoke_jwt");
+
+        let repaired = read_provider_auth_state("nous")
+            .expect("read repaired state")
+            .expect("repaired state");
+        assert_eq!(
+            repaired
+                .get("agent_key")
+                .and_then(serde_json::Value::as_str),
+            Some(oauth_token.as_str())
+        );
+
+        match previous_auth_file {
+            Some(value) => std::env::set_var("HERMES_AUTH_FILE", value),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
         }
     }
 
