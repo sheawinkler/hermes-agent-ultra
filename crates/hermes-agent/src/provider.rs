@@ -3535,6 +3535,55 @@ mod tests {
     }
 
     #[test]
+    fn test_nous_profile_strict_controls_sanitize_tool_replay_without_leaking_controls() {
+        let provider = GenericProvider::new(
+            "https://inference-api.nousresearch.com/v1",
+            "key",
+            "openai/gpt-5.5",
+        )
+        .with_provider_profile("nous");
+        let messages = vec![
+            Message::assistant_with_tool_calls(
+                None,
+                vec![ToolCall {
+                    id: "call_read".to_string(),
+                    function: FunctionCall {
+                        name: "read_file".to_string(),
+                        arguments: "{\"path\":\"a.txt\"}".to_string(),
+                    },
+                    extra_content: None,
+                }],
+            ),
+            Message::tool_result_with_name("call_read", "read_file", "{\"result\":\"ok\"}"),
+        ];
+
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "openai/gpt-5.5",
+            extra_body: Some(&serde_json::json!({
+                "strict_api": true,
+                "provider_strict": true
+            })),
+            stream: false,
+        });
+
+        assert!(body.get("strict_api").is_none());
+        assert!(body.get("provider_strict").is_none());
+        let tc = &body["messages"][0]["tool_calls"][0];
+        assert_eq!(tc["id"], "call_read");
+        assert_eq!(tc["type"], "function");
+        assert_eq!(tc["function"]["name"], "read_file");
+        assert_eq!(tc["function"]["arguments"], "{\"path\":\"a.txt\"}");
+        assert!(tc.get("name").is_none());
+        assert!(tc.get("arguments").is_none());
+        assert_eq!(body["messages"][1]["role"], "tool");
+        assert_eq!(body["messages"][1]["tool_call_id"], "call_read");
+    }
+
+    #[test]
     fn test_sanitize_messages_for_api_decodes_acp_multimodal_user_parts_for_vision_models() {
         let parts = serde_json::json!([
             {"type": "text", "text": "inspect"},
