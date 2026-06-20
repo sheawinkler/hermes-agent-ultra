@@ -7,10 +7,18 @@ Hermes Agent Ultra supports OpenAI-compatible local or private inference endpoin
 - `ollama-local`
 - `llama-cpp`
 - `vllm` (aliases: `ollvm`, `llvm`)
-- `mlx`
+- `mlx` (aliases: `mlx-lm`, `apple-mlx`, `vmlx`, `omlx`, `mlx-vlm`)
 - `apple-ane`
 - `sglang`
 - `tgi`
+- `lmstudio` (aliases: `lm-studio`, `lm_studio`)
+- `lmdeploy` (aliases: `lm-deploy`, `lm_deploy`)
+- `localai` (aliases: `local-ai`, `local_ai`)
+- `koboldcpp` (aliases: `kobold-cpp`, `kobold`)
+- `text-generation-webui` (aliases: `oobabooga`, `textgen-webui`)
+- `tabbyapi` (aliases: `tabby-api`, `exllama`, `exllamav2`)
+
+`llamafile` is treated as a `llama-cpp` server variant.
 
 ## Endpoint env overrides
 
@@ -21,11 +29,19 @@ Hermes Agent Ultra supports OpenAI-compatible local or private inference endpoin
 - `APPLE_ANE_BASE_URL` (default `http://127.0.0.1:8081/v1`)
 - `SGLANG_BASE_URL` (default `http://127.0.0.1:30000/v1`)
 - `TGI_BASE_URL` (default `http://127.0.0.1:8082/v1`)
+- `LMSTUDIO_BASE_URL` (default `http://127.0.0.1:1234/v1`)
+- `LMDEPLOY_BASE_URL` (default `http://127.0.0.1:23333/v1`)
+- `LOCALAI_BASE_URL` (default `http://127.0.0.1:8080/v1`)
+- `KOBOLDCPP_BASE_URL` (default `http://127.0.0.1:5001/v1`)
+- `TEXT_GENERATION_WEBUI_BASE_URL` (default `http://127.0.0.1:5000/v1`)
+- `TABBYAPI_BASE_URL` (default `http://127.0.0.1:5000/v1`)
 
 Optional API-key env vars are also supported if your server enforces auth:
 
 - `OLLAMA_LOCAL_API_KEY`, `LLAMA_CPP_API_KEY`, `VLLM_API_KEY`, `MLX_API_KEY`,
-  `APPLE_ANE_API_KEY`, `SGLANG_API_KEY`, `TGI_API_KEY`
+  `APPLE_ANE_API_KEY`, `SGLANG_API_KEY`, `TGI_API_KEY`, `LMSTUDIO_API_KEY`,
+  `LMDEPLOY_API_KEY`, `LOCALAI_API_KEY`, `KOBOLDCPP_API_KEY`,
+  `TEXT_GENERATION_WEBUI_API_KEY`, `TABBYAPI_API_KEY`
 
 ## Setup flow
 
@@ -88,6 +104,12 @@ Current profiles include:
 - `apple-ane` (`balanced`)
 - `sglang` (`balanced`)
 - `tgi` (`balanced`)
+- `lmstudio` (`balanced`)
+- `lmdeploy` (`balanced`)
+- `localai` (`balanced`)
+- `koboldcpp` (`balanced`)
+- `text-generation-webui` (`balanced`)
+- `tabbyapi` (`balanced`)
 - `mistral-rs` (`balanced` guidance profile)
 
 Applying a profile:

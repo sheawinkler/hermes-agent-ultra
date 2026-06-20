@@ -2201,6 +2201,19 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
         ("TOKENHUB_API_KEY", "tencent-tokenhub"),
         ("COPILOT_GITHUB_TOKEN", "copilot"),
         ("GITHUB_COPILOT_TOKEN", "copilot"),
+        ("OLLAMA_LOCAL_API_KEY", "ollama-local"),
+        ("LLAMA_CPP_API_KEY", "llama-cpp"),
+        ("VLLM_API_KEY", "vllm"),
+        ("MLX_API_KEY", "mlx"),
+        ("APPLE_ANE_API_KEY", "apple-ane"),
+        ("SGLANG_API_KEY", "sglang"),
+        ("TGI_API_KEY", "tgi"),
+        ("LMSTUDIO_API_KEY", "lmstudio"),
+        ("LMDEPLOY_API_KEY", "lmdeploy"),
+        ("LOCALAI_API_KEY", "localai"),
+        ("KOBOLDCPP_API_KEY", "koboldcpp"),
+        ("TEXT_GENERATION_WEBUI_API_KEY", "text-generation-webui"),
+        ("TABBYAPI_API_KEY", "tabbyapi"),
     ] {
         if let Ok(v) = std::env::var(env_var) {
             if v.trim().is_empty() {
@@ -2221,6 +2234,19 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
         ("ARCEE_BASE_URL", "arcee"),
         ("XIAOMI_BASE_URL", "xiaomi"),
         ("TOKENHUB_BASE_URL", "tencent-tokenhub"),
+        ("OLLAMA_BASE_URL", "ollama-local"),
+        ("LLAMA_CPP_BASE_URL", "llama-cpp"),
+        ("VLLM_BASE_URL", "vllm"),
+        ("MLX_BASE_URL", "mlx"),
+        ("APPLE_ANE_BASE_URL", "apple-ane"),
+        ("SGLANG_BASE_URL", "sglang"),
+        ("TGI_BASE_URL", "tgi"),
+        ("LMSTUDIO_BASE_URL", "lmstudio"),
+        ("LMDEPLOY_BASE_URL", "lmdeploy"),
+        ("LOCALAI_BASE_URL", "localai"),
+        ("KOBOLDCPP_BASE_URL", "koboldcpp"),
+        ("TEXT_GENERATION_WEBUI_BASE_URL", "text-generation-webui"),
+        ("TABBYAPI_BASE_URL", "tabbyapi"),
     ] {
         if let Ok(v) = std::env::var(env_var) {
             if v.trim().is_empty() {
@@ -3839,6 +3865,10 @@ llm_providers:
             std::env::set_var("XIAOMI_API_KEY", "xiaomi-token");
             std::env::set_var("TOKENHUB_API_KEY", "tokenhub-token");
             std::env::set_var("TOKENHUB_BASE_URL", "https://tokenhub.example/v1");
+            std::env::set_var("LLAMA_CPP_API_KEY", "llama-cpp-token");
+            std::env::set_var("LLAMA_CPP_BASE_URL", "http://127.0.0.1:8080/v1");
+            std::env::set_var("LMSTUDIO_API_KEY", "lmstudio-token");
+            std::env::set_var("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1");
         }
 
         let mut cfg = GatewayConfig::default();
@@ -3865,12 +3895,34 @@ llm_providers:
             tokenhub.base_url.as_deref(),
             Some("https://tokenhub.example/v1")
         );
+        let llama_cpp = cfg
+            .llm_providers
+            .get("llama-cpp")
+            .expect("llama-cpp provider");
+        assert_eq!(llama_cpp.api_key.as_deref(), Some("llama-cpp-token"));
+        assert_eq!(
+            llama_cpp.base_url.as_deref(),
+            Some("http://127.0.0.1:8080/v1")
+        );
+        let lmstudio = cfg
+            .llm_providers
+            .get("lmstudio")
+            .expect("lmstudio provider");
+        assert_eq!(lmstudio.api_key.as_deref(), Some("lmstudio-token"));
+        assert_eq!(
+            lmstudio.base_url.as_deref(),
+            Some("http://127.0.0.1:1234/v1")
+        );
 
         unsafe {
             std::env::remove_var("ARCEEAI_API_KEY");
             std::env::remove_var("XIAOMI_API_KEY");
             std::env::remove_var("TOKENHUB_API_KEY");
             std::env::remove_var("TOKENHUB_BASE_URL");
+            std::env::remove_var("LLAMA_CPP_API_KEY");
+            std::env::remove_var("LLAMA_CPP_BASE_URL");
+            std::env::remove_var("LMSTUDIO_API_KEY");
+            std::env::remove_var("LMSTUDIO_BASE_URL");
         }
     }
 

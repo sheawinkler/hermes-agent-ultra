@@ -1,4 +1,4 @@
-# ADR: Local Backend Strategy (Ollama/llama.cpp/vLLM/MLX/ANE)
+# ADR: Local Backend Strategy (OpenAI-Compatible Local Servers)
 
 ## Status
 Accepted (2026-05-02)
@@ -16,6 +16,13 @@ Hermes Agent Ultra needs broad multi-provider support for cloud + self-host infe
    - `apple-ane`
    - `sglang`
    - `tgi`
+   - `lmstudio`
+   - `lmdeploy`
+   - `localai`
+   - `koboldcpp`
+   - `text-generation-webui`
+   - `tabbyapi`
+   - alias variants such as `llamafile`, `vmlx`, `omlx`, `oobabooga`, and `exllamav2`
 3. Allow local/private endpoint operation without mandatory API keys.
 4. Keep runtime Rust-first in orchestration and tooling, while inference execution is delegated to external specialized engines.
 5. Defer a full native Rust inference server to a separate phase with explicit performance gates.

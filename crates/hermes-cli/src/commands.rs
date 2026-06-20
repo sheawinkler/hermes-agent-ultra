@@ -4815,6 +4815,48 @@ const BACKEND_BEST_PRACTICE_PROFILES: &[BackendBestPracticeProfile] = &[
         env_overrides: TGI_PROFILE_BALANCED_ENV,
     },
     BackendBestPracticeProfile {
+        provider: "lmstudio",
+        profile: "balanced",
+        summary: "Desktop local serving profile for LM Studio's OpenAI-compatible server.",
+        launch_hint: "Start LM Studio Local Server on 127.0.0.1:1234 and load a model.",
+        env_overrides: &[],
+    },
+    BackendBestPracticeProfile {
+        provider: "lmdeploy",
+        profile: "balanced",
+        summary: "LMDeploy OpenAI-compatible serving profile for local or workstation GPUs.",
+        launch_hint: "lmdeploy serve api_server MODEL --server-port 23333",
+        env_overrides: &[],
+    },
+    BackendBestPracticeProfile {
+        provider: "localai",
+        profile: "balanced",
+        summary: "LocalAI OpenAI-compatible serving profile for mixed local backends.",
+        launch_hint: "local-ai run --address 127.0.0.1:8080",
+        env_overrides: &[],
+    },
+    BackendBestPracticeProfile {
+        provider: "koboldcpp",
+        profile: "balanced",
+        summary: "KoboldCpp single-binary profile for GGUF local serving.",
+        launch_hint: "koboldcpp --model MODEL.gguf --host 127.0.0.1 --port 5001",
+        env_overrides: &[],
+    },
+    BackendBestPracticeProfile {
+        provider: "text-generation-webui",
+        profile: "balanced",
+        summary: "oobabooga text-generation-webui OpenAI extension profile.",
+        launch_hint: "python server.py --extensions openai --api --api-port 5000",
+        env_overrides: &[],
+    },
+    BackendBestPracticeProfile {
+        provider: "tabbyapi",
+        profile: "balanced",
+        summary: "TabbyAPI / ExLlamaV2 profile for quantized GPU serving.",
+        launch_hint: "python main.py --host 127.0.0.1 --port 5000",
+        env_overrides: &[],
+    },
+    BackendBestPracticeProfile {
         provider: "mistral-rs",
         profile: "balanced",
         summary: "mistral.rs runtime baseline for robust local serving.",
@@ -4827,8 +4869,19 @@ fn normalize_backend_provider(value: &str) -> String {
     let raw = value.trim().to_ascii_lowercase();
     match raw.as_str() {
         "llvm" | "ollvm" => "vllm".to_string(),
-        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
-        "ane" => "apple-ane".to_string(),
+        "llama.cpp" | "llamacpp" | "llamafile" => "llama-cpp".to_string(),
+        "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm" | "mlx-openai-server" => {
+            "mlx".to_string()
+        }
+        "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
+        "lm-studio" | "lm_studio" | "lm studio" => "lmstudio".to_string(),
+        "lm-deploy" | "lm_deploy" => "lmdeploy".to_string(),
+        "local-ai" | "local_ai" => "localai".to_string(),
+        "kobold-cpp" | "kobold" => "koboldcpp".to_string(),
+        "oobabooga" | "textgen-webui" | "textgen_webui" | "text-generation-web-ui" => {
+            "text-generation-webui".to_string()
+        }
+        "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => "tabbyapi".to_string(),
         other => other.to_string(),
     }
 }
@@ -31226,6 +31279,15 @@ install_command: "uv pip install -r requirements.txt"
         let row = backend_profile_lookup("llvm", Some("throughput")).expect("profile");
         assert_eq!(row.provider, "vllm");
         assert_eq!(row.profile, "throughput");
+
+        let row = backend_profile_lookup("lm-studio", None).expect("lmstudio profile");
+        assert_eq!(row.provider, "lmstudio");
+        let row = backend_profile_lookup("oobabooga", None).expect("textgen profile");
+        assert_eq!(row.provider, "text-generation-webui");
+        let row = backend_profile_lookup("exllamav2", None).expect("tabby profile");
+        assert_eq!(row.provider, "tabbyapi");
+        let row = backend_profile_lookup("vmlx", None).expect("mlx profile");
+        assert_eq!(row.provider, "mlx");
     }
 
     #[test]

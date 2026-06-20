@@ -18,7 +18,7 @@ Rust-first autonomous agent runtime with functional parity goals against `NousRe
 
 - Fully Rust-native core runtime (agent loop, tools, gateway, skills, CLI/TUI)
 - Multi-provider inference routing and OAuth-capable provider flows
-- First-class local/self-host backends: Ollama, llama.cpp, vLLM, MLX, Apple ANE endpoint, SGLang, TGI
+- First-class local/self-host backends: Ollama, llama.cpp/llamafile, vLLM, MLX, Apple ANE endpoint, SGLang, TGI, LM Studio, LMDeploy, LocalAI, KoboldCpp, text-generation-webui, TabbyAPI
 - Tool runtime with policy enforcement, MCP integration, cron, and memory backends
 - Parity upkeep system for upstream drift triage and controlled roll-forward
 - Production operations surface (`doctor`, replay traces, sync gates, parity artifacts)
@@ -219,6 +219,12 @@ Key operator commands:
 - `apple-ane` (default `http://127.0.0.1:8081/v1`)
 - `sglang` (default `http://127.0.0.1:30000/v1`)
 - `tgi` (default `http://127.0.0.1:8082/v1`)
+- `lmstudio` (default `http://127.0.0.1:1234/v1`)
+- `lmdeploy` (default `http://127.0.0.1:23333/v1`)
+- `localai` (default `http://127.0.0.1:8080/v1`)
+- `koboldcpp` (default `http://127.0.0.1:5001/v1`)
+- `text-generation-webui` (default `http://127.0.0.1:5000/v1`)
+- `tabbyapi` (default `http://127.0.0.1:5000/v1`)
 
 Override endpoint URLs via env vars:
 
@@ -229,6 +235,12 @@ Override endpoint URLs via env vars:
 - `APPLE_ANE_BASE_URL`
 - `SGLANG_BASE_URL`
 - `TGI_BASE_URL`
+- `LMSTUDIO_BASE_URL`
+- `LMDEPLOY_BASE_URL`
+- `LOCALAI_BASE_URL`
+- `KOBOLDCPP_BASE_URL`
+- `TEXT_GENERATION_WEBUI_BASE_URL`
+- `TABBYAPI_BASE_URL`
 
 Detailed guide: [docs/local-backends.md](./docs/local-backends.md)
 
