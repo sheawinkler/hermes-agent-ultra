@@ -256,6 +256,7 @@ const FINALIZER_OUTPUT_QUALITY_MAX_RETRIES: u32 = 2;
 const FINALIZER_ACTION_EXECUTION_MAX_RETRIES: u32 = 2;
 const FINALIZER_WEB_RESEARCH_MAX_RETRIES: u32 = 4;
 const FINALIZER_GOOGLE_WORKSPACE_MAX_RETRIES: u32 = 2;
+const FINALIZER_TASK_FOCUS_MAX_RETRIES: u32 = 2;
 
 // Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
 const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
@@ -5272,6 +5273,7 @@ impl AgentLoop {
         let mut finalizer_action_execution_retries: u32 = 0;
         let mut finalizer_web_research_retries: u32 = 0;
         let mut finalizer_google_workspace_retries: u32 = 0;
+        let mut finalizer_task_focus_retries: u32 = 0;
         let governor_window_limit = governor_window_size();
 
         loop {
@@ -5750,6 +5752,24 @@ impl AgentLoop {
                     ));
                     continue;
                 }
+                if finalizer_task_focus_requires_retry(
+                    ctx.get_messages(),
+                    assistant_msg.content.as_deref().unwrap_or_default(),
+                    finalizer_task_focus_retries,
+                ) {
+                    finalizer_task_focus_retries = finalizer_task_focus_retries.saturating_add(1);
+                    self.emit_status(
+                        "lifecycle",
+                        "Detected final answer drift from explicit user anchors; forcing focused rewrite.",
+                    );
+                    ctx.add_message(Message::system(
+                        "[SYSTEM] Task-focus contract: the final answer must stay anchored to the user's explicit task nouns, paths, accounts, URLs, or identifiers. If an anchor is unverified, mark it UNPROVEN or BLOCKED instead of switching topics.",
+                    ));
+                    ctx.add_message(Message::user(
+                        "Re-issue the final response now, anchored to the explicit user task and verified evidence.",
+                    ));
+                    continue;
+                }
                 if finalizer_claim_requires_evidence_retry(
                     ctx.get_messages(),
                     assistant_msg.content.as_deref().unwrap_or_default(),
@@ -5820,6 +5840,7 @@ impl AgentLoop {
                 finalizer_action_execution_retries = 0;
                 finalizer_web_research_retries = 0;
                 finalizer_google_workspace_retries = 0;
+                finalizer_task_focus_retries = 0;
                 let (objective_guard_active, requires_analytics, deep_audit_required) =
                     objective_guard_policy(ctx.get_messages());
                 if objective_guard_active {
@@ -6577,6 +6598,7 @@ impl AgentLoop {
         let mut finalizer_action_execution_retries: u32 = 0;
         let mut finalizer_web_research_retries: u32 = 0;
         let mut finalizer_google_workspace_retries: u32 = 0;
+        let mut finalizer_task_focus_retries: u32 = 0;
         let governor_window_limit = governor_window_size();
 
         loop {
@@ -7128,6 +7150,24 @@ impl AgentLoop {
                     ));
                     continue;
                 }
+                if finalizer_task_focus_requires_retry(
+                    ctx.get_messages(),
+                    assistant_msg.content.as_deref().unwrap_or_default(),
+                    finalizer_task_focus_retries,
+                ) {
+                    finalizer_task_focus_retries = finalizer_task_focus_retries.saturating_add(1);
+                    self.emit_status(
+                        "lifecycle",
+                        "Detected final answer drift from explicit user anchors; forcing focused rewrite.",
+                    );
+                    ctx.add_message(Message::system(
+                        "[SYSTEM] Task-focus contract: the final answer must stay anchored to the user's explicit task nouns, paths, accounts, URLs, or identifiers. If an anchor is unverified, mark it UNPROVEN or BLOCKED instead of switching topics.",
+                    ));
+                    ctx.add_message(Message::user(
+                        "Re-issue the final response now, anchored to the explicit user task and verified evidence.",
+                    ));
+                    continue;
+                }
                 if finalizer_claim_requires_evidence_retry(
                     ctx.get_messages(),
                     assistant_msg.content.as_deref().unwrap_or_default(),
@@ -7198,6 +7238,7 @@ impl AgentLoop {
                 finalizer_action_execution_retries = 0;
                 finalizer_web_research_retries = 0;
                 finalizer_google_workspace_retries = 0;
+                finalizer_task_focus_retries = 0;
                 let (objective_guard_active, requires_analytics, deep_audit_required) =
                     objective_guard_policy(ctx.get_messages());
                 if objective_guard_active {
@@ -8989,12 +9030,12 @@ fn web_research_system_hint(messages: &[Message], tool_schemas: &[ToolSchema]) -
         .iter()
         .any(|t| matches!(t.name.as_str(), "web_search" | "web_extract" | "web_crawl"));
     let availability = if has_web_tool {
-        "Use `web_search` first, then `web_extract` for the highest-value results when detail matters."
+        "Use `web_search` first, then `web_extract` for the highest-value primary, official, repository, or expert-community sources before final synthesis."
     } else {
         "No web tools are advertised in this session; report that exact blocker instead of inventing sources."
     };
     Some(format!(
-        "[SYSTEM] Web research contract active. {availability} Final answer requirements: include `WEB_SEARCH_USED: yes` only after a web tool succeeds, cite concrete http(s) URLs copied from web tool results, and separate observed source evidence from speculation. For web evidence use `url=<http(s) URL>` or raw URLs; do not substitute local `file=` evidence for web sources. If every web tool call fails or no web tool is available, write `WEB_SEARCH_USED: no` with the exact blocker."
+        "[SYSTEM] Web research contract active. {availability} Final answer requirements: include `WEB_SEARCH_USED: yes` only after a web tool succeeds, cite concrete http(s) URLs copied from web tool results, include `SOURCE_QUALITY: primary=<n> community=<n> secondary=<n>`, and separate observed source evidence from speculation. For web evidence use `url=<http(s) URL>` or raw URLs; do not substitute local `file=` evidence for web sources. If every web tool call fails or no web tool is available, write `WEB_SEARCH_USED: no` with the exact blocker."
     ))
 }
 
@@ -9239,6 +9280,17 @@ fn history_includes_web_tool(messages: &[Message]) -> bool {
     })
 }
 
+fn history_includes_web_extract_or_crawl(messages: &[Message]) -> bool {
+    messages.iter().any(|m| {
+        if !matches!(m.role, MessageRole::Tool) {
+            return false;
+        }
+        m.name
+            .as_deref()
+            .is_some_and(|name| matches!(name, "web_extract" | "web_crawl"))
+    })
+}
+
 fn count_http_urls(text: &str) -> usize {
     text.split_whitespace()
         .filter(|token| token.starts_with("http://") || token.starts_with("https://"))
@@ -9247,13 +9299,45 @@ fn count_http_urls(text: &str) -> usize {
         .len()
 }
 
+fn parse_source_quality_counts(text: &str) -> Option<(u32, u32, u32)> {
+    let lower = text.to_ascii_lowercase();
+    let idx = lower.find("source_quality")?;
+    let tail = &lower[idx..];
+    fn marker_count(tail: &str, marker: &str) -> u32 {
+        tail.split(marker)
+            .nth(1)
+            .and_then(|rest| {
+                rest.trim_start_matches([' ', ':', '='])
+                    .chars()
+                    .take_while(|ch| ch.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u32>()
+                    .ok()
+            })
+            .unwrap_or(0)
+    }
+    Some((
+        marker_count(tail, "primary"),
+        marker_count(tail, "community"),
+        marker_count(tail, "secondary"),
+    ))
+}
+
+fn has_sufficient_source_quality(text: &str) -> bool {
+    let Some((primary, community, secondary)) = parse_source_quality_counts(text) else {
+        return false;
+    };
+    primary > 0 || community >= 2 || (primary + community + secondary >= 3 && community > 0)
+}
+
 fn web_research_retry_prompt() -> &'static str {
     "[SYSTEM] Web research contract failed. This request explicitly requires online research.\n\
      Requirements now:\n\
      - call `web_search` with targeted queries before answering\n\
-     - optionally call `web_extract` on the best primary/community sources\n\
+     - call `web_extract` or `web_crawl` on at least one highest-value primary, official, repository, or expert-community source\n\
      - final answer must include the exact line `WEB_SEARCH_USED: yes` after successful web tooling\n\
      - cite at least two concrete http(s) URLs copied from web tool results\n\
+     - include `SOURCE_QUALITY: primary=<n> community=<n> secondary=<n>` and prefer primary/community evidence over generic SEO summaries\n\
      - for each web finding, include `url=<http(s) URL>` or the raw URL; do not use local `file=` evidence as a substitute\n\
      - separate observed evidence from speculation\n\
      If web tooling is unavailable or errors, final answer must include `WEB_SEARCH_USED: no` and the exact tool error/blocker."
@@ -9276,8 +9360,84 @@ fn finalizer_web_research_requires_retry(
         return false;
     }
     !(history_includes_web_tool(messages)
+        && history_includes_web_extract_or_crawl(messages)
         && has_success_line
-        && count_http_urls(assistant_text) >= 2)
+        && count_http_urls(assistant_text) >= 2
+        && has_sufficient_source_quality(assistant_text))
+}
+
+fn explicit_task_anchors(messages: &[Message]) -> Vec<String> {
+    let Some(user) = latest_user_content(messages) else {
+        return Vec::new();
+    };
+    let mut anchors = Vec::new();
+    for raw in user.split_whitespace() {
+        let token = raw
+            .trim()
+            .trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    '`' | '"' | '\'' | ',' | ';' | ':' | '.' | '(' | ')' | '[' | ']' | '{' | '}'
+                )
+            })
+            .trim_start_matches('#');
+        if token.len() < 4 {
+            continue;
+        }
+        let token_lc = token.to_ascii_lowercase();
+        let explicit = token.contains('@')
+            || token.starts_with('/')
+            || token.starts_with("http://")
+            || token.starts_with("https://")
+            || token.contains(".rs")
+            || token.contains(".py")
+            || token.contains('_')
+            || token.contains('-')
+            || token.contains('/')
+            || token_lc.contains("gmail")
+            || token_lc.contains("google")
+            || token_lc.contains("solana")
+            || token_lc.contains("telegram")
+            || token_lc.contains("contextlattice")
+            || token_lc.contains("algotrader")
+            || token_lc.contains("hermes");
+        if explicit {
+            anchors.push(token_lc);
+        }
+    }
+    anchors.sort();
+    anchors.dedup();
+    anchors.truncate(12);
+    anchors
+}
+
+fn finalizer_task_focus_requires_retry(
+    messages: &[Message],
+    assistant_text: &str,
+    retry_count: u32,
+) -> bool {
+    if retry_count >= FINALIZER_TASK_FOCUS_MAX_RETRIES {
+        return false;
+    }
+    if assistant_text.trim().is_empty() {
+        return false;
+    }
+    let anchors = explicit_task_anchors(messages);
+    if anchors.is_empty() {
+        return false;
+    }
+    let lower = assistant_text.to_ascii_lowercase();
+    if lower.contains("blocked")
+        || lower.contains("unproven")
+        || lower.contains("cannot verify")
+        || lower.contains("not authenticated")
+    {
+        return false;
+    }
+    anchors
+        .iter()
+        .take(8)
+        .all(|anchor| !lower.contains(anchor.as_str()))
 }
 
 fn detect_deep_repo_audit_intent(messages: &[Message]) -> bool {
@@ -16248,8 +16408,42 @@ mod tests {
             "web_search",
             r#"{"results":[{"url":"https://docs.jito.wtf/lowlatencytxnsend/"}]}"#,
         ));
-        let answer = "WEB_SEARCH_USED: yes\nObserved:\n- https://docs.jito.wtf/lowlatencytxnsend/\n- https://www.helius.dev/blog/solana-local-fee-markets";
+        let search_only_answer = "WEB_SEARCH_USED: yes\nSOURCE_QUALITY: primary=1 community=1 secondary=0\nObserved:\n- https://docs.jito.wtf/lowlatencytxnsend/\n- https://www.helius.dev/blog/solana-local-fee-markets";
+        assert!(finalizer_web_research_requires_retry(
+            &grounded,
+            search_only_answer,
+            0
+        ));
+        grounded.push(Message::tool_result_with_name(
+            "web2",
+            "web_extract",
+            "Extracted Jito low-latency transaction send docs.",
+        ));
+        let answer = "WEB_SEARCH_USED: yes\nSOURCE_QUALITY: primary=1 community=1 secondary=0\nObserved:\n- https://docs.jito.wtf/lowlatencytxnsend/\n- https://www.helius.dev/blog/solana-local-fee-markets";
         assert!(!finalizer_web_research_requires_retry(&grounded, answer, 0));
+    }
+
+    #[test]
+    fn test_web_research_finalizer_requires_source_quality_counts() {
+        let mut msgs = vec![Message::user(
+            "Search the web for Solana trading strategies and cite concrete URLs.",
+        )];
+        msgs.push(Message::tool_result_with_name(
+            "web1",
+            "web_search",
+            r#"{"results":[{"url":"https://docs.jito.wtf/lowlatencytxnsend/"}]}"#,
+        ));
+        msgs.push(Message::tool_result_with_name(
+            "web2",
+            "web_extract",
+            "Extracted source",
+        ));
+        let missing_quality = "WEB_SEARCH_USED: yes\n- https://docs.jito.wtf/lowlatencytxnsend/\n- https://www.helius.dev/blog/solana-local-fee-markets";
+        assert!(finalizer_web_research_requires_retry(
+            &msgs,
+            missing_quality,
+            0
+        ));
     }
 
     #[test]
@@ -16265,6 +16459,24 @@ mod tests {
         let hint = web_research_system_hint(&msgs, &tools).expect("web hint");
         assert!(hint.contains("Web research contract active"));
         assert!(hint.contains("web_search"));
+        assert!(hint.contains("SOURCE_QUALITY"));
+    }
+
+    #[test]
+    fn test_task_focus_finalizer_retries_when_explicit_anchors_disappear() {
+        let msgs = vec![Message::user(
+            "Use Gmail to summarize important emails from sheawinkler@gmail.com.",
+        )];
+        assert!(finalizer_task_focus_requires_retry(
+            &msgs,
+            "Here is a generic repository analysis with no email evidence.",
+            0
+        ));
+        assert!(!finalizer_task_focus_requires_retry(
+            &msgs,
+            "Gmail is blocked: not authenticated for sheawinkler@gmail.com.",
+            0
+        ));
     }
 
     #[test]

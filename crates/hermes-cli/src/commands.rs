@@ -14724,31 +14724,118 @@ fn handle_disk_cleanup_command(app: &mut App, args: &[&str]) -> Result<CommandRe
     Ok(CommandResult::Handled)
 }
 
-fn handle_mcp_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    if app.config.mcp_servers.is_empty() {
-        emit_command_output(app, "No MCP servers configured in `config.yaml`.");
-        return Ok(CommandResult::Handled);
+fn render_mcp_runtime_status(
+    yaml_servers: &[hermes_config::McpServerEntry],
+    json_config: Option<&crate::mcp_config::McpConfig>,
+    json_path: &Path,
+) -> String {
+    let json_servers = json_config.map(|cfg| cfg.servers.as_slice()).unwrap_or(&[]);
+    let mut names = HashSet::new();
+    for server in yaml_servers {
+        names.insert(server.name.clone());
     }
-    let mut out = String::from("Configured MCP servers:\n");
-    for server in &app.config.mcp_servers {
-        let endpoint = server
-            .url
-            .as_deref()
-            .filter(|u| !u.is_empty())
-            .unwrap_or("<stdio>");
-        let _ = writeln!(
-            out,
-            "  - {:<18} {}  [parallel_tool_calls:{}]",
-            server.name,
-            endpoint,
-            if server.supports_parallel_tool_calls {
-                "on"
-            } else {
-                "off"
-            }
+    for server in json_servers {
+        names.insert(server.name.clone());
+    }
+
+    if names.is_empty() {
+        return format!(
+            "No MCP servers configured.\n  config.yaml entries: 0\n  mcp_servers.json: {} ({})\nAdd one with `hermes mcp add <name> --url <url>` or `hermes mcp add <name> --command <cmd>`.",
+            if json_path.exists() { "present" } else { "missing" },
+            json_path.display()
         );
     }
-    emit_command_output(app, out.trim_end());
+
+    let mut out = String::new();
+    let _ = writeln!(out, "MCP runtime status");
+    let _ = writeln!(out, "  config.yaml entries: {}", yaml_servers.len());
+    let _ = writeln!(
+        out,
+        "  mcp_servers.json entries: {} ({})",
+        json_servers.len(),
+        json_path.display()
+    );
+
+    if let Some(config) = json_config {
+        for warning in config.warnings() {
+            let _ = writeln!(out, "  warning: {warning}");
+        }
+    }
+
+    let yaml_names: HashSet<_> = yaml_servers
+        .iter()
+        .map(|server| server.name.as_str())
+        .collect();
+    let json_names: HashSet<_> = json_servers
+        .iter()
+        .map(|server| server.name.as_str())
+        .collect();
+    let mut sorted: Vec<_> = names.into_iter().collect();
+    sorted.sort();
+
+    out.push_str("Configured MCP servers:\n");
+    for name in sorted {
+        if let Some(server) = yaml_servers.iter().find(|server| server.name == name) {
+            let endpoint = server
+                .url
+                .as_deref()
+                .filter(|u| !u.is_empty())
+                .or(server.command.as_deref())
+                .unwrap_or("<stdio>");
+            let _ = writeln!(
+                out,
+                "  - {:<18} {}  [source:config.yaml; parallel_tool_calls:{}]",
+                server.name,
+                endpoint,
+                if server.supports_parallel_tool_calls {
+                    "on"
+                } else {
+                    "off"
+                }
+            );
+        }
+        if let Some(server) = json_servers.iter().find(|server| server.name == name) {
+            let _ = writeln!(
+                out,
+                "  - {:<18} {}  [source:mcp_servers.json; {}; enabled:{}; parallel_tool_calls:{}]",
+                server.name,
+                server.transport_display(),
+                server.transport_kind().as_str(),
+                if server.enabled { "on" } else { "off" },
+                if server.supports_parallel_tool_calls {
+                    "on"
+                } else {
+                    "off"
+                }
+            );
+        }
+    }
+
+    let mut yaml_only: Vec<_> = yaml_names.difference(&json_names).copied().collect();
+    let mut json_only: Vec<_> = json_names.difference(&yaml_names).copied().collect();
+    yaml_only.sort();
+    json_only.sort();
+    if !yaml_only.is_empty() || !json_only.is_empty() {
+        let _ = writeln!(
+            out,
+            "Drift: config_only=[{}] json_only=[{}]",
+            yaml_only.join(","),
+            json_only.join(",")
+        );
+    }
+
+    out.trim_end().to_string()
+}
+
+fn handle_mcp_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let mcp_config_path = app.state_root.join("mcp_servers.json");
+    let json_config = load_mcp_config_if_exists(&mcp_config_path)?;
+    let out = render_mcp_runtime_status(
+        &app.config.mcp_servers,
+        json_config.as_ref(),
+        &mcp_config_path,
+    );
+    emit_command_output(app, out);
     Ok(CommandResult::Handled)
 }
 
@@ -29917,6 +30004,46 @@ mod tests {
         assert!(status.contains("Memory provider: files (MEMORY.md + USER.md)"));
         assert!(status.contains("MEMORY.md"));
         assert!(status.contains("USER.md"));
+    }
+
+    #[test]
+    fn test_render_mcp_runtime_status_includes_json_only_servers() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("mcp_servers.json");
+        std::fs::write(
+            &path,
+            r#"{"contextlattice":{"url":"http://127.0.0.1:8075/mcp","enabled":true,"supports_parallel_tool_calls":true}}"#,
+        )
+        .expect("write mcp json");
+        let cfg = crate::mcp_config::load_mcp_config(&path).expect("load mcp config");
+
+        let status = render_mcp_runtime_status(&[], Some(&cfg), &path);
+        assert!(status.contains("MCP runtime status"));
+        assert!(status.contains("contextlattice"));
+        assert!(status.contains("source:mcp_servers.json"));
+        assert!(status.contains("json_only=[contextlattice]"));
+    }
+
+    #[test]
+    fn test_render_mcp_runtime_status_reports_drift_between_yaml_and_json() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("mcp_servers.json");
+        let cfg = crate::mcp_config::parse_mcp_config_json(
+            r#"{"json-only":{"url":"https://example.com/mcp"}}"#,
+        )
+        .expect("parse mcp config");
+        let yaml = vec![hermes_config::McpServerEntry {
+            name: "yaml-only".to_string(),
+            command: Some("local-mcp".to_string()),
+            url: None,
+            supports_parallel_tool_calls: false,
+        }];
+
+        let status = render_mcp_runtime_status(&yaml, Some(&cfg), &path);
+        assert!(status.contains("yaml-only"));
+        assert!(status.contains("json-only"));
+        assert!(status.contains("config_only=[yaml-only]"));
+        assert!(status.contains("json_only=[json-only]"));
     }
 
     #[tokio::test]
