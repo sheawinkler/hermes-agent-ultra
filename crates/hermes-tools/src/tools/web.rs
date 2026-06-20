@@ -81,7 +81,7 @@ impl ToolHandler for WebSearchHandler {
             "query".into(),
             json!({
                 "type": "string",
-                "description": "The search query"
+                "description": "The search query. Prefer precise queries that target official docs, source repositories, primary data, standards, papers, or high-signal expert/community threads before generic summaries."
             }),
         );
         props.insert(
@@ -100,7 +100,7 @@ impl ToolHandler for WebSearchHandler {
 
         tool_schema(
             "web_search",
-            "Search the web using the configured provider (Exa/Tavily/SearXNG). Returns relevant results with titles, URLs, and snippets.",
+            "Search the web using the configured provider (Exa/Tavily/SearXNG). Returns titles, URLs, and snippets. For research tasks, gather primary/official/repository/community sources first and follow the best results with web_extract when detail matters.",
             JsonSchema::object(props, vec!["query".into()]),
         )
     }
@@ -152,7 +152,7 @@ impl ToolHandler for WebCrawlHandler {
             "instructions".into(),
             json!({
                 "type": "string",
-                "description": "Optional natural-language crawl guidance"
+                "description": "Optional natural-language crawl guidance. Prefer instructions that keep crawl scope on official docs, repositories, standards, papers, or expert/community pages relevant to the claim being verified."
             }),
         );
         props.insert(
@@ -175,7 +175,7 @@ impl ToolHandler for WebCrawlHandler {
 
         tool_schema(
             "web_crawl",
-            "Crawl a seed URL using the configured provider. Returns normalized page documents and per-page errors.",
+            "Crawl a seed URL using the configured provider. Returns normalized page documents and per-page errors. Use for source-grounded research when one high-value source has linked subpages worth verifying.",
             JsonSchema::object(props, vec!["url".into()]),
         )
     }
@@ -218,7 +218,7 @@ impl ToolHandler for WebExtractHandler {
             "url".into(),
             json!({
                 "type": "string",
-                "description": "The URL to extract content from"
+                "description": "The URL to extract content from. Prefer the highest-value primary, official, repository, paper, or expert/community result rather than SEO summaries."
             }),
         );
         props.insert(
@@ -232,7 +232,7 @@ impl ToolHandler for WebExtractHandler {
 
         tool_schema(
             "web_extract",
-            "Extract clean content from a web page using Firecrawl. Returns the page text and optional links.",
+            "Extract clean content from a web page using Firecrawl. Returns page text and optional links; use this to verify details from primary/official/repository/community sources before final synthesis.",
             JsonSchema::object(props, vec!["url".into()]),
         )
     }
@@ -294,6 +294,7 @@ mod tests {
         let schema = handler.schema();
         assert_eq!(schema.name, "web_search");
         assert!(schema.parameters.properties.is_some());
+        assert!(schema.description.contains("primary/official"));
     }
 
     #[tokio::test]
@@ -313,6 +314,7 @@ mod tests {
         let handler = WebExtractHandler::new(Box::new(MockExtractBackend));
         let schema = handler.schema();
         assert_eq!(schema.name, "web_extract");
+        assert!(schema.description.contains("verify details"));
     }
 
     #[tokio::test]
