@@ -198,6 +198,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/toolsets", "Show configured toolsets by platform"),
     ("/plugins", "List plugin bundles and status"),
     (
+        "/memory",
+        "Show memory backend status and pending write summary (`status|pending`)",
+    ),
+    (
         "/disk-cleanup",
         "Rust-native ephemeral file cleanup (`status|dry-run|quick|deep|track|forget`)",
     ),
@@ -3760,6 +3764,7 @@ async fn dispatch_slash_command(
         "/toolsets" => handle_toolsets_command(app),
         "/bundles" => handle_bundles_command(app),
         "/plugins" => handle_plugins_command(app),
+        "/memory" => handle_memory_command(app, args),
         "/disk-cleanup" => handle_disk_cleanup_command(app, args),
         "/mcp" => handle_mcp_command(app),
         "/reload" | "/reload-skills" | "/reload-mcp" => {
@@ -5610,31 +5615,7 @@ async fn handle_skills_command(app: &mut App, args: &[&str]) -> Result<CommandRe
         return Ok(CommandResult::Handled);
     }
 
-    let mut skills: Vec<(String, String)> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&skills_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let skill_md = path.join("SKILL.md");
-            if !path.is_dir() || !skill_md.exists() {
-                continue;
-            }
-            let name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            let title = std::fs::read_to_string(&skill_md)
-                .ok()
-                .and_then(|c| {
-                    c.lines()
-                        .find(|l| l.starts_with('#'))
-                        .map(|l| l.trim_start_matches('#').trim().to_string())
-                })
-                .unwrap_or_else(|| "(no description)".to_string());
-            skills.push((name, title));
-        }
-    }
-    skills.sort_by(|a, b| a.0.cmp(&b.0));
+    let skills = collect_local_skill_summaries(&skills_dir);
 
     if skills.is_empty() {
         emit_command_output(
@@ -5646,8 +5627,12 @@ async fn handle_skills_command(app: &mut App, args: &[&str]) -> Result<CommandRe
         );
     } else {
         let mut out = format!("Installed skills ({}):\n", skills.len());
-        for (name, title) in &skills {
-            out.push_str(&format!("- `{}` — {}\n", name, title));
+        for summary in &skills {
+            out.push_str(&format!(
+                "- `{}` — {}\n",
+                format_skill_display_name(summary),
+                summary.title
+            ));
         }
         out.push_str("\nUse `hermes skills inspect <name>` for details.");
         out.push_str("\nUse `/skills quality` for score + fallback recommendations.");
@@ -14767,6 +14752,236 @@ fn handle_mcp_command(app: &mut App) -> Result<CommandResult, AgentError> {
     Ok(CommandResult::Handled)
 }
 
+fn render_memory_backend_status(hermes_home: &Path) -> String {
+    let memories_dir = hermes_home.join("memories");
+    let memory_md = memories_dir.join("MEMORY.md");
+    let user_md = memories_dir.join("USER.md");
+    let legacy_memory_db = hermes_home.join("memory.db");
+    let disabled_marker = hermes_home.join(".memory_disabled");
+    let mut out = String::new();
+
+    if disabled_marker.exists() {
+        out.push_str("Memory provider: disabled\n");
+        let _ = writeln!(out, "  Marker: {}", disabled_marker.display());
+        out.push_str("Run `hermes memory setup` to re-enable.");
+        return out;
+    }
+
+    if memory_md.exists() || user_md.exists() {
+        let mem_size = std::fs::metadata(&memory_md).map(|m| m.len()).unwrap_or(0);
+        let user_size = std::fs::metadata(&user_md).map(|m| m.len()).unwrap_or(0);
+        out.push_str("Memory provider: files (MEMORY.md + USER.md)\n");
+        let _ = writeln!(out, "  Directory: {}", memories_dir.display());
+        let _ = writeln!(
+            out,
+            "  MEMORY.md: {} ({:.1} KB)",
+            memory_md.display(),
+            mem_size as f64 / 1024.0
+        );
+        let _ = writeln!(
+            out,
+            "  USER.md:   {} ({:.1} KB)",
+            user_md.display(),
+            user_size as f64 / 1024.0
+        );
+        if legacy_memory_db.exists() {
+            let _ = writeln!(
+                out,
+                "  Legacy file detected (unused by current memory backend): {}",
+                legacy_memory_db.display()
+            );
+        }
+        return out.trim_end().to_string();
+    }
+
+    if legacy_memory_db.exists() {
+        let size = std::fs::metadata(&legacy_memory_db)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        out.push_str("Memory provider: legacy sqlite artifact only\n");
+        let _ = writeln!(out, "  File: {}", legacy_memory_db.display());
+        let _ = writeln!(out, "  Size: {} KB", size / 1024);
+        out.push_str("Run `hermes memory setup` to initialize the current file backend.");
+        return out;
+    }
+
+    out.push_str("Memory provider: not configured\n");
+    out.push_str("Run `hermes memory setup` to initialize.");
+    out
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalSkillSummary {
+    name: String,
+    title: String,
+    relative_dir: String,
+    skill_md: PathBuf,
+}
+
+fn collect_local_skill_summaries(skills_dir: &Path) -> Vec<LocalSkillSummary> {
+    let mut summaries = Vec::new();
+    collect_local_skill_summaries_rec(skills_dir, skills_dir, &mut summaries);
+    summaries.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then_with(|| a.relative_dir.cmp(&b.relative_dir))
+    });
+    summaries
+}
+
+fn collect_local_skill_summaries_rec(root: &Path, dir: &Path, out: &mut Vec<LocalSkillSummary>) {
+    let skill_md = dir.join("SKILL.md");
+    if skill_md.exists() {
+        if let Some(summary) = read_local_skill_summary(root, &skill_md) {
+            out.push(summary);
+        }
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') {
+            continue;
+        }
+        collect_local_skill_summaries_rec(root, &entry.path(), out);
+    }
+}
+
+fn read_local_skill_summary(root: &Path, skill_md: &Path) -> Option<LocalSkillSummary> {
+    let content = std::fs::read_to_string(skill_md).ok()?;
+    let parent = skill_md.parent()?;
+    let fallback_name = parent.file_name()?.to_string_lossy().to_string();
+    let relative_dir = parent
+        .strip_prefix(root)
+        .ok()
+        .map(path_to_forward_slashes)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| fallback_name.clone());
+    let name = frontmatter_value(&content, "name").unwrap_or(fallback_name);
+    let title = frontmatter_value(&content, "description")
+        .or_else(|| {
+            content
+                .lines()
+                .find(|line| line.starts_with('#'))
+                .map(|line| line.trim_start_matches('#').trim().to_string())
+        })
+        .filter(|line| !line.trim().is_empty())
+        .unwrap_or_else(|| "(no description)".to_string());
+
+    Some(LocalSkillSummary {
+        name,
+        title,
+        relative_dir,
+        skill_md: skill_md.to_path_buf(),
+    })
+}
+
+fn frontmatter_value(content: &str, key: &str) -> Option<String> {
+    let mut lines = content.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+
+    let needle = format!("{}:", key);
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            break;
+        }
+        let Some(value) = trimmed.strip_prefix(&needle) else {
+            continue;
+        };
+        let value = value
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim()
+            .to_string();
+        if !value.is_empty() {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn find_local_skill_markdown(skills_dir: &Path, query: &str) -> Option<PathBuf> {
+    let query = query.trim().trim_start_matches('/');
+    if query.is_empty() {
+        return None;
+    }
+
+    collect_local_skill_summaries(skills_dir)
+        .into_iter()
+        .find(|summary| local_skill_summary_matches(summary, query))
+        .map(|summary| summary.skill_md)
+}
+
+fn local_skill_summary_matches(summary: &LocalSkillSummary, query: &str) -> bool {
+    summary.name == query
+        || summary.relative_dir == query
+        || summary
+            .skill_md
+            .parent()
+            .and_then(|dir| dir.file_name())
+            .map(|name| name.to_string_lossy() == query)
+            .unwrap_or(false)
+        || summary.name.eq_ignore_ascii_case(query)
+        || summary.relative_dir.eq_ignore_ascii_case(query)
+}
+
+fn format_skill_display_name(summary: &LocalSkillSummary) -> String {
+    if summary.relative_dir == summary.name {
+        summary.name.clone()
+    } else {
+        format!("{} ({})", summary.name, summary.relative_dir)
+    }
+}
+
+fn path_to_forward_slashes(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn handle_memory_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let action = args.first().copied().unwrap_or("pending");
+    match action {
+        "status" => {
+            emit_command_output(app, render_memory_backend_status(&app.state_root));
+        }
+        "pending" => {
+            let mut out = String::from("memory.write_approval = off\n\nNo pending memory writes.");
+            out.push_str("\n\n");
+            out.push_str(&render_memory_backend_status(&app.state_root));
+            emit_command_output(app, out.trim_end());
+        }
+        "setup" | "off" | "reset" => {
+            emit_command_output(
+                app,
+                "Use `hermes memory status|setup|off|reset` outside the chat session for memory backend changes. Slash `/memory` is read-only: `/memory [status|pending]`.",
+            );
+        }
+        _ => {
+            emit_command_output(app, "Usage: /memory [status|pending]");
+        }
+    }
+    Ok(CommandResult::Handled)
+}
+
 fn handle_reload_command(app: &mut App, cmd: &str) -> Result<CommandResult, AgentError> {
     if cmd == "/reload-mcp" {
         emit_command_output(
@@ -20634,6 +20849,7 @@ const COMMAND_CATALOG_SECTIONS: &[CommandCatalogSection] = &[
             "/toolcards",
             "/toolsets",
             "/plugins",
+            "/memory",
             "/mcp",
             "/platforms",
             "/integrations",
@@ -21723,7 +21939,7 @@ pub async fn handle_cli_chat(
     let tool_registry = Arc::new(ToolRegistry::new());
     let tool_schemas = if tools_enabled {
         let terminal_backend = build_terminal_backend(&config);
-        let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+        let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
         let skill_provider: Arc<dyn hermes_core::SkillProvider> =
             Arc::new(SkillManager::new(skill_store));
         hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
@@ -21979,28 +22195,16 @@ pub async fn handle_cli_skills(
                 );
                 return Ok(());
             }
-            let mut count = 0u32;
+            let skills = collect_local_skill_summaries(&skills_dir);
             println!("Installed skills ({}):", skills_dir.display());
-            if let Ok(entries) = std::fs::read_dir(&skills_dir) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    let path = entry.path();
-                    let skill_md = path.join("SKILL.md");
-                    if path.is_dir() && skill_md.exists() {
-                        let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
-                        let first_line = std::fs::read_to_string(&skill_md)
-                            .ok()
-                            .and_then(|c| {
-                                c.lines()
-                                    .find(|l| l.starts_with('#'))
-                                    .map(|l| l.trim_start_matches('#').trim().to_string())
-                            })
-                            .unwrap_or_else(|| "(no description)".to_string());
-                        println!("  • {} — {}", dir_name, first_line);
-                        count += 1;
-                    }
-                }
+            for summary in &skills {
+                println!(
+                    "  • {} — {}",
+                    format_skill_display_name(summary),
+                    summary.title
+                );
             }
-            if count == 0 {
+            if skills.is_empty() {
                 println!("  (no skills installed)");
             }
         }
@@ -22670,13 +22874,16 @@ pub async fn handle_cli_skills(
         }
         "inspect" => {
             let skill_name = name.unwrap_or_default();
-            let skill_md = skills_dir.join(&skill_name).join("SKILL.md");
-            if skill_md.exists() {
+            if let Some(skill_md) = find_local_skill_markdown(&skills_dir, &skill_name) {
                 let content = std::fs::read_to_string(&skill_md)
                     .map_err(|e| hermes_core::AgentError::Io(format!("Read error: {}", e)))?;
                 println!("{}", content);
             } else {
-                println!("Skill '{}' not found at {}", skill_name, skill_md.display());
+                println!(
+                    "Skill '{}' not found under {}",
+                    skill_name,
+                    skills_dir.display()
+                );
             }
         }
         "uninstall" => {
@@ -25008,46 +25215,7 @@ pub async fn handle_cli_memory(
 
     match action.as_deref().unwrap_or("status") {
         "status" => {
-            if disabled_marker.exists() {
-                println!("Memory provider: disabled");
-                println!("  Marker: {}", disabled_marker.display());
-                println!("Run `hermes memory setup` to re-enable.");
-                return Ok(());
-            }
-
-            if memory_md.exists() || user_md.exists() {
-                let mem_size = std::fs::metadata(&memory_md).map(|m| m.len()).unwrap_or(0);
-                let user_size = std::fs::metadata(&user_md).map(|m| m.len()).unwrap_or(0);
-                println!("Memory provider: files (MEMORY.md + USER.md)");
-                println!("  Directory: {}", memories_dir.display());
-                println!(
-                    "  MEMORY.md: {} ({:.1} KB)",
-                    memory_md.display(),
-                    mem_size as f64 / 1024.0
-                );
-                println!(
-                    "  USER.md:   {} ({:.1} KB)",
-                    user_md.display(),
-                    user_size as f64 / 1024.0
-                );
-                if legacy_memory_db.exists() {
-                    println!(
-                        "  Legacy file detected (unused by current memory backend): {}",
-                        legacy_memory_db.display()
-                    );
-                }
-            } else if legacy_memory_db.exists() {
-                let size = std::fs::metadata(&legacy_memory_db)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
-                println!("Memory provider: legacy sqlite artifact only");
-                println!("  File: {}", legacy_memory_db.display());
-                println!("  Size: {} KB", size / 1024);
-                println!("Run `hermes memory setup` to initialize the current file backend.");
-            } else {
-                println!("Memory provider: not configured");
-                println!("Run `hermes memory setup` to initialize.");
-            }
+            println!("{}", render_memory_backend_status(&hermes_home));
         }
         "setup" => {
             if let Some(provider) = target
@@ -25406,7 +25574,7 @@ pub async fn handle_cli_mcp(
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
             let tool_registry = Arc::new(ToolRegistry::new());
             let terminal_backend = crate::terminal_backend::build_terminal_backend(&config);
-            let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+            let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(SkillManager::new(skill_store));
             hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
@@ -27459,7 +27627,7 @@ pub async fn handle_cli_acp(
             let tool_registry = Arc::new(hermes_tools::ToolRegistry::new());
             let terminal_backend = crate::terminal_backend::build_terminal_backend(&config);
             let skill_store = Arc::new(hermes_skills::FileSkillStore::new(
-                hermes_skills::FileSkillStore::default_dir(),
+                hermes_config::skills_dir(),
             ));
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(hermes_skills::SkillManager::new(skill_store));
@@ -28104,6 +28272,60 @@ mod tests {
         assert_eq!(invocation.skill_name, "Release Captain");
         assert!(invocation.message.contains("Inspect changed files"));
         assert!(invocation.message.contains("ship it"));
+    }
+
+    #[test]
+    fn local_skill_summaries_include_categorized_skills() {
+        let tmp = tempdir().expect("tempdir");
+        let skills_dir = tmp.path().join("skills");
+        let google_skill_dir = skills_dir.join("productivity").join("google-workspace");
+        std::fs::create_dir_all(&google_skill_dir).expect("create categorized skill dir");
+        std::fs::write(
+            google_skill_dir.join("SKILL.md"),
+            "---\nname: google-workspace\ndescription: Google Workspace automation\n---\n# Google Workspace\n",
+        )
+        .expect("write categorized skill");
+
+        let root_skill_dir = skills_dir.join("release-captain");
+        std::fs::create_dir_all(&root_skill_dir).expect("create root skill dir");
+        std::fs::write(
+            root_skill_dir.join("SKILL.md"),
+            "---\nname: release-captain\ndescription: Release workflow\n---\n# Release Captain\n",
+        )
+        .expect("write root skill");
+
+        let summaries = collect_local_skill_summaries(&skills_dir);
+        assert!(summaries.iter().any(|summary| {
+            summary.name == "google-workspace"
+                && summary.relative_dir == "productivity/google-workspace"
+                && summary.title == "Google Workspace automation"
+        }));
+        assert!(summaries
+            .iter()
+            .any(|summary| summary.name == "release-captain"));
+    }
+
+    #[test]
+    fn local_skill_markdown_resolves_by_name_and_relative_path() {
+        let tmp = tempdir().expect("tempdir");
+        let skills_dir = tmp.path().join("skills");
+        let google_skill_dir = skills_dir.join("productivity").join("google-workspace");
+        std::fs::create_dir_all(&google_skill_dir).expect("create categorized skill dir");
+        let skill_md = google_skill_dir.join("SKILL.md");
+        std::fs::write(
+            &skill_md,
+            "---\nname: google-workspace\ndescription: Google Workspace automation\n---\n# Google Workspace\n",
+        )
+        .expect("write categorized skill");
+
+        assert_eq!(
+            find_local_skill_markdown(&skills_dir, "google-workspace").as_deref(),
+            Some(skill_md.as_path())
+        );
+        assert_eq!(
+            find_local_skill_markdown(&skills_dir, "productivity/google-workspace").as_deref(),
+            Some(skill_md.as_path())
+        );
     }
 
     #[tokio::test]
@@ -29671,6 +29893,30 @@ mod tests {
         assert!(telemetry.contains(&"/telemetry"));
         let runbook = autocomplete("/runb");
         assert!(runbook.contains(&"/runbook"));
+    }
+
+    #[test]
+    fn test_memory_command_is_registered_completable_and_cataloged() {
+        assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/memory"));
+        let results = autocomplete("/mem");
+        assert!(results.contains(&"/memory"));
+        let catalog = render_command_catalog(Some("memory"));
+        assert!(catalog.contains("/memory"));
+        assert!(catalog.contains("Show memory backend status"));
+    }
+
+    #[test]
+    fn test_render_memory_backend_status_reports_file_backend() {
+        let tmp = tempdir().expect("tempdir");
+        let memories = tmp.path().join("memories");
+        std::fs::create_dir_all(&memories).expect("create memories dir");
+        std::fs::write(memories.join("MEMORY.md"), "# Memory\nfact\n").expect("write memory");
+        std::fs::write(memories.join("USER.md"), "# User\npreference\n").expect("write user");
+
+        let status = render_memory_backend_status(tmp.path());
+        assert!(status.contains("Memory provider: files (MEMORY.md + USER.md)"));
+        assert!(status.contains("MEMORY.md"));
+        assert!(status.contains("USER.md"));
     }
 
     #[tokio::test]

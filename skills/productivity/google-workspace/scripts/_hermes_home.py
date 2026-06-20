@@ -25,11 +25,22 @@ try:
 except (ModuleNotFoundError, ImportError):
 
     def get_hermes_home() -> Path:
-        """Return the Hermes home directory (default: ~/.hermes).
+        """Return the Hermes home directory.
 
-        Mirrors ``hermes_constants.get_hermes_home()``."""
-        val = os.environ.get("HERMES_HOME", "").strip()
-        return Path(val) if val else Path.home() / ".hermes"
+        Mirrors the Rust Ultra profile rules when ``hermes_constants`` is not
+        importable: explicit ``HERMES_HOME`` first, then
+        ``HERMES_AGENT_ULTRA_HOME``, then ``~/.hermes-agent-ultra`` unless only
+        the legacy ``~/.hermes`` profile exists.
+        """
+        for key in ("HERMES_HOME", "HERMES_AGENT_ULTRA_HOME"):
+            val = os.environ.get(key, "").strip()
+            if val:
+                return Path(val)
+        primary = Path.home() / ".hermes-agent-ultra"
+        legacy = Path.home() / ".hermes"
+        if primary.exists() or not legacy.exists():
+            return primary
+        return legacy
 
     def display_hermes_home() -> str:
         """Return a user-friendly ``~/``-shortened display string.

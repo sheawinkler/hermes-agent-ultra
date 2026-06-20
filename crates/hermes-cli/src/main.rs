@@ -1838,7 +1838,7 @@ async fn run_tools(
         load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
     let registry = Arc::new(hermes_tools::ToolRegistry::new());
     let terminal_backend = build_terminal_backend(&runtime_config);
-    let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+    let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
     let skill_provider: Arc<dyn hermes_core::SkillProvider> =
         Arc::new(SkillManager::new(skill_store));
     hermes_tools::register_builtin_tools(&registry, terminal_backend, skill_provider);
@@ -1940,7 +1940,7 @@ async fn run_tools_setup_wizard(cli: &Cli) -> Result<(), AgentError> {
         load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
     let registry = Arc::new(hermes_tools::ToolRegistry::new());
     let terminal_backend = build_terminal_backend(&runtime_config);
-    let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+    let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
     let skill_provider: Arc<dyn hermes_core::SkillProvider> =
         Arc::new(SkillManager::new(skill_store));
     hermes_tools::register_builtin_tools(&registry, terminal_backend, skill_provider);
@@ -2932,7 +2932,7 @@ async fn run_gateway(
 
             let tool_registry = Arc::new(ToolRegistry::new());
             let terminal_backend = build_terminal_backend(&config);
-            let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+            let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(SkillManager::new(skill_store));
             hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
@@ -9390,7 +9390,7 @@ fn build_live_cron_scheduler(cli: &Cli, data_dir: &Path) -> Result<CronScheduler
 
     let tool_registry = Arc::new(ToolRegistry::new());
     let terminal_backend = build_terminal_backend(&config);
-    let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+    let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
     let skill_provider: Arc<dyn hermes_core::SkillProvider> =
         Arc::new(SkillManager::new(skill_store));
     hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);

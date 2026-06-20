@@ -2206,7 +2206,7 @@ impl App {
         let stream_handle_shared: Arc<StdMutex<Option<StreamHandle>>> =
             Arc::new(StdMutex::new(None));
         let terminal_backend = build_terminal_backend(&config);
-        let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+        let skill_store = Arc::new(FileSkillStore::new(hermes_config::skills_dir()));
         let skill_provider: Arc<dyn hermes_core::SkillProvider> =
             Arc::new(SkillManager::new(skill_store));
         hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
