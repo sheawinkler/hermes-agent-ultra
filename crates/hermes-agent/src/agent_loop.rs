@@ -257,6 +257,10 @@ const FINALIZER_ACTION_EXECUTION_MAX_RETRIES: u32 = 2;
 const FINALIZER_WEB_RESEARCH_MAX_RETRIES: u32 = 4;
 const FINALIZER_GOOGLE_WORKSPACE_MAX_RETRIES: u32 = 2;
 const FINALIZER_TASK_FOCUS_MAX_RETRIES: u32 = 2;
+const FINALIZER_REPO_RESEARCH_PLAN_MAX_RETRIES: u32 = 2;
+const REPO_RESEARCH_MIN_WORKSTREAMS: usize = 3;
+const REPO_RESEARCH_MIN_UNIQUE_FILES: usize = 2;
+const REPO_RESEARCH_MIN_COMMANDS: usize = 2;
 
 // Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
 const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
@@ -5274,6 +5278,7 @@ impl AgentLoop {
         let mut finalizer_web_research_retries: u32 = 0;
         let mut finalizer_google_workspace_retries: u32 = 0;
         let mut finalizer_task_focus_retries: u32 = 0;
+        let mut finalizer_repo_research_plan_retries: u32 = 0;
         let governor_window_limit = governor_window_size();
 
         loop {
@@ -5770,6 +5775,23 @@ impl AgentLoop {
                     ));
                     continue;
                 }
+                if finalizer_repo_research_plan_requires_retry(
+                    ctx.get_messages(),
+                    assistant_msg.content.as_deref().unwrap_or_default(),
+                    finalizer_repo_research_plan_retries,
+                ) {
+                    finalizer_repo_research_plan_retries =
+                        finalizer_repo_research_plan_retries.saturating_add(1);
+                    self.emit_status(
+                        "lifecycle",
+                        "Detected shallow repo research synthesis; forcing workstream evidence map.",
+                    );
+                    ctx.add_message(Message::system(repo_research_retry_prompt()));
+                    ctx.add_message(Message::user(
+                        "Re-issue the final response with grounded repo research workstreams now.",
+                    ));
+                    continue;
+                }
                 if finalizer_claim_requires_evidence_retry(
                     ctx.get_messages(),
                     assistant_msg.content.as_deref().unwrap_or_default(),
@@ -5841,6 +5863,7 @@ impl AgentLoop {
                 finalizer_web_research_retries = 0;
                 finalizer_google_workspace_retries = 0;
                 finalizer_task_focus_retries = 0;
+                finalizer_repo_research_plan_retries = 0;
                 let (objective_guard_active, requires_analytics, deep_audit_required) =
                     objective_guard_policy(ctx.get_messages());
                 if objective_guard_active {
@@ -6599,6 +6622,7 @@ impl AgentLoop {
         let mut finalizer_web_research_retries: u32 = 0;
         let mut finalizer_google_workspace_retries: u32 = 0;
         let mut finalizer_task_focus_retries: u32 = 0;
+        let mut finalizer_repo_research_plan_retries: u32 = 0;
         let governor_window_limit = governor_window_size();
 
         loop {
@@ -7168,6 +7192,23 @@ impl AgentLoop {
                     ));
                     continue;
                 }
+                if finalizer_repo_research_plan_requires_retry(
+                    ctx.get_messages(),
+                    assistant_msg.content.as_deref().unwrap_or_default(),
+                    finalizer_repo_research_plan_retries,
+                ) {
+                    finalizer_repo_research_plan_retries =
+                        finalizer_repo_research_plan_retries.saturating_add(1);
+                    self.emit_status(
+                        "lifecycle",
+                        "Detected shallow repo research synthesis; forcing workstream evidence map.",
+                    );
+                    ctx.add_message(Message::system(repo_research_retry_prompt()));
+                    ctx.add_message(Message::user(
+                        "Re-issue the final response with grounded repo research workstreams now.",
+                    ));
+                    continue;
+                }
                 if finalizer_claim_requires_evidence_retry(
                     ctx.get_messages(),
                     assistant_msg.content.as_deref().unwrap_or_default(),
@@ -7239,6 +7280,7 @@ impl AgentLoop {
                 finalizer_web_research_retries = 0;
                 finalizer_google_workspace_retries = 0;
                 finalizer_task_focus_retries = 0;
+                finalizer_repo_research_plan_retries = 0;
                 let (objective_guard_active, requires_analytics, deep_audit_required) =
                     objective_guard_policy(ctx.get_messages());
                 if objective_guard_active {
@@ -8954,9 +8996,9 @@ fn repo_review_tool_profile_mode() -> RepoReviewToolProfileMode {
         .unwrap_or(RepoReviewToolProfileMode::Balanced)
 }
 
-fn exploratory_problem_solving_system_hint(messages: &[Message]) -> Option<String> {
+fn detect_exploratory_repo_research_intent(messages: &[Message]) -> bool {
     if !detect_repo_review_intent(messages) {
-        return None;
+        return false;
     }
     let user = latest_user_content(messages)
         .unwrap_or_default()
@@ -8965,7 +9007,7 @@ fn exploratory_problem_solving_system_hint(messages: &[Message]) -> Option<Strin
         .unwrap_or_default()
         .to_ascii_lowercase();
     let combined = format!("{} {}", user, objective);
-    let exploratory = [
+    [
         "explore",
         "investigate",
         "understand",
@@ -8983,8 +9025,11 @@ fn exploratory_problem_solving_system_hint(messages: &[Message]) -> Option<Strin
         "why",
     ]
     .iter()
-    .any(|needle| combined.contains(needle));
-    if !exploratory {
+    .any(|needle| combined.contains(needle))
+}
+
+fn exploratory_problem_solving_system_hint(messages: &[Message]) -> Option<String> {
+    if !detect_exploratory_repo_research_intent(messages) {
         return None;
     }
     Some(
@@ -8992,7 +9037,8 @@ fn exploratory_problem_solving_system_hint(messages: &[Message]) -> Option<Strin
 1) Start by declaring workstreams (`workstream=<name>`) that cover the full problem surface. \
 2) Run focused evidence collection per workstream (`file=...`, `cmd=...`) rather than repeated broad scans. \
 3) After each evidence batch, update status per workstream (`complete|blocked|unproven`) and refine next probes. \
-4) Do not finalize until high-leverage workstreams are either complete or explicitly blocked with concrete blockers and next actions."
+4) Do not finalize until high-leverage workstreams are either complete or explicitly blocked with concrete blockers and next actions. \
+5) Final synthesis must include `REPO_RESEARCH_PLAN: complete` or `REPO_RESEARCH_PLAN: blocked`, plus `workstream=... status=... file=... cmd=...` evidence lines."
             .to_string(),
     )
 }
@@ -9030,7 +9076,7 @@ fn web_research_system_hint(messages: &[Message], tool_schemas: &[ToolSchema]) -
         .iter()
         .any(|t| matches!(t.name.as_str(), "web_search" | "web_extract" | "web_crawl"));
     let availability = if has_web_tool {
-        "Use `web_search` first, then `web_extract` for the highest-value primary, official, repository, or expert-community sources before final synthesis."
+        "Use `web_search` first, rank candidates by returned `source_quality`/`source_quality_score`, then `web_extract` for the highest-value primary, official, repository, or expert-community sources before final synthesis."
     } else {
         "No web tools are advertised in this session; report that exact blocker instead of inventing sources."
     };
@@ -9334,6 +9380,7 @@ fn web_research_retry_prompt() -> &'static str {
     "[SYSTEM] Web research contract failed. This request explicitly requires online research.\n\
      Requirements now:\n\
      - call `web_search` with targeted queries before answering\n\
+     - use returned `source_quality`/`source_quality_score` metadata to choose sources\n\
      - call `web_extract` or `web_crawl` on at least one highest-value primary, official, repository, or expert-community source\n\
      - final answer must include the exact line `WEB_SEARCH_USED: yes` after successful web tooling\n\
      - cite at least two concrete http(s) URLs copied from web tool results\n\
@@ -9438,6 +9485,88 @@ fn finalizer_task_focus_requires_retry(
         .iter()
         .take(8)
         .all(|anchor| !lower.contains(anchor.as_str()))
+}
+
+fn repo_research_retry_prompt() -> &'static str {
+    "[SYSTEM] Repo research planning contract failed. Before final synthesis, produce a grounded research map.\n\
+     Requirements now:\n\
+     - include `REPO_RESEARCH_PLAN: complete` when covered, or `REPO_RESEARCH_PLAN: blocked` with exact blockers\n\
+     - for complete research, include at least three lines shaped like `workstream=<name> status=<complete|blocked|unproven> file=<existing path> cmd=<probe>`\n\
+     - include at least two distinct `file=`/`path=` evidence markers and two distinct `cmd=`/`command=` probes\n\
+     - include `confidence=<high|medium|low>`\n\
+     - mark uncertain claims as `status=unproven` instead of presenting them as findings."
+}
+
+fn repo_research_workstream_evidence_lines(assistant_text: &str) -> usize {
+    assistant_text
+        .lines()
+        .filter(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("workstream=")
+                && lower.contains("status=")
+                && (lower.contains("file=") || lower.contains("path="))
+                && (lower.contains("cmd=") || lower.contains("command="))
+        })
+        .count()
+}
+
+fn repo_research_command_count(assistant_text: &str) -> usize {
+    assistant_text
+        .lines()
+        .filter(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("cmd=") || lower.contains("command=")
+        })
+        .count()
+}
+
+fn finalizer_repo_research_plan_requires_retry(
+    messages: &[Message],
+    assistant_text: &str,
+    retry_count: u32,
+) -> bool {
+    if retry_count >= FINALIZER_REPO_RESEARCH_PLAN_MAX_RETRIES
+        || !detect_exploratory_repo_research_intent(messages)
+    {
+        return false;
+    }
+    if assistant_text.trim().is_empty() {
+        return false;
+    }
+
+    let lower = assistant_text.to_ascii_lowercase();
+    let blocked_or_unproven = lower.contains("repo_research_plan: blocked")
+        || lower.contains("repo_research_plan=blocked")
+        || lower.contains("repo_research_plan: unproven")
+        || lower.contains("repo_research_plan=unproven");
+    if blocked_or_unproven {
+        return !(lower.contains("blocker")
+            && (lower.contains("cmd=")
+                || lower.contains("command=")
+                || lower.contains("file=")
+                || lower.contains("path=")));
+    }
+
+    let complete = lower.contains("repo_research_plan: complete")
+        || lower.contains("repo_research_plan=complete");
+    let has_confidence = lower.contains("confidence=high")
+        || lower.contains("confidence=medium")
+        || lower.contains("confidence=low")
+        || lower.contains("confidence:");
+    if !complete || !has_confidence {
+        return true;
+    }
+
+    if repo_research_workstream_evidence_lines(assistant_text) < REPO_RESEARCH_MIN_WORKSTREAMS {
+        return true;
+    }
+    if extract_explicit_evidence_paths(assistant_text).len() < REPO_RESEARCH_MIN_UNIQUE_FILES {
+        return true;
+    }
+    if repo_research_command_count(assistant_text) < REPO_RESEARCH_MIN_COMMANDS {
+        return true;
+    }
+    assistant_references_missing_evidence_paths(assistant_text)
 }
 
 fn detect_deep_repo_audit_intent(messages: &[Message]) -> bool {
@@ -10071,6 +10200,27 @@ fn tool_result_signal_score(content: &str, is_error: bool) -> f64 {
         || lower.contains("cargo ")
     {
         score += 0.25;
+    }
+    if lower.contains("workstream=") {
+        score += 0.15;
+    }
+    if lower.contains("status=complete")
+        || lower.contains("status=blocked")
+        || lower.contains("status=unproven")
+    {
+        score += 0.10;
+    }
+    let evidence_markers = lower.matches("file=").count()
+        + lower.matches("path=").count()
+        + lower.matches("cmd=").count()
+        + lower.matches("command=").count();
+    if evidence_markers >= 4 {
+        score += 0.15;
+    } else if evidence_markers >= 2 {
+        score += 0.08;
+    }
+    if lower.contains("contextlattice") || lower.contains("source_quality") {
+        score += 0.05;
     }
     if lower.contains("not found")
         || lower.contains("no such file")
@@ -16388,6 +16538,49 @@ mod tests {
             "confidence=high\nfile=src/missing.rs;cmd=rg -n main src/missing.rs",
             tmp.path()
         ));
+    }
+
+    #[test]
+    fn test_repo_research_plan_finalizer_requires_workstream_evidence() {
+        let msgs = vec![Message::user(
+            "Conduct read-only repo research in crates/hermes-agent/src/agent_loop.rs and report how to improve planning.",
+        )];
+        assert!(detect_exploratory_repo_research_intent(&msgs));
+
+        let shallow = "confidence=medium\nfile=Cargo.toml\ncmd=rg -n planning crates";
+        assert!(finalizer_repo_research_plan_requires_retry(
+            &msgs, shallow, 0
+        ));
+
+        let grounded = "REPO_RESEARCH_PLAN: complete\n\
+confidence=medium\n\
+- workstream=web status=complete file=Cargo.toml cmd=rg -n web Cargo.toml\n\
+- workstream=agent-loop status=complete file=src/agent_loop.rs cmd=rg -n finalizer src/agent_loop.rs\n\
+- workstream=tests status=unproven file=Cargo.toml cmd=cargo test -p hermes-agent finalizer";
+        assert!(!finalizer_repo_research_plan_requires_retry(
+            &msgs, grounded, 0
+        ));
+    }
+
+    #[test]
+    fn test_repo_research_plan_finalizer_accepts_explicit_blocker() {
+        let msgs = vec![Message::user(
+            "Research the missing repo path /tmp/does-not-exist and report blockers.",
+        )];
+        let blocked =
+            "REPO_RESEARCH_PLAN: blocked\nblocker=path missing\ncmd=rg --files /tmp/does-not-exist";
+        assert!(!finalizer_repo_research_plan_requires_retry(
+            &msgs, blocked, 0
+        ));
+    }
+
+    #[test]
+    fn test_tool_result_signal_score_rewards_workstream_evidence() {
+        let score = tool_result_signal_score(
+            "workstream=agent status=complete file=Cargo.toml path=crates/hermes-agent/src/agent_loop.rs cmd=rg -n finalizer crates command=cargo test",
+            false,
+        );
+        assert!(score > 0.75, "score={score}");
     }
 
     #[test]

@@ -143,6 +143,225 @@ fn validate_url_does_not_exfiltrate_secret(input: &str) -> Result<(), ToolError>
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SourceQuality {
+    label: &'static str,
+    score: f64,
+    reason: &'static str,
+}
+
+fn host_matches(host: &str, suffixes: &[&str]) -> bool {
+    suffixes.iter().any(|suffix| {
+        host == *suffix
+            || host
+                .strip_suffix(suffix)
+                .is_some_and(|prefix| prefix.ends_with('.'))
+    })
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+fn source_quality_for_url(raw_url: &str) -> SourceQuality {
+    let url = raw_url.trim();
+    if url.is_empty() {
+        return SourceQuality {
+            label: "secondary",
+            score: 0.20,
+            reason: "missing URL",
+        };
+    }
+
+    let parsed = Url::parse(url).or_else(|_| Url::parse(&format!("https://{url}")));
+    let Ok(parsed) = parsed else {
+        return SourceQuality {
+            label: "secondary",
+            score: 0.35,
+            reason: "unparseable URL",
+        };
+    };
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    let path = parsed.path().to_ascii_lowercase();
+    let host_and_path = format!("{host}{path}");
+
+    if host_matches(&host, &["github.com", "gitlab.com"])
+        && contains_any(&path, &["/issues/", "/discussions/", "/pull/"])
+    {
+        return SourceQuality {
+            label: "community",
+            score: 0.78,
+            reason: "repository discussion",
+        };
+    }
+    if host_matches(
+        &host,
+        &[
+            "reddit.com",
+            "old.reddit.com",
+            "news.ycombinator.com",
+            "stackoverflow.com",
+            "stackexchange.com",
+        ],
+    ) || host.contains("forum")
+        || host.contains("discourse")
+    {
+        return SourceQuality {
+            label: "community",
+            score: 0.74,
+            reason: "expert/community discussion",
+        };
+    }
+    if host_matches(
+        &host,
+        &[
+            "github.com",
+            "gitlab.com",
+            "bitbucket.org",
+            "docs.rs",
+            "crates.io",
+            "rfc-editor.org",
+            "ietf.org",
+            "w3.org",
+            "arxiv.org",
+            "doi.org",
+        ],
+    ) {
+        return SourceQuality {
+            label: "primary",
+            score: 0.96,
+            reason: "source repository, registry, standard, or paper",
+        };
+    }
+    if host.ends_with(".gov")
+        || host.ends_with(".mil")
+        || host.ends_with(".edu")
+        || host.starts_with("docs.")
+        || host.starts_with("doc.")
+        || host.starts_with("developer.")
+        || contains_any(
+            &host_and_path,
+            &[
+                "/docs",
+                "/documentation",
+                "/reference",
+                "/api/",
+                "/sdk",
+                "/spec",
+                "/protocol",
+                "/whitepaper",
+                "/manual",
+            ],
+        )
+    {
+        return SourceQuality {
+            label: "primary",
+            score: 0.90,
+            reason: "official documentation or institutional source",
+        };
+    }
+    if host_matches(
+        &host,
+        &[
+            "medium.com",
+            "substack.com",
+            "youtube.com",
+            "youtu.be",
+            "forbes.com",
+            "cointelegraph.com",
+            "decrypt.co",
+        ],
+    ) || contains_any(&path, &["/blog/", "/news/", "/article/", "/posts/"])
+    {
+        return SourceQuality {
+            label: "secondary",
+            score: 0.42,
+            reason: "article or summary source",
+        };
+    }
+
+    SourceQuality {
+        label: "secondary",
+        score: 0.50,
+        reason: "general web result",
+    }
+}
+
+fn enrich_source_quality(row: &mut Value, fallback_position: usize) {
+    let url = row.get("url").and_then(Value::as_str).unwrap_or_default();
+    let quality = source_quality_for_url(url);
+    let original_position = row
+        .get("position")
+        .and_then(Value::as_u64)
+        .filter(|position| *position > 0)
+        .unwrap_or(fallback_position as u64);
+    if let Some(obj) = row.as_object_mut() {
+        obj.insert("source_quality".to_string(), json!(quality.label));
+        obj.insert("source_quality_score".to_string(), json!(quality.score));
+        obj.insert("source_quality_reason".to_string(), json!(quality.reason));
+        obj.insert("original_position".to_string(), json!(original_position));
+    }
+}
+
+fn ranked_search_results(mut rows: Vec<Value>) -> Vec<Value> {
+    for (idx, row) in rows.iter_mut().enumerate() {
+        enrich_source_quality(row, idx + 1);
+    }
+    rows.sort_by(|left, right| {
+        let left_quality = left
+            .get("source_quality_score")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        let right_quality = right
+            .get("source_quality_score")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        let left_score = left.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+        let right_score = right.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+        let left_position = left
+            .get("original_position")
+            .and_then(Value::as_u64)
+            .unwrap_or(u64::MAX);
+        let right_position = right
+            .get("original_position")
+            .and_then(Value::as_u64)
+            .unwrap_or(u64::MAX);
+
+        right_quality
+            .partial_cmp(&left_quality)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                right_score
+                    .partial_cmp(&left_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| left_position.cmp(&right_position))
+    });
+    for (idx, row) in rows.iter_mut().enumerate() {
+        row["position"] = json!(idx + 1);
+        row["source_rank"] = json!(idx + 1);
+    }
+    rows
+}
+
+fn source_quality_summary(rows: &[Value]) -> Value {
+    let mut primary = 0usize;
+    let mut community = 0usize;
+    let mut secondary = 0usize;
+    for row in rows {
+        match row.get("source_quality").and_then(Value::as_str) {
+            Some("primary") => primary += 1,
+            Some("community") => community += 1,
+            _ => secondary += 1,
+        }
+    }
+    json!({
+        "primary": primary,
+        "community": community,
+        "secondary": secondary,
+    })
+}
+
 fn web_secret_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -179,11 +398,15 @@ impl SearchOnlyExtractBackend {
 impl WebExtractBackend for SearchOnlyExtractBackend {
     async fn extract(&self, url: &str, _include_links: bool) -> Result<String, ToolError> {
         validate_url_does_not_exfiltrate_secret(url)?;
+        let quality = source_quality_for_url(url);
         Ok(json!({
             "success": false,
             "error": format!("{} is a search-only web backend and cannot extract URLs", self.provider),
             "url": url,
             "provider": self.provider,
+            "source_quality": quality.label,
+            "source_quality_score": quality.score,
+            "source_quality_reason": quality.reason,
         })
         .to_string())
     }
@@ -237,12 +460,16 @@ impl WebExtractBackend for SimpleExtractBackend {
 
         if bytes.len() > MAX_EXTRACT_BYTES {
             let text = String::from_utf8_lossy(&bytes[..MAX_EXTRACT_BYTES]);
+            let quality = source_quality_for_url(url);
             let result = json!({
                 "url": url,
                 "content_type": content_type,
                 "content": redact_web_content(&text),
                 "truncated": true,
                 "original_size": bytes.len(),
+                "source_quality": quality.label,
+                "source_quality_score": quality.score,
+                "source_quality_reason": quality.reason,
             });
             return serde_json::to_string_pretty(&result)
                 .map_err(|e| ToolError::ExecutionFailed(format!("Serialization error: {}", e)));
@@ -252,12 +479,16 @@ impl WebExtractBackend for SimpleExtractBackend {
 
         let content = redact_web_content(&strip_html_tags(&text));
 
+        let quality = source_quality_for_url(url);
         let result = json!({
             "url": url,
             "content_type": content_type,
             "content": content,
             "truncated": false,
             "size": bytes.len(),
+            "source_quality": quality.label,
+            "source_quality_score": quality.score,
+            "source_quality_reason": quality.reason,
         });
 
         serde_json::to_string_pretty(&result)
@@ -406,23 +637,31 @@ impl WebSearchBackend for ExaSearchBackend {
         })?;
 
         let results = data.get("results").and_then(|r| r.as_array());
-        let formatted: Vec<Value> = results
-            .map(|arr| {
-                arr.iter()
-                    .map(|r| {
-                        json!({
-                            "title": r.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-                            "url": r.get("url").and_then(|v| v.as_str()).unwrap_or(""),
-                            "text": r.get("text").and_then(|v| v.as_str()).unwrap_or(""),
-                            "score": r.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        let formatted: Vec<Value> = ranked_search_results(
+            results
+                .map(|arr| {
+                    arr.iter()
+                        .enumerate()
+                        .map(|(idx, r)| {
+                            search_result(
+                                r.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                                r.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+                                r.get("text").and_then(|v| v.as_str()).unwrap_or(""),
+                                r.get("score").and_then(|v| v.as_f64()),
+                                idx + 1,
+                            )
                         })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+                        .collect()
+                })
+                .unwrap_or_default(),
+        );
 
-        serde_json::to_string_pretty(&json!({ "results": formatted }))
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
+        let source_summary = source_quality_summary(&formatted);
+        serde_json::to_string_pretty(&json!({
+            "results": formatted,
+            "source_quality_summary": source_summary,
+        }))
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
     }
 }
 
@@ -516,27 +755,34 @@ impl WebSearchBackend for TavilySearchBackend {
         })?;
 
         let results = data.get("results").and_then(|r| r.as_array());
-        let formatted: Vec<Value> = results
-            .map(|arr| {
-                arr.iter()
-                    .map(|r| {
-                        json!({
-                            "title": r.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-                            "url": r.get("url").and_then(|v| v.as_str()).unwrap_or(""),
-                            "text": r
-                                .get("content")
-                                .or_else(|| r.get("raw_content"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or(""),
-                            "score": r.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0),
+        let formatted: Vec<Value> = ranked_search_results(
+            results
+                .map(|arr| {
+                    arr.iter()
+                        .enumerate()
+                        .map(|(idx, r)| {
+                            search_result(
+                                r.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                                r.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+                                r.get("content")
+                                    .or_else(|| r.get("raw_content"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(""),
+                                r.get("score").and_then(|v| v.as_f64()),
+                                idx + 1,
+                            )
                         })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+                        .collect()
+                })
+                .unwrap_or_default(),
+        );
 
-        serde_json::to_string_pretty(&json!({ "results": formatted }))
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
+        let source_summary = source_quality_summary(&formatted);
+        serde_json::to_string_pretty(&json!({
+            "results": formatted,
+            "source_quality_summary": source_summary,
+        }))
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
     }
 }
 
@@ -637,11 +883,13 @@ impl WebExtractBackend for TavilyExtractBackend {
             .and_then(|d| d.get("content"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        let source_summary = source_quality_summary(&documents);
         let result = json!({
             "url": url,
             "content": first_content,
             "results": documents,
             "provider": "tavily",
+            "source_quality_summary": source_summary,
         });
         serde_json::to_string_pretty(&result)
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize result: {}", e)))
@@ -728,10 +976,13 @@ impl WebCrawlBackend for TavilyCrawlBackend {
         let data: Value = serde_json::from_str(&text).map_err(|e| {
             ToolError::ExecutionFailed(format!("Failed to parse Tavily crawl response: {}", e))
         })?;
+        let documents = normalize_tavily_documents(&data, url);
+        let source_summary = source_quality_summary(&documents);
         let result = json!({
             "url": url,
-            "results": normalize_tavily_documents(&data, url),
+            "results": documents,
             "provider": "tavily",
+            "source_quality_summary": source_summary,
         });
         serde_json::to_string_pretty(&result)
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize result: {}", e)))
@@ -767,14 +1018,16 @@ fn search_result(
     let title = title.into();
     let url = url.into();
     let description = description.into();
-    json!({
+    let mut row = json!({
         "title": title,
         "url": url,
         "description": description,
         "text": description,
         "score": score.unwrap_or(0.0),
         "position": position,
-    })
+    });
+    enrich_source_quality(&mut row, position);
+    row
 }
 
 fn normalize_tavily_documents(response: &Value, fallback_url: &str) -> Vec<Value> {
@@ -796,6 +1049,9 @@ fn normalize_tavily_documents(response: &Value, fallback_url: &str) -> Vec<Value
                 "title": title,
                 "content": raw,
                 "raw_content": raw,
+                "source_quality": source_quality_for_url(url).label,
+                "source_quality_score": source_quality_for_url(url).score,
+                "source_quality_reason": source_quality_for_url(url).reason,
                 "metadata": {"sourceURL": url, "title": title},
             }));
         }
@@ -816,6 +1072,9 @@ fn normalize_tavily_documents(response: &Value, fallback_url: &str) -> Vec<Value
                 "content": "",
                 "raw_content": "",
                 "error": error,
+                "source_quality": source_quality_for_url(url).label,
+                "source_quality_score": source_quality_for_url(url).score,
+                "source_quality_reason": source_quality_for_url(url).reason,
                 "metadata": {"sourceURL": url},
             }));
         }
@@ -832,6 +1091,9 @@ fn normalize_tavily_documents(response: &Value, fallback_url: &str) -> Vec<Value
                 "content": "",
                 "raw_content": "",
                 "error": "extraction failed",
+                "source_quality": source_quality_for_url(&url).label,
+                "source_quality_score": source_quality_for_url(&url).score,
+                "source_quality_reason": source_quality_for_url(&url).reason,
                 "metadata": {"sourceURL": url},
             }));
         }
@@ -919,7 +1181,7 @@ impl WebSearchBackend for SearxngSearchBackend {
         let data: Value = serde_json::from_str(&text).map_err(|e| {
             ToolError::ExecutionFailed(format!("Failed to parse SearXNG response: {}", e))
         })?;
-        let mut rows: Vec<Value> = data
+        let rows: Vec<Value> = data
             .get("results")
             .and_then(|r| r.as_array())
             .map(|arr| {
@@ -941,20 +1203,17 @@ impl WebSearchBackend for SearxngSearchBackend {
                     .collect()
             })
             .unwrap_or_default();
-        rows.sort_by(|a, b| {
-            let left = a.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let right = b.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            right
-                .partial_cmp(&left)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        for (idx, row) in rows.iter_mut().take(num_results).enumerate() {
-            row["position"] = json!(idx + 1);
-        }
-        let formatted: Vec<Value> = rows.into_iter().take(num_results).collect();
+        let formatted: Vec<Value> = ranked_search_results(rows)
+            .into_iter()
+            .take(num_results)
+            .collect();
 
-        serde_json::to_string_pretty(&json!({ "results": formatted }))
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
+        let source_summary = source_quality_summary(&formatted);
+        serde_json::to_string_pretty(&json!({
+            "results": formatted,
+            "source_quality_summary": source_summary,
+        }))
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
     }
 }
 
@@ -1028,19 +1287,23 @@ impl WebSearchBackend for BraveFreeSearchBackend {
             ToolError::ExecutionFailed(format!("Failed to parse Brave Search response: {e}"))
         })?;
         let formatted = normalize_brave_results(&data, num_results);
-        serde_json::to_string_pretty(&json!({ "results": formatted, "provider": "brave-free" }))
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
+        let source_summary = source_quality_summary(&formatted);
+        serde_json::to_string_pretty(&json!({
+            "results": formatted,
+            "provider": "brave-free",
+            "source_quality_summary": source_summary,
+        }))
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
     }
 }
 
 fn normalize_brave_results(response: &Value, limit: usize) -> Vec<Value> {
-    response
+    let rows: Vec<Value> = response
         .get("web")
         .and_then(|web| web.get("results"))
         .and_then(|results| results.as_array())
         .map(|rows| {
             rows.iter()
-                .take(limit)
                 .enumerate()
                 .map(|(idx, row)| {
                     search_result(
@@ -1055,7 +1318,11 @@ fn normalize_brave_results(response: &Value, limit: usize) -> Vec<Value> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    ranked_search_results(rows)
+        .into_iter()
+        .take(limit)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1122,8 +1389,13 @@ impl WebSearchBackend for DuckDuckGoSearchBackend {
             ToolError::ExecutionFailed(format!("Failed to parse DuckDuckGo response: {e}"))
         })?;
         let formatted = normalize_duckduckgo_results(&data, num_results);
-        serde_json::to_string_pretty(&json!({ "results": formatted, "provider": "ddgs" }))
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
+        let source_summary = source_quality_summary(&formatted);
+        serde_json::to_string_pretty(&json!({
+            "results": formatted,
+            "provider": "ddgs",
+            "source_quality_summary": source_summary,
+        }))
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
     }
 }
 
@@ -1149,10 +1421,10 @@ fn normalize_duckduckgo_results(response: &Value, limit: usize) -> Vec<Value> {
         ));
     }
     collect_duckduckgo_related(response.get("RelatedTopics"), &mut rows);
-    for (idx, row) in rows.iter_mut().take(limit).enumerate() {
-        row["position"] = json!(idx + 1);
-    }
-    rows.into_iter().take(limit).collect()
+    ranked_search_results(rows)
+        .into_iter()
+        .take(limit)
+        .collect()
 }
 
 fn collect_duckduckgo_related(value: Option<&Value>, rows: &mut Vec<Value>) {
@@ -1239,9 +1511,11 @@ impl ParallelWebBackend {
             )
             .await?;
         let formatted = normalize_parallel_search_results(&data, limit);
+        let source_summary = source_quality_summary(&formatted);
         serde_json::to_string_pretty(&json!({
             "results": formatted,
             "provider": "parallel",
+            "source_quality_summary": source_summary,
         }))
         .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
     }
@@ -1347,41 +1621,45 @@ fn normalize_parallel_search_results(response: &Value, limit: usize) -> Vec<Valu
         .get("results")
         .and_then(Value::as_array)
         .or_else(|| response.pointer("/data/web").and_then(Value::as_array));
-    rows.map(|rows| {
-        rows.iter()
-            .take(limit)
-            .enumerate()
-            .map(|(idx, row)| {
-                let description = row
-                    .get("excerpts")
-                    .and_then(Value::as_array)
-                    .map(|items| {
-                        items
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    })
-                    .filter(|v| !v.trim().is_empty())
-                    .or_else(|| {
-                        ["description", "snippet", "text", "content"]
-                            .iter()
-                            .find_map(|key| {
-                                row.get(*key).and_then(Value::as_str).map(str::to_string)
-                            })
-                    })
-                    .unwrap_or_default();
-                search_result(
-                    row.get("title").and_then(Value::as_str).unwrap_or(""),
-                    row.get("url").and_then(Value::as_str).unwrap_or(""),
-                    description,
-                    row.get("score").and_then(Value::as_f64),
-                    idx + 1,
-                )
-            })
-            .collect()
-    })
-    .unwrap_or_default()
+    let normalized: Vec<Value> = rows
+        .map(|rows| {
+            rows.iter()
+                .enumerate()
+                .map(|(idx, row)| {
+                    let description = row
+                        .get("excerpts")
+                        .and_then(Value::as_array)
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        })
+                        .filter(|v| !v.trim().is_empty())
+                        .or_else(|| {
+                            ["description", "snippet", "text", "content"]
+                                .iter()
+                                .find_map(|key| {
+                                    row.get(*key).and_then(Value::as_str).map(str::to_string)
+                                })
+                        })
+                        .unwrap_or_default();
+                    search_result(
+                        row.get("title").and_then(Value::as_str).unwrap_or(""),
+                        row.get("url").and_then(Value::as_str).unwrap_or(""),
+                        description,
+                        row.get("score").and_then(Value::as_f64),
+                        idx + 1,
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ranked_search_results(normalized)
+        .into_iter()
+        .take(limit)
+        .collect()
 }
 
 fn normalize_parallel_extract_documents(response: &Value, requested_urls: &[&str]) -> Vec<Value> {
@@ -1411,6 +1689,9 @@ fn normalize_parallel_extract_documents(response: &Value, requested_urls: &[&str
                 "title": title,
                 "content": content,
                 "raw_content": content,
+                "source_quality": source_quality_for_url(url).label,
+                "source_quality_score": source_quality_for_url(url).score,
+                "source_quality_reason": source_quality_for_url(url).reason,
                 "metadata": {"sourceURL": url, "title": title},
             }));
         }
@@ -1430,6 +1711,9 @@ fn normalize_parallel_extract_documents(response: &Value, requested_urls: &[&str
                 "title": "",
                 "content": "",
                 "error": error,
+                "source_quality": source_quality_for_url(url).label,
+                "source_quality_score": source_quality_for_url(url).score,
+                "source_quality_reason": source_quality_for_url(url).reason,
                 "metadata": {"sourceURL": url},
             }));
         }
@@ -1441,6 +1725,9 @@ fn normalize_parallel_extract_documents(response: &Value, requested_urls: &[&str
                 "title": "",
                 "content": "",
                 "error": "extraction failed (no content returned)",
+                "source_quality": source_quality_for_url(url).label,
+                "source_quality_score": source_quality_for_url(url).score,
+                "source_quality_reason": source_quality_for_url(url).reason,
                 "metadata": {"sourceURL": url},
             }));
         }
@@ -1454,11 +1741,13 @@ fn parallel_extract_response(url: &str, documents: Vec<Value>) -> Result<String,
         .and_then(|d| d.get("content"))
         .and_then(Value::as_str)
         .unwrap_or("");
+    let source_summary = source_quality_summary(&documents);
     let response = json!({
         "url": url,
         "content": first_content,
         "results": documents,
         "provider": "parallel",
+        "source_quality_summary": source_summary,
     });
     serde_json::to_string_pretty(&response)
         .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize result: {e}")))
@@ -1763,20 +2052,16 @@ Query: {query}"
             .get("citations")
             .and_then(|v| v.as_array())
             .map(|citations| {
-                citations
+                let rows: Vec<Value> = citations
                     .iter()
                     .filter_map(|v| v.as_str())
                     .filter(|url| !url.trim().is_empty())
-                    .take(limit)
                     .enumerate()
-                    .map(|(idx, url)| {
-                        json!({
-                            "title": "",
-                            "url": url,
-                            "description": "",
-                            "position": idx + 1,
-                        })
-                    })
+                    .map(|(idx, url)| search_result("", url, "", None, idx + 1))
+                    .collect();
+                ranked_search_results(rows)
+                    .into_iter()
+                    .take(limit)
                     .collect()
             })
             .unwrap_or_default()
@@ -1850,10 +2135,13 @@ impl WebSearchBackend for XaiWebSearchBackend {
             )));
         }
 
+        let formatted = Self::parse_results(&data, limit);
+        let source_summary = source_quality_summary(&formatted);
         serde_json::to_string_pretty(&json!({
-            "results": Self::parse_results(&data, limit),
+            "results": formatted,
             "provider": "xai",
             "model": &self.model,
+            "source_quality_summary": source_summary,
         }))
         .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
     }
@@ -1924,22 +2212,32 @@ fn parse_xai_json_results(text: &str, limit: usize) -> Vec<Value> {
             continue;
         };
         let mut normalized = Vec::new();
-        for row in results.iter().take(limit) {
+        for row in results {
             let Some(url) = row.get("url").and_then(|v| v.as_str()).map(str::trim) else {
                 continue;
             };
             if url.is_empty() {
                 continue;
             }
-            normalized.push(json!({
-                "title": row.get("title").and_then(|v| v.as_str()).unwrap_or("").trim(),
-                "url": url,
-                "description": row.get("description").and_then(|v| v.as_str()).unwrap_or("").trim(),
-                "position": normalized.len() + 1,
-            }));
+            normalized.push(search_result(
+                row.get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim(),
+                url,
+                row.get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim(),
+                None,
+                normalized.len() + 1,
+            ));
         }
         if !normalized.is_empty() {
-            return normalized;
+            return ranked_search_results(normalized)
+                .into_iter()
+                .take(limit)
+                .collect();
         }
     }
     Vec::new()
@@ -1985,17 +2283,15 @@ fn xai_results_from_annotations(
             })
             .map(|s| s.chars().rev().collect::<String>().trim().to_string())
             .unwrap_or_default();
-        results.push(json!({
-            "title": "",
-            "url": url,
-            "description": description,
-            "position": results.len() + 1,
-        }));
+        results.push(search_result("", url, description, None, results.len() + 1));
         if results.len() >= limit {
             break;
         }
     }
-    results
+    ranked_search_results(results)
+        .into_iter()
+        .take(limit)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -2168,9 +2464,11 @@ impl WebSearchBackend for FirecrawlSearchBackend {
             ToolError::ExecutionFailed(format!("Failed to parse Firecrawl search response: {}", e))
         })?;
         let formatted = normalize_firecrawl_search_results(&data);
+        let source_summary = source_quality_summary(&formatted);
         serde_json::to_string_pretty(&json!({
             "results": formatted,
             "transport": self.transport.label(),
+            "source_quality_summary": source_summary,
         }))
         .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
     }
@@ -2185,14 +2483,15 @@ fn normalize_firecrawl_search_results(response: &Value) -> Vec<Value> {
         response.get("results"),
     ];
 
-    candidates
+    let rows: Vec<Value> = candidates
         .into_iter()
         .flatten()
         .find_map(|v| v.as_array())
         .map(|results| {
             results
                 .iter()
-                .map(|result| {
+                .enumerate()
+                .map(|(idx, result)| {
                     let title = result.get("title").and_then(|v| v.as_str()).unwrap_or("");
                     let url = result.get("url").and_then(|v| v.as_str()).unwrap_or("");
                     let text = result
@@ -2202,16 +2501,18 @@ fn normalize_firecrawl_search_results(response: &Value) -> Vec<Value> {
                         .or_else(|| result.get("text"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    json!({
-                        "title": title,
-                        "url": url,
-                        "text": text,
-                        "score": result.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                    })
+                    search_result(
+                        title,
+                        url,
+                        text,
+                        result.get("score").and_then(|v| v.as_f64()),
+                        idx + 1,
+                    )
                 })
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    ranked_search_results(rows)
 }
 
 /// Real Firecrawl API extract backend.
@@ -2510,6 +2811,53 @@ mod web_search_env_tests {
     }
 
     #[test]
+    fn source_quality_classifies_primary_community_and_secondary_urls() {
+        assert_eq!(
+            source_quality_for_url("https://github.com/NousResearch/hermes-agent").label,
+            "primary"
+        );
+        assert_eq!(
+            source_quality_for_url("https://www.reddit.com/r/solana/comments/example").label,
+            "community"
+        );
+        assert_eq!(
+            source_quality_for_url("https://medium.com/example/post").label,
+            "secondary"
+        );
+    }
+
+    #[test]
+    fn ranked_search_results_prefers_primary_sources_before_provider_score() {
+        let rows = vec![
+            search_result(
+                "SEO summary",
+                "https://medium.com/example/post",
+                "summary",
+                Some(0.99),
+                1,
+            ),
+            search_result(
+                "Official docs",
+                "https://docs.solana.com/developing",
+                "docs",
+                Some(0.10),
+                2,
+            ),
+        ];
+
+        let ranked = ranked_search_results(rows);
+        assert_eq!(ranked[0]["title"], "Official docs");
+        assert_eq!(ranked[0]["source_quality"], "primary");
+        assert_eq!(ranked[0]["original_position"], 2);
+        assert_eq!(ranked[0]["position"], 1);
+        assert_eq!(ranked[0]["source_rank"], 1);
+        assert_eq!(
+            source_quality_summary(&ranked),
+            json!({"primary": 1, "community": 0, "secondary": 1})
+        );
+    }
+
+    #[test]
     fn search_backend_choice_uses_xai_only_when_explicit() {
         let _scope = EnvScope::new();
         std::env::set_var("XAI_API_KEY", "xai-key");
@@ -2689,6 +3037,7 @@ mod web_search_env_tests {
         );
         assert_eq!(docs.len(), 4);
         assert_eq!(docs[0]["content"], "body");
+        assert_eq!(docs[0]["source_quality"], "secondary");
         assert_eq!(docs[1]["error"], "blocked");
         assert_eq!(docs[2]["url"], "https://missing.example");
         assert_eq!(docs[3]["url"], "42");
