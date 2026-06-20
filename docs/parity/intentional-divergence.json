@@ -80,6 +80,34 @@
       ]
     },
     {
+      "id": "rust-chronos-managed-cron-provider",
+      "status": "approved",
+      "workstream": "WS3",
+      "summary": "Own Chronos managed-cron behavior in the Rust cron scheduler and API server instead of vendoring the upstream Python cron plugin.",
+      "owner": "sheawinkler",
+      "ticket": 570,
+      "last_reviewed": "2026-06-20",
+      "review_date": "2026-09-20",
+      "rationale": "Hermes Ultra implements NAS-mediated Chronos provisioning, callback JWT verification, stale/duplicate fire suppression, background dispatch, and post-fire re-arm in hermes-cron plus the Rust API server. The upstream plugins/cron Python files are reference-only and must not become Rust runtime execution paths.",
+      "path_prefixes": [
+        "plugins/cron/"
+      ]
+    },
+    {
+      "id": "rust-runtime-no-raft-platform-plugin",
+      "status": "temporary",
+      "workstream": "WS3",
+      "summary": "Track the upstream Raft Python platform plugin as non-runtime until a Rust-native Raft adapter is scoped.",
+      "owner": "sheawinkler",
+      "ticket": 570,
+      "last_reviewed": "2026-06-20",
+      "review_date": "2026-07-20",
+      "rationale": "No Rust gateway Raft adapter is registered locally. Ultra preserves Rust-only runtime behavior and does not vendor the upstream Python wake-bridge adapter; this remains an explicit platform-gap item rather than an unclassified missing plugin tree.",
+      "path_prefixes": [
+        "plugins/platforms/raft/"
+      ]
+    },
+    {
       "id": "upstream-python-plugin-backend-drift-20260527",
       "status": "temporary",
       "workstream": "WS3",

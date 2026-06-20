@@ -18,7 +18,10 @@ use tracing::{debug, error, info, warn};
 
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
-use hermes_cron::{CronError, CronJob, CronScheduler, DeliverConfig, DeliverTarget, JobStatus};
+use hermes_cron::{
+    verify_nas_fire_token, ChronosConfig, CronError, CronJob, CronScheduler, DeliverConfig,
+    DeliverTarget, JobStatus,
+};
 use hermes_tools::{ToolRegistry, ToolsetManager};
 
 use crate::adapter::BasePlatformAdapter;
@@ -193,6 +196,13 @@ struct ApiCronJobCreateRequest {
     no_agent: Option<bool>,
     #[serde(default)]
     enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiCronFireRequest {
+    job_id: String,
+    #[serde(default)]
+    fire_at: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -921,6 +931,10 @@ const HTTP_OK: HttpStatus = HttpStatus {
     code: 200,
     reason: "OK",
 };
+const HTTP_ACCEPTED: HttpStatus = HttpStatus {
+    code: 202,
+    reason: "Accepted",
+};
 const HTTP_BAD_REQUEST: HttpStatus = HttpStatus {
     code: 400,
     reason: "Bad Request",
@@ -1057,6 +1071,7 @@ fn capabilities_response_body() -> serde_json::Value {
             "jobs_pause": {"method": "POST", "path": "/api/jobs/{job_id}/pause"},
             "jobs_resume": {"method": "POST", "path": "/api/jobs/{job_id}/resume"},
             "jobs_run": {"method": "POST", "path": "/api/jobs/{job_id}/run"},
+            "cron_fire": {"method": "POST", "path": "/api/cron/fire"},
             "skills": {"method": "GET", "path": "/v1/skills"},
             "toolsets": {"method": "GET", "path": "/v1/toolsets"},
         }
@@ -2116,6 +2131,94 @@ async fn api_jobs_action_response(
     )
 }
 
+async fn api_cron_fire_response(
+    cron_scheduler: Arc<CronScheduler>,
+    auth_header: Option<&str>,
+    body_bytes: &[u8],
+) -> (HttpStatus, serde_json::Value) {
+    let Some(token) = auth_header
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return (
+            HTTP_UNAUTHORIZED,
+            api_error("Missing Chronos bearer token", "auth_error", 401),
+        );
+    };
+
+    let config = ChronosConfig::load();
+    if let Err(err) = verify_nas_fire_token(token, &config).await {
+        tracing::warn!(error = %err, "Chronos cron fire token rejected");
+        return (
+            HTTP_UNAUTHORIZED,
+            api_error("Unauthorized", "auth_error", 401),
+        );
+    }
+
+    let body_str = String::from_utf8_lossy(body_bytes);
+    let parsed: Result<ApiCronFireRequest, _> = serde_json::from_str(&body_str);
+    let req = match parsed {
+        Ok(req) => req,
+        Err(err) => {
+            return (
+                HTTP_BAD_REQUEST,
+                api_error(
+                    format!("Invalid request: {err}"),
+                    "invalid_request_error",
+                    400,
+                ),
+            );
+        }
+    };
+    let job_id = req.job_id.trim();
+    if job_id.is_empty() {
+        return (
+            HTTP_BAD_REQUEST,
+            api_error("job_id is required", "invalid_request_error", 400),
+        );
+    }
+    let fire_at = match req
+        .fire_at
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        Some(raw) => match chrono::DateTime::parse_from_rfc3339(raw) {
+            Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
+            Err(err) => {
+                return (
+                    HTTP_BAD_REQUEST,
+                    api_error(
+                        format!("fire_at must be RFC3339: {err}"),
+                        "invalid_request_error",
+                        400,
+                    ),
+                );
+            }
+        },
+        None => None,
+    };
+
+    match cron_scheduler.fire_managed_job(job_id, fire_at).await {
+        Ok(accepted) => (
+            HTTP_ACCEPTED,
+            serde_json::json!({
+                "status": "accepted",
+                "job_id": job_id,
+                "dispatched": accepted,
+            }),
+        ),
+        Err(CronError::JobNotFound(_)) => {
+            (HTTP_NOT_FOUND, api_error("Job not found", "not_found", 404))
+        }
+        Err(err) => (
+            HTTP_BAD_GATEWAY,
+            api_error(err.to_string(), "internal_error", 502),
+        ),
+    }
+}
+
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     _peer: SocketAddr,
@@ -2161,8 +2264,9 @@ async fn handle_connection(
         .lines()
         .find(|l| l.to_lowercase().starts_with("authorization:"))
         .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
+    let chronos_fire_route = method == "POST" && path == "/api/cron/fire";
 
-    if let Some(ref expected) = auth_token {
+    if let Some(ref expected) = auth_token.filter(|_| !chronos_fire_route) {
         let valid = auth_header
             .as_deref()
             .and_then(|v| v.strip_prefix("Bearer "))
@@ -2359,6 +2463,13 @@ async fn handle_connection(
                 }),
             )
             .await;
+            let resp = json_http_response(status, &body)?;
+            writer.write_all(resp.as_bytes()).await?;
+        }
+        ("POST", "/api/cron/fire") => {
+            let (status, body) =
+                api_cron_fire_response(cron_scheduler.clone(), auth_header.as_deref(), body_bytes)
+                    .await;
             let resp = json_http_response(status, &body)?;
             writer.write_all(resp.as_bytes()).await?;
         }
@@ -3673,6 +3784,29 @@ mod tests {
             )
             .await;
         assert!(authed_response.starts_with("HTTP/1.1 200 OK"));
+    }
+
+    #[tokio::test]
+    async fn cron_fire_endpoint_uses_nas_auth_not_generic_api_token() {
+        let (tx, _rx) = mpsc::channel(1);
+        let state = ApiTestState::new(tx);
+
+        let response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    "/api/cron/fire",
+                    serde_json::json!({"job_id": "job-1"}),
+                ),
+                Some("api-secret".to_string()),
+            )
+            .await;
+        assert!(response.starts_with("HTTP/1.1 401 Unauthorized"));
+        let body = json_body(&response);
+        assert_eq!(
+            body["error"]["message"].as_str(),
+            Some("Missing Chronos bearer token")
+        );
     }
 
     #[tokio::test]

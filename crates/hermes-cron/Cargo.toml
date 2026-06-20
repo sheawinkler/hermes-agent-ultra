@@ -15,6 +15,7 @@ hermes-skills = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 tracing = { workspace = true }
 cron = { workspace = true }
 chrono = { workspace = true }
@@ -25,6 +26,9 @@ futures = { workspace = true }
 directories = { workspace = true }
 rusqlite = { workspace = true }
 regex = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+jsonwebtoken = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
