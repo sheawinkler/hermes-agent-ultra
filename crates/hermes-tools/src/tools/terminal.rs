@@ -270,7 +270,7 @@ impl ToolHandler for TerminalHandler {
             "command".into(),
             json!({
                 "type": "string",
-                "description": "The command to execute"
+                "description": "The command to execute. The configured terminal already runs it in a shell; do not wrap commands in `bash -lc`, `sh -c`, or `zsh -c` because shell-string wrappers require explicit approval. For multi-step read-only probes, prefer separate terminal calls or direct `cmd1; cmd2` commands."
             }),
         );
         props.insert(
@@ -323,7 +323,7 @@ impl ToolHandler for TerminalHandler {
 
         tool_schema(
             "terminal",
-            "Execute a terminal command. Returns stdout, stderr, and exit code.",
+            "Execute a terminal command. Returns stdout, stderr, and exit code. Use direct commands; shell-string wrappers such as `bash -lc` are approval-gated.",
             JsonSchema::object(props, vec!["command".into()]),
         )
     }

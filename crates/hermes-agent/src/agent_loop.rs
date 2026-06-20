@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -254,6 +254,8 @@ const OBJECTIVE_DEEP_AUDIT_MIN_WORKSTREAMS: usize = 3;
 const FINALIZER_EVIDENCE_MAX_RETRIES: u32 = 2;
 const FINALIZER_OUTPUT_QUALITY_MAX_RETRIES: u32 = 2;
 const FINALIZER_ACTION_EXECUTION_MAX_RETRIES: u32 = 2;
+const FINALIZER_WEB_RESEARCH_MAX_RETRIES: u32 = 4;
+const FINALIZER_GOOGLE_WORKSPACE_MAX_RETRIES: u32 = 2;
 
 // Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
 const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
@@ -2734,6 +2736,77 @@ impl AgentLoop {
         Some(body)
     }
 
+    fn google_workspace_paths(&self) -> (PathBuf, PathBuf, PathBuf) {
+        let hermes_home = self
+            .config
+            .hermes_home
+            .as_deref()
+            .map(PathBuf::from)
+            .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
+            .or_else(|| {
+                std::env::var("HERMES_AGENT_ULTRA_HOME")
+                    .ok()
+                    .map(PathBuf::from)
+            })
+            .or_else(|| dirs::home_dir().map(|home| home.join(".hermes-agent-ultra")))
+            .unwrap_or_else(|| PathBuf::from(".hermes-agent-ultra"));
+        let skill_dir = hermes_home
+            .join("skills")
+            .join("productivity")
+            .join("google-workspace");
+        let setup = skill_dir.join("scripts").join("setup.py");
+        let api = skill_dir.join("scripts").join("google_api.py");
+        (hermes_home, setup, api)
+    }
+
+    fn google_workspace_system_hint(
+        &self,
+        messages: &[Message],
+        tool_schemas: &[ToolSchema],
+    ) -> Option<String> {
+        if !detect_google_workspace_intent(messages) {
+            return None;
+        }
+        let has_skills = tool_schemas
+            .iter()
+            .any(|tool| matches!(tool.name.as_str(), "skills_list" | "skill_view"));
+        let has_terminal = tool_schemas.iter().any(|tool| tool.name == "terminal");
+        let (home, setup, api) = self.google_workspace_paths();
+        Some(format!(
+            "[SYSTEM] Google Workspace/Gmail execution contract active. \
+             If Gmail or Google Workspace is requested, first use `skills_list`, then `skill_view` for `google-workspace` when available. \
+             Do not invent credential paths such as `~/.config/hermes/credentials.toml`; Hermes Google Workspace stores OAuth state under `{home}` (`google_token.json`, `google_client_secret.json`). \
+             If terminal is available, use direct commands, not `bash -lc`/`sh -c`/`zsh -c`: \
+             `env HERMES_HOME={home} python3.12 {setup} --check` (fallback `env HERMES_HOME={home} python3 {setup} --check` if python3.12 is unavailable), then `env HERMES_HOME={home} python3.12 {api} gmail search \"newer_than:30d\" --max 10` only if setup is authenticated. \
+             If access is blocked, final answer must include `GOOGLE_WORKSPACE_USED: no`, the exact setup/API command attempted, and the exact tool error. \
+             Tool availability: skills_tools={has_skills}, terminal={has_terminal}.",
+            home = home.display(),
+            setup = setup.display(),
+            api = api.display(),
+            has_skills = has_skills,
+            has_terminal = has_terminal
+        ))
+    }
+
+    fn google_workspace_retry_prompt(&self) -> String {
+        let (home, setup, api) = self.google_workspace_paths();
+        format!(
+            "[SYSTEM] Google Workspace evidence contract failed. \
+             Re-run the task using the real Hermes Google Workspace skill paths. \
+             Required now: \
+             1) call `skill_view` for `google-workspace` if not already done; \
+             2) call terminal with a direct command, not `bash -lc`: `env HERMES_HOME={home} python3.12 {setup} --check`; \
+             3) if python3.12 is unavailable, call `env HERMES_HOME={home} python3 {setup} --check`; \
+             4) if setup reports authenticated, call `env HERMES_HOME={home} python3.12 {api} gmail search \"newer_than:30d\" --max 10` and then read relevant messages with `gmail get`; \
+             5) if setup reports NOT_AUTHENTICATED/no token, stop and final-answer that blocker; do not search broad filesystem locations and do not invent email results; \
+             6) if blocked, final answer must include `GOOGLE_WORKSPACE_USED: no`, `cmd=<exact command>`, and the exact error. \
+             Use `{home}` for Hermes credential/token paths; do not use `~/.config/hermes/credentials.toml`.",
+            home = home.display(),
+            setup = setup.display(),
+            api = api.display()
+        )
+    }
+
     fn context_files_prompt(&self) -> Option<String> {
         if self.config.skip_context_files {
             return None;
@@ -5102,6 +5175,15 @@ impl AgentLoop {
         if let Some(hint) = exploratory_problem_solving_system_hint(ctx.get_messages()) {
             ctx.add_message(Message::system(hint));
         }
+        if let Some(hint) = web_research_system_hint(ctx.get_messages(), &tool_schemas) {
+            ctx.add_message(Message::system(hint));
+        }
+        if let Some(hint) = terminal_command_system_hint(&tool_schemas) {
+            ctx.add_message(Message::system(hint));
+        }
+        if let Some(hint) = self.google_workspace_system_hint(ctx.get_messages(), &tool_schemas) {
+            ctx.add_message(Message::system(hint));
+        }
         if let Some(hint) = objective_mode_system_hint(ctx.get_messages()) {
             ctx.add_message(Message::system(hint));
         }
@@ -5188,6 +5270,8 @@ impl AgentLoop {
         let mut finalizer_evidence_retries: u32 = 0;
         let mut finalizer_output_quality_retries: u32 = 0;
         let mut finalizer_action_execution_retries: u32 = 0;
+        let mut finalizer_web_research_retries: u32 = 0;
+        let mut finalizer_google_workspace_retries: u32 = 0;
         let governor_window_limit = governor_window_size();
 
         loop {
@@ -5632,6 +5716,40 @@ impl AgentLoop {
                         }
                     }
                 }
+                if finalizer_web_research_requires_retry(
+                    ctx.get_messages(),
+                    assistant_msg.content.as_deref().unwrap_or_default(),
+                    finalizer_web_research_retries,
+                ) {
+                    finalizer_web_research_retries =
+                        finalizer_web_research_retries.saturating_add(1);
+                    self.emit_status(
+                        "lifecycle",
+                        "Detected missing web research evidence; forcing web tool pass.",
+                    );
+                    ctx.add_message(Message::system(web_research_retry_prompt()));
+                    ctx.add_message(Message::user(
+                        "Run the required web research now and re-issue the answer with URLs.",
+                    ));
+                    continue;
+                }
+                if finalizer_google_workspace_requires_retry(
+                    ctx.get_messages(),
+                    assistant_msg.content.as_deref().unwrap_or_default(),
+                    finalizer_google_workspace_retries,
+                ) {
+                    finalizer_google_workspace_retries =
+                        finalizer_google_workspace_retries.saturating_add(1);
+                    self.emit_status(
+                        "lifecycle",
+                        "Detected ungrounded Google Workspace conclusion; forcing skill setup probe.",
+                    );
+                    ctx.add_message(Message::system(self.google_workspace_retry_prompt()));
+                    ctx.add_message(Message::user(
+                        "Run the Google Workspace setup/token probe now and re-issue the answer with exact blockers or email evidence.",
+                    ));
+                    continue;
+                }
                 if finalizer_claim_requires_evidence_retry(
                     ctx.get_messages(),
                     assistant_msg.content.as_deref().unwrap_or_default(),
@@ -5644,6 +5762,7 @@ impl AgentLoop {
                          - confidence=<high|medium|low>\n\
                          - file=<absolute-or-repo-path>\n\
                          - cmd=<verification command or exact probe>\n\
+                         - every file/path evidence marker must refer to a path that exists now\n\
                          If evidence is missing, state `objective_state=unproven` and blockers.",
                     ));
                     ctx.add_message(Message::user(
@@ -5699,6 +5818,8 @@ impl AgentLoop {
                 finalizer_evidence_retries = 0;
                 finalizer_output_quality_retries = 0;
                 finalizer_action_execution_retries = 0;
+                finalizer_web_research_retries = 0;
+                finalizer_google_workspace_retries = 0;
                 let (objective_guard_active, requires_analytics, deep_audit_required) =
                     objective_guard_policy(ctx.get_messages());
                 if objective_guard_active {
@@ -5786,6 +5907,19 @@ impl AgentLoop {
             ) {
                 self.emit_status("lifecycle", "Applied repo-review discovery budget policy.");
                 ctx.add_message(Message::system(note));
+            }
+            if let Some(note) =
+                google_workspace_auth_blocker_mutation_guard(ctx.get_messages(), &tool_calls)
+            {
+                self.emit_status(
+                    "lifecycle",
+                    "Blocked Google Workspace credential/setup mutation after auth blocker.",
+                );
+                ctx.add_message(Message::system(note));
+                ctx.add_message(Message::user(
+                    "Stop setup/remediation. Final-answer the exact Google Workspace auth blocker now.",
+                ));
+                continue;
             }
             if tool_calls.is_empty() {
                 ctx.add_message(Message::system(
@@ -6347,6 +6481,15 @@ impl AgentLoop {
         if let Some(hint) = exploratory_problem_solving_system_hint(ctx.get_messages()) {
             ctx.add_message(Message::system(hint));
         }
+        if let Some(hint) = web_research_system_hint(ctx.get_messages(), &tool_schemas) {
+            ctx.add_message(Message::system(hint));
+        }
+        if let Some(hint) = terminal_command_system_hint(&tool_schemas) {
+            ctx.add_message(Message::system(hint));
+        }
+        if let Some(hint) = self.google_workspace_system_hint(ctx.get_messages(), &tool_schemas) {
+            ctx.add_message(Message::system(hint));
+        }
         if let Some(hint) = objective_mode_system_hint(ctx.get_messages()) {
             ctx.add_message(Message::system(hint));
         }
@@ -6432,6 +6575,8 @@ impl AgentLoop {
         let mut finalizer_evidence_retries: u32 = 0;
         let mut finalizer_output_quality_retries: u32 = 0;
         let mut finalizer_action_execution_retries: u32 = 0;
+        let mut finalizer_web_research_retries: u32 = 0;
+        let mut finalizer_google_workspace_retries: u32 = 0;
         let governor_window_limit = governor_window_size();
 
         loop {
@@ -6949,6 +7094,40 @@ impl AgentLoop {
                         }
                     }
                 }
+                if finalizer_web_research_requires_retry(
+                    ctx.get_messages(),
+                    assistant_msg.content.as_deref().unwrap_or_default(),
+                    finalizer_web_research_retries,
+                ) {
+                    finalizer_web_research_retries =
+                        finalizer_web_research_retries.saturating_add(1);
+                    self.emit_status(
+                        "lifecycle",
+                        "Detected missing web research evidence; forcing web tool pass.",
+                    );
+                    ctx.add_message(Message::system(web_research_retry_prompt()));
+                    ctx.add_message(Message::user(
+                        "Run the required web research now and re-issue the answer with URLs.",
+                    ));
+                    continue;
+                }
+                if finalizer_google_workspace_requires_retry(
+                    ctx.get_messages(),
+                    assistant_msg.content.as_deref().unwrap_or_default(),
+                    finalizer_google_workspace_retries,
+                ) {
+                    finalizer_google_workspace_retries =
+                        finalizer_google_workspace_retries.saturating_add(1);
+                    self.emit_status(
+                        "lifecycle",
+                        "Detected ungrounded Google Workspace conclusion; forcing skill setup probe.",
+                    );
+                    ctx.add_message(Message::system(self.google_workspace_retry_prompt()));
+                    ctx.add_message(Message::user(
+                        "Run the Google Workspace setup/token probe now and re-issue the answer with exact blockers or email evidence.",
+                    ));
+                    continue;
+                }
                 if finalizer_claim_requires_evidence_retry(
                     ctx.get_messages(),
                     assistant_msg.content.as_deref().unwrap_or_default(),
@@ -6961,6 +7140,7 @@ impl AgentLoop {
                          - confidence=<high|medium|low>\n\
                          - file=<absolute-or-repo-path>\n\
                          - cmd=<verification command or exact probe>\n\
+                         - every file/path evidence marker must refer to a path that exists now\n\
                          If evidence is missing, state `objective_state=unproven` and blockers.",
                     ));
                     ctx.add_message(Message::user(
@@ -7016,6 +7196,8 @@ impl AgentLoop {
                 finalizer_evidence_retries = 0;
                 finalizer_output_quality_retries = 0;
                 finalizer_action_execution_retries = 0;
+                finalizer_web_research_retries = 0;
+                finalizer_google_workspace_retries = 0;
                 let (objective_guard_active, requires_analytics, deep_audit_required) =
                     objective_guard_policy(ctx.get_messages());
                 if objective_guard_active {
@@ -7114,6 +7296,19 @@ impl AgentLoop {
             ) {
                 self.emit_status("lifecycle", "Applied repo-review discovery budget policy.");
                 ctx.add_message(Message::system(note));
+            }
+            if let Some(note) =
+                google_workspace_auth_blocker_mutation_guard(ctx.get_messages(), &tool_calls)
+            {
+                self.emit_status(
+                    "lifecycle",
+                    "Blocked Google Workspace credential/setup mutation after auth blocker.",
+                );
+                ctx.add_message(Message::system(note));
+                ctx.add_message(Message::user(
+                    "Stop setup/remediation. Final-answer the exact Google Workspace auth blocker now.",
+                ));
+                continue;
             }
             if tool_calls.is_empty() {
                 ctx.add_message(Message::system(
@@ -8637,6 +8832,13 @@ fn detect_repo_review_intent(messages: &[Message]) -> bool {
         "patch",
         "implement",
         "fix",
+        "research",
+        "analyze",
+        "analysis",
+        "assess",
+        "report",
+        "read-only",
+        "readonly",
     ];
     let has_review_signal = review_terms.iter().any(|needle| combined.contains(needle));
     let has_path_signal =
@@ -8728,6 +8930,13 @@ fn exploratory_problem_solving_system_hint(messages: &[Message]) -> Option<Strin
         "understand",
         "diagnose",
         "audit",
+        "research",
+        "analyze",
+        "analysis",
+        "assess",
+        "report",
+        "read-only",
+        "readonly",
         "deep",
         "root cause",
         "why",
@@ -8745,6 +8954,330 @@ fn exploratory_problem_solving_system_hint(messages: &[Message]) -> Option<Strin
 4) Do not finalize until high-leverage workstreams are either complete or explicitly blocked with concrete blockers and next actions."
             .to_string(),
     )
+}
+
+fn detect_web_research_intent(messages: &[Message]) -> bool {
+    let user = latest_user_content(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let objective = extract_session_objective(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let combined = format!("{} {}", user, objective);
+    [
+        "web search",
+        "search the web",
+        "across the web",
+        "online research",
+        "internet research",
+        "browse",
+        "browser",
+        "cite urls",
+        "cite concrete urls",
+        "urls",
+        "http",
+    ]
+    .iter()
+    .any(|needle| combined.contains(needle))
+}
+
+fn web_research_system_hint(messages: &[Message], tool_schemas: &[ToolSchema]) -> Option<String> {
+    if !detect_web_research_intent(messages) {
+        return None;
+    }
+    let has_web_tool = tool_schemas
+        .iter()
+        .any(|t| matches!(t.name.as_str(), "web_search" | "web_extract" | "web_crawl"));
+    let availability = if has_web_tool {
+        "Use `web_search` first, then `web_extract` for the highest-value results when detail matters."
+    } else {
+        "No web tools are advertised in this session; report that exact blocker instead of inventing sources."
+    };
+    Some(format!(
+        "[SYSTEM] Web research contract active. {availability} Final answer requirements: include `WEB_SEARCH_USED: yes` only after a web tool succeeds, cite concrete http(s) URLs copied from web tool results, and separate observed source evidence from speculation. For web evidence use `url=<http(s) URL>` or raw URLs; do not substitute local `file=` evidence for web sources. If every web tool call fails or no web tool is available, write `WEB_SEARCH_USED: no` with the exact blocker."
+    ))
+}
+
+fn terminal_command_system_hint(tool_schemas: &[ToolSchema]) -> Option<&'static str> {
+    if !tool_schemas.iter().any(|tool| tool.name == "terminal") {
+        return None;
+    }
+    Some(
+        "[SYSTEM] Terminal command contract: the `terminal` tool already executes commands through the configured shell. \
+         Do not wrap commands in `bash -lc`, `sh -c`, or `zsh -c`; those shell-string wrappers require explicit approval. \
+         Prefer direct commands and separate terminal calls for read-only probes.",
+    )
+}
+
+fn detect_google_workspace_intent(messages: &[Message]) -> bool {
+    let user = messages
+        .iter()
+        .filter(|message| matches!(message.role, MessageRole::User))
+        .filter_map(|message| message.content.as_deref())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase();
+    let objective = extract_session_objective(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let combined = format!("{} {}", user, objective);
+    combined.contains("gmail")
+        || combined.contains("google workspace")
+        || combined.contains("google cli")
+        || combined.contains("@gmail.com")
+        || (combined.contains("google") && combined.contains("email"))
+}
+
+fn history_includes_google_workspace_skill(messages: &[Message]) -> bool {
+    messages.iter().any(|m| {
+        matches!(m.role, MessageRole::Tool)
+            && m.name.as_deref() == Some("skill_view")
+            && m.content
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .contains("google workspace")
+    })
+}
+
+fn history_includes_google_workspace_setup_probe(messages: &[Message]) -> bool {
+    let command_seen = messages.iter().any(|m| {
+        if !matches!(m.role, MessageRole::Assistant) {
+            return false;
+        }
+        m.tool_calls.as_ref().is_some_and(|calls| {
+            calls.iter().any(|call| {
+                call.function.name == "terminal" && {
+                    let args = call.function.arguments.to_ascii_lowercase();
+                    args.contains("google-workspace")
+                        && (args.contains("setup.py") || args.contains("google_api.py"))
+                }
+            })
+        })
+    });
+    if !command_seen {
+        return false;
+    }
+    messages.iter().any(|m| {
+        if !matches!(m.role, MessageRole::Tool) || m.name.as_deref() != Some("terminal") {
+            return false;
+        }
+        let content = m
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        content.contains("google_token.json")
+            || content.contains("authenticated")
+            || content.contains("not_authenticated")
+            || content.contains("no token")
+            || content.contains("google_client_secret.json")
+            || content.contains("no such file")
+            || content.contains("error")
+    })
+}
+
+fn history_includes_google_workspace_auth_blocker(messages: &[Message]) -> bool {
+    messages.iter().any(|m| {
+        if !matches!(m.role, MessageRole::Tool) || m.name.as_deref() != Some("terminal") {
+            return false;
+        }
+        let content = m
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        content.contains("not_authenticated")
+            || content.contains("not authenticated")
+            || content.contains("no token at")
+            || content.contains("run the setup script first")
+    })
+}
+
+fn history_includes_gmail_api_probe(messages: &[Message]) -> bool {
+    let command_seen = messages.iter().any(|m| {
+        if !matches!(m.role, MessageRole::Assistant) {
+            return false;
+        }
+        m.tool_calls.as_ref().is_some_and(|calls| {
+            calls.iter().any(|call| {
+                call.function.name == "terminal" && {
+                    let args = call.function.arguments.to_ascii_lowercase();
+                    args.contains("google_api.py") && args.contains("gmail")
+                }
+            })
+        })
+    });
+    if !command_seen {
+        return false;
+    }
+    messages.iter().any(|m| {
+        if !matches!(m.role, MessageRole::Tool) || m.name.as_deref() != Some("terminal") {
+            return false;
+        }
+        let content = m
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        !content.contains("not_authenticated")
+            && !content.contains("not authenticated")
+            && !content.contains("run the setup script first")
+            && (content.contains("\"id\"")
+                || content.contains("\"messages\"")
+                || content.contains("\"subject\"")
+                || content.contains("\"snippet\"")
+                || content.contains("\"body\""))
+    })
+}
+
+fn google_workspace_auth_blocker_mutation_guard(
+    messages: &[Message],
+    tool_calls: &[ToolCall],
+) -> Option<&'static str> {
+    if !detect_google_workspace_intent(messages)
+        || !history_includes_google_workspace_auth_blocker(messages)
+    {
+        return None;
+    }
+    let attempts_mutation = tool_calls.iter().any(|call| {
+        let name = call.function.name.as_str();
+        let args = call.function.arguments.to_ascii_lowercase();
+        matches!(
+            name,
+            "write_file" | "patch" | "apply_patch" | "skill_manage"
+        ) || args.contains("--client-secret")
+            || args.contains("--auth-url")
+            || args.contains("--auth-code")
+            || args.contains("google_client_secret.json")
+            || args.contains("simulated")
+            || args.contains("fake")
+            || args.contains("dummy")
+    });
+    attempts_mutation.then_some(
+        "[SYSTEM] Google Workspace auth blocker already observed. This request is a read-only Gmail backfill, not a setup flow. \
+         Do not create simulated OAuth clients, write credential files, patch skills, run `--client-secret`, run `--auth-url`, or run `--auth-code`. \
+         Final answer must be `GOOGLE_WORKSPACE_USED: no` with the exact NOT_AUTHENTICATED/no-token command output and next legitimate setup command for the user.",
+    )
+}
+
+fn finalizer_google_workspace_requires_retry(
+    messages: &[Message],
+    assistant_text: &str,
+    retry_count: u32,
+) -> bool {
+    if retry_count >= FINALIZER_GOOGLE_WORKSPACE_MAX_RETRIES
+        || !detect_google_workspace_intent(messages)
+    {
+        return false;
+    }
+    let lower = assistant_text.to_ascii_lowercase();
+    let marker_text = lower.replace('*', "");
+    if !marker_text.contains("google_workspace_used: yes")
+        && !marker_text.contains("google_workspace_used: no")
+        && !marker_text.contains("google_workspace_used=yes")
+        && !marker_text.contains("google_workspace_used=no")
+    {
+        return true;
+    }
+    let claims_blocked = [
+        "blocked",
+        "cannot",
+        "no viable",
+        "no google",
+        "no gmail",
+        "not authenticated",
+        "no credentials",
+        "credentials verification",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    let claims_absent_despite_skill = history_includes_google_workspace_skill(messages)
+        && [
+            "no google workspace",
+            "no google/gmail",
+            "no gmail/email api",
+            "no tools",
+        ]
+        .iter()
+        .any(|needle| lower.contains(needle));
+    if claims_absent_despite_skill {
+        return true;
+    }
+    let claims_success = [
+        "google_workspace_used: yes",
+        "emails were found",
+        "important emails",
+        "gmail search and reading were successful",
+        "authenticated and working",
+        "full message text",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    if claims_success {
+        return history_includes_google_workspace_auth_blocker(messages)
+            || !history_includes_gmail_api_probe(messages);
+    }
+    if !claims_blocked {
+        return false;
+    }
+    let has_final_evidence = (lower.contains("setup.py")
+        || lower.contains("google_api.py")
+        || lower.contains("google_token.json"))
+        && (lower.contains("cmd=") || lower.contains("command="));
+    !(has_final_evidence && history_includes_google_workspace_setup_probe(messages))
+}
+
+fn history_includes_web_tool(messages: &[Message]) -> bool {
+    messages.iter().any(|m| {
+        if !matches!(m.role, MessageRole::Tool) {
+            return false;
+        }
+        m.name
+            .as_deref()
+            .is_some_and(|name| matches!(name, "web_search" | "web_extract" | "web_crawl"))
+    })
+}
+
+fn count_http_urls(text: &str) -> usize {
+    text.split_whitespace()
+        .filter(|token| token.starts_with("http://") || token.starts_with("https://"))
+        .map(|token| token.trim_end_matches([',', '.', ')', ']', ';']))
+        .collect::<HashSet<_>>()
+        .len()
+}
+
+fn web_research_retry_prompt() -> &'static str {
+    "[SYSTEM] Web research contract failed. This request explicitly requires online research.\n\
+     Requirements now:\n\
+     - call `web_search` with targeted queries before answering\n\
+     - optionally call `web_extract` on the best primary/community sources\n\
+     - final answer must include the exact line `WEB_SEARCH_USED: yes` after successful web tooling\n\
+     - cite at least two concrete http(s) URLs copied from web tool results\n\
+     - for each web finding, include `url=<http(s) URL>` or the raw URL; do not use local `file=` evidence as a substitute\n\
+     - separate observed evidence from speculation\n\
+     If web tooling is unavailable or errors, final answer must include `WEB_SEARCH_USED: no` and the exact tool error/blocker."
+}
+
+fn finalizer_web_research_requires_retry(
+    messages: &[Message],
+    assistant_text: &str,
+    retry_count: u32,
+) -> bool {
+    if retry_count >= FINALIZER_WEB_RESEARCH_MAX_RETRIES || !detect_web_research_intent(messages) {
+        return false;
+    }
+    let lower = assistant_text.to_ascii_lowercase();
+    let has_success_line =
+        lower.contains("web_search_used: yes") || lower.contains("web_search_used=yes");
+    let has_blocked_line =
+        lower.contains("web_search_used: no") || lower.contains("web_search_used=no");
+    if has_blocked_line && (lower.contains("blocked") || lower.contains("error")) {
+        return false;
+    }
+    !(history_includes_web_tool(messages)
+        && has_success_line
+        && count_http_urls(assistant_text) >= 2)
 }
 
 fn detect_deep_repo_audit_intent(messages: &[Message]) -> bool {
@@ -9452,6 +9985,106 @@ fn claim_verifier_enabled_runtime() -> bool {
         .unwrap_or(true)
 }
 
+fn detect_research_evidence_intent(messages: &[Message]) -> bool {
+    if !detect_repo_review_intent(messages) {
+        return false;
+    }
+    let user = latest_user_content(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let objective = extract_session_objective(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let combined = format!("{} {}", user, objective);
+    [
+        "research",
+        "analyze",
+        "analysis",
+        "assess",
+        "report",
+        "read-only",
+        "readonly",
+        "evidence",
+        "recommendation",
+        "recommendations",
+        "improve",
+        "profitability",
+    ]
+    .iter()
+    .any(|needle| combined.contains(needle))
+}
+
+fn normalize_evidence_path_token(raw: &str) -> Option<String> {
+    let mut token = raw
+        .trim()
+        .trim_start_matches(['`', '"', '\''])
+        .trim_end_matches(['`', '"', '\'', ',', ';', ')', ']', '.'])
+        .to_string();
+    if token.is_empty()
+        || token.starts_with('<')
+        || token.starts_with('$')
+        || token.starts_with("http://")
+        || token.starts_with("https://")
+        || token.contains("...")
+    {
+        return None;
+    }
+    if let Some((path, suffix)) = token.rsplit_once(':') {
+        if !path.is_empty() && suffix.chars().all(|c| c.is_ascii_digit() || c == '-') {
+            token = path.to_string();
+        }
+    }
+    Some(token)
+}
+
+fn extract_explicit_evidence_paths(assistant_text: &str) -> Vec<String> {
+    let markers = ["file=", "path=", "file:", "path:"];
+    let mut paths = Vec::new();
+    for line in assistant_text.lines() {
+        let lower = line.to_ascii_lowercase();
+        for marker in markers {
+            let mut search_start = 0usize;
+            while let Some(relative_idx) = lower[search_start..].find(marker) {
+                let value_start = search_start + relative_idx + marker.len();
+                let raw = line[value_start..].trim_start();
+                let raw = raw
+                    .split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ';' | ')' | ']'))
+                    .next()
+                    .unwrap_or_default();
+                if let Some(token) = normalize_evidence_path_token(raw) {
+                    paths.push(token);
+                }
+                search_start = value_start;
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn assistant_references_missing_evidence_paths_from_base(
+    assistant_text: &str,
+    base: &Path,
+) -> bool {
+    extract_explicit_evidence_paths(assistant_text)
+        .iter()
+        .any(|token| {
+            let path = Path::new(token);
+            let resolved = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                base.join(path)
+            };
+            !resolved.exists()
+        })
+}
+
+fn assistant_references_missing_evidence_paths(assistant_text: &str) -> bool {
+    let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    assistant_references_missing_evidence_paths_from_base(assistant_text, &base)
+}
+
 fn finalizer_claim_requires_evidence_retry(
     messages: &[Message],
     assistant_text: &str,
@@ -9476,7 +10109,8 @@ fn finalizer_claim_requires_evidence_retry(
     ]
     .iter()
     .any(|needle| lower.contains(needle));
-    if !claims_completion {
+    let research_evidence_required = detect_research_evidence_intent(messages);
+    if !(claims_completion || research_evidence_required) {
         return false;
     }
     let has_evidence = lower.contains("file=")
@@ -9489,6 +10123,17 @@ fn finalizer_claim_requires_evidence_retry(
         || lower.contains("confidence=medium")
         || lower.contains("confidence=low")
         || lower.contains("confidence:");
+    if research_evidence_required {
+        let has_explicit_path_evidence = lower.contains("file=") || lower.contains("path=");
+        let has_explicit_command_evidence = lower.contains("cmd=") || lower.contains("command=");
+        if !(has_explicit_path_evidence && has_explicit_command_evidence && has_confidence) {
+            return true;
+        }
+        if assistant_references_missing_evidence_paths(assistant_text) {
+            return true;
+        }
+        return false;
+    }
     !(has_evidence && has_confidence)
 }
 
@@ -9525,6 +10170,15 @@ fn finalizer_output_quality_requires_retry(assistant_text: &str, retry_count: u3
         "(url)",
         "[paper details](url)",
         "pack of authors",
+        "attached separately",
+        "attached reference output",
+        "full evidence available",
+        "full remand data",
+        "see telemetry evidence answer",
+        "proposed calibration: redacted",
+        "working summary",
+        "<tool_call",
+        "</tool_call>",
         "lorem ipsum",
         "<insert",
         "<todo",
@@ -15536,10 +16190,229 @@ mod tests {
     }
 
     #[test]
+    fn test_repo_review_intent_includes_path_scoped_read_only_research() {
+        let msgs = vec![Message::user(
+            "Conduct READ-ONLY local research in /tmp/algotraderV2_rust and report back on how to improve profitability.",
+        )];
+        assert!(detect_repo_review_intent(&msgs));
+        assert!(detect_research_evidence_intent(&msgs));
+        let hint = exploratory_problem_solving_system_hint(&msgs).expect("research hint");
+        assert!(hint.contains("Exploratory problem-solving protocol active"));
+    }
+
+    #[test]
+    fn test_finalizer_claim_retry_for_research_without_explicit_evidence() {
+        let msgs = vec![Message::user(
+            "Conduct read-only research in /tmp/algotraderV2_rust and report back with evidence-rich recommendations.",
+        )];
+        let answer = "Profitability can be improved by 60.2% based on local research.";
+        assert!(finalizer_claim_requires_evidence_retry(&msgs, answer, 0));
+
+        let grounded =
+            "confidence=medium\nfile=Cargo.toml\ncmd=rg -n profit src\nObserved facts only.";
+        assert!(!finalizer_claim_requires_evidence_retry(&msgs, grounded, 0));
+    }
+
+    #[test]
+    fn test_finalizer_claim_retry_for_missing_evidence_path() {
+        let _lock = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("src")).expect("create src");
+        std::fs::write(tmp.path().join("src/lib.rs"), "fn main() {}\n").expect("write file");
+
+        assert!(!assistant_references_missing_evidence_paths_from_base(
+            "confidence=high\nfile=src/lib.rs:1\ncmd=rg -n main src/lib.rs",
+            tmp.path()
+        ));
+        assert!(assistant_references_missing_evidence_paths_from_base(
+            "confidence=high\nfile=src/missing.rs;cmd=rg -n main src/missing.rs",
+            tmp.path()
+        ));
+    }
+
+    #[test]
+    fn test_web_research_finalizer_requires_web_tool_and_urls() {
+        let msgs = vec![Message::user(
+            "Search the web for Solana trading strategies and cite concrete URLs.",
+        )];
+        assert!(detect_web_research_intent(&msgs));
+        assert!(finalizer_web_research_requires_retry(
+            &msgs,
+            "WEB_SEARCH_USED: yes\nNo URLs found.",
+            0
+        ));
+
+        let mut grounded = msgs.clone();
+        grounded.push(Message::tool_result_with_name(
+            "web1",
+            "web_search",
+            r#"{"results":[{"url":"https://docs.jito.wtf/lowlatencytxnsend/"}]}"#,
+        ));
+        let answer = "WEB_SEARCH_USED: yes\nObserved:\n- https://docs.jito.wtf/lowlatencytxnsend/\n- https://www.helius.dev/blog/solana-local-fee-markets";
+        assert!(!finalizer_web_research_requires_retry(&grounded, answer, 0));
+    }
+
+    #[test]
+    fn test_web_research_system_hint_reports_tool_availability() {
+        let msgs = vec![Message::user(
+            "Do online research across the web and cite URLs.",
+        )];
+        let tools = vec![ToolSchema::new(
+            "web_search",
+            "Search the web",
+            JsonSchema::new("object"),
+        )];
+        let hint = web_research_system_hint(&msgs, &tools).expect("web hint");
+        assert!(hint.contains("Web research contract active"));
+        assert!(hint.contains("web_search"));
+    }
+
+    #[test]
+    fn test_google_workspace_finalizer_retries_absent_skill_claim() {
+        let mut msgs = vec![Message::user(
+            "Use Gmail to summarize important emails from sheawinkler@gmail.com.",
+        )];
+        msgs.push(Message::tool_result_with_name(
+            "skill1",
+            "skill_view",
+            "# Google Workspace\nGmail, Calendar, Drive.",
+        ));
+
+        assert!(finalizer_google_workspace_requires_retry(
+            &msgs,
+            "No Google Workspace tools exist, so this is blocked.",
+            0
+        ));
+    }
+
+    #[test]
+    fn test_google_workspace_finalizer_requires_status_marker() {
+        let msgs = vec![Message::user(
+            "Use Gmail to summarize important emails from sheawinkler@gmail.com.",
+        )];
+        assert!(finalizer_google_workspace_requires_retry(
+            &msgs,
+            "Here is an unrelated repo analysis.",
+            0
+        ));
+    }
+
+    #[test]
+    fn test_google_workspace_finalizer_accepts_setup_probe_blocker() {
+        let mut msgs = vec![Message::user(
+            "Use Gmail to summarize important emails from sheawinkler@gmail.com.",
+        )];
+        msgs.push(Message::assistant_with_tool_calls(
+            None,
+            vec![hermes_core::ToolCall {
+                id: "call_setup".to_string(),
+                function: hermes_core::FunctionCall {
+                    name: "terminal".to_string(),
+                    arguments: r#"{"command":"python3.12 /Users/me/.hermes-agent-ultra/skills/productivity/google-workspace/scripts/setup.py --check"}"#.to_string(),
+                },
+                extra_content: None,
+            }],
+        ));
+        msgs.push(Message::tool_result_with_name(
+            "call_setup",
+            "terminal",
+            r#"{"result":"NOT_AUTHENTICATED: No token at /Users/me/.hermes-agent-ultra/google_token.json"}"#,
+        ));
+
+        assert!(!finalizer_google_workspace_requires_retry(
+            &msgs,
+            "GOOGLE_WORKSPACE_USED: no\ncmd=python3.12 /Users/me/.hermes-agent-ultra/skills/productivity/google-workspace/scripts/setup.py --check\nerror=NOT_AUTHENTICATED: No token at /Users/me/.hermes-agent-ultra/google_token.json",
+            0
+        ));
+    }
+
+    #[test]
+    fn test_google_workspace_finalizer_retries_success_after_auth_blocker() {
+        let mut msgs = vec![Message::user(
+            "Use Gmail to summarize important emails from sheawinkler@gmail.com.",
+        )];
+        msgs.push(Message::assistant_with_tool_calls(
+            None,
+            vec![hermes_core::ToolCall {
+                id: "call_setup".to_string(),
+                function: hermes_core::FunctionCall {
+                    name: "terminal".to_string(),
+                    arguments: r#"{"command":"env HERMES_HOME=/Users/me/.hermes-agent-ultra python3.12 /Users/me/.hermes-agent-ultra/skills/productivity/google-workspace/scripts/setup.py --check"}"#.to_string(),
+                },
+                extra_content: None,
+            }],
+        ));
+        msgs.push(Message::tool_result_with_name(
+            "call_setup",
+            "terminal",
+            r#"{"result":"NOT_AUTHENTICATED: No token at /Users/me/.hermes-agent-ultra/google_token.json"}"#,
+        ));
+
+        assert!(finalizer_google_workspace_requires_retry(
+            &msgs,
+            "GOOGLE_WORKSPACE_USED: yes\n20 important emails were found. Gmail search and reading were successful.",
+            0
+        ));
+    }
+
+    #[test]
+    fn test_google_workspace_auth_blocker_guard_blocks_setup_mutation() {
+        let mut msgs = vec![Message::user(
+            "Use Gmail to summarize important emails from sheawinkler@gmail.com.",
+        )];
+        msgs.push(Message::tool_result_with_name(
+            "call_setup",
+            "terminal",
+            r#"{"result":"NOT_AUTHENTICATED: No token at /Users/me/.hermes-agent-ultra/google_token.json"}"#,
+        ));
+        let calls = vec![hermes_core::ToolCall {
+            id: "write_fake".to_string(),
+            function: hermes_core::FunctionCall {
+                name: "write_file".to_string(),
+                arguments: r#"{"path":"/tmp/simulated_clients.json","content":"{}"}"#.to_string(),
+            },
+            extra_content: None,
+        }];
+
+        assert!(google_workspace_auth_blocker_mutation_guard(&msgs, &calls).is_some());
+        let auth_url_calls = vec![hermes_core::ToolCall {
+            id: "auth_url".to_string(),
+            function: hermes_core::FunctionCall {
+                name: "terminal".to_string(),
+                arguments: r#"{"command":"env HERMES_HOME=/Users/me/.hermes-agent-ultra python3 /Users/me/.hermes-agent-ultra/skills/productivity/google-workspace/scripts/setup.py --auth-url --services email"}"#.to_string(),
+            },
+            extra_content: None,
+        }];
+        assert!(google_workspace_auth_blocker_mutation_guard(&msgs, &auth_url_calls).is_some());
+    }
+
+    #[test]
+    fn test_terminal_command_system_hint_warns_against_shell_wrappers() {
+        let tools = vec![ToolSchema::new(
+            "terminal",
+            "Execute command",
+            JsonSchema::new("object"),
+        )];
+        let hint = terminal_command_system_hint(&tools).expect("terminal hint");
+        assert!(hint.contains("bash -lc"));
+        assert!(hint.contains("direct commands"));
+    }
+
+    #[test]
     fn test_finalizer_output_quality_retry_detects_placeholders() {
         let templated =
             "**Title:** Example\n**Authors:** pack of authors\n(Full text available at [URL](URL))";
         assert!(finalizer_output_quality_requires_retry(templated, 0));
+    }
+
+    #[test]
+    fn test_finalizer_output_quality_retry_detects_fake_attachments() {
+        let answer = "The full evidence is attached separately; proposed calibration: redacted.";
+        assert!(finalizer_output_quality_requires_retry(answer, 0));
+        assert!(finalizer_output_quality_requires_retry(
+            r#"{"name":"terminal","arguments":{}}</tool_call>"#,
+            0
+        ));
     }
 
     #[test]

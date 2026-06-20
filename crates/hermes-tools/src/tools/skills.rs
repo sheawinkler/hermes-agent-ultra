@@ -29,12 +29,18 @@ impl SkillsListHandler {
 #[async_trait]
 impl ToolHandler for SkillsListHandler {
     async fn execute(&self, _params: Value) -> Result<String, ToolError> {
-        let skills = self
+        let mut skills = self
             .provider
             .list_skills()
             .await
             .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+        skills.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+                .then_with(|| a.category.cmp(&b.category))
+        });
 
+        let names: Vec<String> = skills.iter().map(|s| s.name.clone()).collect();
         let result: Vec<Value> = skills
             .iter()
             .map(|s| {
@@ -46,7 +52,12 @@ impl ToolHandler for SkillsListHandler {
             })
             .collect();
 
-        Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| "[]".to_string()))
+        Ok(serde_json::to_string_pretty(&json!({
+            "count": result.len(),
+            "names": names,
+            "skills": result,
+        }))
+        .unwrap_or_else(|_| "[]".to_string()))
     }
 
     fn schema(&self) -> ToolSchema {
@@ -89,7 +100,12 @@ impl ToolHandler for SkillViewHandler {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
 
-        if let Some(file_path) = params.get("file_path").and_then(|v| v.as_str()) {
+        if let Some(file_path) = params
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
             // Security hardening (parity with Python): reject obvious traversal
             // patterns before resolving any filesystem paths.
             if has_traversal_component(file_path) {
@@ -654,6 +670,9 @@ mod tests {
         let handler = SkillsListHandler::new(Arc::new(MockSkillProvider));
         let result = handler.execute(json!({})).await.unwrap();
         assert!(result.contains("test"));
+        let payload: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(payload["count"], json!(1));
+        assert_eq!(payload["names"][0], Value::String("test".to_string()));
     }
 
     #[tokio::test]
@@ -684,6 +703,16 @@ mod tests {
             payload["content"],
             Value::String("API docs here".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_skill_view_empty_file_path_uses_provider_content() {
+        let handler = SkillViewHandler::new(Arc::new(MockSkillProvider));
+        let result = handler
+            .execute(json!({"name": "test", "file_path": ""}))
+            .await
+            .unwrap();
+        assert_eq!(result, "skill content");
     }
 
     #[tokio::test]
