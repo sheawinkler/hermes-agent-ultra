@@ -1659,6 +1659,7 @@ name = "hermes-cron"
 version = "0.18.1"
 dependencies = [
  "async-trait",
+ "base64",
  "chrono",
  "cron",
  "directories",
@@ -1668,10 +1669,13 @@ dependencies = [
  "hermes-core",
  "hermes-skills",
  "hermes-tools",
+ "jsonwebtoken",
  "regex",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

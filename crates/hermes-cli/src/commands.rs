@@ -22,7 +22,9 @@ use hermes_core::auth_gate::{
     oauth_runtime_gate_manifest_default, OAuthRuntimeGateManifest,
 };
 use hermes_core::AgentError;
-use hermes_cron::{BlueprintCommandAction, CronJob, DeliverConfig, DeliverTarget};
+use hermes_cron::{
+    BlueprintCommandAction, CronJob, DeliverConfig, DeliverTarget, SuggestionJobSpec,
+};
 use hermes_intelligence::model_metadata::{get_model_context_length, get_model_info};
 use hermes_intelligence::models_dev::default_client;
 use hermes_intelligence::{build_swarm_execution_plan, swarm_runtime_status, SwarmExecutionMode};
@@ -172,6 +174,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/profile", "Show active profile and Hermes home path"),
     ("/whoami", "Alias for /profile"),
     ("/version", "Show Hermes Agent Ultra version and build label"),
+    ("/v", "Alias for /version"),
     ("/fast", "Toggle fast-mode hints"),
     ("/skin", "Show available skin/theme options"),
     ("/skins", "Alias for /skin"),
@@ -216,6 +219,12 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "/blueprint",
         "Automation Blueprint catalog and creation (`<name> slot=value`, alias `/bp`)",
     ),
+    ("/bp", "Alias for /blueprint"),
+    (
+        "/suggestions",
+        "Review suggested automations (`accept|dismiss N`, `catalog`, `clear`)",
+    ),
+    ("/suggest", "Alias for /suggestions"),
     ("/scheduler", "Alias for /background"),
     (
         "/agents",
@@ -301,6 +310,14 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/compact", "Alias for /compress"),
     ("/clear-queue", "Clear queued background jobs"),
     ("/usage", "Show token usage statistics"),
+    (
+        "/credits",
+        "Show Nous credit balance and local usage statistics",
+    ),
+    (
+        "/billing",
+        "Show Nous billing/credits summary and local usage statistics",
+    ),
     ("/insights", "Show local usage/session insights"),
     ("/stop", "Stop current agent execution"),
     ("/busy", "Busy/processing status compatibility surface"),
@@ -3515,6 +3532,8 @@ fn canonical_command(cmd: &str) -> &str {
         "/skins" => "/skin",
         "/summary" => "/recap",
         "/whoami" => "/profile",
+        "/v" => "/version",
+        "/billing" | "/credits" => "/usage",
         "/session" => "/sessions",
         "/switch" => "/sessions",
         "/sb" => "/statusbar",
@@ -3522,6 +3541,7 @@ fn canonical_command(cmd: &str) -> &str {
         "/rb" => "/runbook",
         "/debug" => "/debug-dump",
         "/exit" => "/quit",
+        "/suggest" => "/suggestions",
         other => other,
     }
 }
@@ -3772,6 +3792,7 @@ async fn dispatch_slash_command(
         }
         "/cron" => handle_cron_command(app),
         "/blueprint" => handle_blueprint_command(app, args).await,
+        "/suggestions" => handle_suggestions_command(app, args).await,
         "/agents" => handle_agents_command(app, args),
         "/kanban" => handle_kanban_command(app, args),
         "/plan" => handle_plan_command(app, args),
@@ -15217,6 +15238,163 @@ async fn handle_blueprint_command(
             );
         }
     }
+    Ok(CommandResult::Handled)
+}
+
+fn suggestion_error(err: hermes_cron::SuggestionError) -> AgentError {
+    AgentError::Config(format!("suggestions: {err}"))
+}
+
+fn render_pending_suggestions(pending: &[hermes_cron::SuggestionRecord]) -> String {
+    if pending.is_empty() {
+        return "No suggested automations right now.\nTry `/suggestions catalog` to see the curated starter set, or install a blueprint skill to get one.".to_string();
+    }
+
+    let mut out = String::from("Suggested automations - `/suggestions accept N` or `dismiss N`:\n");
+    for (idx, suggestion) in pending.iter().enumerate() {
+        let _ = writeln!(
+            out,
+            "\n  {}. {}  [{}]  ({})",
+            idx + 1,
+            suggestion.title,
+            suggestion.job_spec.schedule,
+            suggestion.source
+        );
+        if !suggestion.description.trim().is_empty() {
+            let _ = writeln!(out, "     {}", suggestion.description.trim());
+        }
+    }
+    out
+}
+
+fn render_suggestions_usage() -> &'static str {
+    "Usage:\n  /suggestions              list pending\n  /suggestions accept N     schedule suggestion N\n  /suggestions dismiss N    dismiss suggestion N\n  /suggestions catalog      add curated starter automations\n  /suggestions clear        housekeeping"
+}
+
+fn cron_job_from_suggestion_spec(spec: &SuggestionJobSpec) -> Result<CronJob, String> {
+    let Some(deliver) = blueprint_deliver_config(&spec.deliver) else {
+        return Err(format!(
+            "unsupported deliver target `{}`",
+            spec.deliver.trim()
+        ));
+    };
+    let mut job = CronJob::new(spec.schedule.clone(), spec.prompt.clone());
+    job.name = Some(spec.name.clone());
+    job.deliver = Some(deliver);
+    if !spec.skills.is_empty() {
+        job.skills = Some(spec.skills.clone());
+    }
+    Ok(job)
+}
+
+async fn handle_suggestions_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let store = hermes_cron::SuggestionStore::default();
+    let sub = args
+        .first()
+        .map(|arg| arg.to_ascii_lowercase())
+        .unwrap_or_default();
+    let rest = args.get(1..).unwrap_or_default().join(" ");
+
+    match sub.as_str() {
+        "" => {
+            let pending = store.list_pending().map_err(suggestion_error)?;
+            emit_command_output(app, render_pending_suggestions(&pending));
+        }
+        "accept" | "add" | "schedule" => {
+            if rest.trim().is_empty() {
+                emit_command_output(app, "Usage: /suggestions accept <number|id>");
+                return Ok(CommandResult::Handled);
+            }
+            let Some(suggestion) = store.get_pending(&rest).map_err(suggestion_error)? else {
+                emit_command_output(
+                    app,
+                    format!(
+                        "No pending suggestion matches '{}'. Run /suggestions to list them.",
+                        rest.trim()
+                    ),
+                );
+                return Ok(CommandResult::Handled);
+            };
+            let job = match cron_job_from_suggestion_spec(&suggestion.job_spec) {
+                Ok(job) => job,
+                Err(err) => {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Suggestion `{}` cannot be scheduled: {err}.",
+                            suggestion.title
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+            };
+            let job_id = app
+                .cron_scheduler
+                .create_job(job)
+                .await
+                .map_err(|e| AgentError::Config(format!("suggestion cron create: {e}")))?;
+            store
+                .mark_accepted(&suggestion.id)
+                .map_err(suggestion_error)?;
+            emit_command_output(
+                app,
+                format!(
+                    "Scheduled '{}' ({}).\nJob: {}\nManage it with /cron.",
+                    suggestion.job_spec.name, suggestion.job_spec.schedule, job_id
+                ),
+            );
+        }
+        "dismiss" | "no" | "reject" => {
+            if rest.trim().is_empty() {
+                emit_command_output(app, "Usage: /suggestions dismiss <number|id>");
+                return Ok(CommandResult::Handled);
+            }
+            let dismissed = store.dismiss_suggestion(&rest).map_err(suggestion_error)?;
+            if dismissed {
+                emit_command_output(app, "Dismissed. Won't suggest that again.");
+            } else {
+                emit_command_output(
+                    app,
+                    format!("No pending suggestion matches '{}'.", rest.trim()),
+                );
+            }
+        }
+        "catalog" => {
+            let created = store.seed_catalog_suggestions().map_err(suggestion_error)?;
+            if created.is_empty() {
+                emit_command_output(
+                    app,
+                    "No new catalog automations to add (already offered, dismissed, or your suggestion list is full). Run /suggestions to see pending.",
+                );
+            } else {
+                let added = created
+                    .iter()
+                    .map(|record| record.title.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                emit_command_output(
+                    app,
+                    format!(
+                        "Added {} suggestion(s): {}.\nRun /suggestions to review.",
+                        created.len(),
+                        added
+                    ),
+                );
+            }
+        }
+        "clear" => {
+            let removed = store.clear_resolved().map_err(suggestion_error)?;
+            emit_command_output(
+                app,
+                format!("Cleared {removed} resolved suggestion record(s)."),
+            );
+        }
+        _ => emit_command_output(app, render_suggestions_usage()),
+    }
+
     Ok(CommandResult::Handled)
 }
 
@@ -29254,6 +29432,79 @@ mod tests {
         assert_eq!(canonical_command("/goal"), "/objective");
     }
 
+    #[test]
+    fn test_golden_upstream_surface_aliases_are_registered() {
+        for command in [
+            "/bp",
+            "/v",
+            "/credits",
+            "/billing",
+            "/suggest",
+            "/suggestions",
+        ] {
+            assert!(
+                SLASH_COMMANDS.iter().any(|(name, _)| *name == command),
+                "{command} should be registered"
+            );
+        }
+        assert_eq!(canonical_command("/bp"), "/blueprint");
+        assert_eq!(canonical_command("/v"), "/version");
+        assert_eq!(canonical_command("/credits"), "/usage");
+        assert_eq!(canonical_command("/billing"), "/usage");
+        assert_eq!(canonical_command("/suggest"), "/suggestions");
+        assert!(autocomplete("/cre").contains(&"/credits"));
+        assert!(autocomplete("/bill").contains(&"/billing"));
+        assert!(autocomplete("/sugg").contains(&"/suggestions"));
+    }
+
+    #[tokio::test]
+    async fn suggestions_catalog_accept_and_dismiss_flow() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let empty = handle_slash_command(&mut app, "/suggestions", &[])
+            .await
+            .expect("empty suggestions");
+        assert_eq!(empty, CommandResult::Handled);
+        assert!(latest_ui_assistant_text(&app).contains("No suggested automations"));
+
+        handle_slash_command(&mut app, "/suggestions", &["catalog"])
+            .await
+            .expect("seed catalog");
+        let seeded = latest_ui_assistant_text(&app);
+        assert!(seeded.contains("Added"));
+        assert!(seeded.contains("Morning briefing"));
+
+        handle_slash_command(&mut app, "/suggest", &[])
+            .await
+            .expect("alias list suggestions");
+        let listed = latest_ui_assistant_text(&app);
+        assert!(listed.contains("Suggested automations"));
+        assert!(listed.contains("Important-mail monitor"));
+
+        handle_slash_command(&mut app, "/suggestions", &["accept", "1"])
+            .await
+            .expect("accept suggestion");
+        let accepted = latest_ui_assistant_text(&app);
+        assert!(accepted.contains("Scheduled 'Morning briefing'"));
+        let jobs = app.cron_scheduler.list_jobs().await;
+        assert!(jobs.iter().any(|job| {
+            job.name.as_deref() == Some("Morning briefing") && job.schedule == "0 8 * * *"
+        }));
+
+        handle_slash_command(&mut app, "/suggestions", &["dismiss", "1"])
+            .await
+            .expect("dismiss suggestion");
+        assert!(latest_ui_assistant_text(&app).contains("Dismissed."));
+
+        handle_slash_command(&mut app, "/suggestions", &["clear"])
+            .await
+            .expect("clear suggestions");
+        assert!(latest_ui_assistant_text(&app).contains("Cleared 1 resolved"));
+    }
+
     #[tokio::test]
     async fn objective_lifecycle_pause_resume_updates_session_injection() {
         let _guard = env_test_lock();
@@ -29859,6 +30110,10 @@ mod tests {
         assert_eq!(canonical_command("/swarms"), "/swarm");
         assert_eq!(canonical_command("/summary"), "/recap");
         assert_eq!(canonical_command("/whoami"), "/profile");
+        assert_eq!(canonical_command("/v"), "/version");
+        assert_eq!(canonical_command("/billing"), "/usage");
+        assert_eq!(canonical_command("/credits"), "/usage");
+        assert_eq!(canonical_command("/suggest"), "/suggestions");
         assert_eq!(canonical_command("/footer"), "/statusbar");
         assert_eq!(canonical_command("/indicator"), "/statusbar");
         assert_eq!(canonical_command("/tasks"), "/kanban");
