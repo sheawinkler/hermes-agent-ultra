@@ -84,11 +84,21 @@ fn normalize_provider_name(provider: &str) -> String {
         "opencode" | "opencode-zen" | "zen" => "opencode-zen".to_string(),
         "go" => "opencode-go".to_string(),
         "ollama" => "ollama-local".to_string(),
-        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "llama.cpp" | "llamacpp" | "llamafile" => "llama-cpp".to_string(),
         "ollvm" | "llvm" => "vllm".to_string(),
-        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm" | "mlx-openai-server" => {
+            "mlx".to_string()
+        }
         "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
         "text-generation-inference" => "tgi".to_string(),
+        "lm-studio" | "lm_studio" | "lm studio" => "lmstudio".to_string(),
+        "lm-deploy" | "lm_deploy" => "lmdeploy".to_string(),
+        "local-ai" | "local_ai" => "localai".to_string(),
+        "kobold-cpp" | "kobold" => "koboldcpp".to_string(),
+        "oobabooga" | "textgen-webui" | "textgen_webui" | "text-generation-web-ui" => {
+            "text-generation-webui".to_string()
+        }
+        "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => "tabbyapi".to_string(),
         _ => normalized,
     }
 }
@@ -203,6 +213,19 @@ fn provider_env_key_names(provider: &str) -> &'static [&'static str] {
         "xiaomi" => &["XIAOMI_API_KEY"],
         "tencent-tokenhub" => &["TOKENHUB_API_KEY"],
         "ollama-cloud" => &["OLLAMA_API_KEY"],
+        "ollama-local" => &["OLLAMA_LOCAL_API_KEY", "OLLAMA_API_KEY"],
+        "llama-cpp" => &["LLAMA_CPP_API_KEY"],
+        "vllm" => &["VLLM_API_KEY"],
+        "mlx" => &["MLX_API_KEY"],
+        "apple-ane" => &["APPLE_ANE_API_KEY"],
+        "sglang" => &["SGLANG_API_KEY"],
+        "tgi" => &["TGI_API_KEY", "HUGGINGFACE_API_KEY"],
+        "lmstudio" => &["LMSTUDIO_API_KEY"],
+        "lmdeploy" => &["LMDEPLOY_API_KEY"],
+        "localai" => &["LOCALAI_API_KEY"],
+        "koboldcpp" => &["KOBOLDCPP_API_KEY"],
+        "text-generation-webui" => &["TEXT_GENERATION_WEBUI_API_KEY"],
+        "tabbyapi" => &["TABBYAPI_API_KEY"],
         _ => &[],
     }
 }
@@ -347,6 +370,14 @@ mod tests {
         assert_eq!(normalize_provider_name("arcee-ai"), "arcee");
         assert_eq!(normalize_provider_name("mimo"), "xiaomi");
         assert_eq!(normalize_provider_name("tokenhub"), "tencent-tokenhub");
+        assert_eq!(normalize_provider_name("llamafile"), "llama-cpp");
+        assert_eq!(normalize_provider_name("vmlx"), "mlx");
+        assert_eq!(normalize_provider_name("lm-studio"), "lmstudio");
+        assert_eq!(
+            normalize_provider_name("oobabooga"),
+            "text-generation-webui"
+        );
+        assert_eq!(normalize_provider_name("exllamav2"), "tabbyapi");
         assert_eq!(
             provider_env_key_names("arcee"),
             &["ARCEEAI_API_KEY", "ARCEE_API_KEY"]
@@ -355,5 +386,11 @@ mod tests {
             provider_env_key_names("tencent-tokenhub"),
             &["TOKENHUB_API_KEY"]
         );
+        assert_eq!(provider_env_key_names("lmstudio"), &["LMSTUDIO_API_KEY"]);
+        assert_eq!(
+            provider_env_key_names("text-generation-webui"),
+            &["TEXT_GENERATION_WEBUI_API_KEY"]
+        );
+        assert_eq!(provider_env_key_names("tabbyapi"), &["TABBYAPI_API_KEY"]);
     }
 }

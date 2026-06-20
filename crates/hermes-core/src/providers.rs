@@ -39,6 +39,12 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "apple-ane",
     "sglang",
     "tgi",
+    "lmstudio",
+    "lmdeploy",
+    "localai",
+    "koboldcpp",
+    "text-generation-webui",
+    "tabbyapi",
     "opencode-go",
     "opencode-zen",
     "xai",
@@ -121,11 +127,21 @@ pub fn canonical_provider_id(provider: &str) -> String {
         "opencode" | "opencode-zen" | "zen" => "opencode-zen".to_string(),
         "go" => "opencode-go".to_string(),
         "ollama" => "ollama-local".to_string(),
-        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "llama.cpp" | "llamacpp" | "llamafile" => "llama-cpp".to_string(),
         "ollvm" | "llvm" => "vllm".to_string(),
-        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm" | "mlx-openai-server" => {
+            "mlx".to_string()
+        }
         "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
         "text-generation-inference" => "tgi".to_string(),
+        "lm-studio" | "lm_studio" | "lm studio" => "lmstudio".to_string(),
+        "lm-deploy" | "lm_deploy" => "lmdeploy".to_string(),
+        "local-ai" | "local_ai" => "localai".to_string(),
+        "kobold-cpp" | "kobold" => "koboldcpp".to_string(),
+        "oobabooga" | "textgen-webui" | "textgen_webui" | "text-generation-web-ui" => {
+            "text-generation-webui".to_string()
+        }
+        "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => "tabbyapi".to_string(),
         _ => normalized,
     }
 }
@@ -273,6 +289,12 @@ mod tests {
             "apple-ane",
             "sglang",
             "tgi",
+            "lmstudio",
+            "lmdeploy",
+            "localai",
+            "koboldcpp",
+            "text-generation-webui",
+            "tabbyapi",
         ] {
             let cap = provider_capability_for(provider).expect("capability");
             assert!(
@@ -292,7 +314,18 @@ mod tests {
         assert_eq!(canonical_provider_id("gemini-cli"), "google-gemini-cli");
         assert_eq!(canonical_provider_id("ollama"), "ollama-local");
         assert_eq!(canonical_provider_id("llama.cpp"), "llama-cpp");
+        assert_eq!(canonical_provider_id("llamafile"), "llama-cpp");
         assert_eq!(canonical_provider_id("llvm"), "vllm");
+        assert_eq!(canonical_provider_id("vmlx"), "mlx");
+        assert_eq!(canonical_provider_id("omlx"), "mlx");
+        assert_eq!(canonical_provider_id("mlx-vlm"), "mlx");
+        assert_eq!(canonical_provider_id("lm-studio"), "lmstudio");
+        assert_eq!(canonical_provider_id("lm_deploy"), "lmdeploy");
+        assert_eq!(canonical_provider_id("local-ai"), "localai");
+        assert_eq!(canonical_provider_id("kobold-cpp"), "koboldcpp");
+        assert_eq!(canonical_provider_id("oobabooga"), "text-generation-webui");
+        assert_eq!(canonical_provider_id("tabby-api"), "tabbyapi");
+        assert_eq!(canonical_provider_id("exllamav2"), "tabbyapi");
         assert_eq!(canonical_provider_id("glm"), "zai");
         assert_eq!(canonical_provider_id("z-ai"), "zai");
         assert_eq!(canonical_provider_id("zhipu"), "zai");

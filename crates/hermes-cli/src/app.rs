@@ -5922,6 +5922,12 @@ mod tests {
             "APPLE_ANE_API_KEY",
             "SGLANG_API_KEY",
             "TGI_API_KEY",
+            "LMSTUDIO_API_KEY",
+            "LMDEPLOY_API_KEY",
+            "LOCALAI_API_KEY",
+            "KOBOLDCPP_API_KEY",
+            "TEXT_GENERATION_WEBUI_API_KEY",
+            "TABBYAPI_API_KEY",
             "NOVITA_API_KEY",
             "OPENCODE_GO_API_KEY",
             "OPENCODE_ZEN_API_KEY",
@@ -5961,6 +5967,12 @@ mod tests {
             ("APPLE_ANE_API_KEY", "apple-ane"),
             ("SGLANG_API_KEY", "sglang"),
             ("TGI_API_KEY", "tgi"),
+            ("LMSTUDIO_API_KEY", "lm-studio"),
+            ("LMDEPLOY_API_KEY", "lm-deploy"),
+            ("LOCALAI_API_KEY", "local-ai"),
+            ("KOBOLDCPP_API_KEY", "kobold-cpp"),
+            ("TEXT_GENERATION_WEBUI_API_KEY", "oobabooga"),
+            ("TABBYAPI_API_KEY", "exllamav2"),
             ("NOVITA_API_KEY", "novita"),
             ("OPENCODE_GO_API_KEY", "opencode-go"),
             ("OPENCODE_ZEN_API_KEY", "opencode-zen"),
@@ -6024,10 +6036,24 @@ mod tests {
         assert_eq!(normalize_runtime_provider_name("opencode"), "opencode-zen");
         assert_eq!(normalize_runtime_provider_name("ollama"), "ollama-local");
         assert_eq!(normalize_runtime_provider_name("llama.cpp"), "llama-cpp");
+        assert_eq!(normalize_runtime_provider_name("llamafile"), "llama-cpp");
         assert_eq!(normalize_runtime_provider_name("ollvm"), "vllm");
         assert_eq!(normalize_runtime_provider_name("llvm"), "vllm");
         assert_eq!(normalize_runtime_provider_name("mlx-lm"), "mlx");
+        assert_eq!(normalize_runtime_provider_name("vmlx"), "mlx");
+        assert_eq!(normalize_runtime_provider_name("omlx"), "mlx");
+        assert_eq!(normalize_runtime_provider_name("mlx-vlm"), "mlx");
         assert_eq!(normalize_runtime_provider_name("ane"), "apple-ane");
+        assert_eq!(normalize_runtime_provider_name("lm-studio"), "lmstudio");
+        assert_eq!(normalize_runtime_provider_name("lm_deploy"), "lmdeploy");
+        assert_eq!(normalize_runtime_provider_name("local-ai"), "localai");
+        assert_eq!(normalize_runtime_provider_name("kobold-cpp"), "koboldcpp");
+        assert_eq!(
+            normalize_runtime_provider_name("oobabooga"),
+            "text-generation-webui"
+        );
+        assert_eq!(normalize_runtime_provider_name("tabby-api"), "tabbyapi");
+        assert_eq!(normalize_runtime_provider_name("exllamav2"), "tabbyapi");
         assert_eq!(normalize_runtime_provider_name("glm"), "zai");
         assert_eq!(normalize_runtime_provider_name("z-ai"), "zai");
         assert_eq!(normalize_runtime_provider_name("zhipu"), "zai");
@@ -6095,6 +6121,12 @@ mod tests {
             "ARCEE_BASE_URL",
             "XIAOMI_BASE_URL",
             "BEDROCK_BASE_URL",
+            "LMSTUDIO_BASE_URL",
+            "LMDEPLOY_BASE_URL",
+            "LOCALAI_BASE_URL",
+            "KOBOLDCPP_BASE_URL",
+            "TEXT_GENERATION_WEBUI_BASE_URL",
+            "TABBYAPI_BASE_URL",
         ];
         for env_var in env_vars {
             std::env::remove_var(env_var);
@@ -6163,6 +6195,36 @@ mod tests {
             provider_base_url_from_env("aws").as_deref(),
             Some("https://bedrock-runtime.example")
         );
+        std::env::set_var("LMSTUDIO_BASE_URL", "http://localhost:1234/v1");
+        assert_eq!(
+            provider_base_url_from_env("lm-studio").as_deref(),
+            Some("http://localhost:1234/v1")
+        );
+        std::env::set_var("LMDEPLOY_BASE_URL", "http://localhost:23333/v1");
+        assert_eq!(
+            provider_base_url_from_env("lm-deploy").as_deref(),
+            Some("http://localhost:23333/v1")
+        );
+        std::env::set_var("LOCALAI_BASE_URL", "http://localhost:8080/v1");
+        assert_eq!(
+            provider_base_url_from_env("local-ai").as_deref(),
+            Some("http://localhost:8080/v1")
+        );
+        std::env::set_var("KOBOLDCPP_BASE_URL", "http://localhost:5001/v1");
+        assert_eq!(
+            provider_base_url_from_env("kobold-cpp").as_deref(),
+            Some("http://localhost:5001/v1")
+        );
+        std::env::set_var("TEXT_GENERATION_WEBUI_BASE_URL", "http://localhost:5000/v1");
+        assert_eq!(
+            provider_base_url_from_env("oobabooga").as_deref(),
+            Some("http://localhost:5000/v1")
+        );
+        std::env::set_var("TABBYAPI_BASE_URL", "http://localhost:5000/v1");
+        assert_eq!(
+            provider_base_url_from_env("exllamav2").as_deref(),
+            Some("http://localhost:5000/v1")
+        );
 
         for env_var in env_vars {
             std::env::remove_var(env_var);
@@ -6210,11 +6272,48 @@ mod tests {
             ),
             provider_profiles::GEMINI_OPENAI_BASE_URL
         );
+        assert_eq!(
+            provider_default_base_url("llamafile"),
+            Some(LLAMA_CPP_BASE_URL)
+        );
+        assert_eq!(provider_default_base_url("vmlx"), Some(MLX_BASE_URL));
+        assert_eq!(provider_default_base_url("omlx"), Some(MLX_BASE_URL));
+        assert_eq!(
+            provider_default_base_url("lm-studio"),
+            Some(LMSTUDIO_BASE_URL)
+        );
+        assert_eq!(
+            provider_default_base_url("lmdeploy"),
+            Some(LMDEPLOY_BASE_URL)
+        );
+        assert_eq!(
+            provider_default_base_url("local-ai"),
+            Some(LOCALAI_BASE_URL)
+        );
+        assert_eq!(
+            provider_default_base_url("kobold-cpp"),
+            Some(KOBOLDCPP_BASE_URL)
+        );
+        assert_eq!(
+            provider_default_base_url("oobabooga"),
+            Some(TEXT_GENERATION_WEBUI_BASE_URL)
+        );
+        assert_eq!(
+            provider_default_base_url("tabby-api"),
+            Some(TABBYAPI_BASE_URL)
+        );
     }
 
     #[test]
     fn test_allow_no_api_key_for_local_backends_and_private_base_urls() {
         assert!(allow_no_api_key("ollama-local", "ollama-local", None));
+        assert!(allow_no_api_key("lmstudio", "lmstudio", None));
+        assert!(allow_no_api_key("koboldcpp", "koboldcpp", None));
+        assert!(allow_no_api_key(
+            "text-generation-webui",
+            "text-generation-webui",
+            None
+        ));
         assert!(allow_no_api_key(
             "openai",
             "openai",
@@ -7110,6 +7209,12 @@ const MLX_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 const APPLE_ANE_BASE_URL: &str = "http://127.0.0.1:8081/v1";
 const SGLANG_BASE_URL: &str = "http://127.0.0.1:30000/v1";
 const TGI_BASE_URL: &str = "http://127.0.0.1:8082/v1";
+const LMSTUDIO_BASE_URL: &str = "http://127.0.0.1:1234/v1";
+const LMDEPLOY_BASE_URL: &str = "http://127.0.0.1:23333/v1";
+const LOCALAI_BASE_URL: &str = "http://127.0.0.1:8080/v1";
+const KOBOLDCPP_BASE_URL: &str = "http://127.0.0.1:5001/v1";
+const TEXT_GENERATION_WEBUI_BASE_URL: &str = "http://127.0.0.1:5000/v1";
+const TABBYAPI_BASE_URL: &str = "http://127.0.0.1:5000/v1";
 
 fn normalize_runtime_provider_name(provider: &str) -> String {
     let normalized = provider.trim().to_ascii_lowercase();
@@ -7140,11 +7245,21 @@ fn normalize_runtime_provider_name(provider: &str) -> String {
         "opencode" | "opencode-zen" | "zen" => "opencode-zen".to_string(),
         "go" => "opencode-go".to_string(),
         "ollama" => "ollama-local".to_string(),
-        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "llama.cpp" | "llamacpp" | "llamafile" => "llama-cpp".to_string(),
         "ollvm" | "llvm" => "vllm".to_string(),
-        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm" | "mlx-openai-server" => {
+            "mlx".to_string()
+        }
         "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
         "text-generation-inference" => "tgi".to_string(),
+        "lm-studio" | "lm_studio" | "lm studio" => "lmstudio".to_string(),
+        "lm-deploy" | "lm_deploy" => "lmdeploy".to_string(),
+        "local-ai" | "local_ai" => "localai".to_string(),
+        "kobold-cpp" | "kobold" => "koboldcpp".to_string(),
+        "oobabooga" | "textgen-webui" | "textgen_webui" | "text-generation-web-ui" => {
+            "text-generation-webui".to_string()
+        }
+        "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => "tabbyapi".to_string(),
         _ => normalized,
     }
 }
@@ -7180,12 +7295,23 @@ fn provider_default_base_url(provider: &str) -> Option<&'static str> {
         }
         "ollama-cloud" => Some(OLLAMA_CLOUD_BASE_URL),
         "ollama-local" | "ollama" => Some(OLLAMA_LOCAL_BASE_URL),
-        "llama-cpp" | "llama.cpp" | "llamacpp" => Some(LLAMA_CPP_BASE_URL),
+        "llama-cpp" | "llama.cpp" | "llamacpp" | "llamafile" => Some(LLAMA_CPP_BASE_URL),
         "vllm" | "ollvm" | "llvm" => Some(VLLM_BASE_URL),
-        "mlx" | "mlx-lm" | "apple-mlx" => Some(MLX_BASE_URL),
+        "mlx" | "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm"
+        | "mlx-openai-server" => Some(MLX_BASE_URL),
         "apple-ane" | "ane" | "apple-neural-engine" => Some(APPLE_ANE_BASE_URL),
         "sglang" => Some(SGLANG_BASE_URL),
         "tgi" | "text-generation-inference" => Some(TGI_BASE_URL),
+        "lmstudio" | "lm-studio" | "lm_studio" | "lm studio" => Some(LMSTUDIO_BASE_URL),
+        "lmdeploy" | "lm-deploy" | "lm_deploy" => Some(LMDEPLOY_BASE_URL),
+        "localai" | "local-ai" | "local_ai" => Some(LOCALAI_BASE_URL),
+        "koboldcpp" | "kobold-cpp" | "kobold" => Some(KOBOLDCPP_BASE_URL),
+        "text-generation-webui"
+        | "text-generation-web-ui"
+        | "textgen-webui"
+        | "textgen_webui"
+        | "oobabooga" => Some(TEXT_GENERATION_WEBUI_BASE_URL),
+        "tabbyapi" | "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => Some(TABBYAPI_BASE_URL),
         "deepseek" => Some(DEEPSEEK_BASE_URL),
         _ => None,
     }
@@ -7397,12 +7523,19 @@ fn provider_base_url_from_env(provider: &str) -> Option<String> {
             "tencent-tokenhub" => "TOKENHUB_BASE_URL",
             "deepseek" => "DEEPSEEK_BASE_URL",
             "ollama-local" | "ollama" => "OLLAMA_BASE_URL",
-            "llama-cpp" | "llama.cpp" | "llamacpp" => "LLAMA_CPP_BASE_URL",
+            "llama-cpp" | "llama.cpp" | "llamacpp" | "llamafile" => "LLAMA_CPP_BASE_URL",
             "vllm" | "ollvm" | "llvm" => "VLLM_BASE_URL",
-            "mlx" | "mlx-lm" | "apple-mlx" => "MLX_BASE_URL",
+            "mlx" | "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm"
+            | "mlx-openai-server" => "MLX_BASE_URL",
             "apple-ane" | "ane" | "apple-neural-engine" => "APPLE_ANE_BASE_URL",
             "sglang" => "SGLANG_BASE_URL",
             "tgi" | "text-generation-inference" => "TGI_BASE_URL",
+            "lmstudio" => "LMSTUDIO_BASE_URL",
+            "lmdeploy" => "LMDEPLOY_BASE_URL",
+            "localai" => "LOCALAI_BASE_URL",
+            "koboldcpp" => "KOBOLDCPP_BASE_URL",
+            "text-generation-webui" => "TEXT_GENERATION_WEBUI_BASE_URL",
+            "tabbyapi" => "TABBYAPI_BASE_URL",
             _ => return None,
         },
     };
@@ -7415,7 +7548,19 @@ fn provider_base_url_from_env(provider: &str) -> Option<String> {
 fn provider_is_local_backend(provider: &str) -> bool {
     matches!(
         provider.trim().to_ascii_lowercase().as_str(),
-        "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi"
+        "ollama-local"
+            | "llama-cpp"
+            | "vllm"
+            | "mlx"
+            | "apple-ane"
+            | "sglang"
+            | "tgi"
+            | "lmstudio"
+            | "lmdeploy"
+            | "localai"
+            | "koboldcpp"
+            | "text-generation-webui"
+            | "tabbyapi"
     )
 }
 
@@ -7614,6 +7759,24 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
             .filter(|s| !s.trim().is_empty())
             .or_else(|| std::env::var("HUGGINGFACE_API_KEY").ok())
             .filter(|s| !s.trim().is_empty()),
+        "lmstudio" => std::env::var("LMSTUDIO_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "lmdeploy" => std::env::var("LMDEPLOY_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "localai" => std::env::var("LOCALAI_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "koboldcpp" => std::env::var("KOBOLDCPP_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "text-generation-webui" => std::env::var("TEXT_GENERATION_WEBUI_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "tabbyapi" => std::env::var("TABBYAPI_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
         "opencode-go" => std::env::var("OPENCODE_GO_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
@@ -7801,7 +7964,19 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             .with_optional_request_timeout_seconds(request_timeout_seconds);
             Arc::new(p)
         }
-        "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi" => {
+        "ollama-local"
+        | "llama-cpp"
+        | "vllm"
+        | "mlx"
+        | "apple-ane"
+        | "sglang"
+        | "tgi"
+        | "lmstudio"
+        | "lmdeploy"
+        | "localai"
+        | "koboldcpp"
+        | "text-generation-webui"
+        | "tabbyapi" => {
             let url = base_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
             Arc::new(
                 GenericProvider::new(url, &api_key, model_name.as_str())

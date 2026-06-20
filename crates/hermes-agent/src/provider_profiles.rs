@@ -64,8 +64,40 @@ pub fn canonical_provider_profile_id(provider: &str) -> Option<&'static str> {
         }
         "qwen" | "qwen-oauth" | "qwen-portal" | "qwen-cli" => Some("qwen-oauth"),
         "xiaomi" | "mimo" | "xiaomi-mimo" => Some("xiaomi"),
-        "custom" | "ollama" | "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane"
-        | "sglang" | "tgi" => Some("custom"),
+        "custom"
+        | "ollama"
+        | "ollama-local"
+        | "llama-cpp"
+        | "llamafile"
+        | "vllm"
+        | "mlx"
+        | "mlx-lm"
+        | "apple-mlx"
+        | "vmlx"
+        | "omlx"
+        | "mlx-vlm"
+        | "mlxvlm"
+        | "mlx-openai-server"
+        | "apple-ane"
+        | "sglang"
+        | "tgi"
+        | "lmstudio"
+        | "lm-studio"
+        | "lm_studio"
+        | "lmdeploy"
+        | "lm-deploy"
+        | "localai"
+        | "local-ai"
+        | "koboldcpp"
+        | "kobold-cpp"
+        | "text-generation-webui"
+        | "text-generation-web-ui"
+        | "oobabooga"
+        | "textgen-webui"
+        | "tabbyapi"
+        | "tabby-api"
+        | "exllama"
+        | "exllamav2" => Some("custom"),
         _ => None,
     }
 }
@@ -514,6 +546,13 @@ mod tests {
         assert_eq!(canonical_provider_profile_id("qwen"), Some("qwen-oauth"));
         assert_eq!(canonical_provider_profile_id("mimo"), Some("xiaomi"));
         assert_eq!(canonical_provider_profile_id("xiaomi-mimo"), Some("xiaomi"));
+        assert_eq!(canonical_provider_profile_id("lm-studio"), Some("custom"));
+        assert_eq!(canonical_provider_profile_id("llamafile"), Some("custom"));
+        assert_eq!(canonical_provider_profile_id("vmlx"), Some("custom"));
+        assert_eq!(canonical_provider_profile_id("omlx"), Some("custom"));
+        assert_eq!(canonical_provider_profile_id("kobold-cpp"), Some("custom"));
+        assert_eq!(canonical_provider_profile_id("oobabooga"), Some("custom"));
+        assert_eq!(canonical_provider_profile_id("exllamav2"), Some("custom"));
         assert_eq!(
             canonical_provider_profile_id("qwen-portal"),
             Some("qwen-oauth")

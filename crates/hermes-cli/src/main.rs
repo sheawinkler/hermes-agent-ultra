@@ -6111,11 +6111,21 @@ fn normalize_auth_provider(provider: &str) -> String {
         "kilo" | "kilo-code" | "kilo-gateway" => "kilocode".to_string(),
         "opencode" | "zen" => "opencode-zen".to_string(),
         "ollama" => "ollama-local".to_string(),
-        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "llama.cpp" | "llamacpp" | "llamafile" => "llama-cpp".to_string(),
         "ollvm" | "llvm" => "vllm".to_string(),
-        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm" | "mlx-openai-server" => {
+            "mlx".to_string()
+        }
         "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
         "text-generation-inference" => "tgi".to_string(),
+        "lm-studio" | "lm_studio" | "lm studio" => "lmstudio".to_string(),
+        "lm-deploy" | "lm_deploy" => "lmdeploy".to_string(),
+        "local-ai" | "local_ai" => "localai".to_string(),
+        "kobold-cpp" | "kobold" => "koboldcpp".to_string(),
+        "oobabooga" | "textgen-webui" | "textgen_webui" | "text-generation-web-ui" => {
+            "text-generation-webui".to_string()
+        }
+        "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => "tabbyapi".to_string(),
         "aigateway" | "vercel" | "vercel-ai-gateway" => "ai-gateway".to_string(),
         "x-ai" | "x.ai" | "grok" => "xai".to_string(),
         "glm" | "z-ai" | "z.ai" | "zhipu" => "zai".to_string(),
@@ -6174,11 +6184,21 @@ fn normalize_secret_provider(provider: &str) -> String {
         "aigateway" | "vercel" | "vercel-ai-gateway" => "ai-gateway".to_string(),
         "opencode" | "zen" => "opencode-zen".to_string(),
         "ollama" => "ollama-local".to_string(),
-        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "llama.cpp" | "llamacpp" | "llamafile" => "llama-cpp".to_string(),
         "ollvm" | "llvm" => "vllm".to_string(),
-        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm" | "mlx-openai-server" => {
+            "mlx".to_string()
+        }
         "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
         "text-generation-inference" => "tgi".to_string(),
+        "lm-studio" | "lm_studio" | "lm studio" => "lmstudio".to_string(),
+        "lm-deploy" | "lm_deploy" => "lmdeploy".to_string(),
+        "local-ai" | "local_ai" => "localai".to_string(),
+        "kobold-cpp" | "kobold" => "koboldcpp".to_string(),
+        "oobabooga" | "textgen-webui" | "textgen_webui" | "text-generation-web-ui" => {
+            "text-generation-webui".to_string()
+        }
+        "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => "tabbyapi".to_string(),
         "kilo" | "kilo-code" | "kilo-gateway" => "kilocode".to_string(),
         "x-ai" | "x.ai" | "grok" => "xai".to_string(),
         "glm" | "z-ai" | "z.ai" | "zhipu" => "zai".to_string(),
@@ -6285,7 +6305,14 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
             "llamacpp".to_string(),
         ],
         "vllm" => vec!["vllm".to_string(), "ollvm".to_string(), "llvm".to_string()],
-        "mlx" => vec!["mlx".to_string(), "mlx-lm".to_string()],
+        "mlx" => vec![
+            "mlx".to_string(),
+            "mlx-lm".to_string(),
+            "apple-mlx".to_string(),
+            "vmlx".to_string(),
+            "omlx".to_string(),
+            "mlx-vlm".to_string(),
+        ],
         "apple-ane" => vec![
             "apple-ane".to_string(),
             "ane".to_string(),
@@ -6293,6 +6320,21 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
         ],
         "sglang" => vec!["sglang".to_string()],
         "tgi" => vec!["tgi".to_string(), "text-generation-inference".to_string()],
+        "lmstudio" => vec!["lmstudio".to_string(), "lm-studio".to_string()],
+        "lmdeploy" => vec!["lmdeploy".to_string(), "lm-deploy".to_string()],
+        "localai" => vec!["localai".to_string(), "local-ai".to_string()],
+        "koboldcpp" => vec!["koboldcpp".to_string(), "kobold-cpp".to_string()],
+        "text-generation-webui" => vec![
+            "text-generation-webui".to_string(),
+            "textgen-webui".to_string(),
+            "oobabooga".to_string(),
+        ],
+        "tabbyapi" => vec![
+            "tabbyapi".to_string(),
+            "tabby-api".to_string(),
+            "exllama".to_string(),
+            "exllamav2".to_string(),
+        ],
         p => vec![p.to_string()],
     }
 }
@@ -6338,6 +6380,12 @@ fn provider_env_var(provider: &str) -> Option<&'static str> {
         "apple-ane" => Some("APPLE_ANE_API_KEY"),
         "sglang" => Some("SGLANG_API_KEY"),
         "tgi" => Some("TGI_API_KEY"),
+        "lmstudio" => Some("LMSTUDIO_API_KEY"),
+        "lmdeploy" => Some("LMDEPLOY_API_KEY"),
+        "localai" => Some("LOCALAI_API_KEY"),
+        "koboldcpp" => Some("KOBOLDCPP_API_KEY"),
+        "text-generation-webui" => Some("TEXT_GENERATION_WEBUI_API_KEY"),
+        "tabbyapi" => Some("TABBYAPI_API_KEY"),
         "opencode-go" => Some("OPENCODE_GO_API_KEY"),
         "opencode-zen" => Some("OPENCODE_ZEN_API_KEY"),
         "xai" => Some("XAI_API_KEY"),
@@ -6530,6 +6578,12 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
         ("APPLE_ANE_API_KEY", "apple-ane"),
         ("SGLANG_API_KEY", "sglang"),
         ("TGI_API_KEY", "tgi"),
+        ("LMSTUDIO_API_KEY", "lmstudio"),
+        ("LMDEPLOY_API_KEY", "lmdeploy"),
+        ("LOCALAI_API_KEY", "localai"),
+        ("KOBOLDCPP_API_KEY", "koboldcpp"),
+        ("TEXT_GENERATION_WEBUI_API_KEY", "text-generation-webui"),
+        ("TABBYAPI_API_KEY", "tabbyapi"),
         ("OPENCODE_GO_API_KEY", "opencode-go"),
         ("OPENCODE_ZEN_API_KEY", "opencode-zen"),
         ("XAI_API_KEY", "xai"),
@@ -10508,6 +10562,12 @@ const SETUP_MLX_ENV_KEYS: &[&str] = &["MLX_API_KEY"];
 const SETUP_APPLE_ANE_ENV_KEYS: &[&str] = &["APPLE_ANE_API_KEY"];
 const SETUP_SGLANG_ENV_KEYS: &[&str] = &["SGLANG_API_KEY"];
 const SETUP_TGI_ENV_KEYS: &[&str] = &["TGI_API_KEY"];
+const SETUP_LMSTUDIO_ENV_KEYS: &[&str] = &["LMSTUDIO_API_KEY"];
+const SETUP_LMDEPLOY_ENV_KEYS: &[&str] = &["LMDEPLOY_API_KEY"];
+const SETUP_LOCALAI_ENV_KEYS: &[&str] = &["LOCALAI_API_KEY"];
+const SETUP_KOBOLDCPP_ENV_KEYS: &[&str] = &["KOBOLDCPP_API_KEY"];
+const SETUP_TEXT_GENERATION_WEBUI_ENV_KEYS: &[&str] = &["TEXT_GENERATION_WEBUI_API_KEY"];
+const SETUP_TABBYAPI_ENV_KEYS: &[&str] = &["TABBYAPI_API_KEY"];
 const SETUP_OPENCODE_GO_ENV_KEYS: &[&str] = &["OPENCODE_GO_API_KEY"];
 const SETUP_OPENCODE_ZEN_ENV_KEYS: &[&str] = &["OPENCODE_ZEN_API_KEY"];
 const SETUP_XAI_ENV_KEYS: &[&str] = &["XAI_API_KEY"];
@@ -10735,6 +10795,36 @@ const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
         label: "Text Generation Inference",
     },
     SetupModelOption {
+        provider: "lmstudio",
+        model: "lmstudio:local-model",
+        label: "LM Studio local server",
+    },
+    SetupModelOption {
+        provider: "lmdeploy",
+        model: "lmdeploy:internlm/internlm2_5-7b-chat",
+        label: "LMDeploy OpenAI-compatible server",
+    },
+    SetupModelOption {
+        provider: "localai",
+        model: "localai:local-model",
+        label: "LocalAI OpenAI-compatible server",
+    },
+    SetupModelOption {
+        provider: "koboldcpp",
+        model: "koboldcpp:local-model",
+        label: "KoboldCpp OpenAI-compatible server",
+    },
+    SetupModelOption {
+        provider: "text-generation-webui",
+        model: "text-generation-webui:local-model",
+        label: "text-generation-webui / oobabooga",
+    },
+    SetupModelOption {
+        provider: "tabbyapi",
+        model: "tabbyapi:local-model",
+        label: "TabbyAPI / ExLlamaV2",
+    },
+    SetupModelOption {
         provider: "copilot",
         model: "copilot:gpt-5.4",
         label: "GitHub Copilot",
@@ -10863,6 +10953,12 @@ fn setup_provider_display(provider: &str) -> &'static str {
         "apple-ane" => "Apple ANE Endpoint",
         "sglang" => "SGLang Server",
         "tgi" => "Text Gen Inference",
+        "lmstudio" => "LM Studio",
+        "lmdeploy" => "LMDeploy",
+        "localai" => "LocalAI",
+        "koboldcpp" => "KoboldCpp",
+        "text-generation-webui" => "text-generation-webui",
+        "tabbyapi" => "TabbyAPI",
         "opencode-go" => "OpenCode Go",
         "opencode-zen" => "OpenCode Zen",
         "xai" => "xAI",
@@ -10908,6 +11004,12 @@ fn setup_provider_env_keys(provider: &str) -> &'static [&'static str] {
         "apple-ane" => SETUP_APPLE_ANE_ENV_KEYS,
         "sglang" => SETUP_SGLANG_ENV_KEYS,
         "tgi" => SETUP_TGI_ENV_KEYS,
+        "lmstudio" => SETUP_LMSTUDIO_ENV_KEYS,
+        "lmdeploy" => SETUP_LMDEPLOY_ENV_KEYS,
+        "localai" => SETUP_LOCALAI_ENV_KEYS,
+        "koboldcpp" => SETUP_KOBOLDCPP_ENV_KEYS,
+        "text-generation-webui" => SETUP_TEXT_GENERATION_WEBUI_ENV_KEYS,
+        "tabbyapi" => SETUP_TABBYAPI_ENV_KEYS,
         "opencode-go" => SETUP_OPENCODE_GO_ENV_KEYS,
         "opencode-zen" => SETUP_OPENCODE_ZEN_ENV_KEYS,
         "xai" => SETUP_XAI_ENV_KEYS,
@@ -10947,6 +11049,12 @@ fn setup_provider_default_base_url(provider: &str) -> Option<&'static str> {
         "apple-ane" => Some("http://127.0.0.1:8081/v1"),
         "sglang" => Some("http://127.0.0.1:30000/v1"),
         "tgi" => Some("http://127.0.0.1:8082/v1"),
+        "lmstudio" => Some("http://127.0.0.1:1234/v1"),
+        "lmdeploy" => Some("http://127.0.0.1:23333/v1"),
+        "localai" => Some("http://127.0.0.1:8080/v1"),
+        "koboldcpp" => Some("http://127.0.0.1:5001/v1"),
+        "text-generation-webui" => Some("http://127.0.0.1:5000/v1"),
+        "tabbyapi" => Some("http://127.0.0.1:5000/v1"),
         "opencode-go" => Some("https://opencode.ai/zen/go/v1"),
         "opencode-zen" => Some("https://opencode.ai/zen/v1"),
         "xai" => Some("https://api.x.ai/v1"),
@@ -10960,7 +11068,20 @@ fn setup_provider_default_base_url(provider: &str) -> Option<&'static str> {
 fn setup_provider_requires_api_key(provider: &str) -> bool {
     !matches!(
         provider,
-        "bedrock" | "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi"
+        "bedrock"
+            | "ollama-local"
+            | "llama-cpp"
+            | "vllm"
+            | "mlx"
+            | "apple-ane"
+            | "sglang"
+            | "tgi"
+            | "lmstudio"
+            | "lmdeploy"
+            | "localai"
+            | "koboldcpp"
+            | "text-generation-webui"
+            | "tabbyapi"
     )
 }
 
@@ -10973,6 +11094,12 @@ fn local_backend_base_url_env_var(provider: &str) -> Option<&'static str> {
         "apple-ane" => Some("APPLE_ANE_BASE_URL"),
         "sglang" => Some("SGLANG_BASE_URL"),
         "tgi" => Some("TGI_BASE_URL"),
+        "lmstudio" => Some("LMSTUDIO_BASE_URL"),
+        "lmdeploy" => Some("LMDEPLOY_BASE_URL"),
+        "localai" => Some("LOCALAI_BASE_URL"),
+        "koboldcpp" => Some("KOBOLDCPP_BASE_URL"),
+        "text-generation-webui" => Some("TEXT_GENERATION_WEBUI_BASE_URL"),
+        "tabbyapi" => Some("TABBYAPI_BASE_URL"),
         _ => None,
     }
 }
@@ -15994,12 +16121,32 @@ mod tests {
         );
         assert_eq!(provider_env_var("ollama"), Some("OLLAMA_LOCAL_API_KEY"));
         assert_eq!(provider_env_var("llama.cpp"), Some("LLAMA_CPP_API_KEY"));
+        assert_eq!(provider_env_var("llamafile"), Some("LLAMA_CPP_API_KEY"));
         assert_eq!(provider_env_var("ollvm"), Some("VLLM_API_KEY"));
         assert_eq!(provider_env_var("mlx-lm"), Some("MLX_API_KEY"));
+        assert_eq!(provider_env_var("vmlx"), Some("MLX_API_KEY"));
+        assert_eq!(provider_env_var("omlx"), Some("MLX_API_KEY"));
         assert_eq!(provider_env_var("ane"), Some("APPLE_ANE_API_KEY"));
         assert_eq!(
             provider_env_var("text-generation-inference"),
             Some("TGI_API_KEY")
+        );
+        assert_eq!(provider_env_var("lm-studio"), Some("LMSTUDIO_API_KEY"));
+        assert_eq!(provider_env_var("lm-deploy"), Some("LMDEPLOY_API_KEY"));
+        assert_eq!(provider_env_var("local-ai"), Some("LOCALAI_API_KEY"));
+        assert_eq!(provider_env_var("kobold-cpp"), Some("KOBOLDCPP_API_KEY"));
+        assert_eq!(
+            provider_env_var("oobabooga"),
+            Some("TEXT_GENERATION_WEBUI_API_KEY")
+        );
+        assert_eq!(provider_env_var("exllamav2"), Some("TABBYAPI_API_KEY"));
+        assert_eq!(
+            secret_provider_aliases("text-generation-webui"),
+            vec!["text-generation-webui", "textgen-webui", "oobabooga"]
+        );
+        assert_eq!(
+            secret_provider_aliases("tabby-api"),
+            vec!["tabbyapi", "tabby-api", "exllama", "exllamav2"]
         );
     }
 
@@ -16546,6 +16693,12 @@ mod tests {
         }
         assert!(seen.contains("nous"));
         assert!(seen.contains("nous-api"));
+        assert!(seen.contains("lmstudio"));
+        assert!(seen.contains("lmdeploy"));
+        assert!(seen.contains("localai"));
+        assert!(seen.contains("koboldcpp"));
+        assert!(seen.contains("text-generation-webui"));
+        assert!(seen.contains("tabbyapi"));
     }
 
     #[test]
@@ -16646,6 +16799,12 @@ mod tests {
         );
         assert!(!setup_provider_requires_api_key("ollama-local"));
         assert!(!setup_provider_requires_api_key("apple-ane"));
+        assert!(!setup_provider_requires_api_key("lmstudio"));
+        assert!(!setup_provider_requires_api_key("lmdeploy"));
+        assert!(!setup_provider_requires_api_key("localai"));
+        assert!(!setup_provider_requires_api_key("koboldcpp"));
+        assert!(!setup_provider_requires_api_key("text-generation-webui"));
+        assert!(!setup_provider_requires_api_key("tabbyapi"));
         assert!(!setup_provider_requires_api_key("bedrock"));
         assert_eq!(setup_provider_display("bedrock"), "AWS Bedrock");
         assert_eq!(
@@ -16701,6 +16860,40 @@ mod tests {
         assert_eq!(
             setup_provider_default_base_url("novita"),
             Some("https://api.novita.ai/openai/v1")
+        );
+        assert_eq!(setup_provider_display("lmstudio"), "LM Studio");
+        assert_eq!(setup_provider_env_keys("lmstudio"), &["LMSTUDIO_API_KEY"]);
+        assert_eq!(
+            setup_provider_default_base_url("lmstudio"),
+            Some("http://127.0.0.1:1234/v1")
+        );
+        assert_eq!(setup_provider_env_keys("lmdeploy"), &["LMDEPLOY_API_KEY"]);
+        assert_eq!(
+            setup_provider_default_base_url("lmdeploy"),
+            Some("http://127.0.0.1:23333/v1")
+        );
+        assert_eq!(setup_provider_env_keys("localai"), &["LOCALAI_API_KEY"]);
+        assert_eq!(
+            setup_provider_default_base_url("localai"),
+            Some("http://127.0.0.1:8080/v1")
+        );
+        assert_eq!(setup_provider_env_keys("koboldcpp"), &["KOBOLDCPP_API_KEY"]);
+        assert_eq!(
+            setup_provider_default_base_url("koboldcpp"),
+            Some("http://127.0.0.1:5001/v1")
+        );
+        assert_eq!(
+            setup_provider_env_keys("text-generation-webui"),
+            &["TEXT_GENERATION_WEBUI_API_KEY"]
+        );
+        assert_eq!(
+            setup_provider_default_base_url("text-generation-webui"),
+            Some("http://127.0.0.1:5000/v1")
+        );
+        assert_eq!(setup_provider_env_keys("tabbyapi"), &["TABBYAPI_API_KEY"]);
+        assert_eq!(
+            setup_provider_default_base_url("tabbyapi"),
+            Some("http://127.0.0.1:5000/v1")
         );
         assert!(
             SETUP_MODEL_OPTIONS.len() >= 20,

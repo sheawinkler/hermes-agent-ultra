@@ -58,6 +58,12 @@ mod default_base_urls {
     pub const APPLE_ANE: &str = "http://127.0.0.1:8081/v1";
     pub const SGLANG: &str = "http://127.0.0.1:30000/v1";
     pub const TGI: &str = "http://127.0.0.1:8082/v1";
+    pub const LMSTUDIO: &str = "http://127.0.0.1:1234/v1";
+    pub const LMDEPLOY: &str = "http://127.0.0.1:23333/v1";
+    pub const LOCALAI: &str = "http://127.0.0.1:8080/v1";
+    pub const KOBOLDCPP: &str = "http://127.0.0.1:5001/v1";
+    pub const TEXT_GENERATION_WEBUI: &str = "http://127.0.0.1:5000/v1";
+    pub const TABBYAPI: &str = "http://127.0.0.1:5000/v1";
 }
 
 /// Returned by [`build_default_auxiliary_client`] alongside the client so
@@ -419,10 +425,21 @@ fn canonical_provider_label(provider: &str) -> String {
         "mimo" | "xiaomi-mimo" => "xiaomi".to_string(),
         "tencent" | "tokenhub" | "tencent-cloud" | "tencentmaas" => "tencent-tokenhub".to_string(),
         "ollama" => "ollama-local".to_string(),
-        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "llama.cpp" | "llamacpp" | "llamafile" => "llama-cpp".to_string(),
         "ollvm" | "llvm" => "vllm".to_string(),
-        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm" | "mlx-openai-server" => {
+            "mlx".to_string()
+        }
         "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
+        "text-generation-inference" => "tgi".to_string(),
+        "lm-studio" | "lm_studio" | "lm studio" => "lmstudio".to_string(),
+        "lm-deploy" | "lm_deploy" => "lmdeploy".to_string(),
+        "local-ai" | "local_ai" => "localai".to_string(),
+        "kobold-cpp" | "kobold" => "koboldcpp".to_string(),
+        "oobabooga" | "textgen-webui" | "textgen_webui" | "text-generation-web-ui" => {
+            "text-generation-webui".to_string()
+        }
+        "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => "tabbyapi".to_string(),
         "openai-codex" | "codex" => "openai-codex".to_string(),
         other => other.to_string(),
     }
@@ -496,6 +513,12 @@ fn provider_api_key_from_env(label: &str) -> Option<String> {
         "apple-ane" => &["APPLE_ANE_API_KEY"],
         "sglang" => &["SGLANG_API_KEY"],
         "tgi" => &["TGI_API_KEY", "HUGGINGFACE_API_KEY"],
+        "lmstudio" => &["LMSTUDIO_API_KEY"],
+        "lmdeploy" => &["LMDEPLOY_API_KEY"],
+        "localai" => &["LOCALAI_API_KEY"],
+        "koboldcpp" => &["KOBOLDCPP_API_KEY"],
+        "text-generation-webui" => &["TEXT_GENERATION_WEBUI_API_KEY"],
+        "tabbyapi" => &["TABBYAPI_API_KEY"],
         _ => &[],
     };
     env_vars.iter().find_map(|name| {
@@ -530,6 +553,12 @@ fn default_base_url(label: &str) -> Option<&'static str> {
         "apple-ane" => Some(default_base_urls::APPLE_ANE),
         "sglang" => Some(default_base_urls::SGLANG),
         "tgi" => Some(default_base_urls::TGI),
+        "lmstudio" => Some(default_base_urls::LMSTUDIO),
+        "lmdeploy" => Some(default_base_urls::LMDEPLOY),
+        "localai" => Some(default_base_urls::LOCALAI),
+        "koboldcpp" => Some(default_base_urls::KOBOLDCPP),
+        "text-generation-webui" => Some(default_base_urls::TEXT_GENERATION_WEBUI),
+        "tabbyapi" => Some(default_base_urls::TABBYAPI),
         _ => None,
     }
 }
@@ -551,7 +580,19 @@ fn kimi_base_url_from_env_or_key(api_key: &str) -> String {
 fn provider_allows_no_api_key(label: &str, base_url: Option<&str>) -> bool {
     matches!(
         label,
-        "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi"
+        "ollama-local"
+            | "llama-cpp"
+            | "vllm"
+            | "mlx"
+            | "apple-ane"
+            | "sglang"
+            | "tgi"
+            | "lmstudio"
+            | "lmdeploy"
+            | "localai"
+            | "koboldcpp"
+            | "text-generation-webui"
+            | "tabbyapi"
     ) || base_url.is_some_and(is_loopback_base_url)
 }
 
@@ -676,6 +717,12 @@ mod tests {
         "MINIMAX_CN_API_KEY",
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
+        "LMSTUDIO_API_KEY",
+        "LMDEPLOY_API_KEY",
+        "LOCALAI_API_KEY",
+        "KOBOLDCPP_API_KEY",
+        "TEXT_GENERATION_WEBUI_API_KEY",
+        "TABBYAPI_API_KEY",
     ];
 
     /// Save current env, then clear; restored when the guard drops.
@@ -717,6 +764,21 @@ mod tests {
             assert_eq!(client.chain_len(), 0, "empty env produced non-empty chain");
             assert!(summary.registered.is_empty());
             assert!(!summary.skipped.is_empty());
+        }
+
+        // Scenario 1b: local OpenAI-compatible main runtime can be used
+        // without an API key.
+        {
+            let (client, summary) = build_auxiliary_client_with_main_runtime(
+                AuxiliaryConfig::default(),
+                Some(AuxiliaryMainRuntime::new("lm-studio", "local-model")),
+            );
+            assert_eq!(client.chain_labels(), vec!["lmstudio"]);
+            assert_eq!(
+                client.chain_entries(),
+                vec![("lmstudio".to_string(), "local-model".to_string(), true,)]
+            );
+            assert_eq!(summary.registered, vec!["main:lmstudio"]);
         }
 
         // Scenario 2: only OpenRouter.

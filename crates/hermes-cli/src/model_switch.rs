@@ -25,6 +25,12 @@ const MLX_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 const APPLE_ANE_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8081/v1";
 const SGLANG_DEFAULT_BASE_URL: &str = "http://127.0.0.1:30000/v1";
 const TGI_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8082/v1";
+const LMSTUDIO_DEFAULT_BASE_URL: &str = "http://127.0.0.1:1234/v1";
+const LMDEPLOY_DEFAULT_BASE_URL: &str = "http://127.0.0.1:23333/v1";
+const LOCALAI_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
+const KOBOLDCPP_DEFAULT_BASE_URL: &str = "http://127.0.0.1:5001/v1";
+const TEXT_GENERATION_WEBUI_DEFAULT_BASE_URL: &str = "http://127.0.0.1:5000/v1";
+const TABBYAPI_DEFAULT_BASE_URL: &str = "http://127.0.0.1:5000/v1";
 const HUGGINGFACE_ROUTER_DEFAULT_BASE_URL: &str = "https://router.huggingface.co/v1";
 
 const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
@@ -218,6 +224,25 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
             "Qwen/Qwen3-14B-Instruct",
         ],
     ),
+    (
+        "lmstudio",
+        &["local-model", "qwen3", "llama-3.1-8b-instruct"],
+    ),
+    (
+        "lmdeploy",
+        &[
+            "internlm/internlm2_5-7b-chat",
+            "Qwen/Qwen3-14B-Instruct",
+            "meta-llama/Llama-3.1-8B-Instruct",
+        ],
+    ),
+    ("localai", &["local-model", "qwen3", "llama-3.1-8b"]),
+    ("koboldcpp", &["local-model", "koboldcpp", "llama"]),
+    (
+        "text-generation-webui",
+        &["local-model", "oobabooga", "llama"],
+    ),
+    ("tabbyapi", &["local-model", "exllamav2", "llama"]),
     (
         "huggingface",
         &[
@@ -572,7 +597,22 @@ pub fn provider_picker_description(provider: &str) -> &'static str {
         }
         "kimi-coding" => "Kimi Coding Plan (api.kimi.com & Moonshot API)",
         "kimi-coding-cn" => "Kimi / Moonshot China (Domestic direct API)",
-        "lmstudio" | "lm-studio" => "LM Studio (Local desktop app with built-in model server)",
+        "lmstudio" | "lm-studio" | "lm_studio" => {
+            "LM Studio (local desktop OpenAI-compatible model server)"
+        }
+        "lmdeploy" | "lm-deploy" | "lm_deploy" => {
+            "LMDeploy (self-host OpenAI-compatible inference server)"
+        }
+        "localai" | "local-ai" | "local_ai" => "LocalAI (local/self-host OpenAI-compatible server)",
+        "koboldcpp" | "kobold-cpp" | "kobold" => {
+            "KoboldCpp (single-binary local OpenAI-compatible server)"
+        }
+        "text-generation-webui" | "text-generation-web-ui" | "textgen-webui" | "oobabooga" => {
+            "text-generation-webui / oobabooga (local OpenAI-compatible server)"
+        }
+        "tabbyapi" | "tabby-api" | "exllama" | "exllamav2" => {
+            "TabbyAPI / ExLlamaV2 (local OpenAI-compatible server)"
+        }
         "minimax-cn" | "minimax_cn" => "MiniMax China (Domestic direct API)",
         "xai-oauth" => "xAI Grok OAuth (SuperGrok / Premium+ subscription)",
         "nous-api" | "nous_api" | "nousapi" | "nous-portal-api" => {
@@ -620,6 +660,14 @@ pub fn provider_picker_description(provider: &str) -> &'static str {
             "apple-ane" => "Apple ANE Endpoint (private local endpoint)",
             "sglang" => "SGLang Server (local/self-host OpenAI-compatible endpoint)",
             "tgi" => "Text Generation Inference (local/self-host endpoint)",
+            "lmstudio" => "LM Studio (local desktop OpenAI-compatible model server)",
+            "lmdeploy" => "LMDeploy (self-host OpenAI-compatible inference server)",
+            "localai" => "LocalAI (local/self-host OpenAI-compatible server)",
+            "koboldcpp" => "KoboldCpp (single-binary local OpenAI-compatible server)",
+            "text-generation-webui" => {
+                "text-generation-webui / oobabooga (local OpenAI-compatible server)"
+            }
+            "tabbyapi" => "TabbyAPI / ExLlamaV2 (local OpenAI-compatible server)",
             _ => "Provider catalog entry",
         },
     }
@@ -819,7 +867,19 @@ pub async fn provider_catalog_entries_for_config(
 fn is_local_openai_compatible_provider(provider: &str) -> bool {
     matches!(
         provider.trim().to_ascii_lowercase().as_str(),
-        "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi"
+        "ollama-local"
+            | "llama-cpp"
+            | "vllm"
+            | "mlx"
+            | "apple-ane"
+            | "sglang"
+            | "tgi"
+            | "lmstudio"
+            | "lmdeploy"
+            | "localai"
+            | "koboldcpp"
+            | "text-generation-webui"
+            | "tabbyapi"
     )
 }
 
@@ -832,6 +892,12 @@ fn local_provider_default_base_url(provider: &str) -> Option<&'static str> {
         "apple-ane" => Some(APPLE_ANE_DEFAULT_BASE_URL),
         "sglang" => Some(SGLANG_DEFAULT_BASE_URL),
         "tgi" => Some(TGI_DEFAULT_BASE_URL),
+        "lmstudio" => Some(LMSTUDIO_DEFAULT_BASE_URL),
+        "lmdeploy" => Some(LMDEPLOY_DEFAULT_BASE_URL),
+        "localai" => Some(LOCALAI_DEFAULT_BASE_URL),
+        "koboldcpp" => Some(KOBOLDCPP_DEFAULT_BASE_URL),
+        "text-generation-webui" => Some(TEXT_GENERATION_WEBUI_DEFAULT_BASE_URL),
+        "tabbyapi" => Some(TABBYAPI_DEFAULT_BASE_URL),
         _ => None,
     }
 }
@@ -845,6 +911,12 @@ fn local_provider_base_url_env_var(provider: &str) -> Option<&'static str> {
         "apple-ane" => Some("APPLE_ANE_BASE_URL"),
         "sglang" => Some("SGLANG_BASE_URL"),
         "tgi" => Some("TGI_BASE_URL"),
+        "lmstudio" => Some("LMSTUDIO_BASE_URL"),
+        "lmdeploy" => Some("LMDEPLOY_BASE_URL"),
+        "localai" => Some("LOCALAI_BASE_URL"),
+        "koboldcpp" => Some("KOBOLDCPP_BASE_URL"),
+        "text-generation-webui" => Some("TEXT_GENERATION_WEBUI_BASE_URL"),
+        "tabbyapi" => Some("TABBYAPI_BASE_URL"),
         _ => None,
     }
 }
@@ -872,6 +944,24 @@ fn local_provider_api_key(provider: &str) -> Option<String> {
             .ok()
             .filter(|v| !v.trim().is_empty()),
         "tgi" => std::env::var("TGI_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "lmstudio" => std::env::var("LMSTUDIO_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "lmdeploy" => std::env::var("LMDEPLOY_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "localai" => std::env::var("LOCALAI_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "koboldcpp" => std::env::var("KOBOLDCPP_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "text-generation-webui" => std::env::var("TEXT_GENERATION_WEBUI_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "tabbyapi" => std::env::var("TABBYAPI_API_KEY")
             .ok()
             .filter(|v| !v.trim().is_empty()),
         _ => None,
@@ -1478,6 +1568,12 @@ mod tests {
         assert!(provider_curated_models("vllm").contains(&"NousResearch/Meta-Llama-3-8B-Instruct"));
         assert!(provider_curated_models("mlx").contains(&"mlx-community/Qwen3-8B-4bit"));
         assert!(provider_curated_models("apple-ane").contains(&"ane-default"));
+        assert!(provider_curated_models("lmstudio").contains(&"local-model"));
+        assert!(provider_curated_models("lmdeploy").contains(&"internlm/internlm2_5-7b-chat"));
+        assert!(provider_curated_models("localai").contains(&"local-model"));
+        assert!(provider_curated_models("koboldcpp").contains(&"koboldcpp"));
+        assert!(provider_curated_models("text-generation-webui").contains(&"oobabooga"));
+        assert!(provider_curated_models("tabbyapi").contains(&"exllamav2"));
     }
 
     #[test]
@@ -1493,6 +1589,22 @@ mod tests {
         assert_eq!(
             provider_curated_models("llvm"),
             provider_curated_models("vllm")
+        );
+        assert_eq!(
+            provider_curated_models("lm-studio"),
+            provider_curated_models("lmstudio")
+        );
+        assert_eq!(
+            provider_curated_models("oobabooga"),
+            provider_curated_models("text-generation-webui")
+        );
+        assert_eq!(
+            provider_curated_models("exllamav2"),
+            provider_curated_models("tabbyapi")
+        );
+        assert_eq!(
+            provider_curated_models("vmlx"),
+            provider_curated_models("mlx")
         );
     }
 
