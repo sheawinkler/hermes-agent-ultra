@@ -458,6 +458,12 @@ pub struct AnthropicOAuthStatus {
 }
 
 fn auth_json_path() -> PathBuf {
+    if let Ok(path) = std::env::var("HERMES_AUTH_FILE") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
     hermes_config::paths::auth_json_path()
 }
 
@@ -4063,11 +4069,60 @@ mod tests {
     }
 
     #[test]
+    fn auth_store_write_respects_auth_file_override() {
+        let _guard = test_env_lock::lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let home = tmp.path().join("home");
+        let override_path = tmp.path().join("override").join("auth.json");
+        let prev_hermes_home = std::env::var("HERMES_HOME").ok();
+        let prev_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        std::env::set_var("HERMES_HOME", &home);
+        std::env::set_var("HERMES_AUTH_FILE", &override_path);
+
+        let path = save_provider_auth_state(
+            "nous",
+            serde_json::json!({
+                "access_token": "override-access-token",
+                "agent_key": "override-agent-key"
+            }),
+        )
+        .expect("save auth state");
+
+        assert_eq!(path, override_path);
+        assert!(
+            override_path.exists(),
+            "override auth file should be written"
+        );
+        assert!(
+            !home.join("auth.json").exists(),
+            "HERMES_AUTH_FILE writes must not touch HERMES_HOME/auth.json"
+        );
+        let saved = read_provider_auth_state("nous")
+            .expect("read auth state")
+            .expect("provider state");
+        assert_eq!(
+            saved.get("agent_key").and_then(Value::as_str),
+            Some("override-agent-key")
+        );
+
+        match prev_auth_file {
+            Some(v) => std::env::set_var("HERMES_AUTH_FILE", v),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
+        }
+        match prev_hermes_home {
+            Some(v) => std::env::set_var("HERMES_HOME", v),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+    }
+
+    #[test]
     fn auth_store_write_is_atomic_owner_only_and_cleans_tmp() {
         let _guard = test_env_lock::lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let prev_hermes_home = std::env::var("HERMES_HOME").ok();
+        let prev_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
         std::env::set_var("HERMES_HOME", tmp.path());
+        std::env::remove_var("HERMES_AUTH_FILE");
 
         let path = save_provider_auth_state(
             "openai",
@@ -4105,6 +4160,10 @@ mod tests {
         match prev_hermes_home {
             Some(v) => std::env::set_var("HERMES_HOME", v),
             None => std::env::remove_var("HERMES_HOME"),
+        }
+        match prev_auth_file {
+            Some(v) => std::env::set_var("HERMES_AUTH_FILE", v),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
         }
     }
 
