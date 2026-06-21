@@ -1047,6 +1047,43 @@ fn parse_nous_oauth_state(value: Value) -> Option<NousAuthState> {
     Some(state)
 }
 
+fn nous_auth_state_is_runtime_viable(state: &NousAuthState) -> bool {
+    if state
+        .refresh_token
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+    {
+        return true;
+    }
+    nous_invoke_jwt_status(
+        &state.access_token,
+        state.scope.as_deref(),
+        state.expires_at.as_deref(),
+        NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+    )
+    .is_none()
+}
+
+pub fn read_nous_auth_state() -> Result<Option<NousAuthState>, AgentError> {
+    if let Some(raw_state) = read_provider_auth_state("nous")? {
+        if let Some(state) = parse_nous_oauth_state(raw_state) {
+            return Ok(Some(state));
+        }
+    }
+    Ok(discover_existing_nous_oauth()?.map(|imported| imported.state))
+}
+
+pub fn read_valid_nous_auth_state() -> Result<Option<NousAuthState>, AgentError> {
+    Ok(read_nous_auth_state()?.and_then(|state| {
+        if nous_auth_state_is_runtime_viable(&state) {
+            Some(state)
+        } else {
+            None
+        }
+    }))
+}
+
 fn load_nous_oauth_import_from_path(path: &Path) -> Option<NousOAuthImport> {
     let raw = std::fs::read_to_string(path).ok()?;
     let parsed: Value = serde_json::from_str(&raw).ok()?;
@@ -1399,19 +1436,9 @@ pub async fn resolve_nous_runtime_credentials(
     refresh_skew_seconds: i64,
     _min_key_ttl_seconds: u32,
 ) -> Result<NousRuntimeCredentials, AgentError> {
-    let mut state = if let Some(raw_state) = read_provider_auth_state("nous")? {
-        parse_nous_oauth_state(raw_state).ok_or_else(|| {
-            AgentError::AuthFailed(
-                "Stored Nous auth state is invalid; re-run `hermes portal`.".into(),
-            )
-        })?
-    } else if let Some(imported) = discover_existing_nous_oauth()? {
-        imported.state
-    } else {
-        return Err(AgentError::AuthFailed(
-            "Hermes is not logged into Nous Portal. Run `hermes portal`.".into(),
-        ));
-    };
+    let mut state = read_nous_auth_state()?.ok_or_else(|| {
+        AgentError::AuthFailed("Hermes is not logged into Nous Portal. Run `hermes portal`.".into())
+    })?;
 
     if state.portal_base_url.trim().is_empty() {
         state.portal_base_url = env_or_default("NOUS_PORTAL_BASE_URL", DEFAULT_NOUS_PORTAL_URL)
@@ -3784,6 +3811,243 @@ mod tests {
             "fallback-nous-access"
         );
 
+        match prev_auth_file {
+            Some(v) => std::env::set_var("HERMES_AUTH_FILE", v),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
+        }
+        match prev_hermes_home {
+            Some(v) => std::env::set_var("HERMES_HOME", v),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
+    #[test]
+    fn read_valid_nous_auth_state_ignores_malformed_fallback_store() {
+        let _guard = test_env_lock::lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var("HOME").ok();
+        let prev_hermes_home = std::env::var("HERMES_HOME").ok();
+        let prev_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        let prev_nous_file = std::env::var("HERMES_NOUS_OAUTH_FILE").ok();
+
+        std::env::set_var("HOME", tmp.path());
+        std::env::remove_var("HERMES_HOME");
+
+        let primary_store = tmp.path().join("profile-auth.json");
+        let primary_raw = serde_json::json!({
+            "version": 1,
+            "providers": {
+                "openai": { "access_token": "primary-openai" }
+            }
+        });
+        std::fs::write(
+            &primary_store,
+            serde_json::to_string_pretty(&primary_raw).expect("serialize primary auth"),
+        )
+        .expect("write primary auth");
+        std::env::set_var(
+            "HERMES_AUTH_FILE",
+            primary_store.to_string_lossy().to_string(),
+        );
+        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
+
+        let fallback_store = tmp.path().join(".hermes").join("auth.json");
+        std::fs::create_dir_all(
+            fallback_store
+                .parent()
+                .expect("fallback store should have parent"),
+        )
+        .expect("mkdir fallback parent");
+        let fallback_raw = serde_json::json!({
+            "version": 1,
+            "providers": {
+                "nous": {
+                    "client_id": DEFAULT_NOUS_CLIENT_ID,
+                    "inference_base_url": DEFAULT_NOUS_INFERENCE_URL,
+                    "last_auth_error": "unauthorized",
+                    "portal_base_url": DEFAULT_NOUS_PORTAL_URL,
+                    "scope": DEFAULT_NOUS_SCOPE,
+                    "token_type": "Bearer"
+                }
+            }
+        });
+        std::fs::write(
+            &fallback_store,
+            serde_json::to_string_pretty(&fallback_raw).expect("serialize fallback auth"),
+        )
+        .expect("write fallback auth");
+
+        assert!(
+            read_provider_auth_state("nous")
+                .expect("read raw provider auth state")
+                .is_some(),
+            "raw fallback store should still be discoverable"
+        );
+        assert!(
+            read_valid_nous_auth_state()
+                .expect("read valid nous auth state")
+                .is_none(),
+            "malformed fallback state must not count as a valid Nous login"
+        );
+
+        match prev_nous_file {
+            Some(v) => std::env::set_var("HERMES_NOUS_OAUTH_FILE", v),
+            None => std::env::remove_var("HERMES_NOUS_OAUTH_FILE"),
+        }
+        match prev_auth_file {
+            Some(v) => std::env::set_var("HERMES_AUTH_FILE", v),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
+        }
+        match prev_hermes_home {
+            Some(v) => std::env::set_var("HERMES_HOME", v),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
+    #[test]
+    fn read_valid_nous_auth_state_rejects_profile_only_access_state_without_refresh() {
+        let _guard = test_env_lock::lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let auth_path = tmp.path().join("auth.json");
+        let prev_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        let prev_nous_file = std::env::var("HERMES_NOUS_OAUTH_FILE").ok();
+        std::env::set_var("HERMES_AUTH_FILE", auth_path.to_string_lossy().to_string());
+        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
+
+        let mut state = nous_test_state("profile-access-token".to_string());
+        state.scope = Some("profile".to_string());
+        state.refresh_token = None;
+        save_nous_auth_state(&state).expect("save nous state");
+
+        assert!(
+            read_valid_nous_auth_state()
+                .expect("read valid nous auth state")
+                .is_none(),
+            "profile-only access token without refresh must not count as runtime-valid"
+        );
+
+        match prev_auth_file {
+            Some(v) => std::env::set_var("HERMES_AUTH_FILE", v),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
+        }
+        match prev_nous_file {
+            Some(v) => std::env::set_var("HERMES_NOUS_OAUTH_FILE", v),
+            None => std::env::remove_var("HERMES_NOUS_OAUTH_FILE"),
+        }
+    }
+
+    #[test]
+    fn read_valid_nous_auth_state_accepts_refreshable_access_state() {
+        let _guard = test_env_lock::lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let auth_path = tmp.path().join("auth.json");
+        let prev_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        let prev_nous_file = std::env::var("HERMES_NOUS_OAUTH_FILE").ok();
+        std::env::set_var("HERMES_AUTH_FILE", auth_path.to_string_lossy().to_string());
+        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
+
+        let mut state = nous_test_state("profile-access-token".to_string());
+        state.scope = Some("profile".to_string());
+        state.refresh_token = Some("refresh".to_string());
+        save_nous_auth_state(&state).expect("save nous state");
+
+        let found = read_valid_nous_auth_state()
+            .expect("read valid nous auth state")
+            .expect("refreshable state should count as valid");
+        assert_eq!(found.refresh_token.as_deref(), Some("refresh"));
+
+        match prev_auth_file {
+            Some(v) => std::env::set_var("HERMES_AUTH_FILE", v),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
+        }
+        match prev_nous_file {
+            Some(v) => std::env::set_var("HERMES_NOUS_OAUTH_FILE", v),
+            None => std::env::remove_var("HERMES_NOUS_OAUTH_FILE"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_nous_runtime_credentials_ignores_malformed_fallback_store() {
+        let _guard = test_env_lock::lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var("HOME").ok();
+        let prev_hermes_home = std::env::var("HERMES_HOME").ok();
+        let prev_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        let prev_nous_file = std::env::var("HERMES_NOUS_OAUTH_FILE").ok();
+
+        std::env::set_var("HOME", tmp.path());
+        std::env::remove_var("HERMES_HOME");
+
+        let primary_store = tmp.path().join("profile-auth.json");
+        let primary_raw = serde_json::json!({
+            "version": 1,
+            "providers": {
+                "openai": { "access_token": "primary-openai" }
+            }
+        });
+        std::fs::write(
+            &primary_store,
+            serde_json::to_string_pretty(&primary_raw).expect("serialize primary auth"),
+        )
+        .expect("write primary auth");
+        std::env::set_var(
+            "HERMES_AUTH_FILE",
+            primary_store.to_string_lossy().to_string(),
+        );
+        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
+
+        let fallback_store = tmp.path().join(".hermes").join("auth.json");
+        std::fs::create_dir_all(
+            fallback_store
+                .parent()
+                .expect("fallback store should have parent"),
+        )
+        .expect("mkdir fallback parent");
+        let fallback_raw = serde_json::json!({
+            "version": 1,
+            "providers": {
+                "nous": {
+                    "client_id": DEFAULT_NOUS_CLIENT_ID,
+                    "inference_base_url": DEFAULT_NOUS_INFERENCE_URL,
+                    "last_auth_error": "unauthorized",
+                    "portal_base_url": DEFAULT_NOUS_PORTAL_URL,
+                    "scope": DEFAULT_NOUS_SCOPE,
+                    "token_type": "Bearer"
+                }
+            }
+        });
+        std::fs::write(
+            &fallback_store,
+            serde_json::to_string_pretty(&fallback_raw).expect("serialize fallback auth"),
+        )
+        .expect("write fallback auth");
+
+        let err = resolve_nous_runtime_credentials(
+            false,
+            true,
+            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+        )
+        .await
+        .expect_err("malformed fallback store should not resolve runtime credentials");
+        assert!(
+            err.to_string()
+                .contains("Hermes is not logged into Nous Portal"),
+            "unexpected error: {err}"
+        );
+
+        match prev_nous_file {
+            Some(v) => std::env::set_var("HERMES_NOUS_OAUTH_FILE", v),
+            None => std::env::remove_var("HERMES_NOUS_OAUTH_FILE"),
+        }
         match prev_auth_file {
             Some(v) => std::env::set_var("HERMES_AUTH_FILE", v),
             None => std::env::remove_var("HERMES_AUTH_FILE"),
