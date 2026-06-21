@@ -23,6 +23,7 @@ remains the generated parity artifacts under `docs/parity/`.
 | Global parity proof | Must pass release gate locally | `python3 scripts/generate-global-parity-proof.py --check-release` |
 | SOTA harness coverage | Must keep all domains covered | `python3 scripts/generate-sota-harness-hardening.py --check` |
 | Behavioral similarity diff | Must keep outcome similarity at 1.0 with no regressions or unverified cases | `python3 scripts/generate-behavioral-similarity-diff.py --check` |
+| Deep problem-solving diff | Must keep deep problem-solving ratio at 1.0 with no regressions, gaps, or unverified cases | `python3 scripts/generate-deep-problem-solving-diff.py --check` |
 | Runtime placeholder discipline | Must stay clean | `scripts/check-runtime-placeholders.sh` |
 | Rust workspace health | Must build and test locally | `cargo build --workspace`, `cargo test --workspace` |
 

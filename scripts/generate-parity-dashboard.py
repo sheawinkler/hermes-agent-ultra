@@ -48,6 +48,11 @@ def parse_args() -> argparse.Namespace:
         help="Behavioral similarity diff JSON path relative to repo root",
     )
     parser.add_argument(
+        "--deep-problem-solving-diff",
+        default="docs/parity/deep-problem-solving-diff.json",
+        help="Deep problem-solving diff JSON path relative to repo root",
+    )
+    parser.add_argument(
         "--output",
         default="docs/parity/PARITY_DASHBOARD.md",
         help="Output markdown path relative to repo root",
@@ -108,6 +113,7 @@ def render_dashboard(
     test_coverage_audit: dict[str, Any],
     sota_harness_matrix: dict[str, Any],
     behavioral_diff: dict[str, Any],
+    deep_problem_solving_diff: dict[str, Any],
 ) -> str:
     summary = parity_matrix.get("summary", {}) if isinstance(parity_matrix.get("summary"), dict) else {}
     queue_summary = queue_json.get("summary", {}) if isinstance(queue_json.get("summary"), dict) else {}
@@ -146,6 +152,16 @@ def render_dashboard(
         if isinstance(behavioral_diff.get("gate"), dict)
         else {}
     )
+    deep_summary = (
+        deep_problem_solving_diff.get("summary", {})
+        if isinstance(deep_problem_solving_diff.get("summary"), dict)
+        else {}
+    )
+    deep_gate = (
+        deep_problem_solving_diff.get("gate", {})
+        if isinstance(deep_problem_solving_diff.get("gate"), dict)
+        else {}
+    )
 
     upstream_ref = str(workstream_status.get("upstream_ref") or "unknown")
     upstream_sha = str(workstream_status.get("upstream_sha") or "unknown")
@@ -182,6 +198,7 @@ def render_dashboard(
     lines.append(f"- Test coverage audit: **{gate_status(coverage_gate.get('pass'))}**")
     lines.append(f"- SOTA harness matrix: **{gate_status(harness_gate.get('pass'))}**")
     lines.append(f"- Behavioral similarity diff: **{gate_status(behavioral_gate.get('pass'))}**")
+    lines.append(f"- Deep problem-solving diff: **{gate_status(deep_gate.get('pass'))}**")
     lines.append(f"- Release gate failures: {format_failed_checks(release_gate)}")
     lines.append(f"- CI gate failures: {format_failed_checks(ci_gate)}")
     lines.append(f"- CI gate warnings: {format_warning_checks(ci_gate)}")
@@ -248,6 +265,26 @@ def render_dashboard(
         f"| Missing Rust test refs | {int(behavioral_summary.get('missing_rust_test_refs', 0) or 0)} |"
     )
     lines.append("")
+    lines.append("## Deep Problem-Solving Diff")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("| --- | ---: |")
+    lines.append(f"| Total cases | {int(deep_summary.get('total_cases', 0) or 0)} |")
+    lines.append(
+        f"| Equal or better cases | {int(deep_summary.get('equal_or_better_cases', 0) or 0)} |"
+    )
+    lines.append(f"| Superior cases | {int(deep_summary.get('superior_cases', 0) or 0)} |")
+    lines.append(
+        "| Deep problem-solving ratio | "
+        f"{float(deep_summary.get('deep_problem_solving_ratio', 0.0) or 0.0):.4f} |"
+    )
+    lines.append(f"| Regressions | {int(deep_summary.get('regressions', 0) or 0)} |")
+    lines.append(f"| Gaps | {int(deep_summary.get('gaps', 0) or 0)} |")
+    lines.append(f"| Unverified cases | {int(deep_summary.get('unverified_cases', 0) or 0)} |")
+    lines.append(
+        f"| Missing Rust test refs | {int(deep_summary.get('missing_rust_test_refs', 0) or 0)} |"
+    )
+    lines.append("")
     lines.append("## Queue Summary")
     lines.append("")
     lines.append("| Metric | Value |")
@@ -306,6 +343,7 @@ def render_dashboard(
     lines.append("- `docs/parity/test-coverage-audit.json`")
     lines.append("- `docs/parity/sota-harness-matrix.json`")
     lines.append("- `docs/parity/behavioral-similarity-diff.json`")
+    lines.append("- `docs/parity/deep-problem-solving-diff.json`")
     lines.append("")
     return "\n".join(lines)
 
@@ -321,6 +359,7 @@ def main() -> int:
     test_coverage_audit = load_json((repo_root / args.test_coverage_audit).resolve())
     sota_harness_matrix = load_json((repo_root / args.sota_harness_matrix).resolve())
     behavioral_diff = load_json((repo_root / args.behavioral_diff).resolve())
+    deep_problem_solving_diff = load_json((repo_root / args.deep_problem_solving_diff).resolve())
 
     output = (repo_root / args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -332,6 +371,7 @@ def main() -> int:
         test_coverage_audit,
         sota_harness_matrix,
         behavioral_diff,
+        deep_problem_solving_diff,
     )
     output.write_text(dashboard + "\n", encoding="utf-8")
     print(f"Wrote parity dashboard: {output}")

@@ -191,6 +191,104 @@ fn test_behavioral_similarity_diff_gate_passes_and_references_real_tests() {
 }
 
 #[test]
+fn test_deep_problem_solving_diff_gate_passes_and_references_real_tests() {
+    let payload = read_json("docs/parity/deep-problem-solving-diff.json");
+    assert_eq!(
+        payload["gate"]["pass"].as_bool(),
+        Some(true),
+        "deep problem-solving diff gate must pass"
+    );
+    assert_eq!(
+        payload["summary"]["deep_problem_solving_ratio"].as_f64(),
+        Some(1.0),
+        "deep problem-solving ratio must be perfect for release"
+    );
+    assert_eq!(
+        payload["summary"]["regressions"].as_u64(),
+        Some(0),
+        "deep problem-solving diff must have zero regressions"
+    );
+    assert_eq!(
+        payload["summary"]["gaps"].as_u64(),
+        Some(0),
+        "deep problem-solving diff must have zero gaps"
+    );
+    assert_eq!(
+        payload["summary"]["unverified_cases"].as_u64(),
+        Some(0),
+        "deep problem-solving diff must have zero unverified cases"
+    );
+    assert_eq!(
+        payload["summary"]["missing_rust_test_refs"].as_u64(),
+        Some(0),
+        "deep problem-solving diff must have zero missing Rust test refs"
+    );
+
+    let superior_cases = payload["summary"]["superior_cases"]
+        .as_u64()
+        .expect("superior_cases should be integer");
+    let required_superior = payload["summary"]["min_superiority_cases"]
+        .as_u64()
+        .expect("min_superiority_cases should be integer");
+    assert!(
+        superior_cases >= required_superior,
+        "deep problem-solving superiority below gate: {} < {}",
+        superior_cases,
+        required_superior
+    );
+    let total_cases = payload["summary"]["total_cases"]
+        .as_u64()
+        .expect("total_cases should be integer");
+    let required_total = payload["summary"]["min_total_cases"]
+        .as_u64()
+        .expect("min_total_cases should be integer");
+    assert!(
+        total_cases >= required_total,
+        "deep problem-solving case count below gate: {} < {}",
+        total_cases,
+        required_total
+    );
+
+    let cases = payload["cases"].as_array().expect("cases should be array");
+    assert!(
+        !cases.is_empty(),
+        "deep problem-solving diff must declare cases"
+    );
+    for case in cases {
+        let id = case["id"].as_str().expect("case id");
+        let classification = case["classification"]
+            .as_str()
+            .expect("classification should be string");
+        assert!(
+            matches!(
+                classification,
+                "equivalent" | "superior" | "intentional_divergence"
+            ),
+            "case {id} has non-passing classification {classification}"
+        );
+        assert_eq!(
+            case["verified"].as_bool(),
+            Some(true),
+            "case {id} must be verified"
+        );
+        assert!(
+            case["issues"].as_array().expect("issues array").is_empty(),
+            "case {id} must have no validation issues"
+        );
+        let tests = case["rust_tests"].as_array().expect("rust_tests array");
+        assert!(!tests.is_empty(), "case {id} must cite Rust tests");
+        for test in tests {
+            let file = test["file"].as_str().expect("test file");
+            let name = test["name"].as_str().expect("test name");
+            assert!(
+                rust_test_exists(file, name),
+                "case {id} references missing or non-test Rust function {file}::{name}"
+            );
+        }
+    }
+}
+
+#[test]
 fn test_adapter_matrix_has_no_placeholder_status() {
     let payload = read_json("docs/parity/adapter-feature-matrix.json");
     let non_native = payload["summary"]["non_rust_native"]

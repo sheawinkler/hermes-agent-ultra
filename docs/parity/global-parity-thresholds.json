@@ -24,6 +24,13 @@
       "max_behavioral_gaps": 0,
       "max_behavioral_unverified_cases": 0,
       "max_behavioral_missing_rust_refs": 0,
+      "min_deep_problem_solving_ratio": 1.0,
+      "min_deep_problem_solving_superiority_cases": 8,
+      "min_deep_problem_solving_total_cases": 10,
+      "max_deep_problem_solving_regressions": 0,
+      "max_deep_problem_solving_gaps": 0,
+      "max_deep_problem_solving_unverified_cases": 0,
+      "max_deep_problem_solving_missing_rust_refs": 0,
       "max_queue_pending_commits": 0
     },
     "required_workstreams_complete": [
@@ -36,7 +43,8 @@
       "GPAR-07",
       "GPAR-08",
       "GPAR-09",
-      "GPAR-10"
+      "GPAR-10",
+      "GPAR-11"
     ]
   },
   "ci_thresholds": {
@@ -59,6 +67,13 @@
     "max_behavioral_gaps": 0,
     "max_behavioral_unverified_cases": 0,
     "max_behavioral_missing_rust_refs": 0,
+    "min_deep_problem_solving_ratio": 1.0,
+    "min_deep_problem_solving_superiority_cases": 8,
+    "min_deep_problem_solving_total_cases": 10,
+    "max_deep_problem_solving_regressions": 0,
+    "max_deep_problem_solving_gaps": 0,
+    "max_deep_problem_solving_unverified_cases": 0,
+    "max_deep_problem_solving_missing_rust_refs": 0,
     "max_queue_pending_commits": 100,
     "special_rules": {
       "allow_tree_drift_when_functional_clean": {
@@ -75,7 +90,10 @@
         "requires_min_sota_harness_domain_coverage_ratio": 1.0,
         "requires_min_behavioral_similarity_ratio": 1.0,
         "requires_max_behavioral_regressions": 0,
-        "requires_max_behavioral_unverified_cases": 0
+        "requires_max_behavioral_unverified_cases": 0,
+        "requires_min_deep_problem_solving_ratio": 1.0,
+        "requires_max_deep_problem_solving_gaps": 0,
+        "requires_max_deep_problem_solving_unverified_cases": 0
       },
       "allow_files_only_upstream_overshoot_when_functional_clean": {
         "enabled": true,

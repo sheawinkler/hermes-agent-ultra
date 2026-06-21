@@ -156,6 +156,48 @@
         "status": "pass"
       },
       {
+        "actual": 1.0,
+        "limit": 1.0,
+        "metric": "min_deep_problem_solving_ratio",
+        "status": "pass"
+      },
+      {
+        "actual": 9.0,
+        "limit": 8,
+        "metric": "min_deep_problem_solving_superiority_cases",
+        "status": "pass"
+      },
+      {
+        "actual": 10.0,
+        "limit": 10,
+        "metric": "min_deep_problem_solving_total_cases",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_deep_problem_solving_regressions",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_deep_problem_solving_gaps",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_deep_problem_solving_unverified_cases",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_deep_problem_solving_missing_rust_refs",
+        "status": "pass"
+      },
+      {
         "actual": 0.0,
         "limit": 100,
         "metric": "max_queue_pending_commits",
@@ -175,7 +217,51 @@
       }
     ]
   },
-  "generated_at_utc": "2026-06-21T01:37:46.849538+00:00",
+  "deep_problem_solving_summary": {
+    "gate": {
+      "failures": 0,
+      "max_gaps": 0,
+      "max_missing_rust_test_refs": 0,
+      "max_regressions": 0,
+      "max_unverified_cases": 0,
+      "min_deep_problem_solving_ratio": 1.0,
+      "min_superiority_cases": 8,
+      "min_total_cases": 10,
+      "pass": true
+    },
+    "summary": {
+      "classification_counts": {
+        "equivalent": 1,
+        "superior": 9
+      },
+      "deep_problem_solving_ratio": 1.0,
+      "domain_counts": {
+        "answer-finalization": 1,
+        "context-management": 1,
+        "memory-grounding": 1,
+        "model-routing": 1,
+        "multi-pass-synthesis": 1,
+        "objective-loop-momentum": 1,
+        "problem-framing": 1,
+        "repo-research": 1,
+        "tool-use-recovery": 1,
+        "web-research": 1
+      },
+      "equal_or_better_cases": 10,
+      "equivalent_cases": 1,
+      "gaps": 0,
+      "intentional_divergence_cases": 0,
+      "min_superiority_cases": 8,
+      "min_total_cases": 10,
+      "missing_rust_test_refs": 0,
+      "missing_source_artifacts": 0,
+      "regressions": 0,
+      "superior_cases": 9,
+      "total_cases": 10,
+      "unverified_cases": 0
+    }
+  },
+  "generated_at_utc": "2026-06-21T09:42:53.788558+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -186,7 +272,8 @@
     "GPAR-07": true,
     "GPAR-08": true,
     "GPAR-09": true,
-    "GPAR-10": true
+    "GPAR-10": true,
+    "GPAR-11": true
   },
   "metrics": {
     "max_behavioral_gaps": 0.0,
@@ -194,6 +281,10 @@
     "max_behavioral_regressions": 0.0,
     "max_behavioral_unverified_cases": 0.0,
     "max_commits_behind": 5880.0,
+    "max_deep_problem_solving_gaps": 0.0,
+    "max_deep_problem_solving_missing_rust_refs": 0.0,
+    "max_deep_problem_solving_regressions": 0.0,
+    "max_deep_problem_solving_unverified_cases": 0.0,
     "max_divergence_review_overdue": 0.0,
     "max_files_only_upstream": 2309.0,
     "max_queue_pending_commits": 0.0,
@@ -205,6 +296,9 @@
     "max_upstream_patch_missing": 5657.0,
     "min_behavioral_similarity_ratio": 1.0,
     "min_behavioral_superiority_cases": 8.0,
+    "min_deep_problem_solving_ratio": 1.0,
+    "min_deep_problem_solving_superiority_cases": 9.0,
+    "min_deep_problem_solving_total_cases": 10.0,
     "min_sota_harness_domain_coverage_ratio": 1.0,
     "min_test_coverage_tracked_behavior_ratio": 1.0,
     "min_test_intent_mapping_ratio": 1.0
@@ -327,6 +421,48 @@
         "status": "pass"
       },
       {
+        "actual": 1.0,
+        "limit": 1.0,
+        "metric": "min_deep_problem_solving_ratio",
+        "status": "pass"
+      },
+      {
+        "actual": 9.0,
+        "limit": 8,
+        "metric": "min_deep_problem_solving_superiority_cases",
+        "status": "pass"
+      },
+      {
+        "actual": 10.0,
+        "limit": 10,
+        "metric": "min_deep_problem_solving_total_cases",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_deep_problem_solving_regressions",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_deep_problem_solving_gaps",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_deep_problem_solving_unverified_cases",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_deep_problem_solving_missing_rust_refs",
+        "status": "pass"
+      },
+      {
         "actual": 0.0,
         "limit": 0,
         "metric": "max_queue_pending_commits",
@@ -343,7 +479,8 @@
           "GPAR-07": true,
           "GPAR-08": true,
           "GPAR-09": true,
-          "GPAR-10": true
+          "GPAR-10": true,
+          "GPAR-11": true
         },
         "limit": "all true",
         "metric": "required_workstreams_complete",
@@ -374,6 +511,7 @@
   "sources": {
     "adapter_matrix": "docs/parity/adapter-feature-matrix.json",
     "behavioral_diff": "docs/parity/behavioral-similarity-diff.json",
+    "deep_problem_solving_diff": "docs/parity/deep-problem-solving-diff.json",
     "divergence_validation": "docs/parity/divergence-validation.json",
     "intent_mapping": "docs/parity/test-intent-mapping.json",
     "parity_matrix": "docs/parity/parity-matrix.json",

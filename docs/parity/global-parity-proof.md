@@ -1,6 +1,6 @@
 # Global Parity Proof
 
-Generated: `2026-06-21T01:37:46.849538+00:00`
+Generated: `2026-06-21T09:42:53.788558+00:00`
 
 ## Gate Status
 
@@ -31,6 +31,13 @@ Generated: `2026-06-21T01:37:46.849538+00:00`
 | `max_behavioral_gaps` | 0.0 |
 | `max_behavioral_unverified_cases` | 0.0 |
 | `max_behavioral_missing_rust_refs` | 0.0 |
+| `min_deep_problem_solving_ratio` | 1.0 |
+| `min_deep_problem_solving_superiority_cases` | 9.0 |
+| `min_deep_problem_solving_total_cases` | 10.0 |
+| `max_deep_problem_solving_regressions` | 0.0 |
+| `max_deep_problem_solving_gaps` | 0.0 |
+| `max_deep_problem_solving_unverified_cases` | 0.0 |
+| `max_deep_problem_solving_missing_rust_refs` | 0.0 |
 | `max_queue_pending_commits` | 0.0 |
 
 ## GPAR Ticket Completion
@@ -47,6 +54,7 @@ Generated: `2026-06-21T01:37:46.849538+00:00`
 | `GPAR-08` | yes |
 | `GPAR-09` | yes |
 | `GPAR-10` | yes |
+| `GPAR-11` | yes |
 
 ## Test Coverage Audit
 
@@ -68,6 +76,16 @@ Generated: `2026-06-21T01:37:46.849538+00:00`
 - Behavioral gate: **PASS**
 - Similarity ratio: `1.0`
 - Superior cases: `8`
+- Regressions: `0`
+- Gaps: `0`
+- Unverified cases: `0`
+- Missing Rust test refs: `0`
+
+## Deep Problem-Solving Diff
+
+- Deep problem-solving gate: **PASS**
+- Deep problem-solving ratio: `1.0`
+- Superior cases: `9`
 - Regressions: `0`
 - Gaps: `0`
 - Unverified cases: `0`
