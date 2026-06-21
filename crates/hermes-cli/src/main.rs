@@ -7944,6 +7944,7 @@ async fn verify_single_oauth_provider(
                         {
                             if let Err(detail) = verify_nous_runtime_credentials_live(&creds).await
                             {
+                                let _ = clear_provider_auth_state("nous");
                                 result.outcome = AuthVerifyOutcome::RefreshFailed;
                                 result.source = "vault_invoke_jwt".to_string();
                                 result.expires_at = creds.expires_at;
@@ -7968,6 +7969,7 @@ async fn verify_single_oauth_provider(
                             result.credential_present = true;
                             return Ok(result);
                         }
+                        let _ = clear_provider_auth_state("nous");
                     }
                 }
                 result.outcome = if env_present || stored_present || auth_state_present {
@@ -17442,6 +17444,84 @@ mod tests {
             None => std::env::remove_var("HERMES_HOME"),
         }
         match prev_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_verify_nous_does_not_persist_vault_token_when_live_probe_fails() {
+        let _guard = env_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let auth_path = tmp.path().join("auth.json");
+        let vault_path = tmp.path().join("tokens.json");
+        let store = FileTokenStore::new(&vault_path).await.expect("vault store");
+        let manager = AuthManager::new(store.clone());
+        let oauth_token = test_nous_invoke_jwt(900);
+
+        manager
+            .save_credential(OAuthCredential {
+                provider: "nous".to_string(),
+                access_token: oauth_token,
+                refresh_token: None,
+                token_type: "Bearer".to_string(),
+                scope: Some("inference:invoke".to_string()),
+                expires_at: None,
+            })
+            .await
+            .expect("save vault credential");
+
+        let previous_home = std::env::var("HOME").ok();
+        let previous_hermes_home = std::env::var("HERMES_HOME").ok();
+        let previous_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        let previous_nous_file = std::env::var("HERMES_NOUS_OAUTH_FILE").ok();
+        let previous_inference_base_url = std::env::var("NOUS_INFERENCE_BASE_URL").ok();
+        let probe_base_url =
+            spawn_nous_live_probe_server("401 Unauthorized", r#"{"message":"invalid or blocked"}"#)
+                .await;
+        std::env::set_var("HOME", tmp.path());
+        std::env::remove_var("HERMES_HOME");
+        std::env::set_var("HERMES_AUTH_FILE", auth_path.to_string_lossy().to_string());
+        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
+        std::env::set_var("NOUS_INFERENCE_BASE_URL", probe_base_url);
+
+        let result = verify_single_oauth_provider("nous", &store, &manager)
+            .await
+            .expect("verify nous");
+        assert_eq!(result.outcome, AuthVerifyOutcome::RefreshFailed);
+        assert!(
+            result
+                .detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("live_probe_failed"),
+            "unexpected detail: {:?}",
+            result.detail
+        );
+        assert!(
+            read_provider_auth_state("nous")
+                .expect("read provider state")
+                .is_none(),
+            "failed live vault repair must not persist Nous auth state"
+        );
+
+        match previous_auth_file {
+            Some(value) => std::env::set_var("HERMES_AUTH_FILE", value),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
+        }
+        match previous_nous_file {
+            Some(value) => std::env::set_var("HERMES_NOUS_OAUTH_FILE", value),
+            None => std::env::remove_var("HERMES_NOUS_OAUTH_FILE"),
+        }
+        match previous_inference_base_url {
+            Some(value) => std::env::set_var("NOUS_INFERENCE_BASE_URL", value),
+            None => std::env::remove_var("NOUS_INFERENCE_BASE_URL"),
+        }
+        match previous_hermes_home {
+            Some(value) => std::env::set_var("HERMES_HOME", value),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+        match previous_home {
             Some(value) => std::env::set_var("HOME", value),
             None => std::env::remove_var("HOME"),
         }
