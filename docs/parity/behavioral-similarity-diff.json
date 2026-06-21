@@ -1,0 +1,445 @@
+{
+  "cases": [
+    {
+      "classification": "equivalent",
+      "domain": "cli-command-surface",
+      "id": "interactive-slash-command-surface",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "test_golden_upstream_surface_aliases_are_registered"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "query_is_local_slash_command_detects_prefixed_queries"
+        },
+        {
+          "file": "crates/hermes-parity-tests/tests/cli_command_contract.rs",
+          "name": "cli_top_level_surface_contains_required_commands"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-cli/src/main.rs",
+        "crates/hermes-parity-tests/tests/cli_command_contract.rs"
+      ],
+      "ultra_behavior": "Rust CLI command aliases and local slash-query routing cover the upstream golden command surface while preserving terminal-first behavior.",
+      "upstream_behavior": "Interactive slash commands and command aliases remain discoverable and route to the expected CLI/TUI handlers.",
+      "verified": true,
+      "why": "This is behavioral symmetry: the same operator intents are reachable through the Rust command surface."
+    },
+    {
+      "classification": "equivalent",
+      "domain": "tool-runtime-behavior",
+      "id": "tool-use-and-web-research",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-tools/src/toolset.rs",
+          "name": "test_resolve_web_toolset"
+        },
+        {
+          "file": "crates/hermes-acp/src/tools.rs",
+          "name": "format_tool_result_renders_web_search_results"
+        },
+        {
+          "file": "crates/hermes-acp/src/tools.rs",
+          "name": "format_tool_result_shows_web_extract_failures"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-tools/src/toolset.rs",
+        "crates/hermes-acp/src/tools.rs"
+      ],
+      "ultra_behavior": "Rust toolsets expose web_search, web_extract, and web_crawl, and ACP formatting converts web results into compact terminal-facing evidence.",
+      "upstream_behavior": "Web research requests can use search/extract/crawl tools and return readable source snippets to the agent surface.",
+      "verified": true,
+      "why": "This proves the same web-research tool loop exists in Rust rather than only counting source files."
+    },
+    {
+      "classification": "superior",
+      "domain": "memory-plugin-integration",
+      "id": "contextlattice-memory-first-loop",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+          "name": "test_build_search_payload_includes_project_and_topic"
+        },
+        {
+          "file": "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+          "name": "test_apply_pressure_tuning_forces_fast_mode_and_sources"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_inference_messages_injects_runtime_reformulation"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_objective_context_autopin_sets_topic_for_default_path"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-cli/src/app.rs"
+      ],
+      "ultra_behavior": "Ultra explicitly prefers ContextLattice as a Rust-native memory backbone, injects the active topic into runtime guidance, autopins objective topics, and pressure-tunes retrieval mode under queue load.",
+      "upstream_behavior": "The agent retrieves durable context before solving tasks when memory context is relevant.",
+      "verified": true,
+      "why": "This is stricter than behavioral parity because the memory loop has a preferred ContextLattice backbone and pressure-aware retrieval controls."
+    },
+    {
+      "classification": "superior",
+      "domain": "repo-research-planning",
+      "id": "repo-research-planning-contract",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/context_files.rs",
+          "name": "test_load_workspace_context"
+        },
+        {
+          "file": "crates/hermes-agent/src/context_files.rs",
+          "name": "test_scan_context_injection"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_inference_messages_injects_runtime_reformulation"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-agent/src/context_files.rs",
+        "crates/hermes-cli/src/app.rs"
+      ],
+      "ultra_behavior": "Ultra loads workspace context files, scans context for prompt-injection risk, and injects runtime reformulation that requires ContextLattice-first grounding plus concrete action.",
+      "upstream_behavior": "For repository work, the agent should inspect local evidence, gather relevant project context, and avoid plan-only answers when implementation is requested.",
+      "verified": true,
+      "why": "This directly targets repo-research planning quality rather than counting test coverage rows."
+    },
+    {
+      "classification": "superior",
+      "domain": "agent-loop-and-runtime",
+      "id": "source-synthesis-quorum",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_collect_quorum_models_dedup_and_limit"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_compose_quorum_messages_coalesces_systems_before_user_messages"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_quorum_output_is_degraded_non_answer"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-cli/src/app.rs"
+      ],
+      "ultra_behavior": "Ultra adds a quorum synthesis path with independent voter outputs, disagreement handling, thin-evidence warnings, and explicit bans on invented files, commands, metrics, and citations.",
+      "upstream_behavior": "Hard questions should be synthesized from available evidence and disagreements should be surfaced instead of fabricated away.",
+      "verified": true,
+      "why": "This is an outcome-quality extension over a single-pass answer loop."
+    },
+    {
+      "classification": "equivalent",
+      "domain": "model-provider-auth",
+      "id": "provider-auth-repair-and-model-routing",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_verify_nous_repairs_stale_singleton_from_vault_invoke_jwt"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-cli/src/main.rs",
+        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-acp/src/auth.rs"
+      ],
+      "ultra_behavior": "Rust auth and routing cover upstream provider aliases, core OAuth refreshable providers, provider-specific API modes, and Nous stale singleton repair.",
+      "upstream_behavior": "Provider auth, OAuth refresh, model routing, and provider aliases should recover cleanly from stale credentials and route to the selected provider.",
+      "verified": true,
+      "why": "This keeps interactive model/provider behavior aligned with upstream while using Rust config and auth stores."
+    },
+    {
+      "classification": "superior",
+      "domain": "model-provider-runtime",
+      "id": "local-openai-compatible-backends",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-core/src/providers.rs",
+          "name": "local_backends_are_known_and_not_oauth"
+        },
+        {
+          "file": "crates/hermes-core/src/providers.rs",
+          "name": "canonical_provider_id_normalizes_common_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_provider_default_base_url_supports_upstream_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_allow_no_api_key_for_local_backends_and_private_base_urls"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_env_overrides_supports_direct_provider_env_vars"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-core/src/providers.rs",
+        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-config/src/loader.rs"
+      ],
+      "ultra_behavior": "Ultra expands Rust-native local OpenAI-compatible backend support across llama.cpp, MLX, LM Studio, LMDeploy, LocalAI, KoboldCpp, text-generation-webui, and TabbyAPI aliases with no-key local/private defaults.",
+      "upstream_behavior": "The agent can run against common provider backends through OpenAI-compatible request/response semantics.",
+      "verified": true,
+      "why": "This is a wider local model runtime surface than upstream Python parity alone."
+    },
+    {
+      "classification": "equivalent",
+      "domain": "gateway-platform-behavior",
+      "id": "gateway-platform-authorization",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "gateway_platform_access_policy_reads_telegram_chat_lists"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "gateway_dm_manager_group_authorization_matches_upstream_contract"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "gateway_dm_manager_whatsapp_lid_mapping_authorizes_phone_allowlist"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-cli/src/main.rs"
+      ],
+      "ultra_behavior": "Rust gateway policy resolves platform allowlists, group authorization, Telegram chat allowlists, and WhatsApp LID mapping with explicit tests.",
+      "upstream_behavior": "Gateway adapters enforce DM/group allowlists and provider-specific platform authorization behavior.",
+      "verified": true,
+      "why": "This compares the user-visible authorization outcome, not just adapter file presence."
+    },
+    {
+      "classification": "superior",
+      "domain": "cron-and-scheduler-runtime",
+      "id": "telegram-cron-topic-delivery",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "telegram_gateway_message_preserves_group_topic_in_chat_id"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "cron_platform_delivery_target_applies_telegram_cron_thread_at_fire_time"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "cron_platform_delivery_text_uses_full_output_and_suppresses_silent"
+        },
+        {
+          "file": "crates/hermes-cron/src/runner.rs",
+          "name": "test_build_cron_skill_prompt_blocks_injected_skill_body"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-cli/src/main.rs",
+        "crates/hermes-cron/src/runner.rs"
+      ],
+      "ultra_behavior": "Ultra preserves Telegram group/private topics, applies cron thread routing at fire time, and delivers full cron output while supporting silent suppression.",
+      "upstream_behavior": "Scheduled jobs and platform deliveries preserve the intended destination and expose useful completion output.",
+      "verified": true,
+      "why": "This is stricter platform behavior than a generic scheduled-message parity check."
+    },
+    {
+      "classification": "superior",
+      "domain": "skills-management-contract",
+      "id": "skills-governance-and-marketplace",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "effective_skill_taps_merges_defaults_custom_and_subscriptions"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "test_nous_official_default_skill_taps_present_in_merged_list"
+        },
+        {
+          "file": "crates/hermes-skills/src/guard.rs",
+          "name": "trust_level_resolution_matches_known_skill_sources"
+        },
+        {
+          "file": "crates/hermes-skills/src/guard.rs",
+          "name": "scan_skill_dir_reports_source_trust_and_verdict"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-skills/src/guard.rs"
+      ],
+      "ultra_behavior": "Rust skills governance merges official taps, verifies skill trust tiers, scans bundles before install, and preserves upstream-compatible tap/subscription shapes.",
+      "upstream_behavior": "Skills can be discovered, installed, audited, and used without silently accepting unsafe or malformed content.",
+      "verified": true,
+      "why": "This adds explicit governance and audit behavior around upstream skill surfaces."
+    },
+    {
+      "classification": "superior",
+      "domain": "rust-only-runtime",
+      "id": "runtime-rust-only-safety",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "name": "python_suite_skill_and_external_service_contracts_are_rust_owned"
+        },
+        {
+          "file": "crates/hermes-parity-tests/tests/global_parity_governance.rs",
+          "name": "test_coverage_audit_gate_passes"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "scripts/check-rust-runtime-no-python.sh",
+        "docs/parity/python-test-suite-coverage.json",
+        "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs"
+      ],
+      "ultra_behavior": "Ultra keeps upstream Python plugin and test trees reference-only, proves Rust-owned behavior through parity manifests, and runs a no-runtime-Python guard before merge.",
+      "upstream_behavior": "Python plugin/test behavior should not leak into production runtime as an untracked dependency.",
+      "verified": true,
+      "why": "This is a deliberate runtime-safety improvement over direct Python vendoring."
+    },
+    {
+      "classification": "superior",
+      "domain": "protocol-and-fault-tolerance",
+      "id": "fault-and-protocol-resilience",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-parity-tests/tests/sota_harness_contracts.rs",
+          "name": "sota_harness_matrix_gate_passes_and_references_real_tests"
+        },
+        {
+          "file": "crates/hermes-parity-tests/tests/sota_harness_contracts.rs",
+          "name": "fault_injection_matrix_covers_required_classes"
+        },
+        {
+          "file": "crates/hermes-parity-tests/tests/global_parity_governance.rs",
+          "name": "test_sota_harness_matrix_gate_passes"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "docs/parity/sota-harness-matrix.json",
+        "crates/hermes-parity-tests/tests/sota_harness_contracts.rs",
+        "crates/hermes-agent/src/testdata/adapter_chaos_profiles.json"
+      ],
+      "ultra_behavior": "Ultra has a SOTA harness matrix with workflow replay, protocol differential contracts, and chaos scenarios covering timeouts, 5xx, rate limits, connection resets, auth expiry, malformed tool payloads, and partial stream drops.",
+      "upstream_behavior": "Protocol adapters and runtime loops should behave deterministically under transport failures, malformed tool payloads, auth expiry, and stream interruptions.",
+      "verified": true,
+      "why": "This turns resilience into a measured behavior surface rather than relying on happy-path parity."
+    }
+  ],
+  "gate": {
+    "failures": 0,
+    "max_gaps": 0,
+    "max_missing_rust_test_refs": 0,
+    "max_regressions": 0,
+    "max_unverified_cases": 0,
+    "min_similarity_ratio": 1.0,
+    "min_superiority_cases": 5,
+    "pass": true
+  },
+  "gate_failures": [],
+  "generated_at_utc": "2026-06-21T01:37:43.611039+00:00",
+  "manifest": "docs/parity/behavioral-similarity-cases.json",
+  "schema_version": 1,
+  "summary": {
+    "behavioral_similarity_ratio": 1.0,
+    "classification_counts": {
+      "equivalent": 4,
+      "superior": 8
+    },
+    "domain_counts": {
+      "agent-loop-and-runtime": 1,
+      "cli-command-surface": 1,
+      "cron-and-scheduler-runtime": 1,
+      "gateway-platform-behavior": 1,
+      "memory-plugin-integration": 1,
+      "model-provider-auth": 1,
+      "model-provider-runtime": 1,
+      "protocol-and-fault-tolerance": 1,
+      "repo-research-planning": 1,
+      "rust-only-runtime": 1,
+      "skills-management-contract": 1,
+      "tool-runtime-behavior": 1
+    },
+    "equal_or_better_cases": 12,
+    "equivalent_cases": 4,
+    "gaps": 0,
+    "intentional_divergence_cases": 0,
+    "min_superiority_cases": 5,
+    "missing_rust_test_refs": 0,
+    "missing_source_artifacts": 0,
+    "regressions": 0,
+    "superior_cases": 8,
+    "total_cases": 12,
+    "unverified_cases": 0
+  }
+}

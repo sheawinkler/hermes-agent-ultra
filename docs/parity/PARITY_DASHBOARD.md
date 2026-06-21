@@ -1,6 +1,6 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-16T23:55:56.941688+00:00`_
+_Generated from source artifacts: `2026-06-21T01:37:46.849538+00:00`_
 
 ## Snapshot
 
@@ -8,7 +8,7 @@ _Generated from source artifacts: `2026-06-16T23:55:56.941688+00:00`_
 - Workstream snapshot generated: `2026-06-13T16:15:14-06:00`
 - Parity matrix generated: `2026-06-12T11:29:13.798398+00:00`
 - Queue snapshot generated: `2026-06-16T23:55:38.405701+00:00`
-- Proof snapshot generated: `2026-06-16T23:55:56.941688+00:00`
+- Proof snapshot generated: `2026-06-21T01:37:46.849538+00:00`
 
 ## Gate Status
 
@@ -16,6 +16,7 @@ _Generated from source artifacts: `2026-06-16T23:55:56.941688+00:00`_
 - CI/tree-drift gate: **PASS**
 - Test coverage audit: **PASS**
 - SOTA harness matrix: **PASS**
+- Behavioral similarity diff: **PASS**
 - Release gate failures: none
 - CI gate failures: none
 - CI gate warnings: max_commits_behind (actual=5880.0, limit=5500); max_upstream_patch_missing (actual=5657.0, limit=5000)
@@ -27,7 +28,7 @@ _Generated from source artifacts: `2026-06-16T23:55:56.941688+00:00`_
 | Tracked behavior rows | 419 |
 | Covered behavior rows | 419 |
 | Tracked behavior coverage ratio | 1.0000 |
-| Rust test functions | 3535 |
+| Rust test functions | 3583 |
 | Missing Rust test refs | 0 |
 | Critical gaps | 0 |
 
@@ -40,6 +41,19 @@ _Generated from source artifacts: `2026-06-16T23:55:56.941688+00:00`_
 | Domain coverage ratio | 1.0000 |
 | Direct Rust tests | 12 |
 | Critical gaps | 0 |
+| Missing Rust test refs | 0 |
+
+## Behavioral Similarity Diff
+
+| Metric | Value |
+| --- | ---: |
+| Total cases | 12 |
+| Equal or better cases | 12 |
+| Superior cases | 8 |
+| Similarity ratio | 1.0000 |
+| Regressions | 0 |
+| Gaps | 0 |
+| Unverified cases | 0 |
 | Missing Rust test refs | 0 |
 
 ## Queue Summary
@@ -91,4 +105,5 @@ _Generated from source artifacts: `2026-06-16T23:55:56.941688+00:00`_
 - `docs/parity/global-parity-proof.json`
 - `docs/parity/test-coverage-audit.json`
 - `docs/parity/sota-harness-matrix.json`
+- `docs/parity/behavioral-similarity-diff.json`
 

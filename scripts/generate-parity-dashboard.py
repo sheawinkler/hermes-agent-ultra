@@ -43,6 +43,11 @@ def parse_args() -> argparse.Namespace:
         help="SOTA harness matrix JSON path relative to repo root",
     )
     parser.add_argument(
+        "--behavioral-diff",
+        default="docs/parity/behavioral-similarity-diff.json",
+        help="Behavioral similarity diff JSON path relative to repo root",
+    )
+    parser.add_argument(
         "--output",
         default="docs/parity/PARITY_DASHBOARD.md",
         help="Output markdown path relative to repo root",
@@ -102,6 +107,7 @@ def render_dashboard(
     proof_json: dict[str, Any],
     test_coverage_audit: dict[str, Any],
     sota_harness_matrix: dict[str, Any],
+    behavioral_diff: dict[str, Any],
 ) -> str:
     summary = parity_matrix.get("summary", {}) if isinstance(parity_matrix.get("summary"), dict) else {}
     queue_summary = queue_json.get("summary", {}) if isinstance(queue_json.get("summary"), dict) else {}
@@ -128,6 +134,16 @@ def render_dashboard(
     harness_gate = (
         sota_harness_matrix.get("gate", {})
         if isinstance(sota_harness_matrix.get("gate"), dict)
+        else {}
+    )
+    behavioral_summary = (
+        behavioral_diff.get("summary", {})
+        if isinstance(behavioral_diff.get("summary"), dict)
+        else {}
+    )
+    behavioral_gate = (
+        behavioral_diff.get("gate", {})
+        if isinstance(behavioral_diff.get("gate"), dict)
         else {}
     )
 
@@ -165,6 +181,7 @@ def render_dashboard(
     lines.append(f"- CI/tree-drift gate: **{gate_status(ci_gate.get('pass'))}**")
     lines.append(f"- Test coverage audit: **{gate_status(coverage_gate.get('pass'))}**")
     lines.append(f"- SOTA harness matrix: **{gate_status(harness_gate.get('pass'))}**")
+    lines.append(f"- Behavioral similarity diff: **{gate_status(behavioral_gate.get('pass'))}**")
     lines.append(f"- Release gate failures: {format_failed_checks(release_gate)}")
     lines.append(f"- CI gate failures: {format_failed_checks(ci_gate)}")
     lines.append(f"- CI gate warnings: {format_warning_checks(ci_gate)}")
@@ -209,6 +226,26 @@ def render_dashboard(
     )
     lines.append(
         f"| Missing Rust test refs | {int(harness_gate.get('missing_rust_test_refs', 0) or 0)} |"
+    )
+    lines.append("")
+    lines.append("## Behavioral Similarity Diff")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("| --- | ---: |")
+    lines.append(f"| Total cases | {int(behavioral_summary.get('total_cases', 0) or 0)} |")
+    lines.append(
+        f"| Equal or better cases | {int(behavioral_summary.get('equal_or_better_cases', 0) or 0)} |"
+    )
+    lines.append(f"| Superior cases | {int(behavioral_summary.get('superior_cases', 0) or 0)} |")
+    lines.append(
+        "| Similarity ratio | "
+        f"{float(behavioral_summary.get('behavioral_similarity_ratio', 0.0) or 0.0):.4f} |"
+    )
+    lines.append(f"| Regressions | {int(behavioral_summary.get('regressions', 0) or 0)} |")
+    lines.append(f"| Gaps | {int(behavioral_summary.get('gaps', 0) or 0)} |")
+    lines.append(f"| Unverified cases | {int(behavioral_summary.get('unverified_cases', 0) or 0)} |")
+    lines.append(
+        f"| Missing Rust test refs | {int(behavioral_summary.get('missing_rust_test_refs', 0) or 0)} |"
     )
     lines.append("")
     lines.append("## Queue Summary")
@@ -268,6 +305,7 @@ def render_dashboard(
     lines.append("- `docs/parity/global-parity-proof.json`")
     lines.append("- `docs/parity/test-coverage-audit.json`")
     lines.append("- `docs/parity/sota-harness-matrix.json`")
+    lines.append("- `docs/parity/behavioral-similarity-diff.json`")
     lines.append("")
     return "\n".join(lines)
 
@@ -282,6 +320,7 @@ def main() -> int:
     proof_json = load_json((repo_root / args.proof_json).resolve())
     test_coverage_audit = load_json((repo_root / args.test_coverage_audit).resolve())
     sota_harness_matrix = load_json((repo_root / args.sota_harness_matrix).resolve())
+    behavioral_diff = load_json((repo_root / args.behavioral_diff).resolve())
 
     output = (repo_root / args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -292,6 +331,7 @@ def main() -> int:
         proof_json,
         test_coverage_audit,
         sota_harness_matrix,
+        behavioral_diff,
     )
     output.write_text(dashboard + "\n", encoding="utf-8")
     print(f"Wrote parity dashboard: {output}")
