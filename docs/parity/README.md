@@ -16,6 +16,7 @@ python3 scripts/generate-adapter-matrix.py
 python3 scripts/validate-intentional-divergence.py --check --allow-warnings
 python3 scripts/generate-upstream-patch-queue.py --max-commits 0
 python3 scripts/generate-behavioral-similarity-diff.py --check
+python3 scripts/generate-deep-problem-solving-diff.py --check
 python3 scripts/generate-global-parity-proof.py --check-ci
 python3 scripts/generate-gpar-01-04-proof.py
 python3 scripts/generate-sota-harness-hardening.py --check
@@ -41,6 +42,9 @@ By default this command fetches upstream directly from GitHub
 - `behavioral-similarity-cases.json`: upstream-vs-Ultra outcome comparison case manifest
 - `behavioral-similarity-diff.json`: release-gated behavioral similarity and superiority proof
 - `behavioral-similarity-diff.md`: human-readable behavior diff summary
+- `deep-problem-solving-cases.json`: upstream-vs-Ultra deep problem-solving behavior case manifest
+- `deep-problem-solving-diff.json`: release-gated deep problem-solving parity and superiority proof
+- `deep-problem-solving-diff.md`: human-readable deep problem-solving behavior summary
 - `harness-trend-ledger.json` / `harness-trend-ledger.md`: coverage and SOTA harness trend ledger
 - `contextlattice-replay-evidence-index.json` / `contextlattice-replay-evidence-index.md`: ContextLattice replay evidence index for SOTA harness proofs
 - `harness-budget.json` / `harness-budget.md`: cross-version review budgets for queue, coverage, and harness growth
@@ -50,7 +54,7 @@ By default this command fetches upstream directly from GitHub
 - `global-parity-thresholds.json`: machine-readable CI/release parity thresholds
   - `ci_thresholds`: tree-drift observability gate
   - `ci_thresholds.special_rules`: scoped exemptions for non-actionable upstream-only drift
-  - `release_thresholds`: functional parity gate (GPAR/workstream + divergence/test integrity + behavioral similarity)
+  - `release_thresholds`: functional parity gate (GPAR/workstream + divergence/test integrity + behavioral/deep problem-solving similarity)
 - `global-parity-proof.json`: consolidated parity proof with gate results for tickets #19-#28
 - `global-parity-proof.md`: human-readable parity proof summary
 - `gpar-01-04-proof.json`: scoped proof for GPAR-01..04 queue closure parity release

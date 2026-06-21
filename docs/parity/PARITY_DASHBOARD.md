@@ -1,6 +1,6 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-21T01:37:46.849538+00:00`_
+_Generated from source artifacts: `2026-06-21T09:42:53.788558+00:00`_
 
 ## Snapshot
 
@@ -8,7 +8,7 @@ _Generated from source artifacts: `2026-06-21T01:37:46.849538+00:00`_
 - Workstream snapshot generated: `2026-06-13T16:15:14-06:00`
 - Parity matrix generated: `2026-06-12T11:29:13.798398+00:00`
 - Queue snapshot generated: `2026-06-16T23:55:38.405701+00:00`
-- Proof snapshot generated: `2026-06-21T01:37:46.849538+00:00`
+- Proof snapshot generated: `2026-06-21T09:42:53.788558+00:00`
 
 ## Gate Status
 
@@ -17,6 +17,7 @@ _Generated from source artifacts: `2026-06-21T01:37:46.849538+00:00`_
 - Test coverage audit: **PASS**
 - SOTA harness matrix: **PASS**
 - Behavioral similarity diff: **PASS**
+- Deep problem-solving diff: **PASS**
 - Release gate failures: none
 - CI gate failures: none
 - CI gate warnings: max_commits_behind (actual=5880.0, limit=5500); max_upstream_patch_missing (actual=5657.0, limit=5000)
@@ -51,6 +52,19 @@ _Generated from source artifacts: `2026-06-21T01:37:46.849538+00:00`_
 | Equal or better cases | 12 |
 | Superior cases | 8 |
 | Similarity ratio | 1.0000 |
+| Regressions | 0 |
+| Gaps | 0 |
+| Unverified cases | 0 |
+| Missing Rust test refs | 0 |
+
+## Deep Problem-Solving Diff
+
+| Metric | Value |
+| --- | ---: |
+| Total cases | 10 |
+| Equal or better cases | 10 |
+| Superior cases | 9 |
+| Deep problem-solving ratio | 1.0000 |
 | Regressions | 0 |
 | Gaps | 0 |
 | Unverified cases | 0 |
@@ -106,4 +120,5 @@ _Generated from source artifacts: `2026-06-21T01:37:46.849538+00:00`_
 - `docs/parity/test-coverage-audit.json`
 - `docs/parity/sota-harness-matrix.json`
 - `docs/parity/behavioral-similarity-diff.json`
+- `docs/parity/deep-problem-solving-diff.json`
 

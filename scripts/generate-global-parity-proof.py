@@ -105,6 +105,15 @@ def apply_ci_special_rules(
             behavioral_unverified_limit = float(
                 tree_rule_cfg.get("requires_max_behavioral_unverified_cases", 0)
             )
+            deep_ratio = float(
+                tree_rule_cfg.get("requires_min_deep_problem_solving_ratio", 1.0)
+            )
+            deep_gap_limit = float(
+                tree_rule_cfg.get("requires_max_deep_problem_solving_gaps", 0)
+            )
+            deep_unverified_limit = float(
+                tree_rule_cfg.get("requires_max_deep_problem_solving_unverified_cases", 0)
+            )
             if (
                 failed_metrics
                 and failed_metrics.issubset(allowed_metrics)
@@ -119,6 +128,11 @@ def apply_ci_special_rules(
                 <= behavioral_regression_limit
                 and metrics.get("max_behavioral_unverified_cases", 0.0)
                 <= behavioral_unverified_limit
+                and metrics.get("min_deep_problem_solving_ratio", 0.0) >= deep_ratio
+                and metrics.get("max_deep_problem_solving_gaps", 0.0)
+                <= deep_gap_limit
+                and metrics.get("max_deep_problem_solving_unverified_cases", 0.0)
+                <= deep_unverified_limit
             ):
                 for check in failed_checks:
                     check["status"] = "warn"
@@ -276,6 +290,12 @@ def main() -> int:
         help="Behavioral similarity diff JSON file",
     )
     parser.add_argument(
+        "--deep-problem-solving-diff",
+        default="docs/parity/deep-problem-solving-diff.json",
+        type=Path,
+        help="Deep problem-solving diff JSON file",
+    )
+    parser.add_argument(
         "--out-json",
         default="docs/parity/global-parity-proof.json",
         type=Path,
@@ -303,6 +323,7 @@ def main() -> int:
     test_coverage = load_json((repo_root / args.test_coverage_audit).resolve())
     sota_harness = load_json((repo_root / args.sota_harness_matrix).resolve())
     behavioral_diff = load_json((repo_root / args.behavioral_diff).resolve())
+    deep_problem_solving = load_json((repo_root / args.deep_problem_solving_diff).resolve())
 
     parity_summary = parity.get("summary", {})
     intent_summary = intents.get("summary", {})
@@ -315,6 +336,8 @@ def main() -> int:
     sota_harness_gate = sota_harness.get("gate", {})
     behavioral_summary = behavioral_diff.get("summary", {})
     behavioral_gate = behavioral_diff.get("gate", {})
+    deep_summary = deep_problem_solving.get("summary", {})
+    deep_gate = deep_problem_solving.get("gate", {})
     ws_states = ws.get("states", {})
     shared_diff_items = {str(i.get("path", "")) for i in shared_diff.get("items", [])}
     parity_shared = {str(i.get("path", "")) for i in parity.get("top_shared_different", [])}
@@ -333,6 +356,7 @@ def main() -> int:
         and int(divergence_summary.get("review_overdue", 0)) == 0,
         "GPAR-09": bool(test_coverage_gate.get("pass", False)),
         "GPAR-10": bool(behavioral_gate.get("pass", False)),
+        "GPAR-11": bool(deep_gate.get("pass", False)),
     }
 
     metrics = {
@@ -377,6 +401,27 @@ def main() -> int:
         ),
         "max_behavioral_missing_rust_refs": float(
             behavioral_summary.get("missing_rust_test_refs", 0)
+        ),
+        "min_deep_problem_solving_ratio": float(
+            deep_summary.get("deep_problem_solving_ratio", 0.0)
+        ),
+        "min_deep_problem_solving_superiority_cases": float(
+            deep_summary.get("superior_cases", 0)
+        ),
+        "min_deep_problem_solving_total_cases": float(
+            deep_summary.get("total_cases", 0)
+        ),
+        "max_deep_problem_solving_regressions": float(
+            deep_summary.get("regressions", 0)
+        ),
+        "max_deep_problem_solving_gaps": float(
+            deep_summary.get("gaps", 0)
+        ),
+        "max_deep_problem_solving_unverified_cases": float(
+            deep_summary.get("unverified_cases", 0)
+        ),
+        "max_deep_problem_solving_missing_rust_refs": float(
+            deep_summary.get("missing_rust_test_refs", 0)
         ),
         "max_queue_pending_commits": float(
             queue_summary.get("by_disposition", {}).get("pending", 0)
@@ -437,6 +482,7 @@ def main() -> int:
             "test_coverage_audit": str(args.test_coverage_audit),
             "sota_harness_matrix": str(args.sota_harness_matrix),
             "behavioral_diff": str(args.behavioral_diff),
+            "deep_problem_solving_diff": str(args.deep_problem_solving_diff),
         },
         "queue_summary": queue_summary,
         "test_coverage_audit_summary": {
@@ -450,6 +496,10 @@ def main() -> int:
         "behavioral_diff_summary": {
             "summary": behavioral_summary,
             "gate": behavioral_gate,
+        },
+        "deep_problem_solving_summary": {
+            "summary": deep_summary,
+            "gate": deep_gate,
         },
     }
 
@@ -545,6 +595,35 @@ def main() -> int:
     md.append(
         "- Missing Rust test refs: "
         f"`{behavioral_summary.get('missing_rust_test_refs', 0)}`"
+    )
+    md.append("")
+
+    md.append("## Deep Problem-Solving Diff")
+    md.append("")
+    md.append(f"- Deep problem-solving gate: **{'PASS' if deep_gate.get('pass') else 'FAIL'}**")
+    md.append(
+        "- Deep problem-solving ratio: "
+        f"`{deep_summary.get('deep_problem_solving_ratio', 0)}`"
+    )
+    md.append(
+        "- Superior cases: "
+        f"`{deep_summary.get('superior_cases', 0)}`"
+    )
+    md.append(
+        "- Regressions: "
+        f"`{deep_summary.get('regressions', 0)}`"
+    )
+    md.append(
+        "- Gaps: "
+        f"`{deep_summary.get('gaps', 0)}`"
+    )
+    md.append(
+        "- Unverified cases: "
+        f"`{deep_summary.get('unverified_cases', 0)}`"
+    )
+    md.append(
+        "- Missing Rust test refs: "
+        f"`{deep_summary.get('missing_rust_test_refs', 0)}`"
     )
     md.append("")
 

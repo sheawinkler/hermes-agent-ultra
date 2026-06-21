@@ -1,0 +1,434 @@
+{
+  "cases": [
+    {
+      "classification": "superior",
+      "domain": "problem-framing",
+      "id": "evidence-first-runtime-reformulation",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_inference_messages_injects_runtime_reformulation"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_runtime_reformulation_caps_long_prompt_preview_without_losing_user_message"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_inference_messages_respects_reformulation_toggle_off"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-cli/src/app.rs"
+      ],
+      "ultra_behavior": "Ultra injects an internal runtime reformulation before the latest user message that requires anti-scheming evidence discipline, ContextLattice-first grounding, concrete action, iterative objective momentum, and contradiction self-audit.",
+      "upstream_behavior": "Hard tasks are reframed into an evidence-first loop with tool use, memory retrieval, output-shape discipline, and self-checking before final response.",
+      "verified": true,
+      "why": "This directly governs deep problem solving before any model response is produced, rather than relying on general personality text."
+    },
+    {
+      "classification": "superior",
+      "domain": "objective-loop-momentum",
+      "id": "anti-deferral-objective-continuation",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_looks_like_status_only_output_detects_defer_only_language"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_should_force_objective_continuation_for_mission_status_only_turn"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_set_session_objective_injects_replaces_and_clears_system_message"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-cli/src/app.rs"
+      ],
+      "ultra_behavior": "Ultra detects status-heavy, defer-only, or tool-less objective turns and injects a continuation pass requiring concrete action, verifiable evidence, measurable delta, and next action.",
+      "upstream_behavior": "For long-running objectives, the agent should continue working instead of returning plan-only or status-only responses.",
+      "verified": true,
+      "why": "This closes a deep-behavior failure mode where an agent sounds thoughtful but stops before doing work."
+    },
+    {
+      "classification": "superior",
+      "domain": "memory-grounding",
+      "id": "contextlattice-grounded-memory-loop",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+          "name": "test_build_search_payload_includes_project_and_topic"
+        },
+        {
+          "file": "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+          "name": "test_apply_pressure_tuning_forces_fast_mode_and_sources"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_objective_context_autopin_sets_topic_for_default_path"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_objective_context_autopin_respects_custom_topic_pin"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-cli/src/app.rs"
+      ],
+      "ultra_behavior": "Ultra prefers ContextLattice as the memory backbone, sends project/topic search payloads, pressure-tunes retrieval mode, and autopins active objective topics.",
+      "upstream_behavior": "Relevant durable memory should be retrieved before solving, and objective context should guide later actions.",
+      "verified": true,
+      "why": "This makes the memory backbone explicit and testable for hard tasks that depend on prior context."
+    },
+    {
+      "classification": "superior",
+      "domain": "repo-research",
+      "id": "repo-research-evidence-finalizer",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_repo_review_tool_profile_keeps_todo_filters_messaging"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_repo_review_discovery_policy_trims_repeated_loops"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_repo_review_intent_includes_path_scoped_read_only_research"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_repo_research_plan_finalizer_requires_workstream_evidence"
+        },
+        {
+          "file": "crates/hermes-agent/src/context_files.rs",
+          "name": "test_scan_context_injection"
+        },
+        {
+          "file": "crates/hermes-agent/src/context_files.rs",
+          "name": "test_load_workspace_context"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-agent/src/agent_loop.rs",
+        "crates/hermes-agent/src/context_files.rs"
+      ],
+      "ultra_behavior": "Ultra applies repo-review tool profiles, trims repeated discovery loops, detects path-scoped research intent, and retries finalization when repo plans lack explicit evidence.",
+      "upstream_behavior": "Repository research should inspect local evidence, avoid repetitive low-signal loops, and only finalize with concrete workstream evidence or an explicit blocker.",
+      "verified": true,
+      "why": "This is the core behavior the user cares about in codebase problem solving: local evidence before conclusion."
+    },
+    {
+      "classification": "superior",
+      "domain": "web-research",
+      "id": "web-research-source-quality-finalizer",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_web_research_finalizer_requires_web_tool_and_urls"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_web_research_finalizer_requires_source_quality_counts"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_web_research_system_hint_reports_tool_availability"
+        },
+        {
+          "file": "crates/hermes-tools/src/toolset.rs",
+          "name": "test_resolve_web_toolset"
+        },
+        {
+          "file": "crates/hermes-acp/src/tools.rs",
+          "name": "format_tool_result_renders_web_search_results"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-agent/src/agent_loop.rs",
+        "crates/hermes-tools/src/toolset.rs",
+        "crates/hermes-acp/src/tools.rs"
+      ],
+      "ultra_behavior": "Ultra requires web-tool evidence, URLs, source-quality counts, and compact source rendering before finalizing web-research answers.",
+      "upstream_behavior": "Web research should use web tools when requested and synthesize from source-backed evidence rather than unsupported claims.",
+      "verified": true,
+      "why": "This targets the exact deep-research behavior that makes upstream strong: source-backed synthesis instead of generic answer generation."
+    },
+    {
+      "classification": "superior",
+      "domain": "multi-pass-synthesis",
+      "id": "independent-quorum-synthesis",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_collect_quorum_models_dedup_and_limit"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_compose_quorum_messages_coalesces_systems_before_user_messages"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_required_quorum_success_majority"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_quorum_output_is_degraded_non_answer"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_quorum_mode_armed_once_triggers_without_system_hint"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-cli/src/app.rs"
+      ],
+      "ultra_behavior": "Ultra has a quorum fanout path with independent voters, explicit counter-argument requirements, degraded-output detection, synthesis rules, and persisted quorum artifacts.",
+      "upstream_behavior": "Difficult questions should surface disagreement, counter-cases, confidence, and thin-evidence limitations instead of collapsing to a single unsupported answer.",
+      "verified": true,
+      "why": "This is an explicit deep-synthesis mechanism beyond baseline single-model turn handling."
+    },
+    {
+      "classification": "superior",
+      "domain": "tool-use-recovery",
+      "id": "tool-loop-failure-recovery",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_is_provider_tool_payload_error_detects_schema_rejections"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_tool_loop_guard_trips_on_consecutive_full_failure_turns"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_tool_loop_guard_ignores_partial_success_turns"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "stream_mid_tool_call_silent_retry_recovers_tool_call"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "stream_text_only_drop_does_not_retry"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-agent/src/agent_loop.rs"
+      ],
+      "ultra_behavior": "Ultra detects provider tool-payload schema rejection, trips loop guards on consecutive full-failure turns, preserves partial successes, and retries recoverable stream/tool-call drops.",
+      "upstream_behavior": "Tool-heavy problem solving should recover from malformed tool payloads, repeated tool failures, and stream interruptions without pretending success.",
+      "verified": true,
+      "why": "Deep problem solving depends on robust tool iteration, not only initial tool availability."
+    },
+    {
+      "classification": "superior",
+      "domain": "model-routing",
+      "id": "smart-routing-and-provider-resilience",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_smart_model_routing_cheap_route_for_simple_turn"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_smart_model_routing_skips_complex_turn"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_route_learning_persists_across_agent_restarts"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_route_learning_decay_and_ttl"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_failover_chain_from_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_is_transient_retryable_error_detects_timeout_and_rate_limit"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-agent/src/agent_loop.rs",
+        "crates/hermes-cli/src/app.rs"
+      ],
+      "ultra_behavior": "Ultra includes smart model routing, route learning persistence/decay, provider fallback chains, transient retry classification, and OAuth/provider auth repair tests.",
+      "upstream_behavior": "The agent should route simple and complex turns appropriately, learn from route outcomes, and preserve provider/auth recovery behavior.",
+      "verified": true,
+      "why": "Deep behavior quality depends on choosing the right model path and recovering when a provider path degrades."
+    },
+    {
+      "classification": "superior",
+      "domain": "answer-finalization",
+      "id": "final-answer-quality-guards",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_finalizer_claim_retry_for_research_without_explicit_evidence"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_finalizer_claim_retry_for_missing_evidence_path"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_finalizer_output_quality_retry_detects_placeholders"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_finalizer_output_quality_retry_detects_fake_attachments"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_finalizer_output_quality_retry_detects_duplicate_lines"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_finalizer_action_execution_retry_detects_intent_narration"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "test_finalizer_action_execution_retry_skips_when_evidence_present"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-agent/src/agent_loop.rs"
+      ],
+      "ultra_behavior": "Ultra retries finalization for missing evidence paths, placeholder text, fake attachments, duplicate lines, and intent-narration without evidence.",
+      "upstream_behavior": "Before final answers, the agent should reject placeholders, fake artifacts, duplicate filler, unsupported research claims, and narration of actions that were not executed.",
+      "verified": true,
+      "why": "This is the last line of defense between internal reasoning and user-visible deep-work output."
+    },
+    {
+      "classification": "equivalent",
+      "domain": "context-management",
+      "id": "context-and-memory-safety",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/context.rs",
+          "name": "test_truncate_preserves_system_messages"
+        },
+        {
+          "file": "crates/hermes-agent/src/context.rs",
+          "name": "test_context_manager_compress_over_threshold"
+        },
+        {
+          "file": "crates/hermes-agent/src/context_files.rs",
+          "name": "test_scan_context_injection"
+        },
+        {
+          "file": "crates/hermes-agent/src/context_files.rs",
+          "name": "test_load_workspace_context"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "stream_memory_context_blocks_are_scrubbed_from_callbacks_and_final_message"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "crates/hermes-agent/src/context.rs",
+        "crates/hermes-agent/src/context_files.rs",
+        "crates/hermes-agent/src/agent_loop.rs"
+      ],
+      "ultra_behavior": "Ultra loads workspace context, scans for injection, preserves system messages during compression, and scrubs memory context blocks from streamed callbacks/final messages.",
+      "upstream_behavior": "The agent preserves useful context while preventing context bloat, prompt-injection drift, and memory leakage into the final user-visible response.",
+      "verified": true,
+      "why": "This protects the substrate needed for multi-step problem solving."
+    }
+  ],
+  "gate": {
+    "failures": 0,
+    "max_gaps": 0,
+    "max_missing_rust_test_refs": 0,
+    "max_regressions": 0,
+    "max_unverified_cases": 0,
+    "min_deep_problem_solving_ratio": 1.0,
+    "min_superiority_cases": 8,
+    "min_total_cases": 10,
+    "pass": true
+  },
+  "gate_failures": [],
+  "generated_at_utc": "2026-06-21T09:42:56.188162+00:00",
+  "manifest": "docs/parity/deep-problem-solving-cases.json",
+  "schema_version": 1,
+  "summary": {
+    "classification_counts": {
+      "equivalent": 1,
+      "superior": 9
+    },
+    "deep_problem_solving_ratio": 1.0,
+    "domain_counts": {
+      "answer-finalization": 1,
+      "context-management": 1,
+      "memory-grounding": 1,
+      "model-routing": 1,
+      "multi-pass-synthesis": 1,
+      "objective-loop-momentum": 1,
+      "problem-framing": 1,
+      "repo-research": 1,
+      "tool-use-recovery": 1,
+      "web-research": 1
+    },
+    "equal_or_better_cases": 10,
+    "equivalent_cases": 1,
+    "gaps": 0,
+    "intentional_divergence_cases": 0,
+    "min_superiority_cases": 8,
+    "min_total_cases": 10,
+    "missing_rust_test_refs": 0,
+    "missing_source_artifacts": 0,
+    "regressions": 0,
+    "superior_cases": 9,
+    "total_cases": 10,
+    "unverified_cases": 0
+  }
+}
