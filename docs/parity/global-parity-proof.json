@@ -1,4 +1,48 @@
 {
+  "behavioral_diff_summary": {
+    "gate": {
+      "failures": 0,
+      "max_gaps": 0,
+      "max_missing_rust_test_refs": 0,
+      "max_regressions": 0,
+      "max_unverified_cases": 0,
+      "min_similarity_ratio": 1.0,
+      "min_superiority_cases": 5,
+      "pass": true
+    },
+    "summary": {
+      "behavioral_similarity_ratio": 1.0,
+      "classification_counts": {
+        "equivalent": 4,
+        "superior": 8
+      },
+      "domain_counts": {
+        "agent-loop-and-runtime": 1,
+        "cli-command-surface": 1,
+        "cron-and-scheduler-runtime": 1,
+        "gateway-platform-behavior": 1,
+        "memory-plugin-integration": 1,
+        "model-provider-auth": 1,
+        "model-provider-runtime": 1,
+        "protocol-and-fault-tolerance": 1,
+        "repo-research-planning": 1,
+        "rust-only-runtime": 1,
+        "skills-management-contract": 1,
+        "tool-runtime-behavior": 1
+      },
+      "equal_or_better_cases": 12,
+      "equivalent_cases": 4,
+      "gaps": 0,
+      "intentional_divergence_cases": 0,
+      "min_superiority_cases": 5,
+      "missing_rust_test_refs": 0,
+      "missing_source_artifacts": 0,
+      "regressions": 0,
+      "superior_cases": 8,
+      "total_cases": 12,
+      "unverified_cases": 0
+    }
+  },
   "ci_gate": {
     "checks": [
       {
@@ -76,6 +120,42 @@
         "status": "pass"
       },
       {
+        "actual": 1.0,
+        "limit": 1.0,
+        "metric": "min_behavioral_similarity_ratio",
+        "status": "pass"
+      },
+      {
+        "actual": 8.0,
+        "limit": 5,
+        "metric": "min_behavioral_superiority_cases",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_behavioral_regressions",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_behavioral_gaps",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_behavioral_unverified_cases",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_behavioral_missing_rust_refs",
+        "status": "pass"
+      },
+      {
         "actual": 0.0,
         "limit": 100,
         "metric": "max_queue_pending_commits",
@@ -95,7 +175,7 @@
       }
     ]
   },
-  "generated_at_utc": "2026-06-16T23:55:56.941688+00:00",
+  "generated_at_utc": "2026-06-21T01:37:46.849538+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -105,9 +185,14 @@
     "GPAR-06": true,
     "GPAR-07": true,
     "GPAR-08": true,
-    "GPAR-09": true
+    "GPAR-09": true,
+    "GPAR-10": true
   },
   "metrics": {
+    "max_behavioral_gaps": 0.0,
+    "max_behavioral_missing_rust_refs": 0.0,
+    "max_behavioral_regressions": 0.0,
+    "max_behavioral_unverified_cases": 0.0,
     "max_commits_behind": 5880.0,
     "max_divergence_review_overdue": 0.0,
     "max_files_only_upstream": 2309.0,
@@ -118,6 +203,8 @@
     "max_test_coverage_missing_rust_refs": 0.0,
     "max_unowned_divergences": 0.0,
     "max_upstream_patch_missing": 5657.0,
+    "min_behavioral_similarity_ratio": 1.0,
+    "min_behavioral_superiority_cases": 8.0,
     "min_sota_harness_domain_coverage_ratio": 1.0,
     "min_test_coverage_tracked_behavior_ratio": 1.0,
     "min_test_intent_mapping_ratio": 1.0
@@ -204,6 +291,42 @@
         "status": "pass"
       },
       {
+        "actual": 1.0,
+        "limit": 1.0,
+        "metric": "min_behavioral_similarity_ratio",
+        "status": "pass"
+      },
+      {
+        "actual": 8.0,
+        "limit": 5,
+        "metric": "min_behavioral_superiority_cases",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_behavioral_regressions",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_behavioral_gaps",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_behavioral_unverified_cases",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_behavioral_missing_rust_refs",
+        "status": "pass"
+      },
+      {
         "actual": 0.0,
         "limit": 0,
         "metric": "max_queue_pending_commits",
@@ -219,7 +342,8 @@
           "GPAR-06": true,
           "GPAR-07": true,
           "GPAR-08": true,
-          "GPAR-09": true
+          "GPAR-09": true,
+          "GPAR-10": true
         },
         "limit": "all true",
         "metric": "required_workstreams_complete",
@@ -249,6 +373,7 @@
   },
   "sources": {
     "adapter_matrix": "docs/parity/adapter-feature-matrix.json",
+    "behavioral_diff": "docs/parity/behavioral-similarity-diff.json",
     "divergence_validation": "docs/parity/divergence-validation.json",
     "intent_mapping": "docs/parity/test-intent-mapping.json",
     "parity_matrix": "docs/parity/parity-matrix.json",
@@ -275,8 +400,8 @@
       "missing_rust_test_refs": 0,
       "queue_pending": 0,
       "queue_total": 6132,
-      "rust_test_files": 308,
-      "rust_test_functions": 3535,
+      "rust_test_files": 310,
+      "rust_test_functions": 3583,
       "test_intent_mapping_ratio": 1.0,
       "test_intents_mapped": 10,
       "test_intents_total": 10,

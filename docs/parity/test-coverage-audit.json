@@ -90,7 +90,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-16T23:55:56.850514+00:00",
+  "generated_at_utc": "2026-06-21T01:32:08.383148+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -417,28 +417,32 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 7,
+      "direct_test_evidence_count": 9,
       "direct_test_evidence_sample": [
         "crates/hermes-cli/src/commands.rs",
         "crates/hermes-cron/src/backend.rs",
         "crates/hermes-cron/src/blueprints.rs",
+        "crates/hermes-cron/src/chronos.rs",
         "crates/hermes-cron/src/job.rs",
         "crates/hermes-cron/src/persistence.rs",
         "crates/hermes-cron/src/runner.rs",
-        "crates/hermes-cron/src/scheduler.rs"
+        "crates/hermes-cron/src/scheduler.rs",
+        "crates/hermes-cron/src/suggestions.rs"
       ],
-      "evidence_count": 10,
+      "evidence_count": 12,
       "evidence_sample": [
         "crates/hermes-cli/src/commands.rs",
         "crates/hermes-cron/src/backend.rs",
         "crates/hermes-cron/src/blueprints.rs",
+        "crates/hermes-cron/src/chronos.rs",
         "crates/hermes-cron/src/cli_support.rs",
         "crates/hermes-cron/src/completion.rs",
         "crates/hermes-cron/src/job.rs",
         "crates/hermes-cron/src/lib.rs",
         "crates/hermes-cron/src/persistence.rs",
         "crates/hermes-cron/src/runner.rs",
-        "crates/hermes-cron/src/scheduler.rs"
+        "crates/hermes-cron/src/scheduler.rs",
+        "crates/hermes-cron/src/suggestions.rs"
       ],
       "id": "cron-and-scheduler-runtime",
       "mapped": true,
@@ -564,8 +568,8 @@
     "missing_rust_test_refs": 0,
     "queue_pending": 0,
     "queue_total": 6132,
-    "rust_test_files": 308,
-    "rust_test_functions": 3535,
+    "rust_test_files": 310,
+    "rust_test_functions": 3583,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,

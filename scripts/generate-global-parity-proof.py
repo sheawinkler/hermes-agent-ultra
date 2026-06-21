@@ -96,6 +96,15 @@ def apply_ci_special_rules(
             sota_ratio = float(
                 tree_rule_cfg.get("requires_min_sota_harness_domain_coverage_ratio", 1.0)
             )
+            behavioral_ratio = float(
+                tree_rule_cfg.get("requires_min_behavioral_similarity_ratio", 1.0)
+            )
+            behavioral_regression_limit = float(
+                tree_rule_cfg.get("requires_max_behavioral_regressions", 0)
+            )
+            behavioral_unverified_limit = float(
+                tree_rule_cfg.get("requires_max_behavioral_unverified_cases", 0)
+            )
             if (
                 failed_metrics
                 and failed_metrics.issubset(allowed_metrics)
@@ -105,6 +114,11 @@ def apply_ci_special_rules(
                 and metrics.get("max_divergence_review_overdue", 0.0) <= review_limit
                 and metrics.get("min_test_coverage_tracked_behavior_ratio", 0.0) >= coverage_ratio
                 and metrics.get("min_sota_harness_domain_coverage_ratio", 0.0) >= sota_ratio
+                and metrics.get("min_behavioral_similarity_ratio", 0.0) >= behavioral_ratio
+                and metrics.get("max_behavioral_regressions", 0.0)
+                <= behavioral_regression_limit
+                and metrics.get("max_behavioral_unverified_cases", 0.0)
+                <= behavioral_unverified_limit
             ):
                 for check in failed_checks:
                     check["status"] = "warn"
@@ -256,6 +270,12 @@ def main() -> int:
         help="SOTA harness matrix JSON file",
     )
     parser.add_argument(
+        "--behavioral-diff",
+        default="docs/parity/behavioral-similarity-diff.json",
+        type=Path,
+        help="Behavioral similarity diff JSON file",
+    )
+    parser.add_argument(
         "--out-json",
         default="docs/parity/global-parity-proof.json",
         type=Path,
@@ -282,6 +302,7 @@ def main() -> int:
     patch_queue = load_json((repo_root / args.patch_queue).resolve())
     test_coverage = load_json((repo_root / args.test_coverage_audit).resolve())
     sota_harness = load_json((repo_root / args.sota_harness_matrix).resolve())
+    behavioral_diff = load_json((repo_root / args.behavioral_diff).resolve())
 
     parity_summary = parity.get("summary", {})
     intent_summary = intents.get("summary", {})
@@ -292,6 +313,8 @@ def main() -> int:
     test_coverage_gate = test_coverage.get("audit_gate", {})
     sota_harness_summary = sota_harness.get("summary", {})
     sota_harness_gate = sota_harness.get("gate", {})
+    behavioral_summary = behavioral_diff.get("summary", {})
+    behavioral_gate = behavioral_diff.get("gate", {})
     ws_states = ws.get("states", {})
     shared_diff_items = {str(i.get("path", "")) for i in shared_diff.get("items", [])}
     parity_shared = {str(i.get("path", "")) for i in parity.get("top_shared_different", [])}
@@ -309,6 +332,7 @@ def main() -> int:
         and int(divergence_summary.get("unowned", 0)) == 0
         and int(divergence_summary.get("review_overdue", 0)) == 0,
         "GPAR-09": bool(test_coverage_gate.get("pass", False)),
+        "GPAR-10": bool(behavioral_gate.get("pass", False)),
     }
 
     metrics = {
@@ -335,6 +359,24 @@ def main() -> int:
         ),
         "max_sota_harness_missing_rust_refs": float(
             sota_harness_gate.get("missing_rust_test_refs", 0)
+        ),
+        "min_behavioral_similarity_ratio": float(
+            behavioral_summary.get("behavioral_similarity_ratio", 0.0)
+        ),
+        "min_behavioral_superiority_cases": float(
+            behavioral_summary.get("superior_cases", 0)
+        ),
+        "max_behavioral_regressions": float(
+            behavioral_summary.get("regressions", 0)
+        ),
+        "max_behavioral_gaps": float(
+            behavioral_summary.get("gaps", 0)
+        ),
+        "max_behavioral_unverified_cases": float(
+            behavioral_summary.get("unverified_cases", 0)
+        ),
+        "max_behavioral_missing_rust_refs": float(
+            behavioral_summary.get("missing_rust_test_refs", 0)
         ),
         "max_queue_pending_commits": float(
             queue_summary.get("by_disposition", {}).get("pending", 0)
@@ -394,6 +436,7 @@ def main() -> int:
             "patch_queue": str(args.patch_queue),
             "test_coverage_audit": str(args.test_coverage_audit),
             "sota_harness_matrix": str(args.sota_harness_matrix),
+            "behavioral_diff": str(args.behavioral_diff),
         },
         "queue_summary": queue_summary,
         "test_coverage_audit_summary": {
@@ -403,6 +446,10 @@ def main() -> int:
         "sota_harness_summary": {
             "summary": sota_harness_summary,
             "gate": sota_harness_gate,
+        },
+        "behavioral_diff_summary": {
+            "summary": behavioral_summary,
+            "gate": behavioral_gate,
         },
     }
 
@@ -469,6 +516,35 @@ def main() -> int:
     md.append(
         "- Direct Rust tests: "
         f"`{sota_harness_summary.get('direct_rust_tests', 0)}`"
+    )
+    md.append("")
+
+    md.append("## Behavioral Similarity Diff")
+    md.append("")
+    md.append(f"- Behavioral gate: **{'PASS' if behavioral_gate.get('pass') else 'FAIL'}**")
+    md.append(
+        "- Similarity ratio: "
+        f"`{behavioral_summary.get('behavioral_similarity_ratio', 0)}`"
+    )
+    md.append(
+        "- Superior cases: "
+        f"`{behavioral_summary.get('superior_cases', 0)}`"
+    )
+    md.append(
+        "- Regressions: "
+        f"`{behavioral_summary.get('regressions', 0)}`"
+    )
+    md.append(
+        "- Gaps: "
+        f"`{behavioral_summary.get('gaps', 0)}`"
+    )
+    md.append(
+        "- Unverified cases: "
+        f"`{behavioral_summary.get('unverified_cases', 0)}`"
+    )
+    md.append(
+        "- Missing Rust test refs: "
+        f"`{behavioral_summary.get('missing_rust_test_refs', 0)}`"
     )
     md.append("")
 

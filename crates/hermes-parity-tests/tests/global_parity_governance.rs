@@ -14,6 +14,23 @@ fn read_json(path: &str) -> Value {
         .unwrap_or_else(|e| panic!("failed parsing {}: {}", full.display(), e))
 }
 
+fn rust_test_exists(file: &str, name: &str) -> bool {
+    let full = repo_root().join(file);
+    let source = std::fs::read_to_string(&full)
+        .unwrap_or_else(|e| panic!("failed reading referenced Rust file {}: {}", file, e));
+    let needle = format!("fn {name}");
+    let Some(index) = source.find(&needle) else {
+        return false;
+    };
+    let line_start = source[..index].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+    source[..line_start]
+        .lines()
+        .rev()
+        .map(str::trim)
+        .take_while(|line| !line.is_empty() && line.starts_with("#["))
+        .any(|line| line == "#[test]" || line.starts_with("#[tokio::test"))
+}
+
 #[test]
 fn test_intent_mapping_ratio_meets_gate() {
     let payload = read_json("docs/parity/test-intent-mapping.json");
@@ -88,6 +105,89 @@ fn test_sota_harness_matrix_gate_passes() {
         "SOTA harness domain coverage ratio below gate: {}",
         ratio
     );
+}
+
+#[test]
+fn test_behavioral_similarity_diff_gate_passes_and_references_real_tests() {
+    let payload = read_json("docs/parity/behavioral-similarity-diff.json");
+    assert_eq!(
+        payload["gate"]["pass"].as_bool(),
+        Some(true),
+        "behavioral similarity diff gate must pass"
+    );
+    assert_eq!(
+        payload["summary"]["behavioral_similarity_ratio"].as_f64(),
+        Some(1.0),
+        "behavioral similarity must be perfect for release"
+    );
+    assert_eq!(
+        payload["summary"]["regressions"].as_u64(),
+        Some(0),
+        "behavioral diff must have zero regressions"
+    );
+    assert_eq!(
+        payload["summary"]["gaps"].as_u64(),
+        Some(0),
+        "behavioral diff must have zero gaps"
+    );
+    assert_eq!(
+        payload["summary"]["unverified_cases"].as_u64(),
+        Some(0),
+        "behavioral diff must have zero unverified cases"
+    );
+    assert_eq!(
+        payload["summary"]["missing_rust_test_refs"].as_u64(),
+        Some(0),
+        "behavioral diff must have zero missing Rust test refs"
+    );
+
+    let superior_cases = payload["summary"]["superior_cases"]
+        .as_u64()
+        .expect("superior_cases should be integer");
+    let required_superior = payload["summary"]["min_superiority_cases"]
+        .as_u64()
+        .expect("min_superiority_cases should be integer");
+    assert!(
+        superior_cases >= required_superior,
+        "behavioral superiority below gate: {} < {}",
+        superior_cases,
+        required_superior
+    );
+
+    let cases = payload["cases"].as_array().expect("cases should be array");
+    assert!(!cases.is_empty(), "behavioral diff must declare cases");
+    for case in cases {
+        let id = case["id"].as_str().expect("case id");
+        let classification = case["classification"]
+            .as_str()
+            .expect("classification should be string");
+        assert!(
+            matches!(
+                classification,
+                "equivalent" | "superior" | "intentional_divergence"
+            ),
+            "case {id} has non-passing classification {classification}"
+        );
+        assert_eq!(
+            case["verified"].as_bool(),
+            Some(true),
+            "case {id} must be verified"
+        );
+        assert!(
+            case["issues"].as_array().expect("issues array").is_empty(),
+            "case {id} must have no validation issues"
+        );
+        let tests = case["rust_tests"].as_array().expect("rust_tests array");
+        assert!(!tests.is_empty(), "case {id} must cite Rust tests");
+        for test in tests {
+            let file = test["file"].as_str().expect("test file");
+            let name = test["name"].as_str().expect("test name");
+            assert!(
+                rust_test_exists(file, name),
+                "case {id} references missing or non-test Rust function {file}::{name}"
+            );
+        }
+    }
 }
 
 #[test]

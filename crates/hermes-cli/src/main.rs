@@ -6499,6 +6499,13 @@ async fn lookup_secret_from_vault(
 }
 
 async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentError> {
+    hydrate_provider_env_from_vault_for_cli_with_options(cli, true).await
+}
+
+async fn hydrate_provider_env_from_vault_for_cli_with_options(
+    cli: &Cli,
+    prefer_nous_runtime_credentials: bool,
+) -> Result<(), AgentError> {
     let path = secret_vault_path_for_cli(cli);
     if !path.exists() {
         return Ok(());
@@ -6506,35 +6513,41 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
     let store = FileTokenStore::new(path).await?;
     let manager = AuthManager::new(store.clone());
 
-    match resolve_nous_runtime_credentials(
-        false,
-        true,
-        NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-        DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-    )
-    .await
-    {
-        Ok(creds) => {
-            std::env::set_var("NOUS_API_KEY", creds.api_key.clone());
-            if !creds.base_url.trim().is_empty() {
-                std::env::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
-            }
-            let expires_at = parse_rfc3339_utc(creds.expires_at.as_deref());
-            let _ = manager
-                .save_credential(OAuthCredential {
-                    provider: "nous".to_string(),
-                    access_token: creds.api_key,
-                    refresh_token: creds.refresh_token,
-                    token_type: creds.token_type,
-                    scope: creds.scope,
-                    expires_at,
-                })
-                .await;
+    if !prefer_nous_runtime_credentials {
+        if let Some((_provider, token)) = lookup_secret_from_vault(&store, "nous").await {
+            std::env::set_var("NOUS_API_KEY", token);
         }
-        Err(err) => {
-            tracing::debug!("Nous runtime credential refresh skipped: {}", err);
-            if let Some((_provider, token)) = lookup_secret_from_vault(&store, "nous").await {
-                std::env::set_var("NOUS_API_KEY", token);
+    } else {
+        match resolve_nous_runtime_credentials(
+            false,
+            true,
+            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+        )
+        .await
+        {
+            Ok(creds) => {
+                std::env::set_var("NOUS_API_KEY", creds.api_key.clone());
+                if !creds.base_url.trim().is_empty() {
+                    std::env::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
+                }
+                let expires_at = parse_rfc3339_utc(creds.expires_at.as_deref());
+                let _ = manager
+                    .save_credential(OAuthCredential {
+                        provider: "nous".to_string(),
+                        access_token: creds.api_key,
+                        refresh_token: creds.refresh_token,
+                        token_type: creds.token_type,
+                        scope: creds.scope,
+                        expires_at,
+                    })
+                    .await;
+            }
+            Err(err) => {
+                tracing::debug!("Nous runtime credential refresh skipped: {}", err);
+                if let Some((_provider, token)) = lookup_secret_from_vault(&store, "nous").await {
+                    std::env::set_var("NOUS_API_KEY", token);
+                }
             }
         }
     }
@@ -16965,7 +16978,7 @@ mod tests {
         let previous = std::env::var("NOUS_API_KEY").ok();
         std::env::set_var("NOUS_API_KEY", "env-stale-key");
 
-        hydrate_provider_env_from_vault_for_cli(&cli)
+        hydrate_provider_env_from_vault_for_cli_with_options(&cli, false)
             .await
             .expect("hydrate env");
         assert_eq!(

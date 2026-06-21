@@ -22,6 +22,7 @@ remains the generated parity artifacts under `docs/parity/`.
 | Upstream missing queue | Must stay at `pending = 0` before release | `python3 scripts/generate-upstream-patch-queue.py --max-commits 0` |
 | Global parity proof | Must pass release gate locally | `python3 scripts/generate-global-parity-proof.py --check-release` |
 | SOTA harness coverage | Must keep all domains covered | `python3 scripts/generate-sota-harness-hardening.py --check` |
+| Behavioral similarity diff | Must keep outcome similarity at 1.0 with no regressions or unverified cases | `python3 scripts/generate-behavioral-similarity-diff.py --check` |
 | Runtime placeholder discipline | Must stay clean | `scripts/check-runtime-placeholders.sh` |
 | Rust workspace health | Must build and test locally | `cargo build --workspace`, `cargo test --workspace` |
 

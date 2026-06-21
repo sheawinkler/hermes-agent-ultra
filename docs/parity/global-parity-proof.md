@@ -1,6 +1,6 @@
 # Global Parity Proof
 
-Generated: `2026-06-16T23:55:56.941688+00:00`
+Generated: `2026-06-21T01:37:46.849538+00:00`
 
 ## Gate Status
 
@@ -25,6 +25,12 @@ Generated: `2026-06-16T23:55:56.941688+00:00`
 | `min_sota_harness_domain_coverage_ratio` | 1.0 |
 | `max_sota_harness_critical_gaps` | 0.0 |
 | `max_sota_harness_missing_rust_refs` | 0.0 |
+| `min_behavioral_similarity_ratio` | 1.0 |
+| `min_behavioral_superiority_cases` | 8.0 |
+| `max_behavioral_regressions` | 0.0 |
+| `max_behavioral_gaps` | 0.0 |
+| `max_behavioral_unverified_cases` | 0.0 |
+| `max_behavioral_missing_rust_refs` | 0.0 |
 | `max_queue_pending_commits` | 0.0 |
 
 ## GPAR Ticket Completion
@@ -40,6 +46,7 @@ Generated: `2026-06-16T23:55:56.941688+00:00`
 | `GPAR-07` | yes |
 | `GPAR-08` | yes |
 | `GPAR-09` | yes |
+| `GPAR-10` | yes |
 
 ## Test Coverage Audit
 
@@ -55,6 +62,16 @@ Generated: `2026-06-16T23:55:56.941688+00:00`
 - Critical gaps: `0`
 - Missing Rust test refs: `0`
 - Direct Rust tests: `12`
+
+## Behavioral Similarity Diff
+
+- Behavioral gate: **PASS**
+- Similarity ratio: `1.0`
+- Superior cases: `8`
+- Regressions: `0`
+- Gaps: `0`
+- Unverified cases: `0`
+- Missing Rust test refs: `0`
 
 ## Queue Summary
 
