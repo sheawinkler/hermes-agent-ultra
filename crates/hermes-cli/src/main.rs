@@ -7856,7 +7856,11 @@ async fn verify_single_oauth_provider(
 ) -> Result<AuthVerifyResult, AgentError> {
     let provider = normalize_auth_provider(provider);
     let env_present = provider_api_key_from_env(&provider).is_some();
-    let auth_state_present = read_provider_auth_state(&provider)?.is_some();
+    let auth_state_present = if provider == "nous" {
+        read_nous_auth_state()?.is_some()
+    } else {
+        read_provider_auth_state(&provider)?.is_some()
+    };
     let mut stored_credential = token_store.get(&provider).await;
 
     if matches!(provider.as_str(), "openai" | "openai-codex") && stored_credential.is_none() {
@@ -17355,6 +17359,92 @@ mod tests {
             err.contains("HTTP 401 Unauthorized") && err.contains("invalid or blocked"),
             "unexpected error: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn auth_verify_nous_ignores_malformed_global_fallback_state() {
+        let _guard = env_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var("HOME").ok();
+        let prev_hermes_home = std::env::var("HERMES_HOME").ok();
+        let prev_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
+        let prev_nous_file = std::env::var("HERMES_NOUS_OAUTH_FILE").ok();
+        let prev_nous_key = std::env::var("NOUS_API_KEY").ok();
+
+        std::env::set_var("HOME", tmp.path());
+        std::env::remove_var("HERMES_HOME");
+        let primary_store = tmp.path().join("profile-auth.json");
+        std::fs::write(
+            &primary_store,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "version": 1,
+                "providers": {
+                    "openai": { "access_token": "primary-openai" }
+                }
+            }))
+            .expect("serialize primary auth"),
+        )
+        .expect("write primary auth");
+        std::env::set_var(
+            "HERMES_AUTH_FILE",
+            primary_store.to_string_lossy().to_string(),
+        );
+        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
+        std::env::remove_var("NOUS_API_KEY");
+
+        let fallback_store = tmp.path().join(".hermes").join("auth.json");
+        std::fs::create_dir_all(fallback_store.parent().expect("fallback parent"))
+            .expect("mkdir fallback parent");
+        std::fs::write(
+            &fallback_store,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "version": 1,
+                "providers": {
+                    "nous": {
+                        "client_id": DEFAULT_NOUS_CLIENT_ID,
+                        "inference_base_url": DEFAULT_NOUS_INFERENCE_URL,
+                        "last_auth_error": "unauthorized",
+                        "portal_base_url": DEFAULT_NOUS_PORTAL_URL,
+                        "scope": "inference:invoke",
+                        "token_type": "Bearer"
+                    }
+                }
+            }))
+            .expect("serialize fallback auth"),
+        )
+        .expect("write fallback auth");
+
+        let store = FileTokenStore::new(tmp.path().join("tokens.json"))
+            .await
+            .expect("token store");
+        let manager = AuthManager::new(store.clone());
+        let result = verify_single_oauth_provider("nous", &store, &manager)
+            .await
+            .expect("verify nous");
+        assert_eq!(result.outcome, AuthVerifyOutcome::Missing);
+        assert!(!result.credential_present);
+        assert!(!result.oauth_state_present);
+
+        match prev_nous_key {
+            Some(value) => std::env::set_var("NOUS_API_KEY", value),
+            None => std::env::remove_var("NOUS_API_KEY"),
+        }
+        match prev_nous_file {
+            Some(value) => std::env::set_var("HERMES_NOUS_OAUTH_FILE", value),
+            None => std::env::remove_var("HERMES_NOUS_OAUTH_FILE"),
+        }
+        match prev_auth_file {
+            Some(value) => std::env::set_var("HERMES_AUTH_FILE", value),
+            None => std::env::remove_var("HERMES_AUTH_FILE"),
+        }
+        match prev_hermes_home {
+            Some(value) => std::env::set_var("HERMES_HOME", value),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+        match prev_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
     }
 
     #[tokio::test]
