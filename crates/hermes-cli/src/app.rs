@@ -3448,9 +3448,6 @@ impl App {
                         "error handling + remediation",
                         60,
                     );
-                    if let Some(handle) = &self.stream_handle {
-                        handle.send_done();
-                    }
                     if Self::is_provider_auth_or_session_error(&e) {
                         if auth_refresh_attempts < auth_refresh_retry_limit {
                             if self.force_auth_refresh_after_error().await {
@@ -3513,6 +3510,9 @@ impl App {
                             remediation_attempted = true;
                             continue;
                         }
+                    }
+                    if let Some(handle) = &self.stream_handle {
+                        handle.send_done();
                     }
                     return Err(e);
                 }
