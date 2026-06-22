@@ -304,11 +304,13 @@
     {
       "id": "context-and-memory-safety",
       "domain": "context-management",
-      "classification": "equivalent",
+      "classification": "superior",
       "upstream_behavior": "The agent preserves useful context while preventing context bloat, prompt-injection drift, and memory leakage into the final user-visible response.",
-      "ultra_behavior": "Ultra loads workspace context, scans for injection, preserves system messages during compression, and scrubs memory context blocks from streamed callbacks/final messages.",
-      "why": "This protects the substrate needed for multi-step problem solving.",
+      "ultra_behavior": "Ultra loads workspace context, scans for injection, preserves system messages during compression, scrubs memory context blocks from streamed callbacks/final messages, and applies a Rust-native intelligence kernel with context-lane tainting, evidence verdicts, adaptive tool planning, ContextLattice retry/checkpoint policy, behavioral eval scoring, and finalization blockers for unverified claims or leaks.",
+      "why": "This upgrades the context substrate from passive preservation to an auditable safety and problem-solving contract with provenance, freshness, allowed-use policy, and final-answer gates.",
       "source_artifacts": [
+        "crates/hermes-intelligence/src/future_kernel.rs",
+        "crates/hermes-cli/src/app.rs",
         "crates/hermes-agent/src/context.rs",
         "crates/hermes-agent/src/context_files.rs",
         "crates/hermes-agent/src/agent_loop.rs"
@@ -333,6 +335,46 @@
         {
           "file": "crates/hermes-agent/src/agent_loop.rs",
           "name": "stream_memory_context_blocks_are_scrubbed_from_callbacks_and_final_message"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "name": "context_firewall_blocks_secret_and_untrusted_instruction_lanes"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "name": "context_firewall_marks_stale_memory_as_unproven"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "name": "evidence_compiler_marks_supported_stale_and_unproven_claims"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "name": "problem_solving_kernel_builds_nondeferrable_loop"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "name": "adaptive_tool_planner_ranks_parallel_safe_high_value_tools"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "name": "contextlattice_memory_cycle_escalates_zero_hit_retrieval"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "name": "behavioral_eval_arena_scores_missing_expected_behaviors"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "name": "self_audit_finalizer_blocks_unverified_claims_and_memory_leaks"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/future_kernel.rs",
+          "name": "future_grade_guidance_mentions_all_runtime_components"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_inference_messages_injects_runtime_reformulation"
         }
       ]
     }

@@ -1,6 +1,6 @@
 # Global Parity Proof
 
-Generated: `2026-06-21T09:42:53.788558+00:00`
+Generated: `2026-06-22T09:01:40.885073+00:00`
 
 ## Gate Status
 
@@ -32,7 +32,7 @@ Generated: `2026-06-21T09:42:53.788558+00:00`
 | `max_behavioral_unverified_cases` | 0.0 |
 | `max_behavioral_missing_rust_refs` | 0.0 |
 | `min_deep_problem_solving_ratio` | 1.0 |
-| `min_deep_problem_solving_superiority_cases` | 9.0 |
+| `min_deep_problem_solving_superiority_cases` | 10.0 |
 | `min_deep_problem_solving_total_cases` | 10.0 |
 | `max_deep_problem_solving_regressions` | 0.0 |
 | `max_deep_problem_solving_gaps` | 0.0 |
@@ -85,7 +85,7 @@ Generated: `2026-06-21T09:42:53.788558+00:00`
 
 - Deep problem-solving gate: **PASS**
 - Deep problem-solving ratio: `1.0`
-- Superior cases: `9`
+- Superior cases: `10`
 - Regressions: `0`
 - Gaps: `0`
 - Unverified cases: `0`

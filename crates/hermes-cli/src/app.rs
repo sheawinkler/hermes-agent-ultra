@@ -37,6 +37,7 @@ use hermes_config::{
 use hermes_core::ToolSchema;
 use hermes_core::{AgentError, LlmProvider, UsageStats};
 use hermes_cron::{CronRunner, CronScheduler, FileJobPersistence};
+use hermes_intelligence::future_grade_problem_solving_guidance;
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
@@ -1461,6 +1462,8 @@ impl App {
              - continue: state next action with no soft deferral\n",
         );
         out.push_str(contradiction_line);
+        out.push('\n');
+        out.push_str(future_grade_problem_solving_guidance());
         out.push_str("\nuser-request(routing-preview):\n");
         let preview_cap = Self::runtime_reformulation_prompt_preview_chars();
         let prompt_preview = Self::preview_for_status(prompt, preview_cap);
@@ -6411,6 +6414,12 @@ mod tests {
         assert!(injected_text.contains("objective behavior directives:"));
         assert!(injected_text.contains("objective success criteria:"));
         assert!(injected_text.contains("objective loop protocol:"));
+        assert!(injected_text.contains("Hermes intelligence kernel:"));
+        assert!(injected_text.contains("context firewall:"));
+        assert!(injected_text.contains("evidence compiler:"));
+        assert!(injected_text.contains("adaptive tool planner:"));
+        assert!(injected_text.contains("ContextLattice memory cycle:"));
+        assert!(injected_text.contains("self-audit finalizer:"));
         assert!(injected_text.contains("user-request(routing-preview):"));
         assert!(
             injected_text.contains("full user request remains available as the next user message")

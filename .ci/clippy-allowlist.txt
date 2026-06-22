@@ -1,3 +1,4 @@
+hermes-agent-ultra|clippy::await_holding_lock|crates/hermes-cli/src/main.rs
 hermes-agent-ultra|clippy::collapsible_if|crates/hermes-cli/src/main.rs
 hermes-agent-ultra|clippy::field_reassign_with_default|crates/hermes-cli/src/main.rs
 hermes-agent-ultra|clippy::manual_clamp|crates/hermes-cli/src/main.rs
