@@ -1,6 +1,6 @@
 # Behavioral Similarity Diff
 
-Generated: `2026-06-21T01:37:43.611039+00:00`
+Generated: `2026-06-22T21:44:42.099700+00:00`
 
 ## Gate
 
@@ -16,10 +16,10 @@ Generated: `2026-06-21T01:37:43.611039+00:00`
 
 | Metric | Value |
 | --- | ---: |
-| `total_cases` | 12 |
-| `equal_or_better_cases` | 12 |
+| `total_cases` | 13 |
+| `equal_or_better_cases` | 13 |
 | `superior_cases` | 8 |
-| `equivalent_cases` | 4 |
+| `equivalent_cases` | 5 |
 | `intentional_divergence_cases` | 0 |
 | `regressions` | 0 |
 | `gaps` | 0 |
@@ -32,7 +32,7 @@ Generated: `2026-06-21T01:37:43.611039+00:00`
 
 | Classification | Count |
 | --- | ---: |
-| `equivalent` | 4 |
+| `equivalent` | 5 |
 | `superior` | 8 |
 
 ## Domain Counts
@@ -44,7 +44,7 @@ Generated: `2026-06-21T01:37:43.611039+00:00`
 | `cron-and-scheduler-runtime` | 1 |
 | `gateway-platform-behavior` | 1 |
 | `memory-plugin-integration` | 1 |
-| `model-provider-auth` | 1 |
+| `model-provider-auth` | 2 |
 | `model-provider-runtime` | 1 |
 | `protocol-and-fault-tolerance` | 1 |
 | `repo-research-planning` | 1 |
@@ -62,6 +62,7 @@ Generated: `2026-06-21T01:37:43.611039+00:00`
 | `repo-research-planning-contract` | `repo-research-planning` | `superior` | 1.0 |
 | `source-synthesis-quorum` | `agent-loop-and-runtime` | `superior` | 1.0 |
 | `provider-auth-repair-and-model-routing` | `model-provider-auth` | `equivalent` | 1.0 |
+| `openai-pro-oauth-responses-backend` | `model-provider-auth` | `equivalent` | 1.0 |
 | `local-openai-compatible-backends` | `model-provider-runtime` | `superior` | 1.0 |
 | `gateway-platform-authorization` | `gateway-platform-behavior` | `equivalent` | 1.0 |
 | `telegram-cron-topic-delivery` | `cron-and-scheduler-runtime` | `superior` | 1.0 |

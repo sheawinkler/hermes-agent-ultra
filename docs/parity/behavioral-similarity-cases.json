@@ -168,6 +168,39 @@
       ]
     },
     {
+      "id": "openai-pro-oauth-responses-backend",
+      "domain": "model-provider-auth",
+      "classification": "equivalent",
+      "upstream_behavior": "OpenAI/Codex OAuth sessions route ChatGPT account tokens through the Codex Responses backend instead of the public OpenAI chat-completions API shape.",
+      "ultra_behavior": "Rust provider construction detects ChatGPT OAuth JWTs, uses the Codex Responses path for OpenAI gpt-5.5 selections, imports OpenAI OAuth as chatgpt auth mode, and builds the required Responses contract.",
+      "why": "This prevents broad provider-auth parity from hiding a backend-contract gap that upstream already handles.",
+      "source_artifacts": [
+        "docs/parity/upstream-provider-auth-snapshot.json",
+        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-cli/src/auth.rs",
+        "crates/hermes-agent/src/api_bridge.rs",
+        "crates/hermes-agent/src/smart_model_routing.rs"
+      ],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "build_provider_routes_chatgpt_openai_oauth_to_responses_backend"
+        },
+        {
+          "file": "crates/hermes-cli/src/auth.rs",
+          "name": "discover_existing_openai_oauth_reads_env_path"
+        },
+        {
+          "file": "crates/hermes-agent/src/api_bridge.rs",
+          "name": "openai_pro_body_uses_chatgpt_codex_contract"
+        },
+        {
+          "file": "crates/hermes-agent/src/smart_model_routing.rs",
+          "name": "detects_codex_api_mode_from_exact_openai_and_xai_hosts"
+        }
+      ]
+    },
+    {
       "id": "local-openai-compatible-backends",
       "domain": "model-provider-runtime",
       "classification": "superior",
