@@ -19,6 +19,8 @@ use std::sync::Arc;
 use regex::Regex;
 use serde_json::Value;
 
+use hermes_intelligence::redact_sensitive_text;
+
 /// Trait for memory providers that can be registered with the MemoryManager.
 ///
 /// This is a higher-level orchestration trait (distinct from `hermes_core::MemoryProvider`
@@ -145,6 +147,23 @@ pub fn sanitize_context(text: &str) -> String {
     let mut scrubber = StreamingContextScrubber::new();
     let stripped = scrubber.feed(text) + &scrubber.flush();
     FENCE_TAG_RE.replace_all(&stripped, "").to_string()
+}
+
+fn redact_memory_text(text: &str) -> String {
+    redact_sensitive_text(text)
+}
+
+fn redact_memory_value(value: &Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(redact_memory_text(text)),
+        Value::Array(items) => Value::Array(items.iter().map(redact_memory_value).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| (key.clone(), redact_memory_value(value)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 /// Stateful scrubber for streamed assistant deltas that may contain
@@ -276,7 +295,7 @@ pub fn build_memory_context_block(raw_context: &str) -> String {
     if FENCE_TAG_RE.is_match(trimmed) {
         tracing::warn!("Memory provider returned pre-wrapped memory-context; stripping wrapper");
     }
-    let clean = sanitize_context(trimmed);
+    let clean = redact_memory_text(&sanitize_context(trimmed));
     format!(
         "<memory-context>\n\
          [System note: The following is recalled memory context, \
@@ -390,11 +409,11 @@ impl MemoryManager {
         let Some(clean_query) = extract_user_instruction_from_skill_message(query) else {
             return String::new();
         };
-        let query = clean_query.as_ref();
+        let query = redact_memory_text(clean_query.as_ref());
 
         let mut candidates: Vec<FusedMemoryCandidate> = Vec::new();
         for provider in &self.providers {
-            let result = provider.prefetch(query, session_id);
+            let result = provider.prefetch(&query, session_id);
             if result.trim().is_empty() {
                 continue;
             }
@@ -405,7 +424,7 @@ impl MemoryManager {
         }
 
         if memory_graph_depth() > 1 {
-            let mut graph = graph_enrich_candidates(&candidates, query, memory_graph_depth());
+            let mut graph = graph_enrich_candidates(&candidates, &query, memory_graph_depth());
             candidates.append(&mut graph);
         }
 
@@ -414,7 +433,7 @@ impl MemoryManager {
         }
 
         let parts = if memory_fusion_enabled() {
-            fuse_memory_candidates(candidates, query)
+            fuse_memory_candidates(candidates, &query)
         } else {
             candidates
                 .into_iter()
@@ -431,10 +450,10 @@ impl MemoryManager {
         let Some(clean_query) = extract_user_instruction_from_skill_message(query) else {
             return;
         };
-        let query = clean_query.as_ref();
+        let query = redact_memory_text(clean_query.as_ref());
 
         for provider in &self.providers {
-            provider.queue_prefetch(query, session_id);
+            provider.queue_prefetch(&query, session_id);
         }
     }
 
@@ -446,10 +465,11 @@ impl MemoryManager {
         else {
             return;
         };
-        let user_content = clean_user_content.as_ref();
+        let user_content = redact_memory_text(clean_user_content.as_ref());
+        let assistant_content = redact_memory_text(assistant_content);
 
         for provider in &self.providers {
-            provider.sync_turn(user_content, assistant_content, session_id);
+            provider.sync_turn(&user_content, &assistant_content, session_id);
         }
     }
 
@@ -484,7 +504,10 @@ impl MemoryManager {
     /// Route a tool call to the correct provider.
     pub fn handle_tool_call(&self, tool_name: &str, args: &Value) -> String {
         match self.tool_to_provider.get(tool_name) {
-            Some(provider) => provider.handle_tool_call(tool_name, args),
+            Some(provider) => {
+                let args = redact_memory_value(args);
+                provider.handle_tool_call(tool_name, &args)
+            }
             None => {
                 serde_json::json!({"error": format!("No memory provider handles tool '{}'", tool_name)})
                     .to_string()
@@ -497,15 +520,17 @@ impl MemoryManager {
     /// Notify all providers of a new turn.
     pub fn on_turn_start(&mut self, turn_number: u32, message: &str) {
         self.turns_since_memory_write += 1;
+        let message = redact_memory_text(message);
         for provider in &self.providers {
-            provider.on_turn_start(turn_number, message);
+            provider.on_turn_start(turn_number, &message);
         }
     }
 
     /// Notify all providers of session end.
     pub fn on_session_end(&self, messages: &[Value]) {
+        let messages: Vec<Value> = messages.iter().map(redact_memory_value).collect();
         for provider in &self.providers {
-            provider.on_session_end(messages);
+            provider.on_session_end(&messages);
         }
     }
 
@@ -522,15 +547,16 @@ impl MemoryManager {
 
     /// Notify all providers before context compression.
     pub fn on_pre_compress(&self, messages: &[Value]) -> String {
+        let messages: Vec<Value> = messages.iter().map(redact_memory_value).collect();
         let parts: Vec<String> = self
             .providers
             .iter()
             .filter_map(|p| {
-                let result = p.on_pre_compress(messages);
+                let result = p.on_pre_compress(&messages);
                 if result.trim().is_empty() {
                     None
                 } else {
-                    Some(result)
+                    Some(redact_memory_text(&result))
                 }
             })
             .collect();
@@ -540,11 +566,12 @@ impl MemoryManager {
     /// Notify external providers when the built-in memory tool writes.
     pub fn on_memory_write(&mut self, action: &str, target: &str, content: &str) {
         self.turns_since_memory_write = 0;
+        let content = redact_memory_text(content);
         for provider in &self.providers {
             if provider.name() == "builtin" {
                 continue;
             }
-            provider.on_memory_write(action, target, content);
+            provider.on_memory_write(action, target, &content);
         }
     }
 
@@ -1026,6 +1053,11 @@ mod tests {
         prefetched: Arc<std::sync::Mutex<Vec<String>>>,
         queued: Arc<std::sync::Mutex<Vec<String>>>,
         synced: Arc<std::sync::Mutex<Vec<String>>>,
+        synced_assistant: Arc<std::sync::Mutex<Vec<String>>>,
+        memory_writes: Arc<std::sync::Mutex<Vec<String>>>,
+        tool_args: Arc<std::sync::Mutex<Vec<Value>>>,
+        turn_messages: Arc<std::sync::Mutex<Vec<String>>>,
+        session_messages: Arc<std::sync::Mutex<Vec<Value>>>,
     }
 
     impl RecordingProvider {
@@ -1048,8 +1080,36 @@ mod tests {
             self.queued.lock().unwrap().push(query.to_string());
         }
 
-        fn sync_turn(&self, user_content: &str, _assistant_content: &str, _session_id: &str) {
+        fn sync_turn(&self, user_content: &str, assistant_content: &str, _session_id: &str) {
             self.synced.lock().unwrap().push(user_content.to_string());
+            self.synced_assistant
+                .lock()
+                .unwrap()
+                .push(assistant_content.to_string());
+        }
+
+        fn get_tool_schemas(&self) -> Vec<Value> {
+            vec![serde_json::json!({"name": "record_memory"})]
+        }
+
+        fn handle_tool_call(&self, _tool_name: &str, args: &Value) -> String {
+            self.tool_args.lock().unwrap().push(args.clone());
+            serde_json::json!({"ok": true}).to_string()
+        }
+
+        fn on_turn_start(&self, _turn_number: u32, message: &str) {
+            self.turn_messages.lock().unwrap().push(message.to_string());
+        }
+
+        fn on_session_end(&self, messages: &[Value]) {
+            self.session_messages
+                .lock()
+                .unwrap()
+                .extend(messages.iter().cloned());
+        }
+
+        fn on_memory_write(&self, _action: &str, _target: &str, content: &str) {
+            self.memory_writes.lock().unwrap().push(content.to_string());
         }
     }
 
@@ -1078,6 +1138,15 @@ mod tests {
         "# Skill Creator\n\n",
         "Large skill body, no user instruction."
     );
+    const FAKE_SECRET: &str = "sk-test-secret-token-123456";
+
+    fn assert_fake_secret_redacted(rendered: &str) {
+        assert!(!rendered.contains(FAKE_SECRET));
+        assert!(!rendered.contains("secret-token"));
+        assert!(
+            rendered.contains("...") || rendered.contains("***") || rendered.contains("[REDACTED")
+        );
+    }
 
     #[test]
     fn test_add_builtin_provider() {
@@ -1129,6 +1198,15 @@ mod tests {
     }
 
     #[test]
+    fn test_memory_context_block_redacts_sensitive_recall() {
+        let block =
+            build_memory_context_block(&format!("recalled prompt contained api_key={FAKE_SECRET}"));
+
+        assert!(block.contains("<memory-context>"));
+        assert_fake_secret_redacted(&block);
+    }
+
+    #[test]
     fn test_prefetch_all_empty() {
         let mut mm = MemoryManager::new();
         mm.add_provider(Arc::new(TestProvider::new("builtin")));
@@ -1150,6 +1228,20 @@ mod tests {
             *prefetched.lock().unwrap(),
             vec!["make a skill for release triage".to_string()]
         );
+    }
+
+    #[test]
+    fn test_prefetch_all_redacts_sensitive_query_before_provider_call() {
+        let provider = Arc::new(RecordingProvider::new());
+        let prefetched = provider.prefetched.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        let _ctx = mm.prefetch_all(&format!("look up api_key={FAKE_SECRET}"), "session");
+
+        let prefetched = prefetched.lock().unwrap();
+        assert_eq!(prefetched.len(), 1);
+        assert_fake_secret_redacted(&prefetched[0]);
     }
 
     #[test]
@@ -1181,6 +1273,20 @@ mod tests {
     }
 
     #[test]
+    fn test_queue_prefetch_all_redacts_sensitive_query_before_provider_call() {
+        let provider = Arc::new(RecordingProvider::new());
+        let queued = provider.queued.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        mm.queue_prefetch_all(&format!("queue token={FAKE_SECRET}"), "session");
+
+        let queued = queued.lock().unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_fake_secret_redacted(&queued[0]);
+    }
+
+    #[test]
     fn test_queue_prefetch_all_skips_bare_skill_scaffolding() {
         let provider = Arc::new(RecordingProvider::new());
         let queued = provider.queued.clone();
@@ -1208,6 +1314,28 @@ mod tests {
     }
 
     #[test]
+    fn test_sync_all_redacts_sensitive_turn_content_before_provider_call() {
+        let provider = Arc::new(RecordingProvider::new());
+        let synced = provider.synced.clone();
+        let synced_assistant = provider.synced_assistant.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        mm.sync_all(
+            &format!("user pasted api_key={FAKE_SECRET}"),
+            &format!("assistant echoed bearer {FAKE_SECRET}"),
+            "session",
+        );
+
+        let synced = synced.lock().unwrap();
+        let synced_assistant = synced_assistant.lock().unwrap();
+        assert_eq!(synced.len(), 1);
+        assert_eq!(synced_assistant.len(), 1);
+        assert_fake_secret_redacted(&synced[0]);
+        assert_fake_secret_redacted(&synced_assistant[0]);
+    }
+
+    #[test]
     fn test_sync_all_skips_bare_skill_scaffolding() {
         let provider = Arc::new(RecordingProvider::new());
         let synced = provider.synced.clone();
@@ -1228,6 +1356,55 @@ mod tests {
 
         let result = mm.handle_tool_call("memory", &serde_json::json!({}));
         assert!(result.contains("memory"));
+    }
+
+    #[test]
+    fn test_memory_tool_args_are_redacted_before_provider_call() {
+        let provider = Arc::new(RecordingProvider::new());
+        let tool_args = provider.tool_args.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        let result = mm.handle_tool_call(
+            "record_memory",
+            &serde_json::json!({
+                "query": format!("find token={FAKE_SECRET}"),
+                "nested": {"content": format!("write api_key={FAKE_SECRET}")},
+            }),
+        );
+
+        assert!(result.contains("ok"));
+        let tool_args = tool_args.lock().unwrap();
+        assert_eq!(tool_args.len(), 1);
+        let rendered = tool_args[0].to_string();
+        assert_fake_secret_redacted(&rendered);
+    }
+
+    #[test]
+    fn test_lifecycle_memory_callbacks_redact_sensitive_text_before_provider_call() {
+        let provider = Arc::new(RecordingProvider::new());
+        let turn_messages = provider.turn_messages.clone();
+        let session_messages = provider.session_messages.clone();
+        let memory_writes = provider.memory_writes.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+
+        mm.on_turn_start(1, &format!("turn token={FAKE_SECRET}"));
+        mm.on_session_end(&[serde_json::json!({
+            "role": "user",
+            "content": format!("session api_key={FAKE_SECRET}"),
+        })]);
+        mm.on_memory_write("add", "memory", &format!("remember bearer {FAKE_SECRET}"));
+
+        let turn_messages = turn_messages.lock().unwrap();
+        let session_messages = session_messages.lock().unwrap();
+        let memory_writes = memory_writes.lock().unwrap();
+        assert_eq!(turn_messages.len(), 1);
+        assert_eq!(session_messages.len(), 1);
+        assert_eq!(memory_writes.len(), 1);
+        assert_fake_secret_redacted(&turn_messages[0]);
+        assert_fake_secret_redacted(&session_messages[0].to_string());
+        assert_fake_secret_redacted(&memory_writes[0]);
     }
 
     #[test]
