@@ -1,12 +1,12 @@
 # Deep Problem-Solving Diff
 
-Generated: `2026-06-21T09:42:56.188162+00:00`
+Generated: `2026-06-22T09:01:07.499763+00:00`
 
 ## Gate
 
 - Gate: **PASS**
 - Deep problem-solving ratio: `1.0`
-- Superior cases: `9`
+- Superior cases: `10`
 - Regressions: `0`
 - Gaps: `0`
 - Unverified cases: `0`
@@ -18,8 +18,8 @@ Generated: `2026-06-21T09:42:56.188162+00:00`
 | --- | ---: |
 | `total_cases` | 10 |
 | `equal_or_better_cases` | 10 |
-| `superior_cases` | 9 |
-| `equivalent_cases` | 1 |
+| `superior_cases` | 10 |
+| `equivalent_cases` | 0 |
 | `intentional_divergence_cases` | 0 |
 | `regressions` | 0 |
 | `gaps` | 0 |
@@ -32,8 +32,7 @@ Generated: `2026-06-21T09:42:56.188162+00:00`
 
 | Classification | Count |
 | --- | ---: |
-| `equivalent` | 1 |
-| `superior` | 9 |
+| `superior` | 10 |
 
 ## Domain Counts
 
@@ -63,7 +62,7 @@ Generated: `2026-06-21T09:42:56.188162+00:00`
 | `tool-loop-failure-recovery` | `tool-use-recovery` | `superior` | 1.0 |
 | `smart-routing-and-provider-resilience` | `model-routing` | `superior` | 1.0 |
 | `final-answer-quality-guards` | `answer-finalization` | `superior` | 1.0 |
-| `context-and-memory-safety` | `context-management` | `equivalent` | 1.0 |
+| `context-and-memory-safety` | `context-management` | `superior` | 1.0 |
 
 ## Gate Failures
 

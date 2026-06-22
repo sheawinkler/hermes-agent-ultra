@@ -11,6 +11,7 @@ pub mod context_engine;
 pub mod credential_pool;
 pub mod display;
 pub mod error_classifier;
+pub mod future_kernel;
 pub mod insights;
 pub mod model_metadata;
 pub mod models_dev;
@@ -25,6 +26,18 @@ pub mod usage;
 pub mod usage_pricing;
 
 pub use error_classifier::{ErrorCategory, ErrorClassifier, RetryStrategy};
+pub use future_kernel::{
+    future_grade_problem_solving_guidance, plan_contextlattice_memory_cycle, AdaptiveToolPlanner,
+    AuditSeverity, BehavioralEvalArena, BehavioralEvalCase, BehavioralEvalVerdict,
+    BlockedContextItem, Claim, ClaimVerdict, ClaimVerdictKind, CompiledContextItem,
+    ContextBlockReason, ContextDecisionKind, ContextFirewall, ContextFirewallConfig,
+    ContextFirewallReport, ContextItem, ContextLane, ContextLatticeCyclePlan,
+    ContextLatticeMemoryRequest, ContextLatticeRetrievalStats, ContextSource, ContextUse, Evidence,
+    EvidenceCompiler, EvidenceRelation, EvidenceReport, FinalizerFinding, FinalizerInput,
+    FinalizerReport, ObservedBehavior, ProblemSolvingKernel, ProblemSolvingPlan,
+    ProblemSolvingRequest, ProblemStep, ProblemStepKind, SelfAuditFinalizer, ToolBatchPlan,
+    ToolCandidate, ToolPlanEntry, TrustLevel,
+};
 pub use insights::Insights;
 pub use prompt::PromptBuilder;
 pub use redact::{redact_sensitive_text, RedactionPattern, Redactor};

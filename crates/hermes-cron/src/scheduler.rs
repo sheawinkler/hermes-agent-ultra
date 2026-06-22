@@ -73,6 +73,14 @@ struct ScheduledCronRun {
     runnable_job: CronJob,
 }
 
+struct ScheduledJobFinishContext {
+    jobs: Arc<Mutex<HashMap<String, CronJob>>>,
+    persistence: Arc<dyn JobPersistence>,
+    completion_tx: Option<broadcast::Sender<CronCompletionEvent>>,
+    runner: Arc<dyn CronJobExecutor>,
+    managed_provider: Option<Arc<dyn ManagedCronProvider>>,
+}
+
 fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
@@ -333,11 +341,7 @@ impl CronScheduler {
     }
 
     async fn finish_scheduled_job(
-        jobs: Arc<Mutex<HashMap<String, CronJob>>>,
-        persistence: Arc<dyn JobPersistence>,
-        completion_tx: Option<broadcast::Sender<CronCompletionEvent>>,
-        runner: Arc<dyn CronJobExecutor>,
-        managed_provider: Option<Arc<dyn ManagedCronProvider>>,
+        ctx: ScheduledJobFinishContext,
         mut job: CronJob,
         scheduled_at: chrono::DateTime<Utc>,
         run_result: Result<AgentResult, CronError>,
@@ -349,7 +353,7 @@ impl CronScheduler {
                     job.id,
                     result.total_turns
                 );
-                Self::emit_completion(&completion_tx, &job, "schedule", Ok(&result));
+                Self::emit_completion(&ctx.completion_tx, &job, "schedule", Ok(&result));
                 job.mark_executed(scheduled_at);
                 job.last_output = latest_assistant_output(&result)
                     .map(|s| truncate_chars(&s, MAX_STORED_OUTPUT_CHARS));
@@ -357,7 +361,9 @@ impl CronScheduler {
             Err(e) => {
                 tracing::error!("Cron job '{}' failed: {}", job.id, e);
                 if let Some(ref deliver) = job.deliver {
-                    if let Err(deliver_err) = runner.deliver_error(&e.to_string(), deliver).await {
+                    if let Err(deliver_err) =
+                        ctx.runner.deliver_error(&e.to_string(), deliver).await
+                    {
                         tracing::warn!(
                             "Cron job '{}' failed to deliver error alert: {}",
                             job.id,
@@ -365,22 +371,25 @@ impl CronScheduler {
                         );
                     }
                 }
-                Self::emit_completion(&completion_tx, &job, "schedule", Err(e.to_string()));
+                Self::emit_completion(&ctx.completion_tx, &job, "schedule", Err(e.to_string()));
                 job.mark_failed();
             }
         }
 
         {
-            let mut guard = jobs.lock().await;
+            let mut guard = ctx.jobs.lock().await;
             guard.insert(job.id.clone(), job.clone());
         }
 
-        if let Err(e) = persistence.save_job(&job).await {
+        if let Err(e) = ctx.persistence.save_job(&job).await {
             tracing::error!("Failed to persist job '{}': {}", job.id, e);
         }
 
-        if let Some(provider) = managed_provider.filter(|provider| provider.is_available()) {
-            let snapshot = jobs.lock().await.values().cloned().collect::<Vec<_>>();
+        if let Some(provider) = ctx
+            .managed_provider
+            .filter(|provider| provider.is_available())
+        {
+            let snapshot = ctx.jobs.lock().await.values().cloned().collect::<Vec<_>>();
             if let Err(err) = provider.reconcile(snapshot).await {
                 tracing::warn!(
                     provider = provider.name(),
@@ -455,6 +464,13 @@ impl CronScheduler {
             tokio::spawn(async move {
                 let job = due_run.job;
                 let runnable_job = due_run.runnable_job;
+                let finish_ctx = ScheduledJobFinishContext {
+                    jobs,
+                    persistence,
+                    completion_tx,
+                    runner: runner.clone(),
+                    managed_provider,
+                };
                 let run_result = Self::execute_with_optional_sequential_guard(
                     runner.clone(),
                     sequential_run_lock,
@@ -462,17 +478,7 @@ impl CronScheduler {
                 )
                 .await;
 
-                Self::finish_scheduled_job(
-                    jobs,
-                    persistence,
-                    completion_tx,
-                    runner,
-                    managed_provider,
-                    job,
-                    now,
-                    run_result,
-                )
-                .await;
+                Self::finish_scheduled_job(finish_ctx, job, now, run_result).await;
                 Self::clear_running(&running_job_ids, &job_id).await;
             });
         }
@@ -924,6 +930,13 @@ impl CronScheduler {
         let job_id = id.to_string();
 
         tokio::spawn(async move {
+            let finish_ctx = ScheduledJobFinishContext {
+                jobs,
+                persistence,
+                completion_tx,
+                runner: runner.clone(),
+                managed_provider,
+            };
             let run_result = Self::execute_with_optional_sequential_guard(
                 runner.clone(),
                 sequential_run_lock,
@@ -931,17 +944,7 @@ impl CronScheduler {
             )
             .await;
 
-            Self::finish_scheduled_job(
-                jobs,
-                persistence,
-                completion_tx,
-                runner,
-                managed_provider,
-                job,
-                scheduled_at,
-                run_result,
-            )
-            .await;
+            Self::finish_scheduled_job(finish_ctx, job, scheduled_at, run_result).await;
             Self::clear_running(&running_job_ids, &job_id).await;
         });
 
