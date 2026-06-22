@@ -47,7 +47,10 @@ use crate::interrupt::InterruptController;
 use crate::lsp_context::{build_lsp_context_note, LspContextConfig};
 use crate::memory_manager::{MemoryManager, StreamingContextScrubber};
 use crate::plugins::{HookResult, HookType, PluginManager};
-use crate::provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
+use crate::provider::{
+    is_codex_chatgpt_token, AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
+    OPENAI_CODEX_BASE_URL,
+};
 use crate::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
@@ -688,7 +691,7 @@ fn effective_max_turns(config_max_turns: u32) -> Option<u32> {
 }
 
 fn default_model() -> String {
-    "gpt-4o".to_string()
+    "gpt-5.5".to_string()
 }
 
 fn default_max_concurrent_delegates() -> u32 {
@@ -3110,7 +3113,7 @@ impl AgentLoop {
                         .filter(|s| !s.is_empty())
                         .or_else(|| Some("acp://copilot".to_string()))
                 } else if provider == "openai-codex" || provider == "codex" {
-                    Some("https://api.openai.com/v1".to_string())
+                    Some(OPENAI_CODEX_BASE_URL.to_string())
                 } else if provider == "qwen-oauth" {
                     Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string())
                 } else if provider == "google-gemini-cli" {
@@ -3719,7 +3722,13 @@ impl AgentLoop {
             base_url,
         );
         let request_timeout_seconds = self.resolve_runtime_request_timeout_seconds(provider);
-        let mode = api_mode.unwrap_or(&self.config.api_mode);
+        let use_openai_pro_backend = matches!(provider, "openai-codex" | "codex")
+            || (provider == "openai" && is_codex_chatgpt_token(&api_key));
+        let mode = if use_openai_pro_backend {
+            &ApiMode::CodexResponses
+        } else {
+            api_mode.unwrap_or(&self.config.api_mode)
+        };
         let normalized_model_name =
             crate::model_normalize::normalize_model_for_provider(model_name, provider);
         let model_name = normalized_model_name.as_str();
@@ -3727,9 +3736,12 @@ impl AgentLoop {
         let provider_obj: Arc<dyn LlmProvider> = match provider {
             "openai" | "codex" | "openai-codex" => {
                 if matches!(mode, ApiMode::CodexResponses) {
-                    let mut p = CodexProvider::new(&api_key)
-                        .with_model(model_name)
-                        .with_optional_request_timeout_seconds(request_timeout_seconds);
+                    let mut p = if use_openai_pro_backend {
+                        CodexProvider::openai_pro(&api_key, model_name)
+                    } else {
+                        CodexProvider::new(&api_key).with_model(model_name)
+                    }
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
                     if let Some(ref url) = base_url {
                         p = p.with_base_url(url.clone());
                     }

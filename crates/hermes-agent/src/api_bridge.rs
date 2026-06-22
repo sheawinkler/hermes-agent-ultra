@@ -17,7 +17,10 @@ use hermes_core::{
 };
 
 use crate::credential_pool::CredentialPool;
+use crate::provider::{codex_cloudflare_headers, OPENAI_CODEX_BASE_URL};
 use crate::rate_limit::RateLimitTracker;
+
+const CODEX_RESPONSES_BETA_HEADER: &str = "responses=2026-02-06";
 
 fn request_timeout_duration(seconds: Option<f64>) -> Option<Duration> {
     seconds.and_then(|value| {
@@ -46,6 +49,7 @@ pub struct CodexProvider {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    pub headers: Vec<(String, String)>,
     client: Client,
     request_timeout: Option<Duration>,
     pub rate_limiter: Option<Arc<RateLimitTracker>>,
@@ -59,6 +63,7 @@ impl CodexProvider {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: api_key.into(),
             model: "codex-mini-latest".to_string(),
+            headers: Vec::new(),
             client: build_codex_http_client(request_timeout),
             request_timeout,
             rate_limiter: None,
@@ -73,6 +78,11 @@ impl CodexProvider {
 
     pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
+        self
+    }
+
+    pub fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers = headers;
         self
     }
 
@@ -109,6 +119,57 @@ impl CodexProvider {
         }
     }
 
+    fn uses_chatgpt_codex_backend(&self) -> bool {
+        self.base_url
+            .trim()
+            .to_ascii_lowercase()
+            .contains("chatgpt.com/backend-api/codex")
+    }
+
+    fn request_headers(&self, api_key: &str) -> Vec<(String, String)> {
+        let mut headers = self.headers.clone();
+        if self.uses_chatgpt_codex_backend() {
+            for header in codex_cloudflare_headers(Some(api_key)) {
+                if !headers
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(&header.0))
+                {
+                    headers.push(header);
+                }
+            }
+            if !headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("OpenAI-Beta"))
+            {
+                headers.push((
+                    "OpenAI-Beta".to_string(),
+                    CODEX_RESPONSES_BETA_HEADER.to_string(),
+                ));
+            }
+        }
+        headers
+    }
+
+    fn request_builder(&self, url: &str, api_key: &str, body: &Value) -> reqwest::RequestBuilder {
+        let mut request = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json");
+        for (name, value) in self.request_headers(api_key) {
+            request = request.header(name, value);
+        }
+        request.json(body)
+    }
+
+    pub fn openai_pro(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        let api_key = api_key.into();
+        Self::new(api_key.as_str())
+            .with_model(model)
+            .with_base_url(OPENAI_CODEX_BASE_URL)
+            .with_headers(codex_cloudflare_headers(Some(api_key.as_str())))
+    }
+
     async fn check_rate_limit(&self) {
         if let Some(ref tracker) = self.rate_limiter {
             if let Some(wait_duration) = tracker.should_wait() {
@@ -124,7 +185,7 @@ impl CodexProvider {
         }
     }
 
-    /// Convert internal messages to the Responses API input format.
+    /// Convert internal non-system messages to the Responses API input format.
     ///
     /// The Responses API uses a flat `input` array with items of different types:
     /// - `{ "role": "user", "content": "..." }`
@@ -135,12 +196,7 @@ impl CodexProvider {
         let mut input = Vec::new();
         for msg in messages {
             match msg.role {
-                MessageRole::System => {
-                    input.push(serde_json::json!({
-                        "role": "system",
-                        "content": msg.content.as_deref().unwrap_or("")
-                    }));
-                }
+                MessageRole::System => {}
                 MessageRole::User => {
                     input.push(serde_json::json!({
                         "role": "user",
@@ -185,6 +241,30 @@ impl CodexProvider {
         input
     }
 
+    fn convert_instructions(messages: &[Message]) -> Option<String> {
+        let instructions = messages
+            .iter()
+            .filter(|msg| msg.role == MessageRole::System)
+            .filter_map(|msg| msg.content.as_deref())
+            .map(str::trim)
+            .filter(|content| !content.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if instructions.is_empty() {
+            None
+        } else {
+            Some(instructions)
+        }
+    }
+
+    fn default_instructions() -> &'static str {
+        "You are Hermes Agent Ultra. Follow the user's instructions exactly."
+    }
+
+    fn should_forward_extra_body_key(key: &str) -> bool {
+        !matches!(key, "strict_api" | "strict_tool_calls" | "provider_strict")
+    }
+
     /// Convert tool schemas to Responses API function format.
     fn convert_tools(tools: &[ToolSchema]) -> Vec<Value> {
         tools
@@ -198,6 +278,52 @@ impl CodexProvider {
                 })
             })
             .collect()
+    }
+
+    fn build_body(
+        &self,
+        messages: &[Message],
+        tools: &[ToolSchema],
+        max_tokens: Option<u32>,
+        temperature: Option<f64>,
+        effective_model: &str,
+        extra_body: Option<&Value>,
+        stream: bool,
+    ) -> Value {
+        let mut body = serde_json::json!({
+            "model": effective_model,
+            "instructions": Self::convert_instructions(messages)
+                .unwrap_or_else(|| Self::default_instructions().to_string()),
+            "input": Self::convert_input(messages),
+        });
+
+        if stream {
+            body["stream"] = serde_json::json!(true);
+        }
+        if let Some(mt) = max_tokens {
+            body["max_output_tokens"] = serde_json::json!(mt);
+        }
+        if let Some(temp) = temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+        if !tools.is_empty() {
+            body["tools"] = serde_json::json!(Self::convert_tools(tools));
+        }
+        if let Some(eb) = extra_body {
+            if let Value::Object(map) = eb {
+                for (k, v) in map {
+                    if !Self::should_forward_extra_body_key(k) {
+                        continue;
+                    }
+                    body[k] = v.clone();
+                }
+            }
+        }
+        if self.uses_chatgpt_codex_backend() {
+            body["stream"] = serde_json::json!(true);
+            body["store"] = serde_json::json!(false);
+        }
+        body
     }
 
     /// Parse a Responses API response.
@@ -299,6 +425,95 @@ impl CodexProvider {
             finish_reason: stop_reason,
         })
     }
+
+    fn parse_sse_event_block(event_block: &str) -> Option<(String, Value)> {
+        let mut event_type = String::new();
+        let mut event_data = String::new();
+
+        for line in event_block.lines() {
+            let line = line.trim();
+            if let Some(et) = line.strip_prefix("event: ") {
+                event_type = et.trim().to_string();
+            } else if let Some(d) = line.strip_prefix("data: ") {
+                event_data.push_str(d.trim());
+            }
+        }
+
+        if event_data.is_empty() {
+            return None;
+        }
+
+        let json: Value = serde_json::from_str(&event_data).ok()?;
+        Some((event_type, json))
+    }
+
+    async fn collect_streaming_response(
+        &self,
+        resp: reqwest::Response,
+        effective_model: &str,
+    ) -> Result<LlmResponse, AgentError> {
+        let mut byte_stream = resp.bytes_stream();
+        let mut buffer = String::new();
+        let mut content_text = String::new();
+        let mut completed_response: Option<Value> = None;
+
+        while let Some(chunk_result) = byte_stream.next().await {
+            let chunk_bytes =
+                chunk_result.map_err(|e| AgentError::LlmApi(format!("Stream read error: {e}")))?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk_bytes));
+
+            while let Some(event_end) = buffer.find("\n\n") {
+                let event_block = buffer[..event_end].to_string();
+                buffer = buffer[event_end + 2..].to_string();
+                let Some((event_type, json)) = Self::parse_sse_event_block(&event_block) else {
+                    continue;
+                };
+
+                match event_type.as_str() {
+                    "response.output_text.delta" => {
+                        if let Some(delta) = json.get("delta").and_then(|d| d.as_str()) {
+                            content_text.push_str(delta);
+                        }
+                    }
+                    "response.completed" => {
+                        completed_response = json.get("response").cloned();
+                    }
+                    "response.failed" => {
+                        return Err(AgentError::LlmApi(format!("response failed: {json}")));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if let Some(response) = completed_response {
+            if let Ok(parsed) = Self::parse_response(&response) {
+                if parsed.message.content.is_some() || parsed.message.tool_calls.is_some() {
+                    return Ok(parsed);
+                }
+            }
+        }
+
+        Ok(LlmResponse {
+            message: Message {
+                role: MessageRole::Assistant,
+                content: if content_text.is_empty() {
+                    None
+                } else {
+                    Some(content_text)
+                },
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+                reasoning_content: None,
+                anthropic_content_blocks: None,
+                cache_control: None,
+            },
+            usage: None,
+            model: effective_model.to_string(),
+            finish_reason: Some("stop".to_string()),
+        })
+    }
 }
 
 #[async_trait]
@@ -316,36 +531,20 @@ impl LlmProvider for CodexProvider {
         let effective_model = model.unwrap_or(&self.model);
         let api_key = self.effective_api_key();
 
-        let mut body = serde_json::json!({
-            "model": effective_model,
-            "input": Self::convert_input(messages),
-        });
-
-        if let Some(mt) = max_tokens {
-            body["max_output_tokens"] = serde_json::json!(mt);
-        }
-        if let Some(temp) = temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if !tools.is_empty() {
-            body["tools"] = serde_json::json!(Self::convert_tools(tools));
-        }
-        if let Some(eb) = extra_body {
-            if let Value::Object(map) = eb {
-                for (k, v) in map {
-                    body[k] = v.clone();
-                }
-            }
-        }
+        let body = self.build_body(
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            effective_model,
+            extra_body,
+            false,
+        );
 
         let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
 
         let resp = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
+            .request_builder(&url, &api_key, &body)
             .send()
             .await
             .map_err(|e| AgentError::LlmApi(format!("HTTP request failed: {e}")))?;
@@ -361,6 +560,10 @@ impl LlmProvider for CodexProvider {
             return Err(AgentError::LlmApi(format!(
                 "API error {status}: {body_text}"
             )));
+        }
+
+        if self.uses_chatgpt_codex_backend() {
+            return self.collect_streaming_response(resp, effective_model).await;
         }
 
         let resp_json: Value = resp
@@ -391,36 +594,20 @@ impl LlmProvider for CodexProvider {
             let effective_model = model.as_deref().unwrap_or(&provider.model);
             let api_key = provider.effective_api_key();
 
-            let mut body = serde_json::json!({
-                "model": effective_model,
-                "input": CodexProvider::convert_input(&messages),
-                "stream": true,
-            });
-
-            if let Some(mt) = max_tokens {
-                body["max_output_tokens"] = serde_json::json!(mt);
-            }
-            if let Some(temp) = temperature {
-                body["temperature"] = serde_json::json!(temp);
-            }
-            if !tools.is_empty() {
-                body["tools"] = serde_json::json!(CodexProvider::convert_tools(&tools));
-            }
-            if let Some(ref eb) = extra_body {
-                if let Value::Object(map) = eb {
-                    for (k, v) in map {
-                        body[k] = v.clone();
-                    }
-                }
-            }
+            let body = provider.build_body(
+                &messages,
+                &tools,
+                max_tokens,
+                temperature,
+                effective_model,
+                extra_body.as_ref(),
+                true,
+            );
 
             let url = format!("{}/responses", provider.base_url.trim_end_matches('/'));
 
-            let resp = match provider.client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", api_key))
-                .header("Content-Type", "application/json")
-                .json(&body)
+            let resp = match provider
+                .request_builder(&url, &api_key, &body)
                 .send()
                 .await
             {
@@ -458,23 +645,8 @@ impl LlmProvider for CodexProvider {
                     let event_block = buffer[..event_end].to_string();
                     buffer = buffer[event_end + 2..].to_string();
 
-                    let mut event_type = String::new();
-                    let mut event_data = String::new();
-
-                    for line in event_block.lines() {
-                        let line = line.trim();
-                        if let Some(et) = line.strip_prefix("event: ") {
-                            event_type = et.trim().to_string();
-                        } else if let Some(d) = line.strip_prefix("data: ") {
-                            event_data = d.trim().to_string();
-                        }
-                    }
-
-                    if event_data.is_empty() { continue; }
-
-                    let json: Value = match serde_json::from_str(&event_data) {
-                        Ok(v) => v,
-                        Err(_) => continue,
+                    let Some((event_type, json)) = CodexProvider::parse_sse_event_block(&event_block) else {
+                        continue;
                     };
 
                     match event_type.as_str() {
@@ -576,14 +748,17 @@ mod tests {
             Message::assistant("Hi!"),
         ];
         let input = CodexProvider::convert_input(&messages);
-        assert_eq!(input.len(), 3);
-        assert_eq!(input[0]["role"], "system");
-        assert_eq!(input[1]["role"], "user");
-        assert_eq!(input[2]["role"], "assistant");
-        assert_eq!(input[1]["content"][0]["type"], "input_text");
-        assert_eq!(input[1]["content"][0]["text"], "Hello");
-        assert_eq!(input[2]["content"][0]["type"], "output_text");
-        assert_eq!(input[2]["content"][0]["text"], "Hi!");
+        assert_eq!(
+            CodexProvider::convert_instructions(&messages).as_deref(),
+            Some("You are helpful")
+        );
+        assert_eq!(input.len(), 2);
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[1]["role"], "assistant");
+        assert_eq!(input[0]["content"][0]["type"], "input_text");
+        assert_eq!(input[0]["content"][0]["text"], "Hello");
+        assert_eq!(input[1]["content"][0]["type"], "output_text");
+        assert_eq!(input[1]["content"][0]["text"], "Hi!");
     }
 
     #[test]
@@ -615,6 +790,37 @@ mod tests {
         assert_eq!(input[1]["name"], "read_file");
         assert_eq!(input[2]["type"], "function_call_output");
         assert_eq!(input[2]["call_id"], "call_1");
+    }
+
+    #[test]
+    fn openai_pro_body_uses_chatgpt_codex_contract() {
+        let provider = CodexProvider::openai_pro("token", "gpt-5.5");
+        let messages = vec![Message::system("Be exact"), Message::user("Say ok")];
+        let extra_body = serde_json::json!({
+            "strict_api": true,
+            "strict_tool_calls": true,
+            "provider_strict": true,
+            "service_tier": "fast"
+        });
+        let body = provider.build_body(
+            &messages,
+            &[],
+            None,
+            None,
+            "gpt-5.5",
+            Some(&extra_body),
+            false,
+        );
+
+        assert_eq!(body["model"], "gpt-5.5");
+        assert_eq!(body["instructions"], "Be exact");
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["store"], false);
+        assert_eq!(body["service_tier"], "fast");
+        assert!(body.get("strict_api").is_none());
+        assert!(body.get("strict_tool_calls").is_none());
+        assert!(body.get("provider_strict").is_none());
+        assert_eq!(body["input"].as_array().unwrap().len(), 1);
     }
 
     #[test]

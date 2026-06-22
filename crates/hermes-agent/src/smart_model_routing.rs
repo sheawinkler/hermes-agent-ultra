@@ -349,7 +349,10 @@ pub fn detect_api_mode_for_url(base_url: &str) -> Option<ApiMode> {
     if host.contains("bedrock-runtime.") || host.contains("bedrock-runtime-") {
         return Some(ApiMode::BedrockConverse);
     }
-    if host == "api.openai.com" || host == "api.x.ai" {
+    if host == "api.openai.com"
+        || host == "api.x.ai"
+        || (host == "chatgpt.com" && path.ends_with("/backend-api/codex"))
+    {
         return Some(ApiMode::CodexResponses);
     }
     if path == "/anthropic" || path.ends_with("/anthropic") {
@@ -458,6 +461,10 @@ mod tests {
         );
         assert_eq!(
             detect_api_mode_for_url("https://api.x.ai/v1"),
+            Some(ApiMode::CodexResponses)
+        );
+        assert_eq!(
+            detect_api_mode_for_url("https://chatgpt.com/backend-api/codex"),
             Some(ApiMode::CodexResponses)
         );
     }
