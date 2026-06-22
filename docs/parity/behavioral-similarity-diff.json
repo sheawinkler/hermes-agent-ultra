@@ -196,6 +196,44 @@
       "why": "This keeps interactive model/provider behavior aligned with upstream while using Rust config and auth stores."
     },
     {
+      "classification": "equivalent",
+      "domain": "model-provider-auth",
+      "id": "openai-pro-oauth-responses-backend",
+      "issues": [],
+      "missing_rust_test_refs": [],
+      "missing_source_artifacts": [],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "build_provider_routes_chatgpt_openai_oauth_to_responses_backend"
+        },
+        {
+          "file": "crates/hermes-cli/src/auth.rs",
+          "name": "discover_existing_openai_oauth_reads_env_path"
+        },
+        {
+          "file": "crates/hermes-agent/src/api_bridge.rs",
+          "name": "openai_pro_body_uses_chatgpt_codex_contract"
+        },
+        {
+          "file": "crates/hermes-agent/src/smart_model_routing.rs",
+          "name": "detects_codex_api_mode_from_exact_openai_and_xai_hosts"
+        }
+      ],
+      "score": 1.0,
+      "source_artifacts": [
+        "docs/parity/upstream-provider-auth-snapshot.json",
+        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-cli/src/auth.rs",
+        "crates/hermes-agent/src/api_bridge.rs",
+        "crates/hermes-agent/src/smart_model_routing.rs"
+      ],
+      "ultra_behavior": "Rust provider construction detects ChatGPT OAuth JWTs, uses the Codex Responses path for OpenAI gpt-5.5 selections, imports OpenAI OAuth as chatgpt auth mode, and builds the required Responses contract.",
+      "upstream_behavior": "OpenAI/Codex OAuth sessions route ChatGPT account tokens through the Codex Responses backend instead of the public OpenAI chat-completions API shape.",
+      "verified": true,
+      "why": "This prevents broad provider-auth parity from hiding a backend-contract gap that upstream already handles."
+    },
+    {
       "classification": "superior",
       "domain": "model-provider-runtime",
       "id": "local-openai-compatible-backends",
@@ -407,13 +445,13 @@
     "pass": true
   },
   "gate_failures": [],
-  "generated_at_utc": "2026-06-21T01:37:43.611039+00:00",
+  "generated_at_utc": "2026-06-22T21:44:42.099700+00:00",
   "manifest": "docs/parity/behavioral-similarity-cases.json",
   "schema_version": 1,
   "summary": {
     "behavioral_similarity_ratio": 1.0,
     "classification_counts": {
-      "equivalent": 4,
+      "equivalent": 5,
       "superior": 8
     },
     "domain_counts": {
@@ -422,7 +460,7 @@
       "cron-and-scheduler-runtime": 1,
       "gateway-platform-behavior": 1,
       "memory-plugin-integration": 1,
-      "model-provider-auth": 1,
+      "model-provider-auth": 2,
       "model-provider-runtime": 1,
       "protocol-and-fault-tolerance": 1,
       "repo-research-planning": 1,
@@ -430,8 +468,8 @@
       "skills-management-contract": 1,
       "tool-runtime-behavior": 1
     },
-    "equal_or_better_cases": 12,
-    "equivalent_cases": 4,
+    "equal_or_better_cases": 13,
+    "equivalent_cases": 5,
     "gaps": 0,
     "intentional_divergence_cases": 0,
     "min_superiority_cases": 5,
@@ -439,7 +477,7 @@
     "missing_source_artifacts": 0,
     "regressions": 0,
     "superior_cases": 8,
-    "total_cases": 12,
+    "total_cases": 13,
     "unverified_cases": 0
   }
 }

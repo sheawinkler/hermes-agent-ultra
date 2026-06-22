@@ -5215,6 +5215,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn build_provider_routes_chatgpt_openai_oauth_to_responses_backend() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(&[
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "HERMES_OPENAI_CODEX_API_KEY",
+            "OPENAI_BASE_URL",
+            "HERMES_OPENAI_CODEX_BASE_URL",
+        ]);
+        for key in [
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "HERMES_OPENAI_CODEX_API_KEY",
+            "OPENAI_BASE_URL",
+            "HERMES_OPENAI_CODEX_BASE_URL",
+        ] {
+            std::env::remove_var(key);
+        }
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "openai-pro-ok"}]
+                    }
+                ],
+                "model": "gpt-5.5",
+                "status": "completed"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut config = GatewayConfig::default();
+        config.llm_providers.insert(
+            "openai".to_string(),
+            LlmProviderConfig {
+                api_key: Some("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ1c2VyLXh5eiIsImV4cCI6OTk5OTk5OTk5OSwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7ImNoYXRncHRfYWNjb3VudF9pZCI6ImFjY3Qtb3BlbmFpLXByby1wYXJpdHkiLCJjaGF0Z3B0X3BsYW5fdHlwZSI6InBsdXMifX0.sig".to_string()),
+                base_url: Some(server.uri()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let provider = build_provider(&config, "openai:gpt-5.5");
+        let response = provider
+            .chat_completion(
+                &[hermes_core::Message::user("hello")],
+                &[],
+                None,
+                None,
+                Some("gpt-5.5"),
+                None,
+            )
+            .await
+            .expect("OpenAI ChatGPT OAuth provider should use Responses API");
+
+        assert_eq!(response.message.content.as_deref(), Some("openai-pro-ok"));
+        server.verify().await;
+    }
+
+    #[tokio::test]
     async fn runtime_cron_scheduler_uses_configured_provider_not_minimal_fallback() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))

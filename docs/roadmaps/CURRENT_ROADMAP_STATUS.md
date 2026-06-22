@@ -1,6 +1,6 @@
 # Current Roadmap Status
 
-Last reviewed: 2026-06-16
+Last reviewed: 2026-06-22
 
 This file is the human roadmap index. The machine-readable source of truth
 remains the generated parity artifacts under `docs/parity/`.
@@ -26,6 +26,7 @@ remains the generated parity artifacts under `docs/parity/`.
 | Deep problem-solving diff | Must keep deep problem-solving ratio at 1.0 with no regressions, gaps, or unverified cases | `python3 scripts/generate-deep-problem-solving-diff.py --check` |
 | Runtime placeholder discipline | Must stay clean | `scripts/check-runtime-placeholders.sh` |
 | Rust workspace health | Must build and test locally | `cargo build --workspace`, `cargo test --workspace` |
+| Cargo build surface | Track compile invalidation roots before crate splits | `scripts/audit-cargo-build-surface.sh` |
 
 ## Current Implementation Direction
 
@@ -37,6 +38,9 @@ remains the generated parity artifacts under `docs/parity/`.
   `docs/parity/contextlattice-replay-evidence-index.json`.
 - Keep harness growth bounded and reviewable with
   `docs/parity/harness-budget.json`.
+- Reduce Rust build latency by splitting provider/auth routing, app runtime,
+  CLI UI, and broad gateway adapter feature surfaces according to
+  `docs/roadmaps/CARGO_BUILD_SURFACE_CRATIFICATION_2026-06-22.md`.
 - Treat stale roadmap prose as non-authoritative when it conflicts with
   generated parity artifacts or closed GitHub issue state.
 
