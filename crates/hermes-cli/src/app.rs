@@ -19,8 +19,8 @@ use hermes_agent::bedrock::{
 };
 use hermes_agent::plugins::HookType;
 use hermes_agent::provider::{
-    openai_codex_provider_with_timeout, AnthropicProvider, GenericProvider, OpenAiProvider,
-    OpenRouterProvider, OPENAI_CODEX_BASE_URL,
+    is_codex_chatgpt_token, AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
+    OPENAI_CODEX_BASE_URL,
 };
 use hermes_agent::provider_profiles;
 use hermes_agent::providers_extra::{
@@ -29,7 +29,7 @@ use hermes_agent::providers_extra::{
 use hermes_agent::smart_model_routing::ApiMode;
 use hermes_agent::sub_agent_orchestrator::SubAgentOrchestrator;
 use hermes_agent::{
-    AgentCallbacks, AgentConfig, AgentLoop, InterruptController, SessionPersistence,
+    AgentCallbacks, AgentConfig, AgentLoop, CodexProvider, InterruptController, SessionPersistence,
 };
 use hermes_config::{
     hermes_home as hermes_home_dir, load_config, normalize_service_tier, state_dir, GatewayConfig,
@@ -2196,7 +2196,10 @@ impl App {
             }
         }
 
-        let configured_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
+        let configured_model = config
+            .model
+            .clone()
+            .unwrap_or_else(|| "gpt-5.5".to_string());
         let current_model = resolve_startup_model(&config, &configured_model);
         let current_personality = config.personality.clone();
 
@@ -7354,7 +7357,7 @@ fn resolve_provider_and_model(config: &GatewayConfig, model: &str) -> (String, S
 fn resolve_startup_model(config: &GatewayConfig, configured_model: &str) -> String {
     let raw = configured_model.trim();
     if raw.is_empty() {
-        return "gpt-4o".to_string();
+        return "gpt-5.5".to_string();
     }
     if raw.contains(':') {
         return raw.to_string();
@@ -7812,6 +7815,24 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
     }
 }
 
+fn provider_oauth_token_from_auth_state(provider: &str) -> Option<String> {
+    let provider_key = match normalize_runtime_provider_name(provider).as_str() {
+        "openai" => "openai",
+        "openai-codex" | "codex" => "openai-codex",
+        _ => return None,
+    };
+    let state = crate::auth::read_provider_auth_state(provider_key)
+        .ok()
+        .flatten()?;
+    state
+        .get("tokens")
+        .and_then(|tokens| tokens.get("access_token"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+}
+
 pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvider> {
     let (provider_name, model_name) = resolve_provider_and_model(config, model);
     let runtime_provider = normalize_runtime_provider_name(provider_name.as_str());
@@ -7844,7 +7865,9 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
                 .filter(|v| !v.trim().is_empty())
         })
         .or_else(|| provider_api_key_from_env(provider_name.as_str()))
-        .or_else(|| provider_api_key_from_env(runtime_provider.as_str()));
+        .or_else(|| provider_api_key_from_env(runtime_provider.as_str()))
+        .or_else(|| provider_oauth_token_from_auth_state(provider_name.as_str()))
+        .or_else(|| provider_oauth_token_from_auth_state(runtime_provider.as_str()));
 
     let local_no_key_ok = allow_no_api_key(
         provider_name.as_str(),
@@ -7867,22 +7890,41 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
         }
     };
 
+    let use_openai_pro_backend = matches!(runtime_provider.as_str(), "openai-codex" | "codex")
+        || (runtime_provider == "openai" && is_codex_chatgpt_token(&api_key));
+    let base_url = if use_openai_pro_backend {
+        Some(base_url.unwrap_or_else(|| OPENAI_CODEX_BASE_URL.to_string()))
+    } else {
+        base_url
+    };
+
     match runtime_provider.as_str() {
         "openai" => {
-            let mut p = OpenAiProvider::new(&api_key)
-                .with_model(model_name.as_str())
+            if use_openai_pro_backend {
+                let mut p = CodexProvider::openai_pro(&api_key, model_name.as_str())
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
+                if let Some(url) = base_url {
+                    p = p.with_base_url(url);
+                }
+                Arc::new(p)
+            } else {
+                let mut p = OpenAiProvider::new(&api_key)
+                    .with_model(model_name.as_str())
+                    .with_optional_request_timeout_seconds(request_timeout_seconds);
+                if let Some(url) = base_url {
+                    p = p.with_base_url(url);
+                }
+                Arc::new(p)
+            }
+        }
+        "openai-codex" | "codex" => {
+            let mut p = CodexProvider::openai_pro(&api_key, model_name.as_str())
                 .with_optional_request_timeout_seconds(request_timeout_seconds);
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
             Arc::new(p)
         }
-        "openai-codex" | "codex" => Arc::new(openai_codex_provider_with_timeout(
-            &api_key,
-            model_name.as_str(),
-            base_url.as_deref(),
-            request_timeout_seconds,
-        )),
         "anthropic" => {
             let mut p = AnthropicProvider::new(&api_key)
                 .with_model(model_name.as_str())

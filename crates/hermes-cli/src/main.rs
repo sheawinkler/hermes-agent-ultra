@@ -33,7 +33,7 @@ use hermes_cli::auth::{
     NousRuntimeCredentials, ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL,
     CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL,
     DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS, DEFAULT_NOUS_CLIENT_ID, DEFAULT_NOUS_INFERENCE_URL,
-    DEFAULT_NOUS_PORTAL_URL, DEFAULT_OPENAI_BASE_URL, NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+    DEFAULT_NOUS_PORTAL_URL, NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
     QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_OAUTH_CLIENT_ID, QWEN_OAUTH_TOKEN_URL,
 };
 use hermes_cli::cli::{Cli, CliCommand};
@@ -1763,7 +1763,7 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
             }
         }
         None => {
-            let current = config.model.as_deref().unwrap_or("gpt-4o");
+            let current = config.model.as_deref().unwrap_or("gpt-5.5");
             println!("Current model: {}", current);
 
             // List providers with merged models.dev-aware previews.
@@ -1772,7 +1772,7 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
                     .await;
             println!("\nAvailable providers:");
             if entries.is_empty() {
-                println!("  openai       — OpenAI (gpt-4o, gpt-4o-mini, ...)");
+                println!("  openai       — OpenAI (gpt-5.5, gpt-5.5-pro, ...)");
                 println!("  anthropic    — Anthropic (claude-3-5-sonnet, claude-3-opus, ...)");
                 println!("  openrouter   — OpenRouter (multi-provider routing)");
                 println!("  stepfun      — Step Plan / StepFun (step-3.5-flash, ...)");
@@ -2973,7 +2973,7 @@ async fn run_gateway(
                         }
                         let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
                         let effective_model = resolve_model_for_gateway(
-                            config.model.as_deref().unwrap_or("gpt-4o"),
+                            config.model.as_deref().unwrap_or("gpt-5.5"),
                             &ctx,
                         );
                         let tool_schemas = resolve_platform_tool_schemas(
@@ -3245,7 +3245,7 @@ async fn run_gateway(
                         }
                         let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
                         let effective_model = resolve_model_for_gateway(
-                            config.model.as_deref().unwrap_or("gpt-4o"),
+                            config.model.as_deref().unwrap_or("gpt-5.5"),
                             &ctx,
                         );
                         let tool_schemas = resolve_platform_tool_schemas(
@@ -3538,7 +3538,10 @@ async fn run_gateway(
             let cron_dir = hermes_state_root(&cli).join("cron");
             std::fs::create_dir_all(&cron_dir)
                 .map_err(|e| AgentError::Io(format!("cron dir {}: {}", cron_dir.display(), e)))?;
-            let default_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
+            let default_model = config
+                .model
+                .clone()
+                .unwrap_or_else(|| "gpt-5.5".to_string());
             let cron_persistence = Arc::new(FileJobPersistence::with_dir(cron_dir.clone()));
             let cron_llm = build_provider(&config, &default_model);
             let cron_runner = Arc::new(CronRunner::new(cron_llm, agent_tools_for_cron));
@@ -4288,7 +4291,7 @@ fn build_agent_for_gateway_context(
     agent_tools: Arc<hermes_agent::agent_loop::ToolRegistry>,
 ) -> AgentLoop {
     let effective_model =
-        resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), ctx);
+        resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-5.5"), ctx);
     let provider = build_provider(config, &effective_model);
     let mut agent_config = build_agent_config(config, &effective_model);
     if let Some(personality) = ctx.personality.clone() {
@@ -8444,7 +8447,10 @@ async fn run_auth(
                             id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
                             label: label.unwrap_or(default_label),
                             auth_type: "oauth".to_string(),
-                            source: "device_code".to_string(),
+                            source: state
+                                .source
+                                .clone()
+                                .unwrap_or_else(|| "device_code".to_string()),
                             access_token: state.tokens.access_token.clone(),
                             last_status: None,
                             last_status_at: None,
@@ -9576,7 +9582,10 @@ fn cron_cli_error(e: CronError) -> AgentError {
 fn build_live_cron_scheduler(cli: &Cli, data_dir: &Path) -> Result<CronScheduler, AgentError> {
     let config =
         load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
-    let current_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
+    let current_model = config
+        .model
+        .clone()
+        .unwrap_or_else(|| "gpt-5.5".to_string());
     let provider = build_provider(&config, &current_model);
 
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -10727,14 +10736,14 @@ struct SetupModelOption {
 
 const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
     SetupModelOption {
-        provider: "nous",
-        model: "nous:openai/gpt-5.5-pro",
-        label: "Nous (recommended, OAuth)",
+        provider: "openai",
+        model: "openai:gpt-5.5",
+        label: "OpenAI GPT-5.5 (ChatGPT Pro OAuth)",
     },
     SetupModelOption {
-        provider: "nous-api",
-        model: "nous-api:openai/gpt-5.5-pro",
-        label: "Nous Portal API key",
+        provider: "openai",
+        model: "openai:gpt-5.5-pro",
+        label: "OpenAI GPT-5.5 Pro (ChatGPT Pro OAuth)",
     },
     SetupModelOption {
         provider: "openai",
@@ -10745,6 +10754,16 @@ const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
         provider: "openai",
         model: "openai:gpt-4o-mini",
         label: "OpenAI gpt-4o-mini (fast & cheap)",
+    },
+    SetupModelOption {
+        provider: "nous",
+        model: "nous:openai/gpt-5.5-pro",
+        label: "Nous (OAuth)",
+    },
+    SetupModelOption {
+        provider: "nous-api",
+        model: "nous-api:openai/gpt-5.5-pro",
+        label: "Nous Portal API key",
     },
     SetupModelOption {
         provider: "anthropic",
@@ -11564,7 +11583,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
                         .await?;
                     selected_oauth_token_url = Some(CODEX_OAUTH_TOKEN_URL.to_string());
                     selected_oauth_client_id = Some(CODEX_OAUTH_CLIENT_ID.to_string());
-                    selected_base_url_override = Some(DEFAULT_OPENAI_BASE_URL.to_string());
+                    selected_base_url_override = Some(DEFAULT_CODEX_BASE_URL.to_string());
                     stored_provider_secret_in_vault = true;
                 }
                 "anthropic" => {
@@ -14194,7 +14213,7 @@ async fn run_status(cli: Cli) -> Result<(), AgentError> {
 
     println!(
         "Model:   {}",
-        config.model.as_deref().unwrap_or("(default: gpt-4o)")
+        config.model.as_deref().unwrap_or("(default: gpt-5.5)")
     );
     println!(
         "Personality: {}",
@@ -14615,7 +14634,7 @@ fn collect_debug_report(cli: &Cli, lines: u32) -> Result<String, AgentError> {
         report.push_str("\n## Config Summary\n");
         report.push_str(&format!(
             "- model: {}\n",
-            cfg.model.as_deref().unwrap_or("gpt-4o")
+            cfg.model.as_deref().unwrap_or("gpt-5.5")
         ));
         report.push_str(&format!(
             "- personality: {}\n",
@@ -15092,7 +15111,7 @@ async fn run_profile(
             }
             println!(
                 "  Model:       {}",
-                config.model.as_deref().unwrap_or("gpt-4o")
+                config.model.as_deref().unwrap_or("gpt-5.5")
             );
             println!(
                 "  Personality: {}",
@@ -15229,7 +15248,7 @@ async fn run_profile(
 
             out_map
                 .entry(serde_yaml::Value::String("model".to_string()))
-                .or_insert_with(|| serde_yaml::Value::String("openai:gpt-4o".to_string()));
+                .or_insert_with(|| serde_yaml::Value::String("openai:gpt-5.5".to_string()));
             out_map
                 .entry(serde_yaml::Value::String("personality".to_string()))
                 .or_insert_with(|| serde_yaml::Value::String("default".to_string()));

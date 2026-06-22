@@ -128,7 +128,7 @@ fn is_codex_cloudflare_base_url(base_url: &str) -> bool {
         .contains("chatgpt.com/backend-api/codex")
 }
 
-fn codex_chatgpt_account_id(token: &str) -> Option<String> {
+pub fn codex_chatgpt_account_id(token: &str) -> Option<String> {
     let token = token.trim();
     if token.is_empty() {
         return None;
@@ -146,6 +146,10 @@ fn codex_chatgpt_account_id(token: &str) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+pub fn is_codex_chatgpt_token(token: &str) -> bool {
+    codex_chatgpt_account_id(token).is_some()
 }
 
 fn parse_acp_multimodal_parts(content: &str) -> Option<Vec<Value>> {

@@ -723,7 +723,7 @@ fn load_openai_oauth_import_from_path(path: &Path, base_url: &str) -> Option<Ope
 
 pub fn discover_existing_openai_oauth() -> Result<Option<OpenAiOAuthImport>, AgentError> {
     for path in openai_oauth_discovery_paths(&[]) {
-        if let Some(imported) = load_openai_oauth_import_from_path(&path, DEFAULT_OPENAI_BASE_URL) {
+        if let Some(imported) = load_openai_oauth_import_from_path(&path, DEFAULT_CODEX_BASE_URL) {
             return Ok(Some(imported));
         }
     }
@@ -3238,12 +3238,12 @@ pub async fn login_openai_device_code(
     options: CodexDeviceCodeOptions,
 ) -> Result<CodexAuthState, AgentError> {
     let mut state = login_openai_codex_device_code(options).await?;
-    state.base_url = std::env::var("HERMES_OPENAI_BASE_URL")
+    state.base_url = std::env::var("HERMES_OPENAI_OAUTH_BASE_URL")
         .ok()
         .map(|v| v.trim().trim_end_matches('/').to_string())
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| DEFAULT_OPENAI_BASE_URL.to_string());
-    state.auth_mode = Some("openai".to_string());
+        .unwrap_or_else(|| DEFAULT_CODEX_BASE_URL.to_string());
+    state.auth_mode = Some("chatgpt".to_string());
     state.source = Some("device_code".to_string());
     Ok(state)
 }
@@ -3548,7 +3548,7 @@ mod tests {
             imported.state.tokens.refresh_token.as_deref(),
             Some("openai-refresh")
         );
-        assert_eq!(imported.state.base_url, DEFAULT_OPENAI_BASE_URL.to_string());
+        assert_eq!(imported.state.base_url, DEFAULT_CODEX_BASE_URL.to_string());
         assert_eq!(imported.state.auth_mode.as_deref(), Some("chatgpt"));
         assert!(
             imported.state.tokens.expires_in.unwrap_or_default() > 100,
