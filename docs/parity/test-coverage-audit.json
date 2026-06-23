@@ -90,7 +90,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-23T03:48:57.050995+00:00",
+  "generated_at_utc": "2026-06-23T06:11:16.079866+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -221,8 +221,9 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 25,
+      "direct_test_evidence_count": 26,
       "direct_test_evidence_sample": [
+        "crates/hermes-app-runtime/src/lib.rs",
         "crates/hermes-cli/src/alpha_runtime.rs",
         "crates/hermes-cli/src/app.rs",
         "crates/hermes-cli/src/auth.rs",
@@ -246,11 +247,11 @@
         "crates/hermes-cli/src/terminal_backend.rs",
         "crates/hermes-cli/src/theme.rs",
         "crates/hermes-cli/src/tool_preview.rs",
-        "crates/hermes-cli/src/tui.rs",
-        "crates/hermes-parity-tests/tests/cli_command_contract.rs"
+        "crates/hermes-cli/src/tui.rs"
       ],
-      "evidence_count": 40,
+      "evidence_count": 41,
       "evidence_sample": [
+        "crates/hermes-app-runtime/src/lib.rs",
         "crates/hermes-cli/src/alpha_runtime.rs",
         "crates/hermes-cli/src/app.rs",
         "crates/hermes-cli/src/auth.rs",
@@ -274,8 +275,7 @@
         "crates/hermes-cli/src/model_switch.rs",
         "crates/hermes-cli/src/pairing_store.rs",
         "crates/hermes-cli/src/platform_toolsets.rs",
-        "crates/hermes-cli/src/profiles.rs",
-        "crates/hermes-cli/src/providers.rs"
+        "crates/hermes-cli/src/profiles.rs"
       ],
       "id": "cli-command-surface",
       "mapped": true,
@@ -286,7 +286,7 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 46,
+      "direct_test_evidence_count": 47,
       "direct_test_evidence_sample": [
         "crates/hermes-agent/src/agent_loop.rs",
         "crates/hermes-agent/src/api_bridge.rs",
@@ -314,7 +314,7 @@
         "crates/hermes-agent/src/memory_plugins/openviking.rs",
         "crates/hermes-agent/src/memory_plugins/retaindb.rs"
       ],
-      "evidence_count": 50,
+      "evidence_count": 51,
       "evidence_sample": [
         "crates/hermes-agent/src/agent_loop.rs",
         "crates/hermes-agent/src/api_bridge.rs",
@@ -569,7 +569,7 @@
     "queue_pending": 0,
     "queue_total": 6132,
     "rust_test_files": 313,
-    "rust_test_functions": 3614,
+    "rust_test_functions": 3622,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,

@@ -20,9 +20,10 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
    - No TUI, installer, adapter, cron, or gateway feature dependencies.
 
 2. `hermes-app-runtime`
-   - Status: first split implemented.
-   - Owns agent configuration construction plus query-mode provider/model/env/tool policy.
-   - Next: move the remaining noninteractive chat runner, prompt reformulation, tool-planning handoff, memory/context policy injection, and agent-loop wiring.
+   - Status: second split implemented.
+   - Owns agent configuration construction, query-mode provider/model/env/tool policy, model-catalog remediation selection, noninteractive query agent-loop wiring, and assistant reply extraction.
+   - Keeps provider construction injected by the CLI so OpenAI OAuth/auth-state routing remains in the existing runtime path.
+   - Next: move prompt reformulation, memory/context policy injection, and any reusable tool-planning policy that is still embedded in CLI presentation code.
    - Depend on provider runtime and core agent crates, not on CLI wrappers or TUI.
 
 3. `hermes-cli-ui`
@@ -34,7 +35,9 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
    - Keep provider/auth and command-contract tests from compiling every gateway adapter by default.
 
 5. Parity test dependency narrowing
-   - Point behavioral/provider parity tests at `hermes-provider-runtime` and command-contract crates where possible.
+   - Status: first split implemented.
+   - Command-contract parity now reads the CLI source contract without a `hermes-cli` or `clap` dev dependency.
+   - Point behavioral/provider parity tests at `hermes-provider-runtime`, `hermes-app-runtime`, and command-contract crates where possible.
    - Keep full `hermes-cli` parity checks for end-to-end CLI behavior only.
 
 ## Gates
