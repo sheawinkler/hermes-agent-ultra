@@ -41,7 +41,7 @@ use hermes_core::{AgentError, AgentResult, Message, StreamChunk};
 use crate::app::App;
 use crate::commands;
 use crate::theme::Theme;
-use crate::tool_preview::{build_tool_preview_from_value, tool_emoji};
+use hermes_cli_ui::tool_preview::{build_tool_preview_from_value, tool_emoji};
 
 // ---------------------------------------------------------------------------
 // Event

@@ -1642,6 +1642,9 @@ dependencies = [
 [[package]]
 name = "hermes-cli-ui"
 version = "0.18.1"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "hermes-config"

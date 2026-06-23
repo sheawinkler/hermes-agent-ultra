@@ -27,9 +27,10 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
    - Depend on provider runtime and core agent crates, not on CLI wrappers or TUI.
 
 3. `hermes-cli-ui`
-   - Status: first crate split implemented.
-   - Own slash-command rendering, autocomplete ranking, alias canonicalization, and completion/help presentation.
-   - Next: consider moving pure gateway/tool preview rendering after validating whether adding `serde_json` to the presentation crate is still worth the dependency tradeoff.
+   - Status: first crate split implemented; tool-preview presentation split implemented.
+   - Owns slash-command rendering, autocomplete ranking, alias canonicalization, completion/help presentation, tool emoji mapping, compact tool-call previews, and gateway tool-progress rendering.
+   - Depends only on `serde_json` beyond the standard library so preview rendering can stay out of `hermes-cli` without pulling TUI/runtime crates into narrow UI tests.
+   - Next: broader terminal UI, checklist, theme, and clipboard extraction should wait for a dedicated TUI crate boundary.
    - Keep UI dependencies out of provider/auth tests.
 
 4. Gateway adapter feature narrowing

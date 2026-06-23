@@ -48,10 +48,10 @@ use hermes_cli::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
 };
 use hermes_cli::terminal_backend::build_terminal_backend;
-use hermes_cli::tool_preview::{
+use hermes_cli::App;
+use hermes_cli_ui::tool_preview::{
     build_gateway_tool_progress_message, build_tool_preview_from_value, tool_emoji,
 };
-use hermes_cli::App;
 use hermes_config::{
     gateway_pid_path_in, hermes_home, load_config, load_user_config_file, save_config_yaml,
     set_user_config_value, state_dir, user_config_field_display, validate_config, ConfigError,
