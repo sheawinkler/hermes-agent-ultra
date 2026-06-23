@@ -754,6 +754,9 @@ pub struct AgentLoopBehaviorConfig {
     /// Character budget for injected LSP context block.
     #[serde(default = "default_agent_lsp_context_max_chars")]
     pub lsp_context_max_chars: usize,
+    /// Whether to emit preflight context compression status before first LLM call.
+    #[serde(default = "default_agent_preflight_context_compress")]
+    pub preflight_context_compress: bool,
     /// Optional provider request service tier. `fast` maps to provider `priority`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
@@ -812,6 +815,10 @@ fn default_agent_lsp_context_max_chars() -> usize {
     2_800
 }
 
+fn default_agent_preflight_context_compress() -> bool {
+    true
+}
+
 impl Default for AgentLoopBehaviorConfig {
     fn default() -> Self {
         Self {
@@ -825,6 +832,7 @@ impl Default for AgentLoopBehaviorConfig {
             code_index_max_symbols: default_agent_code_index_max_symbols(),
             lsp_context_enabled: default_agent_lsp_context_enabled(),
             lsp_context_max_chars: default_agent_lsp_context_max_chars(),
+            preflight_context_compress: default_agent_preflight_context_compress(),
             service_tier: None,
             api_max_retries: None,
             prefill_messages_file: None,

@@ -4334,6 +4334,7 @@ fn build_agent_for_gateway_context(
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-5.5"), ctx);
     let provider = build_provider(config, &effective_model);
     let mut agent_config = build_agent_config(config, &effective_model);
+    agent_config.preflight_context_compress = config.agent.preflight_context_compress;
     if let Some(personality) = ctx.personality.clone() {
         agent_config.personality = Some(personality);
     }
