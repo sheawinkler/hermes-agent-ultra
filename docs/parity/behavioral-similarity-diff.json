@@ -204,7 +204,7 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-provider-runtime/src/lib.rs",
           "name": "build_provider_routes_chatgpt_openai_oauth_to_responses_backend"
         },
         {
@@ -223,6 +223,7 @@
       "score": 1.0,
       "source_artifacts": [
         "docs/parity/upstream-provider-auth-snapshot.json",
+        "crates/hermes-provider-runtime/src/lib.rs",
         "crates/hermes-cli/src/app.rs",
         "crates/hermes-cli/src/auth.rs",
         "crates/hermes-agent/src/api_bridge.rs",
@@ -250,12 +251,12 @@
           "name": "canonical_provider_id_normalizes_common_aliases"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_provider_default_base_url_supports_upstream_aliases"
+          "file": "crates/hermes-provider-runtime/src/lib.rs",
+          "name": "provider_default_base_url_supports_upstream_aliases"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_allow_no_api_key_for_local_backends_and_private_base_urls"
+          "file": "crates/hermes-provider-runtime/src/lib.rs",
+          "name": "allow_no_api_key_for_local_backends_and_private_base_urls"
         },
         {
           "file": "crates/hermes-config/src/loader.rs",
@@ -265,7 +266,7 @@
       "score": 1.0,
       "source_artifacts": [
         "crates/hermes-core/src/providers.rs",
-        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-provider-runtime/src/lib.rs",
         "crates/hermes-config/src/loader.rs"
       ],
       "ultra_behavior": "Ultra expands Rust-native local OpenAI-compatible backend support across llama.cpp, MLX, LM Studio, LMDeploy, LocalAI, KoboldCpp, text-generation-webui, and TabbyAPI aliases with no-key local/private defaults.",
@@ -445,7 +446,7 @@
     "pass": true
   },
   "gate_failures": [],
-  "generated_at_utc": "2026-06-22T21:44:42.099700+00:00",
+  "generated_at_utc": "2026-06-23T00:33:32.717522+00:00",
   "manifest": "docs/parity/behavioral-similarity-cases.json",
   "schema_version": 1,
   "summary": {

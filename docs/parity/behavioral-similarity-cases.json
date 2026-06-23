@@ -176,6 +176,7 @@
       "why": "This prevents broad provider-auth parity from hiding a backend-contract gap that upstream already handles.",
       "source_artifacts": [
         "docs/parity/upstream-provider-auth-snapshot.json",
+        "crates/hermes-provider-runtime/src/lib.rs",
         "crates/hermes-cli/src/app.rs",
         "crates/hermes-cli/src/auth.rs",
         "crates/hermes-agent/src/api_bridge.rs",
@@ -183,7 +184,7 @@
       ],
       "rust_tests": [
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-provider-runtime/src/lib.rs",
           "name": "build_provider_routes_chatgpt_openai_oauth_to_responses_backend"
         },
         {
@@ -209,7 +210,7 @@
       "why": "This is a wider local model runtime surface than upstream Python parity alone.",
       "source_artifacts": [
         "crates/hermes-core/src/providers.rs",
-        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-provider-runtime/src/lib.rs",
         "crates/hermes-config/src/loader.rs"
       ],
       "rust_tests": [
@@ -222,12 +223,12 @@
           "name": "canonical_provider_id_normalizes_common_aliases"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_provider_default_base_url_supports_upstream_aliases"
+          "file": "crates/hermes-provider-runtime/src/lib.rs",
+          "name": "provider_default_base_url_supports_upstream_aliases"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_allow_no_api_key_for_local_backends_and_private_base_urls"
+          "file": "crates/hermes-provider-runtime/src/lib.rs",
+          "name": "allow_no_api_key_for_local_backends_and_private_base_urls"
         },
         {
           "file": "crates/hermes-config/src/loader.rs",
