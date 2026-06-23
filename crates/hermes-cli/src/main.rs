@@ -43,7 +43,6 @@ use hermes_cli::model_switch::{
     provider_catalog_entries_for_config, provider_model_ids, provider_picker_description,
     provider_slug_from_provider_model, DEFAULT_VISIBLE_MODELS_PER_PROVIDER,
 };
-use hermes_cli::platform_toolsets::{resolve_platform_tool_schemas, tool_definition_summary};
 use hermes_cli::providers::provider_capability_for;
 use hermes_cli::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
@@ -131,6 +130,7 @@ use hermes_gateway::tool_backends::ClarifyDispatcher;
 use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
+use hermes_tool_planning::{resolve_platform_tool_schemas, tool_definition_summary};
 use hermes_tools::{default_tool_policy_counters_path, load_tool_policy_counters, ToolRegistry};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;

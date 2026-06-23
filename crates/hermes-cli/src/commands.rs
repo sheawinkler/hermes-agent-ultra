@@ -5642,11 +5642,8 @@ fn handle_tools_toggle_command(app: &mut App, args: &[&str]) -> Result<CommandRe
         let config = Arc::make_mut(&mut app.config);
         config.tools_config = disk.tools_config.clone();
     }
-    app.tool_schemas = crate::platform_toolsets::resolve_platform_tool_schemas(
-        &app.config,
-        "cli",
-        &app.tool_registry,
-    );
+    app.tool_schemas =
+        hermes_tool_planning::resolve_platform_tool_schemas(&app.config, "cli", &app.tool_registry);
 
     let state = if action == "enable" {
         "Enabled"
@@ -21809,7 +21806,7 @@ pub async fn handle_cli_chat(
             .map_err(|e| hermes_core::AgentError::Config(format!("cron load: {e}")))?;
         cron_scheduler.start().await;
         wire_cron_scheduler_backend(&tool_registry, cron_scheduler);
-        crate::platform_toolsets::resolve_platform_tool_schemas(&config, "cli", &tool_registry)
+        hermes_tool_planning::resolve_platform_tool_schemas(&config, "cli", &tool_registry)
     } else {
         Vec::new()
     };
@@ -27253,7 +27250,7 @@ struct CliAcpPromptExecutor {
 
 impl CliAcpPromptExecutor {
     fn current_tool_schemas(&self) -> Vec<hermes_core::ToolSchema> {
-        let mut schemas = crate::platform_toolsets::resolve_platform_tool_schemas(
+        let mut schemas = hermes_tool_planning::resolve_platform_tool_schemas(
             self.config.as_ref(),
             "cli",
             &self.tool_registry,
@@ -28013,7 +28010,7 @@ mod tests {
             );
             config.tools_config.disabled.push("read_file".to_string());
         }
-        app.tool_schemas = crate::platform_toolsets::resolve_platform_tool_schemas(
+        app.tool_schemas = hermes_tool_planning::resolve_platform_tool_schemas(
             &app.config,
             "cli",
             &app.tool_registry,

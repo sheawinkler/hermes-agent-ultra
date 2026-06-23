@@ -90,7 +90,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-23T10:14:42.979110+00:00",
+  "generated_at_utc": "2026-06-23T11:00:05.001043+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -221,7 +221,7 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 26,
+      "direct_test_evidence_count": 25,
       "direct_test_evidence_sample": [
         "crates/hermes-app-runtime/src/lib.rs",
         "crates/hermes-cli/src/alpha_runtime.rs",
@@ -239,7 +239,6 @@
         "crates/hermes-cli/src/mcp_config.rs",
         "crates/hermes-cli/src/model_switch.rs",
         "crates/hermes-cli/src/pairing_store.rs",
-        "crates/hermes-cli/src/platform_toolsets.rs",
         "crates/hermes-cli/src/runtime_tool_wiring.rs",
         "crates/hermes-cli/src/skin_engine.rs",
         "crates/hermes-cli/src/systems.rs",
@@ -247,7 +246,8 @@
         "crates/hermes-cli/src/terminal_backend.rs",
         "crates/hermes-cli/src/theme.rs",
         "crates/hermes-cli/src/tool_preview.rs",
-        "crates/hermes-cli/src/tui.rs"
+        "crates/hermes-cli/src/tui.rs",
+        "crates/hermes-source-parity-tests/tests/cli_command_contract.rs"
       ],
       "evidence_count": 41,
       "evidence_sample": [
@@ -569,7 +569,7 @@
     "queue_pending": 0,
     "queue_total": 6132,
     "rust_test_files": 314,
-    "rust_test_functions": 3629,
+    "rust_test_functions": 3630,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,
