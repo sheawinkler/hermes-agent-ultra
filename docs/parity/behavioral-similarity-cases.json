@@ -146,6 +146,7 @@
       "source_artifacts": [
         "crates/hermes-cli/src/main.rs",
         "crates/hermes-cli/src/app.rs",
+        "crates/hermes-app-runtime/src/lib.rs",
         "crates/hermes-acp/src/auth.rs"
       ],
       "rust_tests": [
@@ -162,7 +163,7 @@
           "name": "auth_verify_nous_repairs_stale_singleton_from_vault_invoke_jwt"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-app-runtime/src/lib.rs",
           "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
         }
       ]

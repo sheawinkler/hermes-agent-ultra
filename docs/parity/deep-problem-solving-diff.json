@@ -280,7 +280,7 @@
           "name": "test_route_learning_decay_and_ttl"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-app-runtime/src/lib.rs",
           "name": "test_build_agent_config_maps_failover_chain_from_env"
         },
         {
@@ -291,7 +291,8 @@
       "score": 1.0,
       "source_artifacts": [
         "crates/hermes-agent/src/agent_loop.rs",
-        "crates/hermes-cli/src/app.rs"
+        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-app-runtime/src/lib.rs"
       ],
       "ultra_behavior": "Ultra includes smart model routing, route learning persistence/decay, provider fallback chains, transient retry classification, and OAuth/provider auth repair tests.",
       "upstream_behavior": "The agent should route simple and complex turns appropriately, learn from route outcomes, and preserve provider/auth recovery behavior.",
@@ -439,7 +440,7 @@
     "pass": true
   },
   "gate_failures": [],
-  "generated_at_utc": "2026-06-22T09:01:07.499763+00:00",
+  "generated_at_utc": "2026-06-23T03:48:56.725733+00:00",
   "manifest": "docs/parity/deep-problem-solving-cases.json",
   "schema_version": 1,
   "summary": {

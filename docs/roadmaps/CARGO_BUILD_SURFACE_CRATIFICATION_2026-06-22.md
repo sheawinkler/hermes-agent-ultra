@@ -20,7 +20,9 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
    - No TUI, installer, adapter, cron, or gateway feature dependencies.
 
 2. `hermes-app-runtime`
-   - Own noninteractive chat orchestration, prompt reformulation, tool-planning handoff, memory/context policy injection, and agent-loop wiring.
+   - Status: first split implemented.
+   - Owns agent configuration construction plus query-mode provider/model/env/tool policy.
+   - Next: move the remaining noninteractive chat runner, prompt reformulation, tool-planning handoff, memory/context policy injection, and agent-loop wiring.
    - Depend on provider runtime and core agent crates, not on CLI wrappers or TUI.
 
 3. `hermes-cli-ui`
@@ -39,6 +41,7 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
 
 - `scripts/audit-cargo-build-surface.sh`
 - `cargo test -p hermes-provider-runtime`
+- `cargo test -p hermes-app-runtime`
 - `cargo test -p hermes-parity-tests test_behavioral_similarity_diff_gate_passes_and_references_real_tests -- --nocapture`
 - `cargo build -p hermes-cli --bin hermes-ultra --bin hermes-agent-ultra`
 

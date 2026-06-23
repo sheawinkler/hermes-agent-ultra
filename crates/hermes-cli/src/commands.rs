@@ -16,6 +16,10 @@ use std::{
 use bytes::Bytes;
 use hermes_agent::plugins::PluginManifest;
 use hermes_agent::{MemoryProviderPlugin, SessionPersistence};
+use hermes_app_runtime::{
+    apply_cli_chat_runtime_env, query_mode_tools_enabled, resolve_cli_chat_provider_model_with,
+    QUERY_DISABLE_TOOLS_ENV_KEY,
+};
 use hermes_core::auth_gate::{
     load_oauth_runtime_gate_manifest_from_path,
     oauth_runtime_gate_for_provider as shared_oauth_runtime_gate_for_provider,
@@ -22108,75 +22112,12 @@ fn resolve_cli_chat_provider_model(
     model_override: Option<&str>,
     provider_override: Option<&str>,
 ) -> Result<String, AgentError> {
-    let provider_override = provider_override
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(|v| v.to_ascii_lowercase());
-    let model_override = model_override.map(str::trim).filter(|v| !v.is_empty());
-
-    let mut current_model = config_model
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("gpt-4o")
-        .to_string();
-
-    if let Some(model) = model_override {
-        current_model = model.to_string();
-    } else if provider_override.is_none() {
-        if let Ok(model_env) = std::env::var("HERMES_INFERENCE_MODEL") {
-            let model_env = model_env.trim();
-            if !model_env.is_empty() {
-                current_model = model_env.to_string();
-            }
-        }
-    }
-    if let Some(provider) = provider_override.as_deref() {
-        if let Some((_, model_name)) = current_model.split_once(':') {
-            current_model = format!("{provider}:{}", model_name.trim());
-        } else {
-            current_model = format!("{provider}:{}", current_model.trim());
-        }
-    }
-    if !current_model.contains(':') {
-        current_model = normalize_provider_model(&current_model)?;
-    }
-    Ok(current_model)
-}
-
-fn apply_cli_chat_runtime_env(provider_model: &str) {
-    let provider_model = provider_model.trim();
-    if provider_model.is_empty() {
-        return;
-    }
-    std::env::set_var("HERMES_MODEL", provider_model);
-    std::env::set_var("HERMES_INFERENCE_MODEL", provider_model);
-    if let Some((provider, _)) = provider_model.split_once(':') {
-        let provider = provider.trim();
-        if !provider.is_empty() {
-            std::env::set_var("HERMES_INFERENCE_PROVIDER", provider);
-            std::env::set_var("HERMES_TUI_PROVIDER", provider);
-        }
-    }
-}
-
-const QUERY_ALLOW_TOOLS_ENV_KEY: &str = "HERMES_QUERY_ALLOW_TOOLS";
-const QUERY_DISABLE_TOOLS_ENV_KEY: &str = "HERMES_QUERY_DISABLE_TOOLS";
-
-fn query_mode_tools_enabled(query_mode: bool, allow_tools_flag: bool) -> bool {
-    if !query_mode {
-        return true;
-    }
-    if allow_tools_flag {
-        return true;
-    }
-    if hermes_config::env_var_enabled(QUERY_DISABLE_TOOLS_ENV_KEY) {
-        return false;
-    }
-    // Backward compatible explicit-enable override (now redundant with default-on).
-    if hermes_config::env_var_enabled(QUERY_ALLOW_TOOLS_ENV_KEY) {
-        return true;
-    }
-    true
+    resolve_cli_chat_provider_model_with(
+        config_model,
+        model_override,
+        provider_override,
+        normalize_provider_model,
+    )
 }
 
 fn query_mode_model_not_found(err: &hermes_core::AgentError) -> bool {
@@ -31676,146 +31617,6 @@ install_command: "uv pip install -r requirements.txt"
         assert_eq!(parse_pet_dock("left"), Some(PetDock::Left));
         assert_eq!(parse_pet_dock("right"), Some(PetDock::Right));
         assert_eq!(parse_pet_dock("center"), None);
-    }
-
-    #[test]
-    fn resolve_cli_chat_provider_model_defaults_to_config_when_no_overrides() {
-        let _lock = env_test_lock();
-        let prev_inference_model = std::env::var("HERMES_INFERENCE_MODEL").ok();
-        std::env::remove_var("HERMES_INFERENCE_MODEL");
-        let resolved =
-            resolve_cli_chat_provider_model(Some("nous:moonshotai/kimi-k2.6"), None, None)
-                .expect("resolve");
-        assert_eq!(resolved, "nous:moonshotai/kimi-k2.6");
-        match prev_inference_model {
-            Some(value) => std::env::set_var("HERMES_INFERENCE_MODEL", value),
-            None => std::env::remove_var("HERMES_INFERENCE_MODEL"),
-        }
-    }
-
-    #[test]
-    fn resolve_cli_chat_provider_model_applies_provider_override() {
-        let resolved = resolve_cli_chat_provider_model(Some("gpt-4o"), None, Some("anthropic"))
-            .expect("resolve");
-        assert_eq!(resolved, "anthropic:gpt-4o");
-    }
-
-    #[test]
-    fn resolve_cli_chat_provider_model_prefers_model_override_with_provider_prefix() {
-        let resolved = resolve_cli_chat_provider_model(
-            Some("openai:gpt-4o"),
-            Some("moonshotai/kimi-k2.6"),
-            Some("nous"),
-        )
-        .expect("resolve");
-        assert_eq!(resolved, "nous:moonshotai/kimi-k2.6");
-    }
-
-    #[test]
-    fn resolve_cli_chat_provider_model_uses_inference_model_env_when_no_flag_override() {
-        let _lock = env_test_lock();
-        std::env::set_var("HERMES_INFERENCE_MODEL", "nous:moonshotai/kimi-k2.6");
-        let resolved =
-            resolve_cli_chat_provider_model(Some("openai:gpt-4o"), None, None).expect("resolve");
-        assert_eq!(resolved, "nous:moonshotai/kimi-k2.6");
-        std::env::remove_var("HERMES_INFERENCE_MODEL");
-    }
-
-    #[test]
-    fn apply_cli_chat_runtime_env_sets_provider_model() {
-        let _lock = env_test_lock();
-        let keys = [
-            "HERMES_MODEL",
-            "HERMES_INFERENCE_MODEL",
-            "HERMES_INFERENCE_PROVIDER",
-            "HERMES_TUI_PROVIDER",
-        ];
-        for key in keys {
-            std::env::remove_var(key);
-        }
-        std::env::set_var("HERMES_TUI_PROVIDER", "openai");
-
-        apply_cli_chat_runtime_env("nous:openai/gpt-5.5");
-
-        assert_eq!(
-            std::env::var("HERMES_MODEL").ok().as_deref(),
-            Some("nous:openai/gpt-5.5")
-        );
-        assert_eq!(
-            std::env::var("HERMES_INFERENCE_MODEL").ok().as_deref(),
-            Some("nous:openai/gpt-5.5")
-        );
-        assert_eq!(
-            std::env::var("HERMES_INFERENCE_PROVIDER").ok().as_deref(),
-            Some("nous")
-        );
-        assert_eq!(
-            std::env::var("HERMES_TUI_PROVIDER").ok().as_deref(),
-            Some("nous")
-        );
-
-        for key in keys {
-            std::env::remove_var(key);
-        }
-    }
-
-    #[test]
-    fn apply_cli_chat_runtime_env_sets_tui_provider_when_absent() {
-        let _lock = env_test_lock();
-        let keys = [
-            "HERMES_MODEL",
-            "HERMES_INFERENCE_MODEL",
-            "HERMES_INFERENCE_PROVIDER",
-            "HERMES_TUI_PROVIDER",
-        ];
-        for key in keys {
-            std::env::remove_var(key);
-        }
-
-        apply_cli_chat_runtime_env("custom-xuanji:deepseek-v4-pro");
-
-        assert_eq!(
-            std::env::var("HERMES_TUI_PROVIDER").ok().as_deref(),
-            Some("custom-xuanji")
-        );
-        assert_eq!(
-            std::env::var("HERMES_INFERENCE_PROVIDER").ok().as_deref(),
-            Some("custom-xuanji")
-        );
-
-        for key in keys {
-            std::env::remove_var(key);
-        }
-    }
-
-    #[test]
-    fn query_mode_tools_enabled_defaults_on_for_query_mode() {
-        let _lock = env_test_lock();
-        std::env::remove_var("HERMES_QUERY_DISABLE_TOOLS");
-        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
-        assert!(query_mode_tools_enabled(true, false));
-        assert!(query_mode_tools_enabled(false, false));
-    }
-
-    #[test]
-    fn query_mode_tools_enabled_respects_disable_env_and_flag_override() {
-        let _lock = env_test_lock();
-        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
-        std::env::set_var("HERMES_QUERY_DISABLE_TOOLS", "1");
-        assert!(!query_mode_tools_enabled(true, false));
-        assert!(query_mode_tools_enabled(true, true));
-        std::env::remove_var("HERMES_QUERY_DISABLE_TOOLS");
-    }
-
-    #[test]
-    fn query_mode_tools_enabled_respects_legacy_allow_env() {
-        let _lock = env_test_lock();
-        std::env::remove_var("HERMES_QUERY_DISABLE_TOOLS");
-        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
-        assert!(query_mode_tools_enabled(true, false));
-        std::env::set_var("HERMES_QUERY_ALLOW_TOOLS", "1");
-        assert!(query_mode_tools_enabled(true, false));
-        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
     }
 
     #[test]

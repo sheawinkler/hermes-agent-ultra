@@ -1543,6 +1543,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hermes-app-runtime"
+version = "0.18.1"
+dependencies = [
+ "hermes-agent",
+ "hermes-config",
+ "hermes-core",
+ "hermes-provider-runtime",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "hermes-auth"
 version = "0.18.1"
 dependencies = [
@@ -1583,6 +1595,7 @@ dependencies = [
  "futures",
  "hermes-acp",
  "hermes-agent",
+ "hermes-app-runtime",
  "hermes-auth",
  "hermes-config",
  "hermes-core",

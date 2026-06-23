@@ -180,7 +180,7 @@
           "name": "auth_verify_nous_repairs_stale_singleton_from_vault_invoke_jwt"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-app-runtime/src/lib.rs",
           "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
         }
       ],
@@ -188,6 +188,7 @@
       "source_artifacts": [
         "crates/hermes-cli/src/main.rs",
         "crates/hermes-cli/src/app.rs",
+        "crates/hermes-app-runtime/src/lib.rs",
         "crates/hermes-acp/src/auth.rs"
       ],
       "ultra_behavior": "Rust auth and routing cover upstream provider aliases, core OAuth refreshable providers, provider-specific API modes, and Nous stale singleton repair.",
@@ -446,7 +447,7 @@
     "pass": true
   },
   "gate_failures": [],
-  "generated_at_utc": "2026-06-23T00:33:32.717522+00:00",
+  "generated_at_utc": "2026-06-23T03:48:54.251551+00:00",
   "manifest": "docs/parity/behavioral-similarity-cases.json",
   "schema_version": 1,
   "summary": {
