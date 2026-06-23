@@ -59,42 +59,73 @@ use hermes_config::{
     GatewayConfig, PlatformConfig, UnauthorizedDmBehavior,
 };
 use hermes_core::AgentError;
+use hermes_core::ParseMode;
+#[cfg(feature = "gateway-telegram")]
+use hermes_core::PlatformAdapter;
 use hermes_core::{MessageRole, StreamChunk};
-use hermes_core::{ParseMode, PlatformAdapter};
 use hermes_cron::{
     cron_scheduler_for_data_dir, CronCompletionEvent, CronError, CronRunner, CronScheduler,
     DeliverTarget, FileJobPersistence,
 };
 use hermes_gateway::gateway::GatewayConfig as RuntimeGatewayConfig;
+#[cfg(any(
+    feature = "gateway-api-server",
+    feature = "gateway-dingtalk",
+    feature = "gateway-ntfy",
+    feature = "gateway-telegram",
+    feature = "gateway-webhook",
+    feature = "gateway-wecom-callback",
+    feature = "gateway-weixin"
+))]
 use hermes_gateway::gateway::IncomingMessage as GatewayIncomingMessage;
 use hermes_gateway::gateway::{GroupAccessMode, PlatformAccessPolicy};
 use hermes_gateway::hooks::HookRegistry;
+#[cfg(feature = "gateway-api-server")]
 use hermes_gateway::platforms::api_server::{ApiInboundRequest, ApiServerAdapter, ApiServerConfig};
+#[cfg(feature = "gateway-bluebubbles")]
 use hermes_gateway::platforms::bluebubbles::{BlueBubblesAdapter, BlueBubblesConfig};
+#[cfg(feature = "gateway-dingtalk")]
 use hermes_gateway::platforms::dingtalk::{DingTalkAdapter, DingTalkConfig};
+#[cfg(feature = "gateway-discord")]
 use hermes_gateway::platforms::discord::{
     DiscordAdapter, DiscordChannelControls, DiscordChannelSkillBinding, DiscordConfig,
 };
+#[cfg(feature = "gateway-email")]
 use hermes_gateway::platforms::email::{EmailAdapter, EmailConfig};
+#[cfg(feature = "gateway-feishu")]
 use hermes_gateway::platforms::feishu::{FeishuAdapter, FeishuConfig};
+#[cfg(feature = "gateway-homeassistant")]
 use hermes_gateway::platforms::homeassistant::{HomeAssistantAdapter, HomeAssistantConfig};
+#[cfg(feature = "gateway-matrix")]
 use hermes_gateway::platforms::matrix::{MatrixAdapter, MatrixConfig};
+#[cfg(feature = "gateway-mattermost")]
 use hermes_gateway::platforms::mattermost::{MattermostAdapter, MattermostConfig};
+#[cfg(feature = "gateway-ntfy")]
 use hermes_gateway::platforms::ntfy::{NtfyAdapter, NtfyConfig};
+#[cfg(feature = "gateway-qqbot")]
 use hermes_gateway::platforms::qqbot::{QqBotAdapter, QqBotConfig};
+#[cfg(feature = "gateway-signal")]
 use hermes_gateway::platforms::signal::{SignalAdapter, SignalConfig};
+#[cfg(feature = "gateway-slack")]
 use hermes_gateway::platforms::slack::{SlackAdapter, SlackConfig};
+#[cfg(feature = "gateway-sms")]
 use hermes_gateway::platforms::sms::{SmsAdapter, SmsConfig};
+#[cfg(feature = "gateway-telegram")]
 use hermes_gateway::platforms::telegram::{
     IncomingMessage as TelegramIncomingMessage, TelegramAdapter, TelegramConfig,
     TelegramTextBatcher,
 };
+#[cfg(feature = "gateway-webhook")]
 use hermes_gateway::platforms::webhook::{WebhookAdapter, WebhookConfig, WebhookPayload};
+#[cfg(feature = "gateway-wecom")]
 use hermes_gateway::platforms::wecom::{WeComAdapter, WeComConfig};
+#[cfg(feature = "gateway-wecom-callback")]
 use hermes_gateway::platforms::wecom_callback::{
     WeComCallbackAdapter, WeComCallbackApp, WeComCallbackConfig,
 };
+#[cfg(feature = "gateway-weixin")]
 use hermes_gateway::platforms::weixin::{WeChatAdapter, WeixinConfig};
+#[cfg(feature = "gateway-whatsapp")]
 use hermes_gateway::platforms::whatsapp::{WhatsAppAdapter, WhatsAppConfig};
 use hermes_gateway::tool_backends::ClarifyDispatcher;
 use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
@@ -108,7 +139,16 @@ use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
+#[cfg(any(
+    feature = "gateway-api-server",
+    feature = "gateway-dingtalk",
+    feature = "gateway-ntfy",
+    feature = "gateway-webhook",
+    feature = "gateway-wecom-callback",
+    feature = "gateway-weixin"
+))]
+use tokio::sync::mpsc;
 
 fn auth_error_message(err: &AgentError) -> Option<String> {
     match err {
@@ -4362,6 +4402,7 @@ fn truncate_hook_tool_result(result: &str) -> String {
     format!("{prefix}...")
 }
 
+#[cfg(feature = "gateway-telegram")]
 fn build_telegram_config(
     platform_cfg: &hermes_config::platform::PlatformConfig,
     token: String,
@@ -4494,6 +4535,7 @@ fn extra_string_set(platform_cfg: &PlatformConfig, key: &str) -> HashSet<String>
     values
 }
 
+#[cfg(any(feature = "gateway-telegram", feature = "gateway-whatsapp"))]
 fn extra_string_vec(platform_cfg: &PlatformConfig, key: &str) -> Vec<String> {
     let Some(raw) = platform_cfg.extra.get(key) else {
         return Vec::new();
@@ -4526,10 +4568,12 @@ fn extra_string_vec(platform_cfg: &PlatformConfig, key: &str) -> Vec<String> {
     }
 }
 
+#[cfg(feature = "gateway-discord")]
 fn discord_reply_to_mode_string(platform_cfg: &PlatformConfig) -> Option<String> {
     reply_to_mode_string(platform_cfg)
 }
 
+#[cfg(any(feature = "gateway-discord", feature = "gateway-telegram"))]
 fn reply_to_mode_string(platform_cfg: &PlatformConfig) -> Option<String> {
     let raw = platform_cfg.extra.get("reply_to_mode")?;
     let candidate = match raw {
@@ -4549,12 +4593,19 @@ fn env_string(name: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+#[cfg(any(test, feature = "gateway-matrix"))]
 fn matrix_home_room_for_platform(platform_cfg: &PlatformConfig) -> Option<String> {
     extra_string(platform_cfg, "room_id")
         .or_else(|| extra_string(platform_cfg, "home_room"))
         .or_else(|| env_string("MATRIX_HOME_ROOM"))
 }
 
+#[cfg(any(
+    feature = "gateway-qqbot",
+    feature = "gateway-slack",
+    feature = "gateway-telegram",
+    feature = "gateway-whatsapp"
+))]
 fn extra_bool(platform_cfg: &PlatformConfig, key: &str, default: bool) -> bool {
     platform_cfg
         .extra
@@ -4563,6 +4614,12 @@ fn extra_bool(platform_cfg: &PlatformConfig, key: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
+#[cfg(any(
+    feature = "gateway-api-server",
+    feature = "gateway-email",
+    feature = "gateway-webhook",
+    feature = "gateway-wecom-callback"
+))]
 fn extra_u16(platform_cfg: &PlatformConfig, key: &str, default: u16) -> u16 {
     platform_cfg
         .extra
@@ -5256,6 +5313,54 @@ fn gateway_requirement_issues(config: &hermes_config::GatewayConfig) -> Vec<Stri
     issues
 }
 
+fn missing_gateway_adapter_feature(platform: &str) -> Option<&'static str> {
+    match platform
+        .trim()
+        .to_ascii_lowercase()
+        .replace('-', "_")
+        .as_str()
+    {
+        "telegram" if !cfg!(feature = "gateway-telegram") => Some("gateway-telegram"),
+        "discord" if !cfg!(feature = "gateway-discord") => Some("gateway-discord"),
+        "slack" if !cfg!(feature = "gateway-slack") => Some("gateway-slack"),
+        "whatsapp" if !cfg!(feature = "gateway-whatsapp") => Some("gateway-whatsapp"),
+        "signal" if !cfg!(feature = "gateway-signal") => Some("gateway-signal"),
+        "matrix" if !cfg!(feature = "gateway-matrix") => Some("gateway-matrix"),
+        "mattermost" if !cfg!(feature = "gateway-mattermost") => Some("gateway-mattermost"),
+        "dingtalk" if !cfg!(feature = "gateway-dingtalk") => Some("gateway-dingtalk"),
+        "feishu" if !cfg!(feature = "gateway-feishu") => Some("gateway-feishu"),
+        "wecom" if !cfg!(feature = "gateway-wecom") => Some("gateway-wecom"),
+        "wecom_callback" if !cfg!(feature = "gateway-wecom-callback") => {
+            Some("gateway-wecom-callback")
+        }
+        "weixin" if !cfg!(feature = "gateway-weixin") => Some("gateway-weixin"),
+        "qqbot" | "qq" if !cfg!(feature = "gateway-qqbot") => Some("gateway-qqbot"),
+        "bluebubbles" if !cfg!(feature = "gateway-bluebubbles") => Some("gateway-bluebubbles"),
+        "email" if !cfg!(feature = "gateway-email") => Some("gateway-email"),
+        "sms" if !cfg!(feature = "gateway-sms") => Some("gateway-sms"),
+        "homeassistant" if !cfg!(feature = "gateway-homeassistant") => {
+            Some("gateway-homeassistant")
+        }
+        "ntfy" if !cfg!(feature = "gateway-ntfy") => Some("gateway-ntfy"),
+        "api_server" if !cfg!(feature = "gateway-api-server") => Some("gateway-api-server"),
+        "webhook" if !cfg!(feature = "gateway-webhook") => Some("gateway-webhook"),
+        _ => None,
+    }
+}
+
+fn report_uncompiled_gateway_adapters(config: &hermes_config::GatewayConfig) {
+    for (platform, platform_cfg) in &config.platforms {
+        if platform_cfg.enabled {
+            if let Some(feature) = missing_gateway_adapter_feature(platform) {
+                println!(
+                    "{platform} is enabled but this binary was built without `{feature}`; skipping adapter registration."
+                );
+            }
+        }
+    }
+}
+
+#[cfg(feature = "gateway-api-server")]
 fn build_api_server_config(platform_cfg: &PlatformConfig) -> ApiServerConfig {
     ApiServerConfig {
         host: extra_string(platform_cfg, "host").unwrap_or_else(|| "127.0.0.1".to_string()),
@@ -5265,6 +5370,7 @@ fn build_api_server_config(platform_cfg: &PlatformConfig) -> ApiServerConfig {
     }
 }
 
+#[cfg(feature = "gateway-webhook")]
 fn build_webhook_config(platform_cfg: &PlatformConfig, secret: String) -> WebhookConfig {
     let routes = platform_cfg
         .extra
@@ -5293,6 +5399,7 @@ fn build_webhook_config(platform_cfg: &PlatformConfig, secret: String) -> Webhoo
     }
 }
 
+#[cfg(feature = "gateway-api-server")]
 async fn run_api_server_inbound_loop(
     gateway: Arc<Gateway>,
     mut rx: mpsc::Receiver<ApiInboundRequest>,
@@ -5323,6 +5430,7 @@ async fn run_api_server_inbound_loop(
     }
 }
 
+#[cfg(feature = "gateway-webhook")]
 async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<WebhookPayload>) {
     while let Some(payload) = rx.recv().await {
         let incoming = GatewayIncomingMessage {
@@ -5342,6 +5450,11 @@ async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<
     }
 }
 
+#[cfg(any(
+    feature = "gateway-dingtalk",
+    feature = "gateway-ntfy",
+    feature = "gateway-weixin"
+))]
 async fn run_gateway_incoming_loop(
     gateway: Arc<Gateway>,
     mut rx: mpsc::Receiver<GatewayIncomingMessage>,
@@ -5359,6 +5472,10 @@ async fn register_gateway_adapters(
     gateway: Arc<Gateway>,
     sidecar_tasks: &mut Vec<tokio::task::JoinHandle<()>>,
 ) -> Result<(), AgentError> {
+    report_uncompiled_gateway_adapters(config);
+    let _ = (&gateway, &sidecar_tasks);
+
+    #[cfg(feature = "gateway-telegram")]
     if let Some(platform_cfg) = config.platforms.get("telegram") {
         if platform_cfg.enabled {
             if let Some(token) = platform_token_or_extra(platform_cfg) {
@@ -5379,6 +5496,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-weixin")]
     if let Some(platform_cfg) = config.platforms.get("weixin") {
         if platform_cfg.enabled {
             let account_id_missing = platform_cfg
@@ -5421,6 +5539,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-discord")]
     if let Some(platform_cfg) = config.platforms.get("discord") {
         if platform_cfg.enabled {
             if let Some(token) = platform_token_or_extra(platform_cfg) {
@@ -5451,6 +5570,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-slack")]
     if let Some(platform_cfg) = config.platforms.get("slack") {
         if platform_cfg.enabled {
             if let Some(token) = platform_token_or_extra(platform_cfg) {
@@ -5471,6 +5591,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-matrix")]
     if let Some(platform_cfg) = config.platforms.get("matrix") {
         if platform_cfg.enabled {
             let homeserver_url = extra_string(platform_cfg, "homeserver_url")
@@ -5500,6 +5621,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-mattermost")]
     if let Some(platform_cfg) = config.platforms.get("mattermost") {
         if platform_cfg.enabled {
             let token = platform_token_or_extra(platform_cfg).unwrap_or_default();
@@ -5531,6 +5653,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-signal")]
     if let Some(platform_cfg) = config.platforms.get("signal") {
         if platform_cfg.enabled {
             let phone_number = extra_string(platform_cfg, "phone_number")
@@ -5553,6 +5676,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-whatsapp")]
     if let Some(platform_cfg) = config.platforms.get("whatsapp") {
         if platform_cfg.enabled {
             if let Some(token) = platform_token_or_extra(platform_cfg) {
@@ -5591,6 +5715,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-dingtalk")]
     if let Some(platform_cfg) = config.platforms.get("dingtalk") {
         if platform_cfg.enabled {
             let ding_cfg = DingTalkConfig::from_platform_config(platform_cfg);
@@ -5610,6 +5735,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-feishu")]
     if let Some(platform_cfg) = config.platforms.get("feishu") {
         if platform_cfg.enabled {
             let app_id = extra_string(platform_cfg, "app_id").unwrap_or_default();
@@ -5634,6 +5760,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-wecom")]
     if let Some(platform_cfg) = config.platforms.get("wecom") {
         if platform_cfg.enabled {
             let corp_id = extra_string(platform_cfg, "corp_id").unwrap_or_default();
@@ -5658,6 +5785,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-wecom-callback")]
     if let Some(platform_cfg) = config.platforms.get("wecom_callback") {
         if platform_cfg.enabled {
             let corp_id = extra_string(platform_cfg, "corp_id").unwrap_or_default();
@@ -5723,6 +5851,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-qqbot")]
     if let Some(platform_cfg) = config
         .platforms
         .get("qqbot")
@@ -5750,6 +5879,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-bluebubbles")]
     if let Some(platform_cfg) = config.platforms.get("bluebubbles") {
         if platform_cfg.enabled {
             let server_url = extra_string(platform_cfg, "server_url").unwrap_or_default();
@@ -5776,6 +5906,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-email")]
     if let Some(platform_cfg) = config.platforms.get("email") {
         if platform_cfg.enabled {
             let imap_host = extra_string(platform_cfg, "imap_host").unwrap_or_default();
@@ -5813,6 +5944,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-sms")]
     if let Some(platform_cfg) = config.platforms.get("sms") {
         if platform_cfg.enabled {
             let account_sid = extra_string(platform_cfg, "account_sid").unwrap_or_default();
@@ -5839,6 +5971,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-homeassistant")]
     if let Some(platform_cfg) = config.platforms.get("homeassistant") {
         if platform_cfg.enabled {
             let base_url = extra_string(platform_cfg, "base_url").unwrap_or_default();
@@ -5868,6 +6001,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-ntfy")]
     if let Some(platform_cfg) = config.platforms.get("ntfy") {
         if platform_cfg.enabled {
             let ntfy_cfg = NtfyConfig::from_platform_config(platform_cfg);
@@ -5887,6 +6021,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-webhook")]
     if let Some(platform_cfg) = config.platforms.get("webhook") {
         if platform_cfg.enabled {
             let secret = platform_token_or_extra(platform_cfg)
@@ -5908,6 +6043,7 @@ async fn register_gateway_adapters(
         }
     }
 
+    #[cfg(feature = "gateway-api-server")]
     if let Some(platform_cfg) = config
         .platforms
         .get("api_server")
@@ -5933,6 +6069,7 @@ async fn register_gateway_adapters(
     Ok(())
 }
 
+#[cfg(feature = "gateway-telegram")]
 fn telegram_should_batch_text(msg: &TelegramIncomingMessage) -> bool {
     msg.text
         .as_deref()
@@ -5946,6 +6083,7 @@ fn telegram_should_batch_text(msg: &TelegramIncomingMessage) -> bool {
         && msg.callback_data.is_none()
 }
 
+#[cfg(feature = "gateway-telegram")]
 fn telegram_routable_topic_thread(thread_id: Option<i64>) -> Option<i64> {
     match thread_id {
         Some(id) if id > 1 => Some(id),
@@ -5953,6 +6091,7 @@ fn telegram_routable_topic_thread(thread_id: Option<i64>) -> Option<i64> {
     }
 }
 
+#[cfg(feature = "gateway-telegram")]
 fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMessage {
     let text = msg.text.unwrap_or_else(|| {
         if msg.is_voice {
@@ -5986,6 +6125,7 @@ fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMess
     }
 }
 
+#[cfg(feature = "gateway-telegram")]
 async fn route_telegram_message(gateway: &Gateway, msg: TelegramIncomingMessage) {
     let incoming = telegram_gateway_message(msg);
     if let Err(err) = gateway.route_message(&incoming).await {
@@ -5993,6 +6133,7 @@ async fn route_telegram_message(gateway: &Gateway, msg: TelegramIncomingMessage)
     }
 }
 
+#[cfg(feature = "gateway-telegram")]
 async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdapter>) {
     if adapter.config().polling {
         if let Err(err) = adapter.delete_webhook(false).await {
@@ -15635,6 +15776,43 @@ mod tests {
         ))
     }
 
+    fn assert_gateway_feature_guard(platform: &str, feature_enabled: bool, feature_name: &str) {
+        if feature_enabled {
+            assert_eq!(missing_gateway_adapter_feature(platform), None);
+        } else {
+            assert_eq!(
+                missing_gateway_adapter_feature(platform),
+                Some(feature_name)
+            );
+        }
+    }
+
+    #[test]
+    fn gateway_adapter_feature_guard_normalizes_platform_aliases() {
+        assert_gateway_feature_guard(
+            "telegram",
+            cfg!(feature = "gateway-telegram"),
+            "gateway-telegram",
+        );
+        assert_gateway_feature_guard(
+            "api-server",
+            cfg!(feature = "gateway-api-server"),
+            "gateway-api-server",
+        );
+        assert_gateway_feature_guard(
+            "api_server",
+            cfg!(feature = "gateway-api-server"),
+            "gateway-api-server",
+        );
+        assert_gateway_feature_guard(
+            "wecom_callback",
+            cfg!(feature = "gateway-wecom-callback"),
+            "gateway-wecom-callback",
+        );
+        assert_gateway_feature_guard("qq", cfg!(feature = "gateway-qqbot"), "gateway-qqbot");
+        assert_eq!(missing_gateway_adapter_feature("unknown-platform"), None);
+    }
+
     #[tokio::test]
     async fn run_model_persists_default_model_to_config_yaml() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -15736,6 +15914,7 @@ mod tests {
         assert!(masked.contains("***"));
     }
 
+    #[cfg(feature = "gateway-api-server")]
     #[test]
     fn api_server_config_defaults_to_loopback() {
         let platform = PlatformConfig {
@@ -15748,6 +15927,7 @@ mod tests {
         assert_eq!(cfg.auth_token, None);
     }
 
+    #[cfg(feature = "gateway-api-server")]
     #[test]
     fn api_server_config_honors_overrides_and_token_precedence() {
         let mut platform = PlatformConfig {
@@ -15771,6 +15951,7 @@ mod tests {
         assert_eq!(cfg.auth_token.as_deref(), Some("platform-token"));
     }
 
+    #[cfg(feature = "gateway-telegram")]
     #[test]
     fn telegram_gateway_message_preserves_group_topic_in_chat_id() {
         let incoming = TelegramIncomingMessage {
@@ -15804,6 +15985,7 @@ mod tests {
         assert!(!routed.is_dm);
     }
 
+    #[cfg(feature = "gateway-telegram")]
     #[test]
     fn telegram_gateway_message_preserves_private_topic_in_chat_id() {
         let incoming = TelegramIncomingMessage {
@@ -15837,6 +16019,7 @@ mod tests {
         assert!(routed.is_dm);
     }
 
+    #[cfg(feature = "gateway-telegram")]
     #[test]
     fn telegram_gateway_message_treats_general_topic_as_root_lobby() {
         let incoming = TelegramIncomingMessage {
@@ -16356,6 +16539,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "gateway-telegram")]
     #[test]
     fn build_telegram_config_reads_reply_secret_and_reactions() {
         let _guard = env_lock();
@@ -16448,6 +16632,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "gateway-telegram")]
     #[test]
     fn build_telegram_config_maps_yaml_boolean_off_reply_mode() {
         let mut platform = PlatformConfig::default();

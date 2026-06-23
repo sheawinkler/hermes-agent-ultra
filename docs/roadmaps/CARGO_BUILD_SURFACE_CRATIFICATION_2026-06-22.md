@@ -31,8 +31,10 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
    - Keep UI dependencies out of provider/auth tests.
 
 4. Gateway adapter feature narrowing
+   - Status: implemented as the fourth split.
    - Move broad adapter feature enablement behind explicit binary/runtime feature sets.
    - Keep provider/auth and command-contract tests from compiling every gateway adapter by default.
+   - Default `hermes-cli` builds still enable `gateway-adapters-all` to preserve installed-user behavior; `--no-default-features` now compiles the gateway core without adapter modules and emits clear skip diagnostics for enabled-but-uncompiled adapters.
 
 5. Parity test dependency narrowing
    - Status: second split implemented.
