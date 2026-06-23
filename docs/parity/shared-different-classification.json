@@ -908,7 +908,7 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -978,7 +978,7 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/agent",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -1265,7 +1265,7 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/cli",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -1377,7 +1377,7 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/e2e",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -2665,7 +2665,7 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/hermes_cli",
-      "rationale": "Upstream Python hermes_cli tests remain reference-only; Rust-first CLI/provider/gateway/config behavior is covered by docs/parity/hermes-cli-test-coverage.json and enforced by crates/hermes-parity-tests/tests/hermes_cli_test_coverage_contract.rs.",
+      "rationale": "Upstream Python hermes_cli tests remain reference-only; Rust-first CLI/provider/gateway/config behavior is covered by docs/parity/hermes-cli-test-coverage.json and enforced by crates/hermes-source-parity-tests/tests/hermes_cli_test_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -2798,21 +2798,21 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/honcho_plugin",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/integration",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/plugins",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -2875,7 +2875,7 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/run_agent",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -3288,14 +3288,14 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/skills",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/stress",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -3316,7 +3316,7 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/tools",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
@@ -4009,28 +4009,28 @@
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/tui_gateway",
-      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs.",
+      "rationale": "Upstream Python test-suite rows are reference-only in Ultra; Rust runtime behavior is covered by docs/parity/python-test-suite-coverage.json and enforced by crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "ui-tui",
-      "rationale": "Upstream TypeScript/Ink TUI source remains reference-only; Rust Ratatui CLI/TUI behavior is covered by docs/parity/ui-tui-source-coverage.json and enforced by crates/hermes-parity-tests/tests/ui_tui_source_coverage_contract.rs.",
+      "rationale": "Upstream TypeScript/Ink TUI source remains reference-only; Rust Ratatui CLI/TUI behavior is covered by docs/parity/ui-tui-source-coverage.json and enforced by crates/hermes-source-parity-tests/tests/ui_tui_source_coverage_contract.rs.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "ui-tui/packages",
-      "rationale": "Upstream TypeScript/Ink TUI source remains reference-only; Rust Ratatui CLI/TUI behavior is covered by docs/parity/ui-tui-source-coverage.json and enforced by crates/hermes-parity-tests/tests/ui_tui_source_coverage_contract.rs.",
+      "rationale": "Upstream TypeScript/Ink TUI source remains reference-only; Rust Ratatui CLI/TUI behavior is covered by docs/parity/ui-tui-source-coverage.json and enforced by crates/hermes-source-parity-tests/tests/ui_tui_source_coverage_contract.rs.",
       "ticket": 25
     },
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "ui-tui/src",
-      "rationale": "Upstream TypeScript/Ink TUI source remains reference-only; Rust Ratatui CLI/TUI behavior is covered by docs/parity/ui-tui-source-coverage.json and enforced by crates/hermes-parity-tests/tests/ui_tui_source_coverage_contract.rs.",
+      "rationale": "Upstream TypeScript/Ink TUI source remains reference-only; Rust Ratatui CLI/TUI behavior is covered by docs/parity/ui-tui-source-coverage.json and enforced by crates/hermes-source-parity-tests/tests/ui_tui_source_coverage_contract.rs.",
       "ticket": 25
     },
     {

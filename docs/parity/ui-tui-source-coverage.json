@@ -6,7 +6,7 @@
       "ui-tui/packages",
       "ui-tui/src"
     ],
-    "guard_test": "crates/hermes-parity-tests/tests/ui_tui_source_coverage_contract.rs",
+    "guard_test": "crates/hermes-source-parity-tests/tests/ui_tui_source_coverage_contract.rs",
     "rust_primary_tui": "crates/hermes-cli/src/tui.rs",
     "rust_only_runtime": true
   },

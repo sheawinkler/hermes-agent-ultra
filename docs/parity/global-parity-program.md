@@ -7,7 +7,7 @@ This runbook maps each GPAR ticket to executable artifacts and checks.
 - `#20 GPAR-01` tests + CI parity closure
   - `docs/parity/test-intent-mapping.json`
   - `docs/parity/test-coverage-audit.json`
-  - `crates/hermes-parity-tests/tests/global_parity_governance.rs`
+  - `crates/hermes-source-parity-tests/tests/global_parity_governance.rs`
   - `crates/hermes-parity-tests/fixtures/hermes_core/tool_call_parser.json`
 - `#21 GPAR-02` skills + optional-skills parity
   - test-intent mapping entry: `skills-management-contract`

@@ -43,7 +43,7 @@
     {
       "contextlattice_topic": "hermes-agent-ultra/parity/sota/protocol-differential-contracts",
       "fixtures": [
-        "crates/hermes-parity-tests/tests/fixtures/protocol_differential_contracts.json"
+        "crates/hermes-protocol-parity-tests/tests/fixtures/protocol_differential_contracts.json"
       ],
       "id": "protocol-differential-contracts",
       "required_capabilities": [
@@ -56,11 +56,11 @@
       "retrieval_query": "Hermes Agent Ultra SOTA harness evidence for protocol-differential-contracts including fixtures, Rust tests, failures, and queue status",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/protocol_differential_contracts.rs",
+          "file": "crates/hermes-protocol-parity-tests/tests/protocol_differential_contracts.rs",
           "name": "protocol_differential_fixture_is_complete_and_unique"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/protocol_differential_contracts.rs",
+          "file": "crates/hermes-protocol-parity-tests/tests/protocol_differential_contracts.rs",
           "name": "protocol_differential_fixture_matches_runtime_serialization"
         }
       ],
@@ -114,7 +114,7 @@
           "name": "stream_text_only_drop_does_not_retry"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/sota_harness_contracts.rs",
+          "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
           "name": "fault_injection_matrix_covers_required_classes"
         }
       ],

@@ -15,7 +15,8 @@ fn repo_root() -> PathBuf {
 }
 
 fn load_fixture() -> CliCommandContractFixture {
-    let path = repo_root().join("crates/hermes-parity-tests/tests/fixtures/command_actions.json");
+    let path =
+        repo_root().join("crates/hermes-source-parity-tests/tests/fixtures/command_actions.json");
     let raw = std::fs::read_to_string(&path).expect("read command_actions fixture");
     serde_json::from_str(&raw).expect("parse command_actions fixture")
 }
@@ -191,7 +192,8 @@ fn cli_action_contract_matches_fixture() {
 
 #[test]
 fn fixture_path_is_stable() {
-    let path = repo_root().join("crates/hermes-parity-tests/tests/fixtures/command_actions.json");
+    let path =
+        repo_root().join("crates/hermes-source-parity-tests/tests/fixtures/command_actions.json");
     assert!(
         Path::new(&path).exists(),
         "missing fixture at {}",
