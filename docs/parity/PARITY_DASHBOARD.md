@@ -1,14 +1,14 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-23T09:23:29.929691+00:00`_
+_Generated from source artifacts: `2026-06-23T10:14:49.130616+00:00`_
 
 ## Snapshot
 
 - Upstream target: `upstream/main` @ `5ecf3bf0e0726b8b33682bb5c3aad9679b7b5be4`
-- Workstream snapshot generated: `2026-06-23T02:03:48-06:00`
+- Workstream snapshot generated: `2026-06-23T03:25:28-06:00`
 - Parity matrix generated: `2026-06-12T11:29:13.798398+00:00`
 - Queue snapshot generated: `2026-06-16T23:55:38.405701+00:00`
-- Proof snapshot generated: `2026-06-23T09:23:29.929691+00:00`
+- Proof snapshot generated: `2026-06-23T10:14:49.130616+00:00`
 
 ## Gate Status
 
@@ -29,7 +29,7 @@ _Generated from source artifacts: `2026-06-23T09:23:29.929691+00:00`_
 | Tracked behavior rows | 419 |
 | Covered behavior rows | 419 |
 | Tracked behavior coverage ratio | 1.0000 |
-| Rust test functions | 3626 |
+| Rust test functions | 3629 |
 | Missing Rust test refs | 0 |
 | Critical gaps | 0 |
 

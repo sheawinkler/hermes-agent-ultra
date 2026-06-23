@@ -74,6 +74,7 @@ hermes-agent = { workspace = true }
 hermes-tools = { workspace = true }
 hermes-config = { workspace = true }
 hermes-gateway = { workspace = true }
+hermes-cli-ui = { workspace = true }
 hermes-cron = { workspace = true }
 hermes-environments = { workspace = true }
 hermes-mcp = { workspace = true }

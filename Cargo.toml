@@ -7,6 +7,7 @@ members = [
     "crates/hermes-agent",
     "crates/hermes-tools",
     "crates/hermes-gateway",
+    "crates/hermes-cli-ui",
     "crates/hermes-cli",
     "crates/hermes-cron",
     "crates/hermes-skills",
@@ -38,6 +39,7 @@ hermes-app-runtime = { path = "crates/hermes-app-runtime" }
 hermes-agent = { path = "crates/hermes-agent" }
 hermes-tools = { path = "crates/hermes-tools" }
 hermes-gateway = { path = "crates/hermes-gateway" }
+hermes-cli-ui = { path = "crates/hermes-cli-ui" }
 hermes-cli = { path = "crates/hermes-cli" }
 hermes-cron = { path = "crates/hermes-cron" }
 hermes-skills = { path = "crates/hermes-skills" }
