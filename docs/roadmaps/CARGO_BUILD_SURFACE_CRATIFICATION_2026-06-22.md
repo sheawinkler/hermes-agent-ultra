@@ -27,7 +27,9 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
    - Depend on provider runtime and core agent crates, not on CLI wrappers or TUI.
 
 3. `hermes-cli-ui`
-   - Own terminal UI, clipboard, slash-command rendering, and completion/help presentation.
+   - Status: first crate split implemented.
+   - Own slash-command rendering, autocomplete ranking, alias canonicalization, and completion/help presentation.
+   - Next: move terminal UI, clipboard, and remaining TUI presentation helpers out of `hermes-cli`.
    - Keep UI dependencies out of provider/auth tests.
 
 4. Gateway adapter feature narrowing

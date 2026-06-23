@@ -1601,6 +1601,7 @@ dependencies = [
  "hermes-agent",
  "hermes-app-runtime",
  "hermes-auth",
+ "hermes-cli-ui",
  "hermes-config",
  "hermes-core",
  "hermes-cron",
@@ -1636,6 +1637,10 @@ dependencies = [
  "wiremock",
  "zip",
 ]
+
+[[package]]
+name = "hermes-cli-ui"
+version = "0.18.1"
 
 [[package]]
 name = "hermes-config"
