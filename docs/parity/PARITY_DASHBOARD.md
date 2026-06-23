@@ -1,6 +1,6 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-22T21:44:45.532726+00:00`_
+_Generated from source artifacts: `2026-06-23T00:33:37.210464+00:00`_
 
 ## Snapshot
 
@@ -8,7 +8,7 @@ _Generated from source artifacts: `2026-06-22T21:44:45.532726+00:00`_
 - Workstream snapshot generated: `2026-06-13T16:15:14-06:00`
 - Parity matrix generated: `2026-06-12T11:29:13.798398+00:00`
 - Queue snapshot generated: `2026-06-16T23:55:38.405701+00:00`
-- Proof snapshot generated: `2026-06-22T21:44:45.532726+00:00`
+- Proof snapshot generated: `2026-06-23T00:33:37.210464+00:00`
 
 ## Gate Status
 

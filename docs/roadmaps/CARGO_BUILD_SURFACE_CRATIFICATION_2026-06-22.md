@@ -15,7 +15,8 @@ Date: 2026-06-22
 Keep the runtime Rust-only, but split compile surfaces so targeted work can test targeted crates:
 
 1. `hermes-provider-runtime`
-   - Own `build_provider`, provider/model selection, OpenAI ChatGPT OAuth routing, local OpenAI-compatible backend routing, and provider auth repair contracts.
+   - Status: implemented as the first split.
+   - Owns `build_provider`, provider/model selection, OpenAI ChatGPT OAuth routing, local OpenAI-compatible backend routing, and provider auth repair contracts.
    - No TUI, installer, adapter, cron, or gateway feature dependencies.
 
 2. `hermes-app-runtime`
@@ -38,7 +39,6 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
 
 - `scripts/audit-cargo-build-surface.sh`
 - `cargo test -p hermes-provider-runtime`
-- `cargo test -p hermes-app-runtime`
 - `cargo test -p hermes-parity-tests test_behavioral_similarity_diff_gate_passes_and_references_real_tests -- --nocapture`
 - `cargo build -p hermes-cli --bin hermes-ultra --bin hermes-agent-ultra`
 

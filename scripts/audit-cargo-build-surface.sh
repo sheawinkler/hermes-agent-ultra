@@ -80,5 +80,5 @@ echo
 echo "## Interpretation"
 echo
 echo "- \`hermes-cli\` is currently the invalidation root for wrappers, the main runtime binary, provider/auth routing, TUI/clipboard UI dependencies, gateway adapter features, cron, ACP, MCP, tools, skills, and telemetry."
-echo "- The first crate split should isolate provider/auth routing and noninteractive chat contracts from the CLI/TUI and gateway adapter feature surface."
-echo "- Parity tests that only validate provider, auth, or command contracts should depend on that narrower crate instead of pulling the full CLI binary surface."
+echo "- Provider/auth routing now has a narrower home in \`hermes-provider-runtime\`; the next high-value split is noninteractive chat orchestration away from CLI/TUI and gateway adapter feature surfaces."
+echo "- Parity tests that only validate provider, auth, or command contracts should keep moving to narrower crates instead of pulling the full CLI binary surface."

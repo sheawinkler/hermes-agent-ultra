@@ -1,0 +1,20 @@
+[package]
+name = "hermes-provider-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Provider/model routing and LLM backend construction for Hermes"
+
+[dependencies]
+hermes-core = { workspace = true }
+hermes-config = { workspace = true }
+hermes-agent = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+wiremock = "0.6"

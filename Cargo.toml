@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/hermes-core",
+    "crates/hermes-provider-runtime",
     "crates/hermes-agent",
     "crates/hermes-tools",
     "crates/hermes-gateway",
@@ -29,6 +30,7 @@ repository = "https://github.com/sheawinkler/hermes-agent-ultra"
 [workspace.dependencies]
 # Internal crates
 hermes-core = { path = "crates/hermes-core" }
+hermes-provider-runtime = { path = "crates/hermes-provider-runtime" }
 hermes-agent = { path = "crates/hermes-agent" }
 hermes-tools = { path = "crates/hermes-tools" }
 hermes-gateway = { path = "crates/hermes-gateway" }

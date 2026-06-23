@@ -1591,6 +1591,7 @@ dependencies = [
  "hermes-gateway",
  "hermes-intelligence",
  "hermes-mcp",
+ "hermes-provider-runtime",
  "hermes-skills",
  "hermes-telemetry",
  "hermes-tools",
@@ -1847,6 +1848,21 @@ dependencies = [
  "sha2",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "hermes-provider-runtime"
+version = "0.18.1"
+dependencies = [
+ "async-trait",
+ "futures",
+ "hermes-agent",
+ "hermes-config",
+ "hermes-core",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "wiremock",
 ]
 
 [[package]]
