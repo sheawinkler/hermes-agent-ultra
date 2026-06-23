@@ -35,8 +35,10 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
    - Keep provider/auth and command-contract tests from compiling every gateway adapter by default.
 
 5. Parity test dependency narrowing
-   - Status: first split implemented.
-   - Command-contract parity now reads the CLI source contract without a `hermes-cli` or `clap` dev dependency.
+   - Status: second split implemented.
+   - Command-contract parity now lives in `hermes-source-parity-tests` and reads the CLI source contract without a `hermes-cli`, `clap`, fixture-harness, or protocol-stack dependency.
+   - Protocol differential parity now lives in `hermes-protocol-parity-tests`, isolating ACP, MCP, gateway, and tool-runtime dependencies to tests that need them.
+   - `hermes-parity-tests` remains the Rust fixture harness crate for core/intelligence fixture parity.
    - Point behavioral/provider parity tests at `hermes-provider-runtime`, `hermes-app-runtime`, and command-contract crates where possible.
    - Keep full `hermes-cli` parity checks for end-to-end CLI behavior only.
 
@@ -45,7 +47,8 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
 - `scripts/audit-cargo-build-surface.sh`
 - `cargo test -p hermes-provider-runtime`
 - `cargo test -p hermes-app-runtime`
-- `cargo test -p hermes-parity-tests test_behavioral_similarity_diff_gate_passes_and_references_real_tests -- --nocapture`
+- `cargo test -p hermes-source-parity-tests --test global_parity_governance -- --nocapture`
+- `cargo test -p hermes-protocol-parity-tests --test protocol_differential_contracts -- --nocapture`
 - `cargo build -p hermes-cli --bin hermes-ultra --bin hermes-agent-ultra`
 
 ## Non-Goals

@@ -41,13 +41,15 @@ jobs:
       - name: Parity fixture tests
         run: cargo test -p hermes-parity-tests
       - name: CLI command/action parity contract
-        run: cargo test -p hermes-parity-tests --test cli_command_contract
+        run: cargo test -p hermes-source-parity-tests --test cli_command_contract
+      - name: Protocol differential parity contract
+        run: cargo test -p hermes-protocol-parity-tests --test protocol_differential_contracts
       - name: Upstream slash-command parity gate
         run: python3 scripts/run-upstream-slash-parity-gate.py --upstream-ref upstream/main
       - name: Upstream surface coverage gate
         run: python3 scripts/run-upstream-surface-coverage-gate.py --repo-root . --upstream-ref upstream/main --local-ref HEAD
       - name: Global parity governance contract
-        run: cargo test -p hermes-parity-tests --test global_parity_governance
+        run: cargo test -p hermes-source-parity-tests --test global_parity_governance
       - name: Upstream webhook sync script lint
         run: |
           python3 -m py_compile scripts/upstream_webhook_sync.py

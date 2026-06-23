@@ -1849,18 +1849,26 @@ dependencies = [
 name = "hermes-parity-tests"
 version = "0.18.1"
 dependencies = [
- "async-trait",
- "hermes-acp",
  "hermes-core",
- "hermes-gateway",
  "hermes-intelligence",
- "hermes-mcp",
- "hermes-tools",
- "regex",
  "serde",
  "serde_json",
  "sha2",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "hermes-protocol-parity-tests"
+version = "0.18.1"
+dependencies = [
+ "async-trait",
+ "hermes-acp",
+ "hermes-core",
+ "hermes-gateway",
+ "hermes-mcp",
+ "hermes-tools",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -1903,6 +1911,15 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "hermes-source-parity-tests"
+version = "0.18.1"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -40,7 +40,7 @@ INTENTS: list[IntentSpec] = [
         local_evidence_globs=[
             "crates/hermes-app-runtime/src/**/*.rs",
             "crates/hermes-cli/src/**/*.rs",
-            "crates/hermes-parity-tests/tests/cli_command_contract.rs",
+            "crates/hermes-source-parity-tests/tests/cli_command_contract.rs",
         ],
     ),
     IntentSpec(

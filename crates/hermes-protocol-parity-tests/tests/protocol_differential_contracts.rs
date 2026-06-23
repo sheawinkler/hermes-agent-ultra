@@ -47,8 +47,9 @@ fn repo_root() -> PathBuf {
 }
 
 fn load_suite() -> ProtocolSuite {
-    let path = repo_root()
-        .join("crates/hermes-parity-tests/tests/fixtures/protocol_differential_contracts.json");
+    let path = repo_root().join(
+        "crates/hermes-protocol-parity-tests/tests/fixtures/protocol_differential_contracts.json",
+    );
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("failed reading {}: {}", path.display(), err));
     serde_json::from_str(&raw)

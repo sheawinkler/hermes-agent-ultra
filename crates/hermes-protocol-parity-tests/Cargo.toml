@@ -1,0 +1,19 @@
+[package]
+name = "hermes-protocol-parity-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Protocol differential parity contracts for Hermes Agent"
+publish = false
+
+[dev-dependencies]
+async-trait = { workspace = true }
+hermes-acp = { workspace = true }
+hermes-core = { workspace = true }
+hermes-gateway = { workspace = true }
+hermes-mcp = { workspace = true }
+hermes-tools = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

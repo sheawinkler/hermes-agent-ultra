@@ -12,7 +12,7 @@
       "source_artifacts": [
         "crates/hermes-cli/src/commands.rs",
         "crates/hermes-cli/src/main.rs",
-        "crates/hermes-parity-tests/tests/cli_command_contract.rs"
+        "crates/hermes-source-parity-tests/tests/cli_command_contract.rs"
       ],
       "rust_tests": [
         {
@@ -24,7 +24,7 @@
           "name": "query_is_local_slash_command_detects_prefixed_queries"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/cli_command_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/cli_command_contract.rs",
           "name": "cli_top_level_surface_contains_required_commands"
         }
       ]
@@ -332,15 +332,15 @@
       "source_artifacts": [
         "scripts/check-rust-runtime-no-python.sh",
         "docs/parity/python-test-suite-coverage.json",
-        "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs"
+        "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs"
       ],
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_skill_and_external_service_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/global_parity_governance.rs",
+          "file": "crates/hermes-source-parity-tests/tests/global_parity_governance.rs",
           "name": "test_coverage_audit_gate_passes"
         }
       ]
@@ -354,20 +354,20 @@
       "why": "This turns resilience into a measured behavior surface rather than relying on happy-path parity.",
       "source_artifacts": [
         "docs/parity/sota-harness-matrix.json",
-        "crates/hermes-parity-tests/tests/sota_harness_contracts.rs",
+        "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
         "crates/hermes-agent/src/testdata/adapter_chaos_profiles.json"
       ],
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/sota_harness_contracts.rs",
+          "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
           "name": "sota_harness_matrix_gate_passes_and_references_real_tests"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/sota_harness_contracts.rs",
+          "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
           "name": "fault_injection_matrix_covers_required_classes"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/global_parity_governance.rs",
+          "file": "crates/hermes-source-parity-tests/tests/global_parity_governance.rs",
           "name": "test_sota_harness_matrix_gate_passes"
         }
       ]

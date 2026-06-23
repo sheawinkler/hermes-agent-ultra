@@ -20,6 +20,8 @@ members = [
     "crates/hermes-auth",
     "crates/hermes-telemetry",
     "crates/hermes-parity-tests",
+    "crates/hermes-source-parity-tests",
+    "crates/hermes-protocol-parity-tests",
 ]
 
 [workspace.package]
@@ -49,6 +51,8 @@ hermes-http = { path = "crates/hermes-http" }
 hermes-auth = { path = "crates/hermes-auth" }
 hermes-telemetry = { path = "crates/hermes-telemetry" }
 hermes-parity-tests = { path = "crates/hermes-parity-tests" }
+hermes-source-parity-tests = { path = "crates/hermes-source-parity-tests" }
+hermes-protocol-parity-tests = { path = "crates/hermes-protocol-parity-tests" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

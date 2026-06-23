@@ -26,5 +26,5 @@ Generated: `2026-06-10T23:45:00Z`
 ## Source Artifacts
 
 - `crates/hermes-parity-tests/tests/fixtures/sota_workflow_replay.json`
-- `crates/hermes-parity-tests/tests/fixtures/protocol_differential_contracts.json`
+- `crates/hermes-protocol-parity-tests/tests/fixtures/protocol_differential_contracts.json`
 - `crates/hermes-agent/src/testdata/adapter_chaos_profiles.json`

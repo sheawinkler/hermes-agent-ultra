@@ -4190,7 +4190,7 @@
   "source_backlog": "docs/parity/shared-diff-backlog.json",
   "summary": {
     "covered_paths": 116,
-    "guard_test": "crates/hermes-parity-tests/tests/hermes_cli_test_coverage_contract.rs",
+    "guard_test": "crates/hermes-source-parity-tests/tests/hermes_cli_test_coverage_contract.rs",
     "provider_api_mode_bridge_added": true,
     "required_backlog_classification_path": "tests/hermes_cli"
   }

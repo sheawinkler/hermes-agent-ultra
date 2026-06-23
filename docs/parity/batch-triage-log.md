@@ -1326,7 +1326,7 @@
   - `cargo test -p hermes-agent background_request_dispatches_handle_and_emits_completion_callback -- --nocapture`
   - `cargo test -p hermes-gateway gateway_deferred_post_delivery_messages_flush_after_main_reply -- --nocapture`
   - `scripts/check-runtime-placeholders.sh`
-  - `cargo test -p hermes-parity-tests --test global_parity_governance -- --nocapture`
+  - `cargo test -p hermes-source-parity-tests --test global_parity_governance -- --nocapture`
   - `python3 scripts/generate-global-parity-proof.py --check-ci`
 - Verification note:
   - All Rust/placeholder/governance checks above passed except `generate-global-parity-proof.py --check-ci`, which regenerated proof artifacts but exited non-zero on pre-existing tree-drift thresholds (`max_commits_behind=5880 > 5500`, `max_upstream_patch_missing=5657 > 5000`) and release-mode `pending=0` policy. The queue pending metric itself is under CI threshold (`21 <= 100`).

@@ -17,7 +17,7 @@
       "tests/tools",
       "tests/tui_gateway"
     ],
-    "guard_test": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+    "guard_test": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
     "coverage_kind": "rust_test_suite_contract_or_documented_divergence",
     "rust_only_runtime": true
   },
@@ -3446,11 +3446,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -3658,7 +3658,7 @@
           "name": "test_honcho_user_peer_falls_back_to_sanitized_session_key"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -3723,7 +3723,7 @@
           "name": "test_honcho_user_peer_falls_back_to_sanitized_session_key"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -3788,7 +3788,7 @@
           "name": "test_honcho_user_peer_falls_back_to_sanitized_session_key"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -3853,7 +3853,7 @@
           "name": "test_honcho_user_peer_falls_back_to_sanitized_session_key"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -3918,7 +3918,7 @@
           "name": "test_honcho_user_peer_falls_back_to_sanitized_session_key"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -4215,11 +4215,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6134,11 +6134,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6198,11 +6198,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6261,11 +6261,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6324,11 +6324,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6388,11 +6388,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6451,11 +6451,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6514,11 +6514,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6577,11 +6577,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6640,11 +6640,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6703,11 +6703,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6766,11 +6766,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6829,11 +6829,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6893,11 +6893,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -6957,11 +6957,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7020,11 +7020,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7083,11 +7083,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7146,11 +7146,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7210,11 +7210,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7273,11 +7273,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7337,11 +7337,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7401,11 +7401,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7465,11 +7465,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7528,11 +7528,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7592,11 +7592,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7657,11 +7657,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7720,11 +7720,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7783,11 +7783,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7846,11 +7846,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7909,11 +7909,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -7972,11 +7972,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -8035,11 +8035,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -8098,11 +8098,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -8161,11 +8161,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -8224,11 +8224,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -8287,11 +8287,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -8352,11 +8352,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -8415,11 +8415,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -8478,11 +8478,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {
@@ -8541,11 +8541,11 @@
       "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime.",
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_suite_top_level_install_packaging_contracts_are_rust_owned"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/python_test_suite_coverage_contract.rs",
+          "file": "crates/hermes-source-parity-tests/tests/python_test_suite_coverage_contract.rs",
           "name": "python_test_suite_manifest_covers_all_backlog_rows_and_references_real_tests"
         },
         {

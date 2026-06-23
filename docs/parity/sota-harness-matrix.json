@@ -48,7 +48,7 @@
       "why": "Normalizes ACP, MCP, and gateway protocol surfaces against fixture expectations before transport-specific details hide regressions.",
       "status": "covered_by_rust_contracts",
       "fixtures": [
-        "crates/hermes-parity-tests/tests/fixtures/protocol_differential_contracts.json"
+        "crates/hermes-protocol-parity-tests/tests/fixtures/protocol_differential_contracts.json"
       ],
       "required_capabilities": [
         "ACP method alias normalization",
@@ -59,11 +59,11 @@
       ],
       "rust_tests": [
         {
-          "file": "crates/hermes-parity-tests/tests/protocol_differential_contracts.rs",
+          "file": "crates/hermes-protocol-parity-tests/tests/protocol_differential_contracts.rs",
           "name": "protocol_differential_fixture_is_complete_and_unique"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/protocol_differential_contracts.rs",
+          "file": "crates/hermes-protocol-parity-tests/tests/protocol_differential_contracts.rs",
           "name": "protocol_differential_fixture_matches_runtime_serialization"
         }
       ]
@@ -115,7 +115,7 @@
           "name": "stream_text_only_drop_does_not_retry"
         },
         {
-          "file": "crates/hermes-parity-tests/tests/sota_harness_contracts.rs",
+          "file": "crates/hermes-source-parity-tests/tests/sota_harness_contracts.rs",
           "name": "fault_injection_matrix_covers_required_classes"
         }
       ]
