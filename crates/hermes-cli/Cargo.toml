@@ -70,6 +70,7 @@ path = "src/main.rs"
 hermes-core = { workspace = true }
 hermes-provider-runtime = { workspace = true }
 hermes-app-runtime = { workspace = true }
+hermes-tool-planning = { workspace = true }
 hermes-agent = { workspace = true }
 hermes-tools = { workspace = true }
 hermes-config = { workspace = true }

@@ -618,11 +618,11 @@
           "name": "startup_banner_names_ultra_runtime"
         },
         {
-          "file": "crates/hermes-cli/src/platform_toolsets.rs",
+          "file": "crates/hermes-tool-planning/src/lib.rs",
           "name": "platform_toolset_tokens_strip_legacy_tools_suffix"
         },
         {
-          "file": "crates/hermes-cli/src/platform_toolsets.rs",
+          "file": "crates/hermes-tool-planning/src/lib.rs",
           "name": "tools_config_disabled_removes_even_if_platform_enables"
         },
         {

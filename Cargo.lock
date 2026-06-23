@@ -1612,6 +1612,7 @@ dependencies = [
  "hermes-provider-runtime",
  "hermes-skills",
  "hermes-telemetry",
+ "hermes-tool-planning",
  "hermes-tools",
  "hex",
  "hmac",
@@ -1942,6 +1943,20 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "hermes-tool-planning"
+version = "0.18.1"
+dependencies = [
+ "async-trait",
+ "hermes-agent",
+ "hermes-config",
+ "hermes-core",
+ "hermes-tools",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

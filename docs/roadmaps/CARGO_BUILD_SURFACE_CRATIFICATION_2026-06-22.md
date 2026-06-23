@@ -23,13 +23,13 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
    - Status: third split implemented.
    - Owns agent configuration construction, query-mode provider/model/env/tool policy, model-catalog remediation selection, noninteractive query agent-loop wiring, assistant reply extraction, and runtime prompt reformulation policy.
    - Keeps provider construction injected by the CLI so OpenAI OAuth/auth-state routing remains in the existing runtime path.
-   - Next: move remaining reusable memory/context policy injection and any reusable tool-planning policy that is still embedded in CLI presentation code.
+   - Remaining memory/context policy injection is already runtime-owned where it is generic; UI-only ContextLattice status events remain in the CLI app.
    - Depend on provider runtime and core agent crates, not on CLI wrappers or TUI.
 
 3. `hermes-cli-ui`
    - Status: first crate split implemented.
    - Own slash-command rendering, autocomplete ranking, alias canonicalization, and completion/help presentation.
-   - Next: move terminal UI, clipboard, and remaining TUI presentation helpers out of `hermes-cli`.
+   - Next: consider moving pure gateway/tool preview rendering after validating whether adding `serde_json` to the presentation crate is still worth the dependency tradeoff.
    - Keep UI dependencies out of provider/auth tests.
 
 4. Gateway adapter feature narrowing
@@ -46,11 +46,18 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
    - Point behavioral/provider parity tests at `hermes-provider-runtime`, `hermes-app-runtime`, and command-contract crates where possible.
    - Keep full `hermes-cli` parity checks for end-to-end CLI behavior only.
 
+6. Runtime tool-planning policy
+   - Status: implemented as the fifth split.
+   - Owns platform alias normalization, default/configured platform toolset selection, coding-focus narrowing, live MCP toolset inclusion, explicit tool enable/disable merging, schema filtering, and compact tool-definition summaries.
+   - Uses `hermes-config` defaults as the source of truth and extends them only for runtime-only `api_server` tool planning.
+   - Keeps `hermes-cli::platform_toolsets` as an explicit compatibility re-export while moving tests and implementation to `hermes-tool-planning`.
+
 ## Gates
 
 - `scripts/audit-cargo-build-surface.sh`
 - `cargo test -p hermes-provider-runtime`
 - `cargo test -p hermes-app-runtime`
+- `cargo test -p hermes-tool-planning`
 - `cargo test -p hermes-source-parity-tests --test global_parity_governance -- --nocapture`
 - `cargo test -p hermes-protocol-parity-tests --test protocol_differential_contracts -- --nocapture`
 - `cargo build -p hermes-cli --bin hermes-ultra --bin hermes-agent-ultra`
