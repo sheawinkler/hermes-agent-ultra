@@ -992,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_provider_and_model_uses_named_custom_provider_model() {
+    fn test_resolve_provider_and_model_uses_named_custom_provider_model() {
         let mut cfg = GatewayConfig::default();
         cfg.llm_providers.insert(
             "custom".to_string(),

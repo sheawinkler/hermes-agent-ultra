@@ -907,7 +907,7 @@
 - Verification (targeted + compile):
   - `cargo test -p hermes-agent test_runtime_provider_stepfun -- --nocapture`
   - `cargo test -p hermes-cli stepfun -- --nocapture`
-  - `cargo test -p hermes-cli test_build_agent_config_infers_provider_for_bare_model -- --nocapture`
+  - `cargo test -p hermes-app-runtime test_build_agent_config_infers_provider_for_bare_model -- --nocapture`
   - `cargo test -p hermes-cli capture_debug_log_snapshot -- --nocapture`
   - `cargo test -p hermes-cli run_sessions_db_auto_maintenance_degrades_when_home_is_invalid -- --nocapture`
   - `cargo test -p hermes-cli --no-run`

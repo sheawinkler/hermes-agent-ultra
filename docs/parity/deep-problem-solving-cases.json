@@ -231,7 +231,8 @@
       "why": "Deep behavior quality depends on choosing the right model path and recovering when a provider path degrades.",
       "source_artifacts": [
         "crates/hermes-agent/src/agent_loop.rs",
-        "crates/hermes-cli/src/app.rs"
+        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-app-runtime/src/lib.rs"
       ],
       "rust_tests": [
         {
@@ -251,7 +252,7 @@
           "name": "test_route_learning_decay_and_ttl"
         },
         {
-          "file": "crates/hermes-cli/src/app.rs",
+          "file": "crates/hermes-app-runtime/src/lib.rs",
           "name": "test_build_agent_config_maps_failover_chain_from_env"
         },
         {
