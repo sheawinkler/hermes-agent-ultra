@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-12T11:29:15.009976+00:00",
+  "generated_at_utc": "2026-06-23T06:03:55.140114+00:00",
   "intent_unit": "domain_intent",
   "intents": [
     {
@@ -75,8 +75,9 @@
       ]
     },
     {
-      "evidence_count": 40,
+      "evidence_count": 41,
       "evidence_sample": [
+        "crates/hermes-app-runtime/src/lib.rs",
         "crates/hermes-cli/src/alpha_runtime.rs",
         "crates/hermes-cli/src/app.rs",
         "crates/hermes-cli/src/auth.rs",
@@ -100,8 +101,7 @@
         "crates/hermes-cli/src/model_switch.rs",
         "crates/hermes-cli/src/pairing_store.rs",
         "crates/hermes-cli/src/platform_toolsets.rs",
-        "crates/hermes-cli/src/profiles.rs",
-        "crates/hermes-cli/src/providers.rs"
+        "crates/hermes-cli/src/profiles.rs"
       ],
       "id": "cli-command-surface",
       "mapped": true,
@@ -111,7 +111,7 @@
       ]
     },
     {
-      "evidence_count": 50,
+      "evidence_count": 51,
       "evidence_sample": [
         "crates/hermes-agent/src/agent_loop.rs",
         "crates/hermes-agent/src/api_bridge.rs",
@@ -188,18 +188,20 @@
       ]
     },
     {
-      "evidence_count": 10,
+      "evidence_count": 12,
       "evidence_sample": [
         "crates/hermes-cli/src/commands.rs",
         "crates/hermes-cron/src/backend.rs",
         "crates/hermes-cron/src/blueprints.rs",
+        "crates/hermes-cron/src/chronos.rs",
         "crates/hermes-cron/src/cli_support.rs",
         "crates/hermes-cron/src/completion.rs",
         "crates/hermes-cron/src/job.rs",
         "crates/hermes-cron/src/lib.rs",
         "crates/hermes-cron/src/persistence.rs",
         "crates/hermes-cron/src/runner.rs",
-        "crates/hermes-cron/src/scheduler.rs"
+        "crates/hermes-cron/src/scheduler.rs",
+        "crates/hermes-cron/src/suggestions.rs"
       ],
       "id": "cron-and-scheduler-runtime",
       "mapped": true,

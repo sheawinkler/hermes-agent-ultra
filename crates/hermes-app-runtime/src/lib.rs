@@ -6,14 +6,16 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use hermes_agent::agent_loop::{
     CheapModelRouteConfig, RetryConfig, RuntimeProviderConfig, SmartModelRoutingConfig,
+    ToolRegistry as AgentToolRegistry,
 };
 use hermes_agent::smart_model_routing::ApiMode;
-use hermes_agent::AgentConfig;
+use hermes_agent::{AgentCallbacks, AgentConfig, AgentLoop};
 use hermes_config::{normalize_service_tier, GatewayConfig, LlmProviderConfig};
-use hermes_core::AgentError;
+use hermes_core::{AgentError, AgentResult, LlmProvider, Message, MessageRole, ToolSchema};
 use hermes_provider_runtime::{
     active_llm_provider_config, normalize_runtime_provider_name, resolve_provider_and_model,
 };
@@ -21,6 +23,19 @@ use serde_json::Value;
 
 pub const QUERY_ALLOW_TOOLS_ENV_KEY: &str = "HERMES_QUERY_ALLOW_TOOLS";
 pub const QUERY_DISABLE_TOOLS_ENV_KEY: &str = "HERMES_QUERY_DISABLE_TOOLS";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryModelRemediation {
+    pub next_model: String,
+    pub close_matches: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct NoninteractiveQueryOutcome {
+    pub active_model: String,
+    pub result: AgentResult,
+    pub reply: String,
+}
 
 fn build_retry_config(config: &GatewayConfig) -> RetryConfig {
     let mut retry_cfg = RetryConfig::default();
@@ -321,10 +336,195 @@ pub fn query_mode_tools_enabled(query_mode: bool, allow_tools_flag: bool) -> boo
     true
 }
 
+pub fn split_provider_model(provider_model: &str) -> (&str, &str) {
+    provider_model
+        .split_once(':')
+        .unwrap_or(("openai", provider_model))
+}
+
+pub fn resolve_catalog_model_candidate(
+    requested_model: &str,
+    catalog: &[String],
+) -> Option<String> {
+    if catalog.is_empty() {
+        return None;
+    }
+    let requested_trimmed = requested_model.trim();
+    if requested_trimmed.is_empty() {
+        return catalog.first().cloned();
+    }
+    if let Some(hit) = catalog
+        .iter()
+        .find(|m| m.trim().eq_ignore_ascii_case(requested_trimmed))
+    {
+        return Some(hit.clone());
+    }
+    let requested_lc = requested_trimmed.to_ascii_lowercase();
+    let slash_suffix = format!("/{requested_lc}");
+    if let Some(hit) = catalog.iter().find(|m| {
+        let lower = m.trim().to_ascii_lowercase();
+        lower.ends_with(&slash_suffix) || lower == requested_lc
+    }) {
+        return Some(hit.clone());
+    }
+    rank_catalog_model_candidates(requested_trimmed, catalog, 1)
+        .into_iter()
+        .next()
+}
+
+pub fn rank_catalog_model_candidates(
+    requested_model: &str,
+    catalog: &[String],
+    limit: usize,
+) -> Vec<String> {
+    if catalog.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let requested = requested_model.trim().to_ascii_lowercase();
+    if requested.is_empty() {
+        return catalog.iter().take(limit).cloned().collect();
+    }
+    let requested_tail = requested.rsplit('/').next().unwrap_or(requested.as_str());
+    let requested_norm: String = requested
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+
+    let mut scored: Vec<(usize, usize, String)> = catalog
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, candidate)| {
+            let cand_trimmed = candidate.trim();
+            if cand_trimmed.is_empty() {
+                return None;
+            }
+            let cand = cand_trimmed.to_ascii_lowercase();
+            let cand_tail = cand.rsplit('/').next().unwrap_or(cand.as_str());
+            let cand_norm: String = cand.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+            let mut score = 0usize;
+
+            if cand == requested {
+                score += 10_000;
+            }
+            if cand_tail == requested_tail {
+                score += 8_000;
+            }
+            if cand.ends_with(&format!("/{}", requested_tail)) {
+                score += 6_000;
+            }
+            if cand.contains(requested_tail) || requested_tail.contains(cand_tail) {
+                score += 2_000;
+            }
+
+            let shared_prefix = requested_norm
+                .chars()
+                .zip(cand_norm.chars())
+                .take_while(|(a, b)| a == b)
+                .count();
+            score += shared_prefix.saturating_mul(40);
+
+            let shared_chars = requested_norm
+                .chars()
+                .filter(|ch| cand_norm.contains(*ch))
+                .count();
+            score += shared_chars.saturating_mul(12);
+
+            let len_delta = requested_norm.len().abs_diff(cand_norm.len());
+            score = score.saturating_sub(len_delta.saturating_mul(4));
+            if score == 0 {
+                return None;
+            }
+            Some((score, idx, cand_trimmed.to_string()))
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, _, candidate)| candidate)
+        .collect()
+}
+
+pub fn query_mode_remediation_target_from_catalog(
+    provider_model: &str,
+    catalog: &[String],
+) -> Option<QueryModelRemediation> {
+    let (provider, model_id) = split_provider_model(provider_model);
+    let provider = provider.trim().to_ascii_lowercase();
+    if provider.is_empty() || model_id.trim().is_empty() || catalog.is_empty() {
+        return None;
+    }
+    let close_matches = rank_catalog_model_candidates(model_id.trim(), catalog, 5);
+    let selected = resolve_catalog_model_candidate(model_id.trim(), catalog)
+        .or_else(|| close_matches.first().cloned())
+        .or_else(|| catalog.first().cloned())?;
+    let next_model = format!("{}:{}", provider, selected.trim());
+    if next_model.eq_ignore_ascii_case(provider_model) {
+        return None;
+    }
+    Some(QueryModelRemediation {
+        next_model,
+        close_matches,
+    })
+}
+
+pub fn query_mode_model_not_found(err: &AgentError) -> bool {
+    let msg = err.to_string().to_ascii_lowercase();
+    (msg.contains("model") && msg.contains("not found"))
+        || msg.contains("requested model does not exist")
+        || msg.contains("openrouter catalog")
+}
+
+pub fn assistant_reply_from_result(result: &AgentResult) -> String {
+    result
+        .messages
+        .iter()
+        .rev()
+        .find_map(|m| {
+            if m.role == MessageRole::Assistant {
+                m.content.clone()
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "(no assistant reply)".to_string())
+}
+
+pub async fn run_noninteractive_query(
+    config: &GatewayConfig,
+    active_model: &str,
+    query: &str,
+    agent_tool_registry: Arc<AgentToolRegistry>,
+    tool_schemas: Vec<ToolSchema>,
+    callbacks: AgentCallbacks,
+    provider_factory: impl Fn(&GatewayConfig, &str) -> Arc<dyn LlmProvider>,
+) -> Result<NoninteractiveQueryOutcome, AgentError> {
+    let active_model = active_model.trim().to_string();
+    apply_cli_chat_runtime_env(&active_model);
+    let agent_config = build_agent_config(config, &active_model);
+    let provider = provider_factory(config, &active_model);
+    let agent =
+        AgentLoop::new(agent_config, agent_tool_registry, provider).with_callbacks(callbacks);
+    let result = agent
+        .run(vec![Message::user(query)], Some(tool_schemas))
+        .await?;
+    let reply = assistant_reply_from_result(&result);
+    Ok(NoninteractiveQueryOutcome {
+        active_model,
+        result,
+        reply,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use futures::stream::{self, BoxStream};
+    use futures::StreamExt;
     use hermes_config::LlmProviderConfig;
+    use hermes_core::{LlmResponse, StreamChunk};
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
@@ -932,5 +1132,164 @@ mod tests {
         assert!(query_mode_tools_enabled(true, false));
         std::env::set_var(QUERY_ALLOW_TOOLS_ENV_KEY, "1");
         assert!(query_mode_tools_enabled(true, false));
+    }
+
+    #[test]
+    fn resolve_catalog_model_candidate_prefers_suffix_match() {
+        let catalog = vec![
+            "nousresearch/hermes-4-405b".to_string(),
+            "moonshotai/kimi-k2.6".to_string(),
+        ];
+        let chosen = resolve_catalog_model_candidate("kimi-k2.6", &catalog).expect("candidate");
+        assert_eq!(chosen, "moonshotai/kimi-k2.6");
+    }
+
+    #[test]
+    fn resolve_catalog_model_candidate_uses_relative_match_for_near_miss() {
+        let catalog = vec![
+            "qwen/qwen3.6-plus".to_string(),
+            "qwen/qwen3.6-max-preview".to_string(),
+            "moonshotai/kimi-k2.6".to_string(),
+        ];
+        let chosen = resolve_catalog_model_candidate("qwen3.6-max", &catalog).expect("candidate");
+        assert_eq!(chosen, "qwen/qwen3.6-max-preview");
+    }
+
+    #[test]
+    fn rank_catalog_model_candidates_returns_best_first() {
+        let catalog = vec![
+            "qwen/qwen3.6-plus".to_string(),
+            "qwen/qwen3.6-max-preview".to_string(),
+            "moonshotai/kimi-k2.6".to_string(),
+        ];
+        let ranked = rank_catalog_model_candidates("qwen3.6-max", &catalog, 2);
+        assert_eq!(
+            ranked,
+            vec![
+                "qwen/qwen3.6-max-preview".to_string(),
+                "qwen/qwen3.6-plus".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn query_mode_remediation_target_from_catalog_selects_close_model() {
+        let catalog = vec![
+            "qwen/qwen3.6-plus".to_string(),
+            "qwen/qwen3.6-max-preview".to_string(),
+        ];
+        let remediation =
+            query_mode_remediation_target_from_catalog("openrouter:qwen3.6-max", &catalog)
+                .expect("remediation");
+        assert_eq!(
+            remediation.next_model,
+            "openrouter:qwen/qwen3.6-max-preview"
+        );
+        assert_eq!(
+            remediation.close_matches.first().map(String::as_str),
+            Some("qwen/qwen3.6-max-preview")
+        );
+    }
+
+    #[test]
+    fn query_mode_model_not_found_detects_provider_shapes() {
+        assert!(query_mode_model_not_found(&AgentError::LlmApi(
+            "requested model does not exist".to_string()
+        )));
+        assert!(query_mode_model_not_found(&AgentError::Config(
+            "OpenRouter catalog did not include model".to_string()
+        )));
+        assert!(!query_mode_model_not_found(&AgentError::Config(
+            "bad config".to_string()
+        )));
+    }
+
+    #[test]
+    fn assistant_reply_from_result_prefers_last_assistant_message() {
+        let result = AgentResult {
+            messages: vec![
+                Message::assistant("first"),
+                Message::user("next"),
+                Message::assistant("last"),
+            ],
+            ..AgentResult::default()
+        };
+        assert_eq!(assistant_reply_from_result(&result), "last");
+    }
+
+    struct FixedProvider {
+        reply: &'static str,
+    }
+
+    #[async_trait]
+    impl LlmProvider for FixedProvider {
+        async fn chat_completion(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> Result<LlmResponse, AgentError> {
+            Ok(LlmResponse {
+                message: Message::assistant(self.reply),
+                usage: None,
+                model: model.unwrap_or("test-model").to_string(),
+                finish_reason: Some("stop".to_string()),
+            })
+        }
+
+        fn chat_completion_stream(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            _model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+            stream::empty().boxed()
+        }
+    }
+
+    #[tokio::test]
+    async fn run_noninteractive_query_uses_injected_provider_factory_and_returns_reply() {
+        let _lock = env_test_lock();
+        let _env = EnvSnapshot::capture(&[
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "HERMES_TUI_PROVIDER",
+        ]);
+        let calls = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let calls_for_factory = Arc::clone(&calls);
+        let outcome = run_noninteractive_query(
+            &GatewayConfig::default(),
+            "openai:gpt-5.5",
+            "hello",
+            Arc::new(AgentToolRegistry::new()),
+            Vec::new(),
+            AgentCallbacks::default(),
+            move |_config, model| {
+                calls_for_factory.lock().unwrap().push(model.to_string());
+                Arc::new(FixedProvider {
+                    reply: "runtime-ok",
+                })
+            },
+        )
+        .await
+        .expect("query run");
+
+        assert_eq!(outcome.active_model, "openai:gpt-5.5");
+        assert_eq!(outcome.reply, "runtime-ok");
+        assert_eq!(
+            calls.lock().unwrap().as_slice(),
+            &["openai:gpt-5.5".to_string()]
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_PROVIDER").ok().as_deref(),
+            Some("openai")
+        );
     }
 }

@@ -1546,12 +1546,15 @@ dependencies = [
 name = "hermes-app-runtime"
 version = "0.18.1"
 dependencies = [
+ "async-trait",
+ "futures",
  "hermes-agent",
  "hermes-config",
  "hermes-core",
  "hermes-provider-runtime",
  "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1847,9 +1850,7 @@ name = "hermes-parity-tests"
 version = "0.18.1"
 dependencies = [
  "async-trait",
- "clap",
  "hermes-acp",
- "hermes-cli",
  "hermes-core",
  "hermes-gateway",
  "hermes-intelligence",

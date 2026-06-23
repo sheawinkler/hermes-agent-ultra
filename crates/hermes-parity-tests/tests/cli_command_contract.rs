@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use clap::CommandFactory;
 use regex::Regex;
 use serde::Deserialize;
 
@@ -65,14 +64,63 @@ fn extract_actions_from_function(source: &str, fn_name: &str) -> BTreeSet<String
     out
 }
 
+fn normalize_variant_command_name(variant: &str) -> String {
+    let mut out = String::new();
+    for (idx, ch) in variant.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if idx > 0 {
+                out.push('-');
+            }
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn extract_top_level_commands_from_cli_source(source: &str) -> BTreeSet<String> {
+    let variant_re =
+        Regex::new(r"^    ([A-Z][A-Za-z0-9_]*)(?:\s*[,{(]|,)$").expect("variant regex");
+    let command_name_re =
+        Regex::new(r#"#\[command\(name\s*=\s*"([^"]+)""#).expect("command name regex");
+    let mut in_enum = false;
+    let mut explicit_name: Option<String> = None;
+    let mut out = BTreeSet::new();
+
+    for line in source.lines() {
+        if line.trim() == "pub enum CliCommand {" {
+            in_enum = true;
+            continue;
+        }
+        if !in_enum {
+            continue;
+        }
+        if line == "}" {
+            break;
+        }
+        if let Some(cap) = command_name_re.captures(line.trim()) {
+            explicit_name = Some(cap[1].to_string());
+            continue;
+        }
+        let Some(cap) = variant_re.captures(line) else {
+            continue;
+        };
+        let variant = &cap[1];
+        let name = explicit_name
+            .take()
+            .unwrap_or_else(|| normalize_variant_command_name(variant));
+        out.insert(name);
+    }
+    out
+}
+
 #[test]
 fn cli_top_level_surface_contains_required_commands() {
     let fixture = load_fixture();
-    let command = hermes_cli::Cli::command();
-    let have: BTreeSet<String> = command
-        .get_subcommands()
-        .map(|c| c.get_name().to_string())
-        .collect();
+    let source = std::fs::read_to_string(repo_root().join("crates/hermes-cli/src/cli.rs"))
+        .expect("read cli.rs");
+    let have = extract_top_level_commands_from_cli_source(&source);
 
     for required in fixture.required_top_level {
         assert!(

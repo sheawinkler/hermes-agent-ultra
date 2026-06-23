@@ -17,10 +17,8 @@ thiserror = { workspace = true }
 [dev-dependencies]
 async-trait = { workspace = true }
 hermes-acp = { workspace = true }
-hermes-cli = { workspace = true }
 hermes-gateway = { workspace = true }
 hermes-mcp = { workspace = true }
 hermes-tools = { workspace = true }
-clap = { workspace = true }
 regex = { workspace = true }
 tokio = { workspace = true }

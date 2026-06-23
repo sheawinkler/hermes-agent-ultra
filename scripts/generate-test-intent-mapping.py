@@ -38,6 +38,7 @@ INTENTS: list[IntentSpec] = [
         id="cli-command-surface",
         upstream_scope=["tests/hermes_cli", "tests/cli"],
         local_evidence_globs=[
+            "crates/hermes-app-runtime/src/**/*.rs",
             "crates/hermes-cli/src/**/*.rs",
             "crates/hermes-parity-tests/tests/cli_command_contract.rs",
         ],
@@ -46,6 +47,7 @@ INTENTS: list[IntentSpec] = [
         id="agent-loop-and-runtime",
         upstream_scope=["tests/run_agent", "tests/agent"],
         local_evidence_globs=[
+            "crates/hermes-app-runtime/src/**/*.rs",
             "crates/hermes-agent/src/**/*.rs",
             "crates/hermes-agent/tests/*.rs",
         ],
@@ -191,4 +193,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
