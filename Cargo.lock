@@ -1551,6 +1551,7 @@ dependencies = [
  "hermes-agent",
  "hermes-config",
  "hermes-core",
+ "hermes-intelligence",
  "hermes-provider-runtime",
  "serde_json",
  "tempfile",

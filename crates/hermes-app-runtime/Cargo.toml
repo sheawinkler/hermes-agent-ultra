@@ -10,6 +10,7 @@ description = "Non-UI application runtime policy and agent configuration for Her
 hermes-core = { workspace = true }
 hermes-config = { workspace = true }
 hermes-agent = { workspace = true }
+hermes-intelligence = { workspace = true }
 hermes-provider-runtime = { workspace = true }
 serde_json = { workspace = true }
 

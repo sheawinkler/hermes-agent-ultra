@@ -17,11 +17,14 @@ use hermes_agent::plugins::HookType;
 use hermes_agent::sub_agent_orchestrator::SubAgentOrchestrator;
 use hermes_agent::{AgentCallbacks, AgentLoop, InterruptController, SessionPersistence};
 pub use hermes_app_runtime::build_agent_config;
+use hermes_app_runtime::{
+    build_runtime_reformulation_message as build_runtime_reformulation_message_for_runtime,
+    RuntimeReformulationObjective,
+};
 use hermes_config::{hermes_home as hermes_home_dir, load_config, state_dir, GatewayConfig};
 use hermes_core::ToolSchema;
 use hermes_core::{AgentError, LlmProvider, UsageStats};
 use hermes_cron::{CronRunner, CronScheduler, FileJobPersistence};
-use hermes_intelligence::future_grade_problem_solving_guidance;
 pub use hermes_provider_runtime::{
     active_llm_provider_config, allow_no_api_key, normalize_runtime_provider_name,
     provider_api_key_from_env, provider_base_url_from_env, provider_default_base_url,
@@ -53,7 +56,6 @@ const SESSION_SNAPSHOT_MIN_FREE_BYTES_DEFAULT: u64 = 128 * 1024 * 1024;
 const QUORUM_HINT_PREFIX: &str = "[QUORUM_MODE] ";
 const QUORUM_MAX_VOTER_OUTPUT_CHARS: usize = 120_000;
 const QUORUM_DEFAULT_VOTER_PASSES: usize = 6;
-const RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS: usize = 1_600;
 const QUORUM_AGENT_CONTRACT_DEFAULT_PATH: &str =
     "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/QUORUM_AGENTS.md";
 const COMPOSER_DRAFTS_FILE: &str = "composer-drafts.json";
@@ -436,7 +438,6 @@ pub struct UiTranscriptMessage {
 
 impl App {
     const SESSION_OBJECTIVE_PREFIX: &'static str = "[SESSION_OBJECTIVE] ";
-    const RUNTIME_REFORMULATION_PREFIX: &'static str = "[HERMES_RUNTIME_REFORMULATION] ";
 
     fn ensure_session_stub_snapshot(&self) {
         if let Err(err) = self.persist_session_snapshot(None) {
@@ -1324,146 +1325,23 @@ impl App {
         }
     }
 
-    fn runtime_prompt_reformulation_enabled() -> bool {
-        !matches!(
-            std::env::var("HERMES_RUNTIME_PROMPT_REFORMULATION")
-                .ok()
-                .as_deref()
-                .map(|v| v.trim().to_ascii_lowercase()),
-            Some(v) if matches!(v.as_str(), "0" | "false" | "off" | "no")
-        )
-    }
-
-    fn runtime_contradiction_self_check_enabled() -> bool {
-        !matches!(
-            std::env::var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK")
-                .ok()
-                .as_deref()
-                .map(|v| v.trim().to_ascii_lowercase()),
-            Some(v) if matches!(v.as_str(), "0" | "false" | "off" | "no")
-        )
-    }
-
-    fn runtime_reformulation_prompt_preview_chars() -> usize {
-        std::env::var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS")
-            .ok()
-            .and_then(|v| v.trim().parse::<usize>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS)
-    }
-
-    fn current_tool_profile_mode() -> String {
-        std::env::var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE")
-            .ok()
-            .map(|v| v.trim().to_ascii_lowercase())
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| "balanced".to_string())
+    fn runtime_reformulation_objective(
+        contract: &ObjectiveContract,
+    ) -> RuntimeReformulationObjective {
+        RuntimeReformulationObjective {
+            id: contract.id.clone(),
+            behavior_mode: canonical_objective_behavior_mode(&contract.behavior_mode),
+            objective_text: contract.objective_text.clone(),
+            behavior_directives: contract.behavior_directives.clone(),
+            success_criteria: contract.success_criteria.clone(),
+        }
     }
 
     fn build_runtime_reformulation_message(&self, latest_user_prompt: &str) -> Option<String> {
-        if !Self::runtime_prompt_reformulation_enabled() {
-            return None;
-        }
-        let prompt = latest_user_prompt.trim();
-        if prompt.is_empty() {
-            return None;
-        }
-        let tool_profile_mode = Self::current_tool_profile_mode();
-        let contradiction_check = Self::runtime_contradiction_self_check_enabled();
-        let context_topic = std::env::var("CONTEXTLATTICE_TOPIC_PATH")
-            .ok()
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| "runbooks/hermes".to_string());
-
-        let objective_contract = Self::load_active_objective_contract();
-        let objective_line = objective_contract
+        let objective = Self::load_active_objective_contract()
             .as_ref()
-            .map(|contract| {
-                format!(
-                    "objective(active): {} | behavior={} | text={}",
-                    contract.id,
-                    canonical_objective_behavior_mode(&contract.behavior_mode),
-                    Self::preview_for_status(&contract.objective_text, 220)
-                )
-            })
-            .unwrap_or_else(|| "objective(active): none".to_string());
-        let objective_directives = objective_contract
-            .as_ref()
-            .map(|contract| {
-                contract
-                    .behavior_directives
-                    .iter()
-                    .take(6)
-                    .map(|line| format!("- {}", line.trim()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| "- (none)".to_string());
-        let objective_success = objective_contract
-            .as_ref()
-            .map(|contract| {
-                contract
-                    .success_criteria
-                    .iter()
-                    .take(5)
-                    .map(|line| format!("- {}", line.trim()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| "- (none)".to_string());
-
-        let contradiction_line = if contradiction_check {
-            "before final response: self-audit contradictions across tool outputs, runtime facts, and claims; unresolved items must be marked UNPROVEN/CONTRADICTORY."
-        } else {
-            "before final response: consistency self-audit optional (disabled by runtime toggle)."
-        };
-
-        let mut out = String::new();
-        out.push_str(Self::RUNTIME_REFORMULATION_PREFIX);
-        out.push_str(
-            "\nRuntime execution reformulation (internal):\n\
-             1) apply anti-scheming evidence-first discipline\n\
-             2) pull ContextLattice context first when relevant\n\
-             3) route tool usage intentionally and avoid repetitive low-signal loops\n\
-             4) match requested output shape exactly (count/format), with no template placeholders or duplicate list items\n\
-             5) for open-ended missions, execute at least one concrete action before returning status text\n\
-             6) maintain iterative objective momentum: gather evidence, test, refine, then continue with next high-value action\n",
-        );
-        out.push_str(&format!(
-            "tool-profile(mode): {}\ncontextlattice(topic): {}\n{}\n",
-            tool_profile_mode, context_topic, objective_line
-        ));
-        out.push_str("objective behavior directives:\n");
-        out.push_str(&objective_directives);
-        out.push('\n');
-        out.push_str("objective success criteria:\n");
-        out.push_str(&objective_success);
-        out.push('\n');
-        out.push_str(
-            "objective loop protocol:\n\
-             - baseline: state current objective KPI and latest known value\n\
-             - execute: perform concrete highest-leverage action now\n\
-             - verify: present measurable delta or explicit blocked evidence\n\
-             - continue: state next action with no soft deferral\n",
-        );
-        out.push_str(contradiction_line);
-        out.push('\n');
-        out.push_str(future_grade_problem_solving_guidance());
-        out.push_str("\nuser-request(routing-preview):\n");
-        let preview_cap = Self::runtime_reformulation_prompt_preview_chars();
-        let prompt_preview = Self::preview_for_status(prompt, preview_cap);
-        out.push_str(&prompt_preview);
-        if prompt.chars().count() > preview_cap {
-            out.push_str(
-                "\n[preview truncated; the full user request remains available as the next user message]",
-            );
-        } else {
-            out.push_str("\n[full user request remains available as the next user message]");
-        }
-        Some(out)
+            .map(Self::runtime_reformulation_objective);
+        build_runtime_reformulation_message_for_runtime(latest_user_prompt, objective.as_ref())
     }
 
     fn build_inference_messages(&self) -> (Vec<hermes_core::Message>, bool) {
@@ -5393,7 +5271,7 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, hermes_core::MessageRole::System);
         let injected_text = messages[0].content.as_deref().unwrap_or_default();
-        assert!(injected_text.contains(App::RUNTIME_REFORMULATION_PREFIX));
+        assert!(injected_text.contains(hermes_app_runtime::RUNTIME_REFORMULATION_PREFIX));
         assert!(injected_text.contains("tool-profile(mode): focus"));
         assert!(injected_text.contains("contextlattice(topic): runbooks/objective/test-objective"));
         assert!(injected_text.contains(contract.id.as_str()));
