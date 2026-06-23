@@ -51,12 +51,11 @@ echo
 
 gateway_feature_count="$(
   awk '
-    /^hermes-gateway = / { in_gateway = 1; next }
-    in_gateway && /^\] / { in_gateway = 0 }
+    /^gateway-adapters-all = \[/ { in_gateway = 1; next }
     in_gateway && /^\]/ { in_gateway = 0 }
-    in_gateway && /"/ {
+    in_gateway && /"gateway-/ {
       line = $0;
-      while (match(line, /"[^"]+"/)) {
+      while (match(line, /"gateway-[^"]+"/)) {
         count++;
         line = substr(line, RSTART + RLENGTH);
       }
@@ -67,13 +66,21 @@ gateway_feature_count="$(
 
 echo "## Gateway Adapter Feature Surface"
 echo
-echo "- Feature count pulled into \`hermes-cli\`: \`$gateway_feature_count\`"
+echo "- Default \`gateway-adapters-all\` feature count: \`$gateway_feature_count\`"
+echo "- Narrow gateway build path: \`cargo check -p hermes-cli --bin hermes-agent-ultra --no-default-features\`"
 echo
 
 echo "## cargo tree: hermes-cli --edges normal --depth 1"
 echo
 echo '```text'
 cargo tree -p hermes-cli --edges normal --depth 1
+echo '```'
+echo
+
+echo "## cargo tree: hermes-cli --no-default-features --edges normal --depth 1"
+echo
+echo '```text'
+cargo tree -p hermes-cli --no-default-features --edges normal --depth 1
 echo '```'
 echo
 
@@ -100,9 +107,10 @@ echo
 
 echo "## Interpretation"
 echo
-echo "- \`hermes-cli\` is currently the invalidation root for wrappers, the main runtime binary, TUI/clipboard UI dependencies, gateway adapter features, cron, ACP, MCP, tools, skills, and telemetry."
+echo "- \`hermes-cli\` is currently the invalidation root for wrappers, the main runtime binary, TUI/clipboard UI dependencies, cron, ACP, MCP, tools, skills, and telemetry."
+echo "- Gateway adapter features are now behind explicit \`gateway-*\` CLI features. Default builds keep \`gateway-adapters-all\` for behavior compatibility, while \`--no-default-features\` checks compile the gateway core without adapter modules."
 echo "- Provider/auth routing now has a narrower home in \`hermes-provider-runtime\`; agent configuration, query-mode provider/model/env/tool policy, model remediation, noninteractive agent-loop wiring, reply extraction, and runtime prompt reformulation policy now have a narrower home in \`hermes-app-runtime\`."
 echo "- Source/governance parity now lives in \`hermes-source-parity-tests\`, so command-contract checks avoid \`hermes-cli\`, \`clap\`, fixture-harness runtime crates, and protocol stack crates."
 echo "- Protocol differential parity now lives in \`hermes-protocol-parity-tests\`, isolating ACP/MCP/gateway/tool dependencies to tests that need them."
-echo "- The next high-value split is remaining reusable memory/context policy injection and tool-planning policy away from CLI/TUI and gateway adapter feature surfaces."
+echo "- The next high-value split is remaining reusable memory/context policy injection and tool-planning policy away from CLI/TUI, followed by extracting CLI UI/help presentation into a narrower module/crate."
 echo "- Parity tests that only validate provider, auth, app-runtime, or command contracts should keep moving to narrower crates instead of pulling the full CLI binary surface."

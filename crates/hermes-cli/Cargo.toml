@@ -8,9 +8,51 @@ description = "CLI/TUI interface for Hermes Agent"
 autobins = false
 
 [features]
-default = []
+default = ["gateway-adapters-all"]
 otlp = ["hermes-telemetry/otlp"]
 swarms = ["hermes-intelligence/swarms"]
+gateway-adapters-all = [
+    "gateway-telegram",
+    "gateway-discord",
+    "gateway-slack",
+    "gateway-whatsapp",
+    "gateway-signal",
+    "gateway-matrix",
+    "gateway-mattermost",
+    "gateway-dingtalk",
+    "gateway-feishu",
+    "gateway-wecom",
+    "gateway-wecom-callback",
+    "gateway-weixin",
+    "gateway-qqbot",
+    "gateway-bluebubbles",
+    "gateway-email",
+    "gateway-sms",
+    "gateway-homeassistant",
+    "gateway-ntfy",
+    "gateway-api-server",
+    "gateway-webhook",
+]
+gateway-telegram = ["hermes-gateway/telegram"]
+gateway-discord = ["hermes-gateway/discord"]
+gateway-slack = ["hermes-gateway/slack"]
+gateway-whatsapp = ["hermes-gateway/whatsapp"]
+gateway-signal = ["hermes-gateway/signal"]
+gateway-matrix = ["hermes-gateway/matrix"]
+gateway-mattermost = ["hermes-gateway/mattermost"]
+gateway-dingtalk = ["hermes-gateway/dingtalk"]
+gateway-feishu = ["hermes-gateway/feishu"]
+gateway-wecom = ["hermes-gateway/wecom"]
+gateway-wecom-callback = ["hermes-gateway/wecom-callback"]
+gateway-weixin = ["hermes-gateway/weixin"]
+gateway-qqbot = ["hermes-gateway/qqbot"]
+gateway-bluebubbles = ["hermes-gateway/bluebubbles"]
+gateway-email = ["hermes-gateway/email"]
+gateway-sms = ["hermes-gateway/sms"]
+gateway-homeassistant = ["hermes-gateway/homeassistant"]
+gateway-ntfy = ["hermes-gateway/ntfy"]
+gateway-api-server = ["hermes-gateway/api-server"]
+gateway-webhook = ["hermes-gateway/webhook"]
 
 [[bin]]
 name = "hermes"
@@ -31,28 +73,7 @@ hermes-app-runtime = { workspace = true }
 hermes-agent = { workspace = true }
 hermes-tools = { workspace = true }
 hermes-config = { workspace = true }
-hermes-gateway = { workspace = true, features = [
-    "telegram",
-    "discord",
-    "slack",
-    "whatsapp",
-    "signal",
-    "matrix",
-    "mattermost",
-    "dingtalk",
-    "feishu",
-    "wecom",
-    "wecom-callback",
-    "weixin",
-    "qqbot",
-    "bluebubbles",
-    "email",
-    "sms",
-    "homeassistant",
-    "ntfy",
-    "api-server",
-    "webhook",
-] }
+hermes-gateway = { workspace = true }
 hermes-cron = { workspace = true }
 hermes-environments = { workspace = true }
 hermes-mcp = { workspace = true }
