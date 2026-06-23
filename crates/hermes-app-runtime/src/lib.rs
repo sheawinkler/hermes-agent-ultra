@@ -16,6 +16,7 @@ use hermes_agent::smart_model_routing::ApiMode;
 use hermes_agent::{AgentCallbacks, AgentConfig, AgentLoop};
 use hermes_config::{normalize_service_tier, GatewayConfig, LlmProviderConfig};
 use hermes_core::{AgentError, AgentResult, LlmProvider, Message, MessageRole, ToolSchema};
+use hermes_intelligence::future_grade_problem_solving_guidance;
 use hermes_provider_runtime::{
     active_llm_provider_config, normalize_runtime_provider_name, resolve_provider_and_model,
 };
@@ -23,6 +24,8 @@ use serde_json::Value;
 
 pub const QUERY_ALLOW_TOOLS_ENV_KEY: &str = "HERMES_QUERY_ALLOW_TOOLS";
 pub const QUERY_DISABLE_TOOLS_ENV_KEY: &str = "HERMES_QUERY_DISABLE_TOOLS";
+pub const RUNTIME_REFORMULATION_PREFIX: &str = "[HERMES_RUNTIME_REFORMULATION] ";
+pub const RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS_DEFAULT: usize = 1_600;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryModelRemediation {
@@ -35,6 +38,15 @@ pub struct NoninteractiveQueryOutcome {
     pub active_model: String,
     pub result: AgentResult,
     pub reply: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeReformulationObjective {
+    pub id: String,
+    pub behavior_mode: String,
+    pub objective_text: String,
+    pub behavior_directives: Vec<String>,
+    pub success_criteria: Vec<String>,
 }
 
 fn build_retry_config(config: &GatewayConfig) -> RetryConfig {
@@ -334,6 +346,167 @@ pub fn query_mode_tools_enabled(query_mode: bool, allow_tools_flag: bool) -> boo
         return true;
     }
     true
+}
+
+pub fn runtime_prompt_reformulation_enabled() -> bool {
+    !matches!(
+        std::env::var("HERMES_RUNTIME_PROMPT_REFORMULATION")
+            .ok()
+            .as_deref()
+            .map(|v| v.trim().to_ascii_lowercase()),
+        Some(v) if matches!(v.as_str(), "0" | "false" | "off" | "no")
+    )
+}
+
+pub fn runtime_contradiction_self_check_enabled() -> bool {
+    !matches!(
+        std::env::var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK")
+            .ok()
+            .as_deref()
+            .map(|v| v.trim().to_ascii_lowercase()),
+        Some(v) if matches!(v.as_str(), "0" | "false" | "off" | "no")
+    )
+}
+
+pub fn runtime_reformulation_prompt_preview_chars() -> usize {
+    std::env::var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS_DEFAULT)
+}
+
+pub fn runtime_tool_profile_mode() -> String {
+    std::env::var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE")
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "balanced".to_string())
+}
+
+pub fn runtime_contextlattice_topic_path() -> String {
+    std::env::var("CONTEXTLATTICE_TOPIC_PATH")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "runbooks/hermes".to_string())
+}
+
+pub fn preview_for_runtime_status(raw: &str, max_chars: usize) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= max_chars {
+        collapsed
+    } else {
+        let mut out: String = collapsed
+            .chars()
+            .take(max_chars.saturating_sub(1))
+            .collect();
+        out.push('…');
+        out
+    }
+}
+
+fn bullet_lines(lines: &[String], limit: usize) -> String {
+    let joined = lines
+        .iter()
+        .take(limit)
+        .map(|line| format!("- {}", line.trim()))
+        .filter(|line| line.trim() != "-")
+        .collect::<Vec<_>>()
+        .join("\n");
+    if joined.is_empty() {
+        "- (none)".to_string()
+    } else {
+        joined
+    }
+}
+
+pub fn build_runtime_reformulation_message(
+    latest_user_prompt: &str,
+    objective: Option<&RuntimeReformulationObjective>,
+) -> Option<String> {
+    if !runtime_prompt_reformulation_enabled() {
+        return None;
+    }
+    let prompt = latest_user_prompt.trim();
+    if prompt.is_empty() {
+        return None;
+    }
+    let tool_profile_mode = runtime_tool_profile_mode();
+    let contradiction_check = runtime_contradiction_self_check_enabled();
+    let context_topic = runtime_contextlattice_topic_path();
+
+    let objective_line = objective
+        .as_ref()
+        .map(|contract| {
+            format!(
+                "objective(active): {} | behavior={} | text={}",
+                contract.id,
+                contract.behavior_mode,
+                preview_for_runtime_status(&contract.objective_text, 220)
+            )
+        })
+        .unwrap_or_else(|| "objective(active): none".to_string());
+    let objective_directives = objective
+        .map(|contract| bullet_lines(&contract.behavior_directives, 6))
+        .unwrap_or_else(|| "- (none)".to_string());
+    let objective_success = objective
+        .map(|contract| bullet_lines(&contract.success_criteria, 5))
+        .unwrap_or_else(|| "- (none)".to_string());
+
+    let contradiction_line = if contradiction_check {
+        "before final response: self-audit contradictions across tool outputs, runtime facts, and claims; unresolved items must be marked UNPROVEN/CONTRADICTORY."
+    } else {
+        "before final response: consistency self-audit optional (disabled by runtime toggle)."
+    };
+
+    let mut out = String::new();
+    out.push_str(RUNTIME_REFORMULATION_PREFIX);
+    out.push_str(
+        "\nRuntime execution reformulation (internal):\n\
+         1) apply anti-scheming evidence-first discipline\n\
+         2) pull ContextLattice context first when relevant\n\
+         3) route tool usage intentionally and avoid repetitive low-signal loops\n\
+         4) match requested output shape exactly (count/format), with no template placeholders or duplicate list items\n\
+         5) for open-ended missions, execute at least one concrete action before returning status text\n\
+         6) maintain iterative objective momentum: gather evidence, test, refine, then continue with next high-value action\n",
+    );
+    out.push_str(&format!(
+        "tool-profile(mode): {}\ncontextlattice(topic): {}\n{}\n",
+        tool_profile_mode, context_topic, objective_line
+    ));
+    out.push_str("objective behavior directives:\n");
+    out.push_str(&objective_directives);
+    out.push('\n');
+    out.push_str("objective success criteria:\n");
+    out.push_str(&objective_success);
+    out.push('\n');
+    out.push_str(
+        "objective loop protocol:\n\
+         - baseline: state current objective KPI and latest known value\n\
+         - execute: perform concrete highest-leverage action now\n\
+         - verify: present measurable delta or explicit blocked evidence\n\
+         - continue: state next action with no soft deferral\n",
+    );
+    out.push_str(contradiction_line);
+    out.push('\n');
+    out.push_str(future_grade_problem_solving_guidance());
+    out.push_str("\nuser-request(routing-preview):\n");
+    let preview_cap = runtime_reformulation_prompt_preview_chars();
+    let prompt_preview = preview_for_runtime_status(prompt, preview_cap);
+    out.push_str(&prompt_preview);
+    if prompt.chars().count() > preview_cap {
+        out.push_str(
+            "\n[preview truncated; the full user request remains available as the next user message]",
+        );
+    } else {
+        out.push_str("\n[full user request remains available as the next user message]");
+    }
+    Some(out)
 }
 
 pub fn split_provider_model(provider_model: &str) -> (&str, &str) {
@@ -1132,6 +1305,81 @@ mod tests {
         assert!(query_mode_tools_enabled(true, false));
         std::env::set_var(QUERY_ALLOW_TOOLS_ENV_KEY, "1");
         assert!(query_mode_tools_enabled(true, false));
+    }
+
+    #[test]
+    fn runtime_reformulation_message_includes_objective_and_kernel_guidance() {
+        let _lock = env_test_lock();
+        let _env = EnvSnapshot::capture(&[
+            "HERMES_RUNTIME_PROMPT_REFORMULATION",
+            "HERMES_RUNTIME_CONTRADICTION_SELF_CHECK",
+            "HERMES_REPO_REVIEW_TOOL_PROFILE_MODE",
+            "CONTEXTLATTICE_TOPIC_PATH",
+            "HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS",
+        ]);
+        std::env::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "1");
+        std::env::set_var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK", "1");
+        std::env::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "focus");
+        std::env::set_var(
+            "CONTEXTLATTICE_TOPIC_PATH",
+            "runbooks/objective/test-objective",
+        );
+
+        let objective = RuntimeReformulationObjective {
+            id: "test-objective".to_string(),
+            behavior_mode: "mission".to_string(),
+            objective_text: "Grow SOL with controlled risk".to_string(),
+            behavior_directives: vec!["Act with evidence".to_string()],
+            success_criteria: vec!["Positive risk-adjusted delta".to_string()],
+        };
+        let injected = build_runtime_reformulation_message(
+            "provide 3 more ideas with contextlattice being one",
+            Some(&objective),
+        )
+        .expect("reformulation");
+
+        assert!(injected.contains(RUNTIME_REFORMULATION_PREFIX));
+        assert!(injected.contains("tool-profile(mode): focus"));
+        assert!(injected.contains("contextlattice(topic): runbooks/objective/test-objective"));
+        assert!(injected.contains("objective(active): test-objective | behavior=mission"));
+        assert!(injected.contains("- Act with evidence"));
+        assert!(injected.contains("- Positive risk-adjusted delta"));
+        assert!(injected.contains("UNPROVEN/CONTRADICTORY"));
+        assert!(injected.contains("execute at least one concrete action"));
+        assert!(injected.contains("Hermes intelligence kernel:"));
+        assert!(injected.contains("ContextLattice memory cycle:"));
+        assert!(injected.contains("user-request(routing-preview):"));
+        assert!(injected.contains("full user request remains available as the next user message"));
+    }
+
+    #[test]
+    fn runtime_reformulation_message_respects_toggle_off() {
+        let _lock = env_test_lock();
+        let _env = EnvSnapshot::capture(&["HERMES_RUNTIME_PROMPT_REFORMULATION"]);
+        std::env::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "off");
+        assert!(build_runtime_reformulation_message("plain request", None).is_none());
+    }
+
+    #[test]
+    fn runtime_reformulation_message_truncates_preview_without_losing_user_message() {
+        let _lock = env_test_lock();
+        let _env = EnvSnapshot::capture(&[
+            "HERMES_RUNTIME_PROMPT_REFORMULATION",
+            "HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS",
+        ]);
+        std::env::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "1");
+        std::env::set_var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS", "48");
+
+        let long_prompt =
+            "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu".repeat(12);
+        let injected =
+            build_runtime_reformulation_message(&long_prompt, None).expect("reformulation");
+        assert!(injected.contains("user-request(routing-preview):"));
+        assert!(injected.contains("preview truncated"));
+        assert!(!injected.contains(&long_prompt));
+        assert!(
+            injected.contains("the full user request remains available as the next user message")
+        );
     }
 
     #[test]

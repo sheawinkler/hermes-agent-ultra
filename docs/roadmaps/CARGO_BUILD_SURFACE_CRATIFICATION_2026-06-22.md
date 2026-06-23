@@ -20,10 +20,10 @@ Keep the runtime Rust-only, but split compile surfaces so targeted work can test
    - No TUI, installer, adapter, cron, or gateway feature dependencies.
 
 2. `hermes-app-runtime`
-   - Status: second split implemented.
-   - Owns agent configuration construction, query-mode provider/model/env/tool policy, model-catalog remediation selection, noninteractive query agent-loop wiring, and assistant reply extraction.
+   - Status: third split implemented.
+   - Owns agent configuration construction, query-mode provider/model/env/tool policy, model-catalog remediation selection, noninteractive query agent-loop wiring, assistant reply extraction, and runtime prompt reformulation policy.
    - Keeps provider construction injected by the CLI so OpenAI OAuth/auth-state routing remains in the existing runtime path.
-   - Next: move prompt reformulation, memory/context policy injection, and any reusable tool-planning policy that is still embedded in CLI presentation code.
+   - Next: move remaining reusable memory/context policy injection and any reusable tool-planning policy that is still embedded in CLI presentation code.
    - Depend on provider runtime and core agent crates, not on CLI wrappers or TUI.
 
 3. `hermes-cli-ui`
