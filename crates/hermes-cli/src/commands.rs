@@ -21748,7 +21748,7 @@ pub async fn handle_cli_chat(
 ) -> Result<(), hermes_core::AgentError> {
     use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
     use crate::terminal_backend::build_terminal_backend;
-    use crate::tool_preview::{build_tool_preview_from_value, tool_emoji};
+    use hermes_cli_ui::tool_preview::{build_tool_preview_from_value, tool_emoji};
     use hermes_config::load_config;
     use hermes_skills::{FileSkillStore, SkillManager};
     use hermes_tools::ToolRegistry;

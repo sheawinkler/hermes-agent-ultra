@@ -7,3 +7,4 @@ repository.workspace = true
 description = "Pure CLI presentation policy for Hermes Agent"
 
 [dependencies]
+serde_json = { workspace = true }

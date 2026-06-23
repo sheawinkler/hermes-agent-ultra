@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 
+pub mod tool_preview;
+
 #[derive(Debug, Clone, Copy)]
 struct CommandCatalogSection {
     title: &'static str,

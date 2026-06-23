@@ -90,7 +90,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-23T11:00:05.001043+00:00",
+  "generated_at_utc": "2026-06-23T11:48:53.898884+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -221,7 +221,7 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 25,
+      "direct_test_evidence_count": 24,
       "direct_test_evidence_sample": [
         "crates/hermes-app-runtime/src/lib.rs",
         "crates/hermes-cli/src/alpha_runtime.rs",
@@ -245,7 +245,6 @@
         "crates/hermes-cli/src/teams_pipeline_cli.rs",
         "crates/hermes-cli/src/terminal_backend.rs",
         "crates/hermes-cli/src/theme.rs",
-        "crates/hermes-cli/src/tool_preview.rs",
         "crates/hermes-cli/src/tui.rs",
         "crates/hermes-source-parity-tests/tests/cli_command_contract.rs"
       ],
