@@ -394,6 +394,33 @@ timeout_secs = 30
         assert_eq!(parsed.tasks[0].task_id, "t1");
     }
 
+    #[test]
+    fn live_behavioral_sota_manifest_loads_all_core_surfaces() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("benchmarks")
+            .join("live-behavioral-sota.toml");
+        let adapter = ConfiguredBenchmarkAdapter::from_path(path).expect("manifest loads");
+        assert_eq!(adapter.spec.benchmark.id, "live-behavioral-sota");
+        assert_eq!(adapter.spec.tasks.len(), 7);
+        for expected in [
+            "context_memory",
+            "research",
+            "repo_research",
+            "provider",
+            "tool_planning",
+            "ux",
+        ] {
+            assert!(
+                adapter
+                    .spec
+                    .tasks
+                    .iter()
+                    .any(|task| task.category.as_deref() == Some(expected)),
+                "missing category {expected}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn heuristic_verifier_passes_and_fails() {
         let task = TaskSpec {

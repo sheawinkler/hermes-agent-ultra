@@ -51,6 +51,7 @@ hermes_agent|clippy::question_mark|crates/hermes-agent/src/agent_loop.rs
 hermes_agent|clippy::redundant_closure|crates/hermes-agent/src/rate_limit.rs
 hermes_agent|clippy::redundant_locals|crates/hermes-agent/src/agent_loop.rs
 hermes_agent|clippy::too_many_arguments|crates/hermes-agent/src/agent_loop.rs
+hermes_agent|clippy::too_many_arguments|crates/hermes-agent/src/api_bridge.rs
 hermes_agent|clippy::type_complexity|crates/hermes-agent/src/agent_loop.rs
 hermes_agent|clippy::type_complexity|crates/hermes-agent/src/plugins.rs
 hermes_agent|clippy::unnecessary_cast|crates/hermes-agent/src/provider.rs
@@ -59,6 +60,9 @@ hermes_agent|clippy::unnecessary_map_or|crates/hermes-agent/src/credential_pool.
 hermes_agent|clippy::useless_conversion|crates/hermes-agent/src/lsp_context.rs
 hermes_agent|clippy::while_let_loop|crates/hermes-agent/src/context_references.rs
 hermes_agent|clippy::while_let_on_iterator|crates/hermes-agent/src/agent_loop.rs
+hermes_app_runtime|clippy::await_holding_lock|crates/hermes-app-runtime/src/lib.rs
+hermes_app_runtime|clippy::field_reassign_with_default|crates/hermes-app-runtime/src/lib.rs
+hermes_cli_ui|clippy::needless_borrows_for_generic_args|crates/hermes-cli-ui/src/lib.rs
 hermes_cli|clippy::await_holding_lock|crates/hermes-cli/src/auth.rs
 hermes_cli|clippy::await_holding_lock|crates/hermes-cli/src/commands.rs
 hermes_cli|clippy::await_holding_lock|crates/hermes-cli/src/model_switch.rs
@@ -78,7 +82,6 @@ hermes_cli|clippy::manual_clamp|crates/hermes-cli/src/commands.rs
 hermes_cli|clippy::manual_clamp|crates/hermes-cli/src/tui.rs
 hermes_cli|clippy::manual_strip|crates/hermes-cli/src/auth.rs
 hermes_cli|clippy::needless_borrows_for_generic_args|crates/hermes-cli/src/commands.rs
-hermes_cli|clippy::needless_borrows_for_generic_args|crates/hermes-cli/src/platform_toolsets.rs
 hermes_cli|clippy::needless_lifetimes|crates/hermes-cli/src/commands.rs
 hermes_cli|clippy::print_literal|crates/hermes-cli/src/commands.rs
 hermes_cli|clippy::question_mark|crates/hermes-cli/src/auth.rs
@@ -181,6 +184,7 @@ hermes_mcp|clippy::new_without_default|crates/hermes-mcp/src/transport.rs
 hermes_mcp|clippy::unnecessary_map_or|crates/hermes-mcp/src/serve.rs
 hermes_skills|clippy::derivable_impls|crates/hermes-skills/src/guard.rs
 hermes_skills|clippy::ptr_arg|crates/hermes-skills/src/skill.rs
+hermes_tool_planning|clippy::needless_borrows_for_generic_args|crates/hermes-tool-planning/src/lib.rs
 hermes_tools|clippy::field_reassign_with_default|crates/hermes-tools/src/tts_streaming/sentence_buffer.rs
 hermes_tools|clippy::manual_checked_ops|crates/hermes-tools/src/backends/memory.rs
 hermes_tools|clippy::manual_clamp|crates/hermes-tools/src/backends/session_search.rs

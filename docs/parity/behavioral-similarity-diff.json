@@ -447,7 +447,7 @@
     "pass": true
   },
   "gate_failures": [],
-  "generated_at_utc": "2026-06-23T11:48:56.445863+00:00",
+  "generated_at_utc": "2026-06-24T00:21:16.048264+00:00",
   "manifest": "docs/parity/behavioral-similarity-cases.json",
   "schema_version": 1,
   "summary": {

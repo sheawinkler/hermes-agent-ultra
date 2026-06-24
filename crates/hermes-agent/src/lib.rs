@@ -19,6 +19,7 @@ pub mod credential_pool;
 pub mod fallback;
 pub mod honcho_provider;
 pub mod interrupt;
+pub mod local_backends;
 pub mod lsp_context;
 pub mod memory_manager;
 pub mod memory_plugins;

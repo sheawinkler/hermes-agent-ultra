@@ -6,7 +6,10 @@
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use reqwest::Client;
+use reqwest::{
+    header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE},
+    Client,
+};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
@@ -151,11 +154,17 @@ impl CodexProvider {
     }
 
     fn request_builder(&self, url: &str, api_key: &str, body: &Value) -> reqwest::RequestBuilder {
+        let accept = if body.get("stream").and_then(Value::as_bool).unwrap_or(false) {
+            "text/event-stream"
+        } else {
+            "application/json"
+        };
         let mut request = self
             .client
             .post(url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json");
+            .header(AUTHORIZATION, format!("Bearer {}", api_key))
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, accept);
         for (name, value) in self.request_headers(api_key) {
             request = request.header(name, value);
         }
@@ -821,6 +830,51 @@ mod tests {
         assert!(body.get("strict_tool_calls").is_none());
         assert!(body.get("provider_strict").is_none());
         assert_eq!(body["input"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn openai_pro_request_uses_json_body_and_sse_accept_contract() {
+        let token = "token";
+        let provider = CodexProvider::openai_pro(token, "gpt-5.5");
+        let body = provider.build_body(
+            &[Message::user("Say ok")],
+            &[],
+            None,
+            None,
+            "gpt-5.5",
+            None,
+            false,
+        );
+        let request = provider
+            .request_builder(
+                &format!("{}/responses", provider.base_url.trim_end_matches('/')),
+                token,
+                &body,
+            )
+            .build()
+            .expect("request");
+        let headers = request.headers();
+
+        assert_eq!(
+            headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok()),
+            Some("application/json")
+        );
+        assert_eq!(
+            headers.get(ACCEPT).and_then(|v| v.to_str().ok()),
+            Some("text/event-stream")
+        );
+        assert_eq!(
+            headers.get(AUTHORIZATION).and_then(|v| v.to_str().ok()),
+            Some("Bearer token")
+        );
+        assert_eq!(
+            headers.get("OpenAI-Beta").and_then(|v| v.to_str().ok()),
+            Some(CODEX_RESPONSES_BETA_HEADER)
+        );
+        assert_eq!(
+            headers.get("originator").and_then(|v| v.to_str().ok()),
+            Some("codex_cli_rs")
+        );
     }
 
     #[test]

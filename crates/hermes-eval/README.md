@@ -27,6 +27,18 @@ cargo run -p hermes-eval --bin hermes-bench -- \
 
 By default, reports are written to `evals/<benchmark>-<timestamp>.json`. Override with `--output`.
 
+Run the seven-surface behavioral harness without model spend:
+
+```bash
+cargo run -p hermes-eval --bin hermes-bench -- \
+  --benchmark crates/hermes-eval/benchmarks/live-behavioral-sota.toml \
+  --rollout smoke \
+  --output /tmp/hermes-live-behavioral-smoke.json \
+  --print-json
+```
+
+Use the same manifest with `--rollout agent` for live interactive behavior checks.
+
 ## Dataset Format
 
 Datasets are `.toml` or `.json` files with:
