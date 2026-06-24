@@ -46,7 +46,7 @@ use crate::credential_pool::CredentialPool;
 use crate::interrupt::InterruptController;
 use crate::lsp_context::{build_lsp_context_note, LspContextConfig};
 use crate::memory_manager::{MemoryManager, StreamingContextScrubber};
-use crate::plugins::{HookResult, HookType, PluginManager};
+use crate::plugins::{HookResult, HookType, PluginManager, ToolExecutionMiddlewareContext};
 use crate::provider::{
     is_codex_chatgpt_token, AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
     OPENAI_CODEX_BASE_URL,
@@ -2266,6 +2266,33 @@ impl AgentLoop {
         }
         if changed {
             *content = Some(current);
+        }
+    }
+
+    fn apply_tool_request_middleware_to_calls(&self, tool_calls: &mut [ToolCall], turn: u32) {
+        let Some(ref pm) = self.plugin_manager else {
+            return;
+        };
+        let Ok(pm) = pm.lock() else {
+            tracing::warn!("Plugin manager lock poisoned while applying tool request middleware");
+            return;
+        };
+        for tc in tool_calls {
+            let Ok(args) = serde_json::from_str::<Value>(&tc.function.arguments) else {
+                continue;
+            };
+            let result = pm.apply_tool_request_middleware(&tc.function.name, args, turn);
+            if !result.changed {
+                continue;
+            }
+            match serde_json::to_string(&result.args) {
+                Ok(serialized) => tc.function.arguments = serialized,
+                Err(err) => tracing::warn!(
+                    tool = tc.function.name,
+                    error = %err,
+                    "Plugin tool request middleware returned non-serializable arguments"
+                ),
+            }
         }
     }
 
@@ -6112,6 +6139,7 @@ impl AgentLoop {
                 continue;
             }
             invalid_json_retries = 0;
+            self.apply_tool_request_middleware_to_calls(&mut tool_calls, total_turns);
 
             for tc in &tool_calls {
                 if let Ok(mut c) = self.evolution_counters.lock() {
@@ -7564,6 +7592,7 @@ impl AgentLoop {
                 continue;
             }
             invalid_json_retries = 0;
+            self.apply_tool_request_middleware_to_calls(&mut tool_calls, total_turns);
             for tc in &tool_calls {
                 if let Ok(mut c) = self.evolution_counters.lock() {
                     match tc.function.name.as_str() {
@@ -8474,6 +8503,64 @@ impl AgentLoop {
         Ok(Some(response.message))
     }
 
+    fn execute_tool_call_terminal(
+        registry: &ToolRegistry,
+        tool_call_id: &str,
+        tool_name: &str,
+        mut params: Value,
+        max_delegate_depth: u32,
+        current_delegate_depth: u32,
+        parent_budget_remaining_usd: Option<f64>,
+    ) -> ToolResult {
+        match registry.get(tool_name) {
+            Some(entry) => {
+                if tool_name == "delegate_task" {
+                    if current_delegate_depth >= max_delegate_depth {
+                        return ToolResult::err(
+                            tool_call_id,
+                            format!(
+                                "Delegation depth limit reached ({}/{}).",
+                                current_delegate_depth, max_delegate_depth
+                            ),
+                        );
+                    }
+                    if let Some(obj) = params.as_object_mut() {
+                        obj.insert(
+                            "child_depth".to_string(),
+                            Value::from(current_delegate_depth + 1),
+                        );
+                        obj.insert("max_depth".to_string(), Value::from(max_delegate_depth));
+                        if let Some(remaining) = parent_budget_remaining_usd {
+                            obj.insert(
+                                "parent_budget_remaining_usd".to_string(),
+                                Value::from(remaining),
+                            );
+                        }
+                    }
+                }
+
+                match (entry.handler)(params) {
+                    Ok(output) => {
+                        if looks_like_tool_error_output(&output) {
+                            ToolResult::err(tool_call_id, output)
+                        } else {
+                            ToolResult::ok(tool_call_id, output)
+                        }
+                    }
+                    Err(e) => ToolResult::err(tool_call_id, e.to_string()),
+                }
+            }
+            None => {
+                let available = registry.names().join(", ");
+                let error_msg = format!(
+                    "Unknown tool '{}'. Available tools: [{}]",
+                    tool_name, available
+                );
+                ToolResult::err(tool_call_id, error_msg)
+            }
+        }
+    }
+
     /// Execute a batch of tool calls in parallel using a JoinSet.
     async fn execute_tool_calls(
         &self,
@@ -8599,74 +8686,53 @@ impl AgentLoop {
             let tool_name = tc.function.name.clone();
             let raw_args = tc.function.arguments.clone();
             let registry = self.tool_registry.clone();
+            let plugin_manager = self.plugin_manager.clone();
             let max_delegate_depth = max_delegate_depth;
             let current_delegate_depth = current_delegate_depth;
             let parent_budget_remaining_usd = parent_budget_remaining_usd;
 
             join_set.spawn(async move {
-                match registry.get(&tool_name) {
-                    Some(entry) => {
-                        // Parse arguments
-                        let mut params: Value = match serde_json::from_str(&raw_args) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                let error_msg = format!(
-                                    "Invalid JSON params for tool '{}': {}. \
-                                     Please check your parameters and retry with valid JSON.",
-                                    tool_name, e
-                                );
-                                return ToolResult::err(&tool_call_id, error_msg);
-                            }
-                        };
-
-                        if tool_name == "delegate_task" {
-                            if current_delegate_depth >= max_delegate_depth {
-                                return ToolResult::err(
-                                    &tool_call_id,
-                                    format!(
-                                        "Delegation depth limit reached ({}/{}).",
-                                        current_delegate_depth, max_delegate_depth
-                                    ),
-                                );
-                            }
-                            if let Some(obj) = params.as_object_mut() {
-                                obj.insert(
-                                    "child_depth".to_string(),
-                                    Value::from(current_delegate_depth + 1),
-                                );
-                                obj.insert(
-                                    "max_depth".to_string(),
-                                    Value::from(max_delegate_depth),
-                                );
-                                if let Some(remaining) = parent_budget_remaining_usd {
-                                    obj.insert(
-                                        "parent_budget_remaining_usd".to_string(),
-                                        Value::from(remaining),
-                                    );
-                                }
-                            }
-                        }
-
-                        // Execute the handler
-                        match (entry.handler)(params) {
-                            Ok(output) => {
-                                if looks_like_tool_error_output(&output) {
-                                    ToolResult::err(&tool_call_id, output)
-                                } else {
-                                    ToolResult::ok(&tool_call_id, output)
-                                }
-                            }
-                            Err(e) => ToolResult::err(&tool_call_id, e.to_string()),
-                        }
-                    }
-                    None => {
-                        let available = registry.names().join(", ");
+                let params: Value = match serde_json::from_str(&raw_args) {
+                    Ok(v) => v,
+                    Err(e) => {
                         let error_msg = format!(
-                            "Unknown tool '{}'. Available tools: [{}]",
-                            tool_name, available
+                            "Invalid JSON params for tool '{}': {}. \
+                             Please check your parameters and retry with valid JSON.",
+                            tool_name, e
                         );
-                        ToolResult::err(&tool_call_id, error_msg)
+                        return ToolResult::err(&tool_call_id, error_msg);
                     }
+                };
+                let middleware_ctx = ToolExecutionMiddlewareContext {
+                    tool_name: tool_name.clone(),
+                    tool_call_id: tool_call_id.clone(),
+                    args: params.clone(),
+                    original_args: params.clone(),
+                    turn,
+                };
+                let terminal = |next_params: Value| {
+                    Self::execute_tool_call_terminal(
+                        &registry,
+                        &tool_call_id,
+                        &tool_name,
+                        next_params,
+                        max_delegate_depth,
+                        current_delegate_depth,
+                        parent_budget_remaining_usd,
+                    )
+                };
+                if let Some(pm) = plugin_manager {
+                    match pm.lock() {
+                        Ok(pm) => pm.run_tool_execution_middleware(middleware_ctx, terminal),
+                        Err(_) => {
+                            tracing::warn!(
+                                "Plugin manager lock poisoned while running tool execution middleware"
+                            );
+                            terminal(params)
+                        }
+                    }
+                } else {
+                    terminal(params)
                 }
             });
             if join_set.len() >= tool_concurrency {
@@ -14862,6 +14928,134 @@ mod tests {
         assert!(transcript.contains("Tool 'web_search' is not enabled in this session"));
         assert!(transcript.contains("Available tools: terminal"));
         assert!(!transcript.contains("web ran"));
+    }
+
+    #[test]
+    fn plugin_tool_middleware_runs_inside_agent_loop() {
+        use futures::stream::BoxStream;
+        use hermes_core::JsonSchema;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        struct ToolThenDoneProvider {
+            calls: Arc<AtomicU32>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for ToolThenDoneProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                let message = if n == 0 {
+                    Message::assistant_with_tool_calls(
+                        None,
+                        vec![ToolCall {
+                            id: "tc_echo".to_string(),
+                            function: hermes_core::FunctionCall {
+                                name: "echo".to_string(),
+                                arguments: r#"{"value":"original"}"#.to_string(),
+                            },
+                            extra_content: None,
+                        }],
+                    )
+                } else {
+                    Message::assistant("done")
+                };
+                Ok(hermes_core::LlmResponse {
+                    message,
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        struct MiddlewarePlugin;
+
+        #[async_trait::async_trait]
+        impl crate::plugins::Plugin for MiddlewarePlugin {
+            fn meta(&self) -> crate::plugins::PluginMeta {
+                crate::plugins::PluginMeta {
+                    name: "middleware_test".to_string(),
+                    version: "0.1.0".to_string(),
+                    description: "Middleware test".to_string(),
+                    author: None,
+                }
+            }
+
+            async fn initialize(&self) -> Result<(), AgentError> {
+                Ok(())
+            }
+
+            async fn shutdown(&self) -> Result<(), AgentError> {
+                Ok(())
+            }
+
+            fn register(&self, ctx: &mut crate::plugins::PluginContext) {
+                ctx.on_tool_request(Arc::new(|request| {
+                    let mut args = request.args.clone();
+                    args["value"] = Value::String("rewritten".to_string());
+                    Some(crate::plugins::ToolRequestMiddlewareUpdate::new(args))
+                }));
+                ctx.on_tool_execution(Arc::new(|_request, next_call| {
+                    let mut result = next_call(None);
+                    result.content = format!("wrapped: {}", result.content);
+                    result
+                }));
+            }
+        }
+
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "echo",
+            ToolSchema::new("echo", "Echo tool", JsonSchema::new("object")),
+            Arc::new(|args| Ok(args["value"].as_str().unwrap_or_default().to_string())),
+        );
+        let mut plugin_manager = PluginManager::new();
+        plugin_manager.register(Arc::new(MiddlewarePlugin));
+        let agent = AgentLoop::new(
+            AgentConfig {
+                max_turns: 4,
+                ..AgentConfig::default()
+            },
+            Arc::new(registry),
+            Arc::new(ToolThenDoneProvider {
+                calls: Arc::new(AtomicU32::new(0)),
+            }),
+        )
+        .with_plugins(Arc::new(std::sync::Mutex::new(plugin_manager)));
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+        let result = rt
+            .block_on(agent.run(vec![Message::user("use echo")], None))
+            .expect("agent run should succeed");
+        let transcript = result
+            .messages
+            .iter()
+            .filter_map(|msg| msg.content.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(result.finished_naturally);
+        assert!(transcript.contains("wrapped: rewritten"), "{transcript}");
     }
 
     #[test]
