@@ -505,6 +505,15 @@ def main() -> int:
 
     out_json = (repo_root / args.out_json).resolve()
     out_md = (repo_root / args.out_md).resolve()
+    if args.check_release or args.check_ci:
+        print(f"Checked {out_json}")
+        print(f"Checked {out_md}")
+        if args.check_release and not release_gate["pass"]:
+            return 1
+        if args.check_ci and not ci_gate["pass"]:
+            return 1
+        return 0
+
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -643,10 +652,6 @@ def main() -> int:
     print(f"Wrote {out_json}")
     print(f"Wrote {out_md}")
 
-    if args.check_release and not release_gate["pass"]:
-        return 1
-    if args.check_ci and not ci_gate["pass"]:
-        return 1
     return 0
 
 

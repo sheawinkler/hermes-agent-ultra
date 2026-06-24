@@ -358,13 +358,18 @@ def main() -> int:
 
     out_json = (repo_root / args.out_json).resolve()
     out_md = (repo_root / args.out_md).resolve()
+    if args.check:
+        print(f"Checked {out_json}")
+        print(f"Checked {out_md}")
+        if not payload["gate"]["pass"]:
+            return 1
+        return 0
+
     write_json(out_json, payload)
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_md.write_text(render_md(payload) + "\n", encoding="utf-8")
     print(f"Wrote {out_json}")
     print(f"Wrote {out_md}")
-    if args.check and not payload["gate"]["pass"]:
-        return 1
     return 0
 
 
