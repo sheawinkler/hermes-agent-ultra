@@ -51,19 +51,6 @@ mod default_base_urls {
     pub const NVIDIA: &str = "https://integrate.api.nvidia.com/v1";
     pub const ARCEE: &str = "https://api.arcee.ai/api/v1";
     pub const TENCENT_TOKENHUB: &str = "https://tokenhub.tencentmaas.com/v1";
-    pub const OLLAMA_LOCAL: &str = "http://127.0.0.1:11434/v1";
-    pub const LLAMA_CPP: &str = "http://127.0.0.1:8080/v1";
-    pub const VLLM: &str = "http://127.0.0.1:8000/v1";
-    pub const MLX: &str = "http://127.0.0.1:8080/v1";
-    pub const APPLE_ANE: &str = "http://127.0.0.1:8081/v1";
-    pub const SGLANG: &str = "http://127.0.0.1:30000/v1";
-    pub const TGI: &str = "http://127.0.0.1:8082/v1";
-    pub const LMSTUDIO: &str = "http://127.0.0.1:1234/v1";
-    pub const LMDEPLOY: &str = "http://127.0.0.1:23333/v1";
-    pub const LOCALAI: &str = "http://127.0.0.1:8080/v1";
-    pub const KOBOLDCPP: &str = "http://127.0.0.1:5001/v1";
-    pub const TEXT_GENERATION_WEBUI: &str = "http://127.0.0.1:5000/v1";
-    pub const TABBYAPI: &str = "http://127.0.0.1:5000/v1";
 }
 
 /// Returned by [`build_default_auxiliary_client`] alongside the client so
@@ -424,22 +411,12 @@ fn canonical_provider_label(provider: &str) -> String {
         "arcee-ai" | "arceeai" => "arcee".to_string(),
         "mimo" | "xiaomi-mimo" => "xiaomi".to_string(),
         "tencent" | "tokenhub" | "tencent-cloud" | "tencentmaas" => "tencent-tokenhub".to_string(),
-        "ollama" => "ollama-local".to_string(),
-        "llama.cpp" | "llamacpp" | "llamafile" => "llama-cpp".to_string(),
-        "ollvm" | "llvm" => "vllm".to_string(),
-        "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm" | "mlx-openai-server" => {
-            "mlx".to_string()
+        local if crate::local_backends::local_backend_spec(local).is_some() => {
+            crate::local_backends::local_backend_spec(local)
+                .expect("local backend spec checked")
+                .provider
+                .to_string()
         }
-        "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
-        "text-generation-inference" => "tgi".to_string(),
-        "lm-studio" | "lm_studio" | "lm studio" => "lmstudio".to_string(),
-        "lm-deploy" | "lm_deploy" => "lmdeploy".to_string(),
-        "local-ai" | "local_ai" => "localai".to_string(),
-        "kobold-cpp" | "kobold" => "koboldcpp".to_string(),
-        "oobabooga" | "textgen-webui" | "textgen_webui" | "text-generation-web-ui" => {
-            "text-generation-webui".to_string()
-        }
-        "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => "tabbyapi".to_string(),
         "openai-codex" | "codex" => "openai-codex".to_string(),
         other => other.to_string(),
     }
@@ -474,6 +451,9 @@ fn resolve_main_api_key(main: &AuxiliaryMainRuntime, label: &str) -> Option<Stri
 }
 
 fn provider_api_key_from_env(label: &str) -> Option<String> {
+    if let Some(api_key) = crate::local_backends::local_backend_api_key_from_env(label) {
+        return Some(api_key);
+    }
     let env_vars: &[&str] = match label {
         "openai" => &["HERMES_OPENAI_API_KEY", "OPENAI_API_KEY"],
         "openai-codex" => &["HERMES_OPENAI_CODEX_API_KEY"],
@@ -506,19 +486,6 @@ fn provider_api_key_from_env(label: &str) -> Option<String> {
         "nvidia" => &["NVIDIA_API_KEY"],
         "arcee" => &["ARCEEAI_API_KEY", "ARCEE_API_KEY"],
         "ollama-cloud" => &["OLLAMA_API_KEY"],
-        "ollama-local" => &["OLLAMA_LOCAL_API_KEY", "OLLAMA_API_KEY"],
-        "llama-cpp" => &["LLAMA_CPP_API_KEY"],
-        "vllm" => &["VLLM_API_KEY"],
-        "mlx" => &["MLX_API_KEY"],
-        "apple-ane" => &["APPLE_ANE_API_KEY"],
-        "sglang" => &["SGLANG_API_KEY"],
-        "tgi" => &["TGI_API_KEY", "HUGGINGFACE_API_KEY"],
-        "lmstudio" => &["LMSTUDIO_API_KEY"],
-        "lmdeploy" => &["LMDEPLOY_API_KEY"],
-        "localai" => &["LOCALAI_API_KEY"],
-        "koboldcpp" => &["KOBOLDCPP_API_KEY"],
-        "text-generation-webui" => &["TEXT_GENERATION_WEBUI_API_KEY"],
-        "tabbyapi" => &["TABBYAPI_API_KEY"],
         _ => &[],
     };
     env_vars.iter().find_map(|name| {
@@ -530,6 +497,9 @@ fn provider_api_key_from_env(label: &str) -> Option<String> {
 }
 
 fn default_base_url(label: &str) -> Option<&'static str> {
+    if let Some(base_url) = crate::local_backends::local_backend_default_base_url(label) {
+        return Some(base_url);
+    }
     match label {
         "openai" | "custom" => Some(default_base_urls::OPENAI),
         "openai-codex" => Some(default_base_urls::OPENAI_CODEX),
@@ -546,19 +516,6 @@ fn default_base_url(label: &str) -> Option<&'static str> {
         "novita" => Some(default_base_urls::NOVITA),
         "nvidia" => Some(default_base_urls::NVIDIA),
         "arcee" => Some(default_base_urls::ARCEE),
-        "ollama-local" => Some(default_base_urls::OLLAMA_LOCAL),
-        "llama-cpp" => Some(default_base_urls::LLAMA_CPP),
-        "vllm" => Some(default_base_urls::VLLM),
-        "mlx" => Some(default_base_urls::MLX),
-        "apple-ane" => Some(default_base_urls::APPLE_ANE),
-        "sglang" => Some(default_base_urls::SGLANG),
-        "tgi" => Some(default_base_urls::TGI),
-        "lmstudio" => Some(default_base_urls::LMSTUDIO),
-        "lmdeploy" => Some(default_base_urls::LMDEPLOY),
-        "localai" => Some(default_base_urls::LOCALAI),
-        "koboldcpp" => Some(default_base_urls::KOBOLDCPP),
-        "text-generation-webui" => Some(default_base_urls::TEXT_GENERATION_WEBUI),
-        "tabbyapi" => Some(default_base_urls::TABBYAPI),
         _ => None,
     }
 }
@@ -578,29 +535,8 @@ fn kimi_base_url_from_env_or_key(api_key: &str) -> String {
 }
 
 fn provider_allows_no_api_key(label: &str, base_url: Option<&str>) -> bool {
-    matches!(
-        label,
-        "ollama-local"
-            | "llama-cpp"
-            | "vllm"
-            | "mlx"
-            | "apple-ane"
-            | "sglang"
-            | "tgi"
-            | "lmstudio"
-            | "lmdeploy"
-            | "localai"
-            | "koboldcpp"
-            | "text-generation-webui"
-            | "tabbyapi"
-    ) || base_url.is_some_and(is_loopback_base_url)
-}
-
-fn is_loopback_base_url(base_url: &str) -> bool {
-    let trimmed = base_url.trim().to_ascii_lowercase();
-    trimmed.starts_with("http://127.")
-        || trimmed.starts_with("http://localhost")
-        || trimmed.starts_with("http://[::1]")
+    crate::local_backends::is_local_backend_provider(label)
+        || base_url.is_some_and(crate::local_backends::is_local_or_private_base_url)
 }
 
 fn register_direct_key(

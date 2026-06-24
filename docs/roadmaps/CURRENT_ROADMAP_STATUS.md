@@ -1,6 +1,6 @@
 # Current Roadmap Status
 
-Last reviewed: 2026-06-22
+Last reviewed: 2026-06-23
 
 This file is the human roadmap index. The machine-readable source of truth
 remains the generated parity artifacts under `docs/parity/`.
@@ -41,6 +41,12 @@ remains the generated parity artifacts under `docs/parity/`.
 - Reduce Rust build latency by splitting provider/auth routing, app runtime,
   CLI UI, and broad gateway adapter feature surfaces according to
   `docs/roadmaps/CARGO_BUILD_SURFACE_CRATIFICATION_2026-06-22.md`.
+- Behavioral/product enhancement items 1-7 are implemented through reusable
+  Rust owners: `hermes-intelligence` owns source ranking, memory safety,
+  tool-planning rationale, and finalization guidance; `hermes-eval` owns the
+  live behavioral harness manifest; `hermes-provider-runtime` owns OpenAI/local
+  backend diagnostics; CLI doctor consumes provider-runtime local backend
+  coverage.
 - Treat stale roadmap prose as non-authoritative when it conflicts with
   generated parity artifacts or closed GitHub issue state.
 

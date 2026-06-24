@@ -1347,7 +1347,9 @@ mod tests {
         assert!(injected.contains("UNPROVEN/CONTRADICTORY"));
         assert!(injected.contains("execute at least one concrete action"));
         assert!(injected.contains("Hermes intelligence kernel:"));
+        assert!(injected.contains("research synthesis engine:"));
         assert!(injected.contains("ContextLattice memory cycle:"));
+        assert!(injected.contains("read back memory"));
         assert!(injected.contains("user-request(routing-preview):"));
         assert!(injected.contains("full user request remains available as the next user message"));
     }

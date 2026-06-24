@@ -86,6 +86,9 @@ mod unix {
         job.id = "e2e-gateway-webhook-job".to_string();
         job.next_run = Some(Utc::now() - Duration::minutes(5));
         job.repeat = Some(1);
+        job.no_agent = true;
+        job.script = Some("printf 'forced cron failure for webhook e2e' >&2; exit 7".to_string());
+        job.script_timeout_seconds = Some(5);
 
         let job_json = serde_json::to_string_pretty(&job).expect("serialize CronJob");
         fs::write(
@@ -152,7 +155,7 @@ mod unix {
         assert_eq!(body["trigger"], "schedule");
         assert_eq!(
             body["ok"], false,
-            "no API key → StubProvider fails; webhook still fires"
+            "script-only cron failure should still fire webhook"
         );
         assert!(
             body["error"].is_string(),

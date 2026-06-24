@@ -1800,6 +1800,11 @@ fn governor_for_turn(
     }
 }
 
+fn runtime_provider_allows_no_api_key(provider: &str, base_url: Option<&str>) -> bool {
+    crate::local_backends::is_local_backend_provider(provider)
+        || base_url.is_some_and(crate::local_backends::is_local_or_private_base_url)
+}
+
 /// The main agent loop.
 ///
 /// Owns the configuration, a tool registry, and an LLM provider.
@@ -2998,13 +3003,16 @@ impl AgentLoop {
                 .filter(|v| !v.trim().is_empty());
         }
         match provider {
-            "gemini" | "google" | "google-gemini" | "google-ai-studio" => {
-                std::env::var("GEMINI_API_KEY")
-                    .ok()
-                    .filter(|v| !v.trim().is_empty())
-                    .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
-                    .filter(|v| !v.trim().is_empty())
-            }
+            "google-ai-studio" => std::env::var("GOOGLE_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("GEMINI_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty()),
+            "gemini" | "google" | "google-gemini" => std::env::var("GEMINI_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty()),
             "gmi" | "gmi-cloud" | "gmicloud" => std::env::var("GMI_API_KEY")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
@@ -3170,6 +3178,8 @@ impl AgentLoop {
                     Some("https://tokenhub.tencentmaas.com/v1".to_string())
                 } else if matches!(provider, "zai" | "glm" | "z-ai" | "z_ai" | "zhipu") {
                     Some("https://api.z.ai/api/paas/v4".to_string())
+                } else if crate::local_backends::is_local_backend_provider(provider) {
+                    crate::local_backends::local_backend_resolved_base_url(provider)
                 } else {
                     None
                 }
@@ -3706,15 +3716,20 @@ impl AgentLoop {
         api_mode: Option<&ApiMode>,
         credential_pool: Option<&Arc<CredentialPool>>,
     ) -> Result<Arc<dyn LlmProvider>, AgentError> {
-        let api_key = self
-            .resolve_runtime_api_key(provider, api_key_env_override, explicit_api_key)
-            .ok_or_else(|| {
-                AgentError::Config(format!(
-                    "No API key configured for runtime-routed provider '{}'",
-                    provider
-                ))
-            })?;
         let base_url = self.resolve_runtime_base_url(provider, route_base_url);
+        let api_key =
+            match self.resolve_runtime_api_key(provider, api_key_env_override, explicit_api_key) {
+                Some(api_key) => api_key,
+                None if runtime_provider_allows_no_api_key(provider, base_url.as_deref()) => {
+                    "local-no-key".to_string()
+                }
+                None => {
+                    return Err(AgentError::Config(format!(
+                        "No API key configured for runtime-routed provider '{}'",
+                        provider
+                    )))
+                }
+            };
         let base_url = self.resolve_kimi_runtime_base_url_for_key(
             provider,
             route_base_url,
@@ -10977,7 +10992,7 @@ mod tests {
     fn test_agent_config_default() {
         let config = AgentConfig::default();
         assert_eq!(config.max_turns, 250);
-        assert_eq!(config.model, "gpt-4o");
+        assert_eq!(config.model, "gpt-5.5");
         assert!(!config.stream);
         assert_eq!(config.max_concurrent_delegates, 1);
         assert_eq!(config.max_delegate_depth, 4);
@@ -14833,10 +14848,7 @@ mod tests {
         let agent = AgentLoop::new(config, Arc::new(registry), provider);
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let result = rt
-            .block_on(agent.run(
-                vec![Message::user("search the web")],
-                Some(vec![terminal_schema]),
-            ))
+            .block_on(agent.run(vec![Message::user("hello")], Some(vec![terminal_schema])))
             .expect("agent run should succeed");
 
         assert!(result.finished_naturally);
@@ -15550,6 +15562,71 @@ mod tests {
         let resolved = agent.resolve_runtime_api_key("custom", None, None);
         assert_eq!(resolved.as_deref(), Some("env-secret"));
         std::env::remove_var("MY_FALLBACK_KEY");
+    }
+
+    #[test]
+    fn test_local_runtime_providers_allow_no_key_and_default_base_url() {
+        use futures::stream::BoxStream;
+
+        let _guard = env_test_lock();
+        let _llama_key = EnvVarGuard::remove("LLAMA_CPP_API_KEY");
+        let _llama_url = EnvVarGuard::remove("LLAMA_CPP_BASE_URL");
+        let _lmstudio_key = EnvVarGuard::remove("LMSTUDIO_API_KEY");
+        let _lmstudio_url = EnvVarGuard::remove("LMSTUDIO_BASE_URL");
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+
+        assert_eq!(
+            agent.resolve_runtime_base_url("llamafile", None).as_deref(),
+            Some("http://127.0.0.1:8080/v1")
+        );
+        assert_eq!(
+            agent.resolve_runtime_base_url("lmstudio", None).as_deref(),
+            Some("http://127.0.0.1:1234/v1")
+        );
+        assert!(agent
+            .build_runtime_provider("llamafile", "local-gguf", None, None, None, None, None)
+            .is_ok());
+        assert!(agent
+            .build_runtime_provider("lmstudio", "local-model", None, None, None, None, None)
+            .is_ok());
     }
 
     #[test]

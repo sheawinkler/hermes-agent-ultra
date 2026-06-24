@@ -35,8 +35,9 @@ pub use future_kernel::{
     ContextLatticeMemoryRequest, ContextLatticeRetrievalStats, ContextSource, ContextUse, Evidence,
     EvidenceCompiler, EvidenceRelation, EvidenceReport, FinalizerFinding, FinalizerInput,
     FinalizerReport, ObservedBehavior, ProblemSolvingKernel, ProblemSolvingPlan,
-    ProblemSolvingRequest, ProblemStep, ProblemStepKind, SelfAuditFinalizer, ToolBatchPlan,
-    ToolCandidate, ToolPlanEntry, TrustLevel,
+    ProblemSolvingRequest, ProblemStep, ProblemStepKind, RankedResearchSource, ResearchSource,
+    ResearchSourceKind, ResearchSynthesisEngine, ResearchSynthesisPlan, ResearchSynthesisStep,
+    SelfAuditFinalizer, SourceQualityTier, ToolBatchPlan, ToolCandidate, ToolPlanEntry, TrustLevel,
 };
 pub use insights::Insights;
 pub use prompt::PromptBuilder;

@@ -25,7 +25,7 @@
       "reason": "all SOTA harness domains must remain represented"
     },
     {
-      "actual": 3583,
+      "actual": 3630,
       "id": "rust_test_functions",
       "limit": 4500,
       "operator": "<=",
@@ -69,20 +69,20 @@
     "failures": [],
     "pass": true
   },
-  "generated_at_utc": "2026-06-21T01:32:19.157937+00:00",
+  "generated_at_utc": "2026-06-24T00:21:39.244248+00:00",
   "purpose": "Cross-version review budget for SOTA harness and coverage growth.",
   "schema_version": 1,
   "snapshot": {
     "ci_gate_pass": true,
     "coverage_manifest_entries": 409,
     "covered_behavior_rows": 419,
-    "local_head": "4ec5989190dc01f59b8d0dfd65a546cd2417d391+worktree",
+    "local_head": "55d43effb9c00a02dc0bdfde2840cef7b5176961+worktree",
     "missing_rust_test_refs": 0,
     "queue_pending": 0,
     "queue_total": 6132,
-    "recorded_at_utc": "2026-06-21T01:32:19.157276+00:00",
+    "recorded_at_utc": "2026-06-24T00:21:39.243720+00:00",
     "release_gate_pass": true,
-    "rust_test_functions": 3583,
+    "rust_test_functions": 3630,
     "sota_critical_gaps": 0,
     "sota_direct_rust_tests": 12,
     "sota_domain_coverage_ratio": 1.0,
@@ -92,7 +92,7 @@
     "sota_workflow_replay_steps": 5,
     "tracked_behavior_coverage_ratio": 1.0,
     "tracked_behavior_rows": 419,
-    "upstream_head": "15852722d47b2b50d6815b3831891663076b5865"
+    "upstream_head": "5ecf3bf0e0726b8b33682bb5c3aad9679b7b5be4"
   },
   "source_artifacts": {
     "global_parity_proof": "docs/parity/global-parity-proof.json",

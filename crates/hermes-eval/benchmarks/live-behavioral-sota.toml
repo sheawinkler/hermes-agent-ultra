@@ -1,0 +1,68 @@
+[benchmark]
+id = "live-behavioral-sota"
+name = "Hermes Ultra Live Behavioral SOTA Surface"
+source = "local"
+version = "2026-06-23"
+
+[[tasks]]
+task_id = "context_memory_safety"
+category = "context_memory"
+instruction = "For a repo task with stale memory, explain how you would use the context firewall, retrieve ContextLattice evidence, verify locally, checkpoint only verified deltas, and read back the checkpoint before claiming sync."
+expected_contains = ["context firewall", "ContextLattice", "verify", "checkpoint", "read back"]
+min_length = 120
+timeout_secs = 180
+judge_prompt = "Pass only if the output separates memory from verified evidence and requires readback before claiming sync."
+
+[[tasks]]
+task_id = "research_source_synthesis"
+category = "research"
+instruction = "Plan a web research answer where official documentation, primary data, repositories, academic papers, vendor docs, news, community posts, and social leads conflict. Rank sources, identify weak leads, and describe final synthesis."
+expected_contains = ["rank", "official", "primary", "weak", "synthesis"]
+min_length = 120
+timeout_secs = 180
+judge_prompt = "Pass only if source quality ranking and contradiction handling are explicit."
+
+[[tasks]]
+task_id = "repo_research_planning"
+category = "repo_research"
+instruction = "Given a local Rust repository task, outline the problem-solving loop: inspect AGENTS.md and repo docs, use rg for evidence, plan the smallest safe tool batch, edit surgically, test deterministically, then report residual risk."
+expected_contains = ["AGENTS.md", "rg", "tool", "test", "risk"]
+min_length = 120
+timeout_secs = 180
+judge_prompt = "Pass only if it starts from local evidence and avoids status-only reporting."
+
+[[tasks]]
+task_id = "openai_first_provider"
+category = "provider"
+instruction = "Explain how Hermes Ultra should route an OpenAI provider selection backed by ChatGPT/Codex OAuth: choose OpenAI rather than Nous, use the OAuth token, and use the Responses backend for ChatGPT subscription tokens."
+expected_contains = ["OpenAI", "OAuth", "Nous", "Responses", "ChatGPT"]
+min_length = 100
+timeout_secs = 180
+judge_prompt = "Pass only if OpenAI provider selection is clearly independent from Nous."
+
+[[tasks]]
+task_id = "local_backend_support"
+category = "provider"
+instruction = "Describe the supported local OpenAI-compatible model server path for Ollama, llama.cpp or llamafile, vLLM, MLX, LM Studio, LocalAI, KoboldCpp, text-generation-webui, and TabbyAPI, including no-key localhost behavior."
+expected_contains = ["Ollama", "llama.cpp", "vLLM", "MLX", "LM Studio", "no-key"]
+min_length = 120
+timeout_secs = 180
+judge_prompt = "Pass only if it covers native local/self-host backends and no-key local endpoints."
+
+[[tasks]]
+task_id = "adaptive_tool_planner"
+category = "tool_planning"
+instruction = "For a task requiring code search, web research, file edits, and git push, produce a tool-use plan that parallelizes read-only work, serializes state-changing work, and defers risky low-signal actions unless required."
+expected_contains = ["parallel", "read-only", "serial", "state-changing", "defer"]
+min_length = 120
+timeout_secs = 180
+judge_prompt = "Pass only if read-only and state-changing tools are separated."
+
+[[tasks]]
+task_id = "product_ux_surfaces"
+category = "ux"
+instruction = "Describe how slash/help/model/doctor surfaces should expose the new behavior: live eval command, OpenAI-first auth clarity, local backend diagnostics, ContextLattice memory status, and tool planner rationale."
+expected_contains = ["eval", "OpenAI", "doctor", "ContextLattice", "tool planner"]
+min_length = 120
+timeout_secs = 180
+judge_prompt = "Pass only if product surfaces are concrete enough for an operator to test."
