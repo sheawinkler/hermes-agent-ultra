@@ -127,7 +127,9 @@ use hermes_gateway::platforms::weixin::{WeChatAdapter, WeixinConfig};
 #[cfg(feature = "gateway-whatsapp")]
 use hermes_gateway::platforms::whatsapp::{WhatsAppAdapter, WhatsAppConfig};
 use hermes_gateway::tool_backends::ClarifyDispatcher;
-use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
+use hermes_gateway::{
+    ActiveSessionControl, DmManager, Gateway, GatewayRuntimeContext, SessionManager,
+};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
 use hermes_tool_planning::{resolve_platform_tool_schemas, tool_definition_summary};
@@ -3233,6 +3235,13 @@ async fn run_gateway(
                         let agent =
                             build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools)
                                 .with_callbacks(callbacks);
+                        if let Some(registration) = ctx.busy_control.clone() {
+                            let _ = registration
+                                .attach(Arc::new(GatewayAgentBusyControl::new(
+                                    agent.interrupt.clone(),
+                                )))
+                                .await;
+                        }
                         let result = agent
                             .run(messages, Some(tool_schemas))
                             .await
@@ -3505,6 +3514,13 @@ async fn run_gateway(
                         let agent =
                             build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools)
                                 .with_callbacks(callbacks);
+                        if let Some(registration) = ctx.busy_control.clone() {
+                            let _ = registration
+                                .attach(Arc::new(GatewayAgentBusyControl::new(
+                                    agent.interrupt.clone(),
+                                )))
+                                .await;
+                        }
                         let emit = on_chunk.clone();
                         let ui_state = Arc::new(Mutex::new((false, false))); // (muted, needs_break)
                         let ui_state_cb = ui_state.clone();
@@ -4268,6 +4284,29 @@ fn resolve_model_for_gateway(default_model: &str, ctx: &GatewayRuntimeContext) -
     }
 
     default_model.to_string()
+}
+
+#[derive(Clone)]
+struct GatewayAgentBusyControl {
+    interrupt: hermes_agent::InterruptController,
+}
+
+impl GatewayAgentBusyControl {
+    fn new(interrupt: hermes_agent::InterruptController) -> Self {
+        Self { interrupt }
+    }
+}
+
+impl ActiveSessionControl for GatewayAgentBusyControl {
+    fn interrupt(&self, message: &str) {
+        self.interrupt.interrupt(Some(message.to_string()));
+    }
+
+    fn steer(&self, message: &str) -> bool {
+        self.interrupt
+            .interrupt(Some(hermes_agent::format_steer_marker(message)));
+        true
+    }
 }
 
 fn normalize_gateway_tool_progress_mode(raw: &str) -> Option<String> {

@@ -320,6 +320,18 @@ pub struct DisplayConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_progress: Option<String>,
 
+    /// Busy-session input mode for gateway surfaces: `interrupt`, `queue`, or `steer`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busy_input_mode: Option<String>,
+
+    /// Whether gateway busy-session guard should acknowledge queued/interrupted messages.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_option_boolish",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub busy_ack_enabled: Option<bool>,
+
     /// Per-platform display overrides keyed by normalized platform name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub platforms: BTreeMap<String, PlatformDisplayConfig>,
@@ -336,6 +348,26 @@ impl DisplayConfig {
             .get(&key)
             .and_then(|cfg| cfg.tool_progress.as_deref())
             .or(self.tool_progress.as_deref())
+    }
+
+    pub fn normalized_busy_input_mode(&self) -> &'static str {
+        match self
+            .busy_input_mode
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "queue" | "queued" => "queue",
+            "steer" | "steering" => "steer",
+            "interrupt" | "interrupted" | "replace" | "" => "interrupt",
+            _ => "interrupt",
+        }
+    }
+
+    pub fn busy_ack_enabled(&self) -> bool {
+        self.busy_ack_enabled.unwrap_or(true)
     }
 }
 
@@ -899,6 +931,38 @@ where
     }
 
     deserializer.deserialize_any(BoolishVisitor)
+}
+
+fn deserialize_option_boolish<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct OptionBoolishVisitor;
+
+    impl<'de> Visitor<'de> for OptionBoolishVisitor {
+        type Value = Option<bool>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a bool, bool-like string, or null")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_some<D2>(self, deserializer: D2) -> Result<Self::Value, D2::Error>
+        where
+            D2: Deserializer<'de>,
+        {
+            deserialize_boolish(deserializer).map(Some)
+        }
+    }
+
+    deserializer.deserialize_option(OptionBoolishVisitor)
 }
 
 fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -2017,6 +2081,8 @@ quick_commands:
 display:
   tool_progress_command: "true"
   tool_progress: all
+  busy_input_mode: steer
+  busy_ack_enabled: "false"
   platforms:
     telegram:
       tool_progress: off
@@ -2029,6 +2095,8 @@ agent:
         assert!(cfg.display.tool_progress_command_enabled());
         assert_eq!(cfg.display.platform_tool_progress("telegram"), Some("off"));
         assert_eq!(cfg.display.platform_tool_progress("slack"), Some("all"));
+        assert_eq!(cfg.display.normalized_busy_input_mode(), "steer");
+        assert!(!cfg.display.busy_ack_enabled());
         assert_eq!(
             cfg.agent.normalized_service_tier().as_deref(),
             Some("priority")

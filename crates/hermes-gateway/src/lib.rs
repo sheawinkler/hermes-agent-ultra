@@ -49,8 +49,9 @@ pub use agent_cache::{
     GatewayAgentCache,
 };
 pub use session_control::{
-    build_session_key, BusyInputMode, BusyMessageDecision, BusySessionCoordinator, MessageEvent,
-    MessageType, ProcessingOutcome, SessionSource,
+    build_session_key, ActiveSessionControl, AgentActivitySummary, BusyInputMode,
+    BusyMessageDecision, BusySessionCoordinator, MessageEvent, MessageType, ProcessingOutcome,
+    SessionSource,
 };
 
 // Re-export session management

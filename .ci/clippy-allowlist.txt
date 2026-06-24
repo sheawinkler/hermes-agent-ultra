@@ -143,7 +143,6 @@ hermes_gateway|clippy::manual_split_once|crates/hermes-gateway/src/platforms/api
 hermes_gateway|clippy::needless_as_bytes|crates/hermes-gateway/src/platforms/weixin.rs
 hermes_gateway|clippy::needless_borrows_for_generic_args|crates/hermes-gateway/src/gateway.rs
 hermes_gateway|clippy::needless_borrows_for_generic_args|crates/hermes-gateway/src/platforms/slack.rs
-hermes_gateway|clippy::needless_borrow|crates/hermes-gateway/src/gateway.rs
 hermes_gateway|clippy::should_implement_trait|crates/hermes-gateway/src/platforms/telegram.rs
 hermes_gateway|clippy::to_string_in_format_args|crates/hermes-gateway/src/platforms/api_server.rs
 hermes_gateway|clippy::too_many_arguments|crates/hermes-gateway/src/platforms/email.rs

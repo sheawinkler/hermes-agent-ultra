@@ -3,7 +3,7 @@
 //! These helpers model the Python gateway's active-session guard without
 //! coupling platform adapters to a concrete Rust agent implementation.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -192,7 +192,7 @@ struct ActiveSession {
 
 pub struct BusySessionCoordinator {
     active: HashMap<String, ActiveSession>,
-    pending: HashMap<String, MessageEvent>,
+    pending: HashMap<String, VecDeque<MessageEvent>>,
     busy_ack_ts: HashMap<String, Instant>,
     ack_cooldown: Duration,
 }
@@ -241,21 +241,70 @@ impl BusySessionCoordinator {
         session_key: &str,
         _outcome: ProcessingOutcome,
     ) -> Option<MessageEvent> {
-        self.reset_session(session_key)
+        self.active.remove(session_key);
+        self.busy_ack_ts.remove(session_key);
+        self.pop_pending(session_key)
     }
 
     pub fn reset_session(&mut self, session_key: &str) -> Option<MessageEvent> {
         self.active.remove(session_key);
         self.busy_ack_ts.remove(session_key);
-        self.pending.remove(session_key)
+        self.pending
+            .remove(session_key)
+            .and_then(|mut queue| queue.pop_front())
     }
 
     pub fn is_active(&self, session_key: &str) -> bool {
         self.active.contains_key(session_key)
     }
 
+    pub fn attach_control(
+        &mut self,
+        session_key: &str,
+        control: Arc<dyn ActiveSessionControl>,
+    ) -> bool {
+        let Some(active) = self.active.get_mut(session_key) else {
+            return false;
+        };
+        active.control = Some(control);
+        true
+    }
+
+    pub fn interrupt_active(&mut self, session_key: &str, message: &str) -> bool {
+        let Some(active) = self.active.get(session_key) else {
+            return false;
+        };
+        let Some(control) = active.control.as_ref() else {
+            return false;
+        };
+        control.interrupt(message);
+        true
+    }
+
     pub fn pending(&self, session_key: &str) -> Option<&MessageEvent> {
-        self.pending.get(session_key)
+        self.pending
+            .get(session_key)
+            .and_then(|queue| queue.front())
+    }
+
+    pub fn pending_len(&self, session_key: &str) -> usize {
+        self.pending
+            .get(session_key)
+            .map(VecDeque::len)
+            .unwrap_or(0)
+    }
+
+    pub fn queue_message(&mut self, session_key: &str, event: MessageEvent) {
+        self.queue_event(session_key, event);
+    }
+
+    fn pop_pending(&mut self, session_key: &str) -> Option<MessageEvent> {
+        let queue = self.pending.get_mut(session_key)?;
+        let event = queue.pop_front();
+        if queue.is_empty() {
+            self.pending.remove(session_key);
+        }
+        event
     }
 
     fn should_ack_at(&mut self, session_key: &str, now: Instant) -> bool {
@@ -271,7 +320,10 @@ impl BusySessionCoordinator {
     }
 
     fn queue_event(&mut self, session_key: &str, event: MessageEvent) {
-        self.pending.insert(session_key.to_string(), event);
+        self.pending
+            .entry(session_key.to_string())
+            .or_default()
+            .push_back(event);
     }
 
     pub fn handle_busy_message_at(
@@ -306,15 +358,27 @@ impl BusySessionCoordinator {
             BusyInputMode::Interrupt => {
                 if let Some(control) = active.control.as_ref() {
                     control.interrupt(&event.text);
-                }
-                BusyMessageDecision {
-                    handled: true,
-                    queued: false,
-                    interrupted: active.control.is_some(),
-                    steered: false,
-                    ack: self
-                        .should_ack_at(session_key, now)
-                        .then(|| interrupt_ack(active.started_at, active.control.as_deref(), now)),
+                    BusyMessageDecision {
+                        handled: true,
+                        queued: false,
+                        interrupted: true,
+                        steered: false,
+                        ack: self.should_ack_at(session_key, now).then(|| {
+                            interrupt_ack(active.started_at, active.control.as_deref(), now)
+                        }),
+                    }
+                } else {
+                    self.queue_event(session_key, event);
+                    BusyMessageDecision {
+                        handled: true,
+                        queued: true,
+                        interrupted: false,
+                        steered: false,
+                        ack: self.should_ack_at(session_key, now).then(|| {
+                            "Queued for the next turn. I will respond once the current task finishes."
+                                .to_string()
+                        }),
+                    }
                 }
             }
             BusyInputMode::Steer => {
@@ -481,7 +545,8 @@ mod tests {
             now + Duration::from_secs(1),
         );
         assert!(second.ack.is_none());
-        assert_eq!(coord.pending(&key).unwrap().text, "still there");
+        assert_eq!(coord.pending(&key).unwrap().text, "follow up");
+        assert_eq!(coord.pending_len(&key), 2);
     }
 
     #[test]
@@ -510,6 +575,36 @@ mod tests {
         assert!(ack.contains("21/60"));
         assert!(ack.contains("terminal"));
         assert!(ack.contains("10 min"));
+    }
+
+    #[test]
+    fn interrupt_without_control_queues_instead_of_dropping_message() {
+        let mut coord = BusySessionCoordinator::default();
+        let key = build_session_key(&source("10"));
+        coord.mark_active(&key, None);
+
+        let decision = coord.handle_busy_message(
+            &key,
+            event("do not drop me", "10"),
+            BusyInputMode::Interrupt,
+        );
+
+        assert!(decision.handled);
+        assert!(decision.queued);
+        assert!(!decision.interrupted);
+        assert_eq!(coord.pending(&key).unwrap().text, "do not drop me");
+    }
+
+    #[test]
+    fn attached_control_can_be_interrupted_directly() {
+        let mut coord = BusySessionCoordinator::default();
+        let key = build_session_key(&source("10"));
+        let control = Arc::new(MockControl::default());
+        coord.mark_active(&key, None);
+
+        assert!(coord.attach_control(&key, control.clone()));
+        assert!(coord.interrupt_active(&key, "stop now"));
+        assert_eq!(control.interrupts.lock().unwrap().as_slice(), ["stop now"]);
     }
 
     #[test]
@@ -566,10 +661,11 @@ mod tests {
         let key = build_session_key(&source("10"));
         coord.mark_active(&key, None);
         coord.handle_busy_message(&key, event("queued", "10"), BusyInputMode::Queue);
+        coord.handle_busy_message(&key, event("next", "10"), BusyInputMode::Queue);
         let pending = coord.finish(&key, ProcessingOutcome::Success).unwrap();
         assert_eq!(pending.text, "queued");
         assert!(!coord.is_active(&key));
-        assert!(coord.pending(&key).is_none());
+        assert_eq!(coord.pending(&key).unwrap().text, "next");
     }
 
     #[test]
