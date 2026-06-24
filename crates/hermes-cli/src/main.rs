@@ -11382,25 +11382,6 @@ fn setup_provider_requires_api_key(provider: &str) -> bool {
     )
 }
 
-fn local_backend_base_url_env_var(provider: &str) -> Option<&'static str> {
-    match provider {
-        "ollama-local" => Some("OLLAMA_BASE_URL"),
-        "llama-cpp" => Some("LLAMA_CPP_BASE_URL"),
-        "vllm" => Some("VLLM_BASE_URL"),
-        "mlx" => Some("MLX_BASE_URL"),
-        "apple-ane" => Some("APPLE_ANE_BASE_URL"),
-        "sglang" => Some("SGLANG_BASE_URL"),
-        "tgi" => Some("TGI_BASE_URL"),
-        "lmstudio" => Some("LMSTUDIO_BASE_URL"),
-        "lmdeploy" => Some("LMDEPLOY_BASE_URL"),
-        "localai" => Some("LOCALAI_BASE_URL"),
-        "koboldcpp" => Some("KOBOLDCPP_BASE_URL"),
-        "text-generation-webui" => Some("TEXT_GENERATION_WEBUI_BASE_URL"),
-        "tabbyapi" => Some("TABBYAPI_BASE_URL"),
-        _ => None,
-    }
-}
-
 fn merge_missing_env_keys(src: &Path, dst: &Path, label: &str) -> Result<usize, AgentError> {
     let src_content =
         read_env_text(src).map_err(|e| AgentError::Io(format!("read {}: {}", src.display(), e)))?;
@@ -12425,28 +12406,12 @@ async fn run_doctor(
     }
 
     println!("\nLocal backend endpoints:");
-    for provider in [
-        "ollama-local",
-        "llama-cpp",
-        "vllm",
-        "mlx",
-        "apple-ane",
-        "sglang",
-        "tgi",
-    ] {
-        let configured = loaded_config
-            .as_ref()
-            .and_then(|cfg| cfg.llm_providers.get(provider))
-            .and_then(|entry| entry.base_url.clone())
-            .filter(|value| !value.trim().is_empty());
-        let env_override = local_backend_base_url_env_var(provider)
-            .and_then(|name| std::env::var(name).ok())
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        let base_url = configured
-            .or(env_override)
-            .or_else(|| setup_provider_default_base_url(provider).map(ToString::to_string));
-
+    for spec in hermes_provider_runtime::local_backend_specs() {
+        let provider = spec.provider;
+        let base_url = hermes_provider_runtime::local_backend_resolved_base_url(
+            provider,
+            loaded_config.as_ref(),
+        );
         let (reachable, probed_url) = if let Some(url) = base_url.clone() {
             let models_url = format!("{}/models", url.trim_end_matches('/'));
             let ok = reqwest::Client::new()
@@ -12462,8 +12427,8 @@ async fn run_doctor(
         };
 
         println!(
-            "  {:<12} ... {}",
-            provider,
+            "  {:<24} ... {}",
+            spec.display_name,
             if reachable {
                 "✓ reachable"
             } else {
@@ -12474,6 +12439,8 @@ async fn run_doctor(
             "name": format!("local_backend_{provider}"),
             "ok": true,
             "provider": provider,
+            "display_name": spec.display_name,
+            "base_url_env_var": spec.base_url_env_var,
             "base_url": base_url,
             "probe_url": probed_url,
             "reachable": reachable,

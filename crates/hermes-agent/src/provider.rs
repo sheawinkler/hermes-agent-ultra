@@ -777,9 +777,11 @@ impl GenericProvider {
     ) -> reqwest::RequestBuilder {
         let mut req = client
             .post(url)
-            .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
             .json(body);
+        if api_key.trim() != "local-no-key" {
+            req = req.header("Authorization", format!("Bearer {}", api_key));
+        }
         if provider_profiles::is_kimi_code_base_url(&self.base_url) {
             req = req.header("User-Agent", provider_profiles::KIMI_CODE_USER_AGENT);
         }
@@ -2890,6 +2892,23 @@ mod tests {
             .unwrap()
             .starts_with("codex_cli_rs/"));
         assert_eq!(headers.get("ChatGPT-Account-ID").unwrap(), "acct-request");
+    }
+
+    #[test]
+    fn generic_provider_omits_authorization_for_local_no_key_marker() {
+        let provider =
+            GenericProvider::new("http://127.0.0.1:8080/v1", "local-no-key", "local-gguf")
+                .with_provider_profile("llama-cpp");
+        let request = provider
+            .build_request(
+                &Client::new(),
+                "http://127.0.0.1:8080/v1/chat/completions",
+                "local-no-key",
+                &serde_json::json!({"model": "local-gguf", "messages": []}),
+            )
+            .build()
+            .expect("request");
+        assert!(request.headers().get("Authorization").is_none());
     }
 
     #[test]

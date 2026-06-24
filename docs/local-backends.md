@@ -51,7 +51,7 @@ Run:
 hermes-ultra setup
 ```
 
-Pick a local provider in the provider menu. Local providers do not require OAuth and do not require an API key by default.
+Pick a local provider in the provider menu. Local providers do not require OAuth and do not require an API key by default. For no-key localhost/private endpoints, Hermes uses a local no-key marker internally and does not add an authorization bearer header to OpenAI-compatible requests.
 
 ## Model selection
 
@@ -153,4 +153,4 @@ Run:
 hermes-ultra doctor --deep
 ```
 
-Doctor prints optional reachability checks for each local backend endpoint.
+Doctor prints optional reachability checks for every provider-runtime local backend endpoint listed above.

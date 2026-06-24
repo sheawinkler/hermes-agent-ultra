@@ -10,6 +10,7 @@ use futures::StreamExt;
 use hermes_agent::bedrock::{
     bedrock_runtime_base_url, resolve_bedrock_region, BedrockProvider, BEDROCK_AUTH_MARKER,
 };
+use hermes_agent::local_backends;
 use hermes_agent::provider::{
     is_codex_chatgpt_token, AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
     OPENAI_CODEX_BASE_URL,
@@ -22,6 +23,8 @@ use hermes_agent::CodexProvider;
 use hermes_config::{GatewayConfig, LlmProviderConfig};
 use hermes_core::{AgentError, LlmProvider};
 use serde_json::Value;
+
+pub use hermes_agent::local_backends::LocalBackendSpec;
 
 pub const DEFAULT_NOUS_INFERENCE_URL: &str = "https://inference-api.nousresearch.com/v1";
 pub const STEPFUN_BASE_URL: &str = "https://api.stepfun.ai/step_plan/v1";
@@ -49,21 +52,143 @@ pub const ARCEE_BASE_URL: &str = "https://api.arcee.ai/api/v1";
 pub const TENCENT_TOKENHUB_BASE_URL: &str = "https://tokenhub.tencentmaas.com/v1";
 pub const OLLAMA_CLOUD_BASE_URL: &str = "https://ollama.com/v1";
 pub const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1";
-pub const OLLAMA_LOCAL_BASE_URL: &str = "http://127.0.0.1:11434/v1";
-pub const LLAMA_CPP_BASE_URL: &str = "http://127.0.0.1:8080/v1";
-pub const VLLM_BASE_URL: &str = "http://127.0.0.1:8000/v1";
-pub const MLX_BASE_URL: &str = "http://127.0.0.1:8080/v1";
-pub const APPLE_ANE_BASE_URL: &str = "http://127.0.0.1:8081/v1";
-pub const SGLANG_BASE_URL: &str = "http://127.0.0.1:30000/v1";
-pub const TGI_BASE_URL: &str = "http://127.0.0.1:8082/v1";
-pub const LMSTUDIO_BASE_URL: &str = "http://127.0.0.1:1234/v1";
-pub const LMDEPLOY_BASE_URL: &str = "http://127.0.0.1:23333/v1";
-pub const LOCALAI_BASE_URL: &str = "http://127.0.0.1:8080/v1";
-pub const KOBOLDCPP_BASE_URL: &str = "http://127.0.0.1:5001/v1";
-pub const TEXT_GENERATION_WEBUI_BASE_URL: &str = "http://127.0.0.1:5000/v1";
-pub const TABBYAPI_BASE_URL: &str = "http://127.0.0.1:5000/v1";
+pub const OLLAMA_LOCAL_BASE_URL: &str = local_backends::OLLAMA_LOCAL_BASE_URL;
+pub const LLAMA_CPP_BASE_URL: &str = local_backends::LLAMA_CPP_BASE_URL;
+pub const VLLM_BASE_URL: &str = local_backends::VLLM_BASE_URL;
+pub const MLX_BASE_URL: &str = local_backends::MLX_BASE_URL;
+pub const APPLE_ANE_BASE_URL: &str = local_backends::APPLE_ANE_BASE_URL;
+pub const SGLANG_BASE_URL: &str = local_backends::SGLANG_BASE_URL;
+pub const TGI_BASE_URL: &str = local_backends::TGI_BASE_URL;
+pub const LMSTUDIO_BASE_URL: &str = local_backends::LMSTUDIO_BASE_URL;
+pub const LMDEPLOY_BASE_URL: &str = local_backends::LMDEPLOY_BASE_URL;
+pub const LOCALAI_BASE_URL: &str = local_backends::LOCALAI_BASE_URL;
+pub const KOBOLDCPP_BASE_URL: &str = local_backends::KOBOLDCPP_BASE_URL;
+pub const TEXT_GENERATION_WEBUI_BASE_URL: &str = local_backends::TEXT_GENERATION_WEBUI_BASE_URL;
+pub const TABBYAPI_BASE_URL: &str = local_backends::TABBYAPI_BASE_URL;
 
 pub type OAuthTokenResolver<'a> = dyn Fn(&str) -> Option<String> + 'a;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderRuntimeDiagnostic {
+    pub requested_provider: String,
+    pub runtime_provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub api_key_present: bool,
+    pub api_key_source: Option<String>,
+    pub local_no_key_allowed: bool,
+    pub uses_openai_pro_backend: bool,
+}
+
+pub fn local_backend_specs() -> &'static [LocalBackendSpec] {
+    local_backends::local_backend_specs()
+}
+
+pub fn local_backend_spec(provider: &str) -> Option<&'static LocalBackendSpec> {
+    local_backends::local_backend_spec(provider)
+}
+
+pub fn local_backend_resolved_base_url(
+    provider: &str,
+    config: Option<&GatewayConfig>,
+) -> Option<String> {
+    let spec = local_backend_spec(provider)?;
+    config
+        .and_then(|cfg| {
+            cfg.llm_providers
+                .get(spec.provider)
+                .or_else(|| cfg.llm_providers.get(provider))
+                .and_then(|entry| entry.base_url.clone())
+        })
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| local_backends::local_backend_base_url_from_env(provider))
+        .or_else(|| Some(spec.default_base_url.to_string()))
+}
+
+pub fn provider_runtime_diagnostic(
+    config: &GatewayConfig,
+    model: &str,
+) -> ProviderRuntimeDiagnostic {
+    let (provider_name, model_name) = resolve_provider_and_model(config, model);
+    let runtime_provider = normalize_runtime_provider_name(provider_name.as_str());
+    let provider_config =
+        active_llm_provider_config(config, provider_name.as_str(), runtime_provider.as_str());
+    let default_base_url = provider_default_base_url(provider_name.as_str())
+        .or_else(|| provider_default_base_url(runtime_provider.as_str()));
+    let base_url = provider_config
+        .and_then(|c| c.base_url.clone())
+        .or_else(|| provider_base_url_from_env(provider_name.as_str()))
+        .or_else(|| provider_base_url_from_env(runtime_provider.as_str()))
+        .or_else(|| default_base_url.map(ToString::to_string));
+    let (api_key_present, api_key_source) = provider_runtime_api_key_source(
+        provider_config,
+        provider_name.as_str(),
+        runtime_provider.as_str(),
+    );
+    let local_no_key_allowed = allow_no_api_key(
+        provider_name.as_str(),
+        runtime_provider.as_str(),
+        base_url.as_deref(),
+    );
+    let api_key_for_backend_probe = provider_config
+        .and_then(|c| c.api_key.as_deref())
+        .and_then(resolve_api_key_literal_or_env_ref)
+        .or_else(|| provider_api_key_from_env(provider_name.as_str()))
+        .or_else(|| provider_api_key_from_env(runtime_provider.as_str()));
+    let uses_openai_pro_backend = matches!(runtime_provider.as_str(), "openai-codex" | "codex")
+        || (runtime_provider == "openai"
+            && api_key_for_backend_probe
+                .as_deref()
+                .is_some_and(is_codex_chatgpt_token));
+    ProviderRuntimeDiagnostic {
+        requested_provider: provider_name,
+        runtime_provider,
+        model: model_name,
+        base_url,
+        api_key_present,
+        api_key_source,
+        local_no_key_allowed,
+        uses_openai_pro_backend,
+    }
+}
+
+fn provider_runtime_api_key_source(
+    provider_config: Option<&LlmProviderConfig>,
+    provider_name: &str,
+    runtime_provider: &str,
+) -> (bool, Option<String>) {
+    if let Some(config) = provider_config {
+        if config
+            .api_key
+            .as_deref()
+            .and_then(resolve_api_key_literal_or_env_ref)
+            .is_some()
+        {
+            return (true, Some("config.api_key".to_string()));
+        }
+        if let Some(env_name) = config
+            .api_key_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        {
+            if std::env::var(env_name)
+                .ok()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                return (true, Some(format!("env:{env_name}")));
+            }
+        }
+    }
+    if provider_api_key_from_env(provider_name).is_some() {
+        return (true, Some(format!("provider_env:{provider_name}")));
+    }
+    if provider_api_key_from_env(runtime_provider).is_some() {
+        return (true, Some(format!("provider_env:{runtime_provider}")));
+    }
+    (false, None)
+}
 
 pub fn active_llm_provider_config<'a>(
     config: &'a GatewayConfig,
@@ -115,22 +240,12 @@ pub fn normalize_runtime_provider_name(provider: &str) -> String {
         "kilo" | "kilo-code" | "kilo-gateway" => "kilocode".to_string(),
         "opencode" | "opencode-zen" | "zen" => "opencode-zen".to_string(),
         "go" => "opencode-go".to_string(),
-        "ollama" => "ollama-local".to_string(),
-        "llama.cpp" | "llamacpp" | "llamafile" => "llama-cpp".to_string(),
-        "ollvm" | "llvm" => "vllm".to_string(),
-        "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm" | "mlx-openai-server" => {
-            "mlx".to_string()
+        local if local_backends::local_backend_spec(local).is_some() => {
+            local_backends::local_backend_spec(local)
+                .expect("local backend spec checked")
+                .provider
+                .to_string()
         }
-        "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
-        "text-generation-inference" => "tgi".to_string(),
-        "lm-studio" | "lm_studio" | "lm studio" => "lmstudio".to_string(),
-        "lm-deploy" | "lm_deploy" => "lmdeploy".to_string(),
-        "local-ai" | "local_ai" => "localai".to_string(),
-        "kobold-cpp" | "kobold" => "koboldcpp".to_string(),
-        "oobabooga" | "textgen-webui" | "textgen_webui" | "text-generation-web-ui" => {
-            "text-generation-webui".to_string()
-        }
-        "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => "tabbyapi".to_string(),
         _ => normalized,
     }
 }
@@ -165,25 +280,10 @@ pub fn provider_default_base_url(provider: &str) -> Option<&'static str> {
             Some(TENCENT_TOKENHUB_BASE_URL)
         }
         "ollama-cloud" => Some(OLLAMA_CLOUD_BASE_URL),
-        "ollama-local" | "ollama" => Some(OLLAMA_LOCAL_BASE_URL),
-        "llama-cpp" | "llama.cpp" | "llamacpp" | "llamafile" => Some(LLAMA_CPP_BASE_URL),
-        "vllm" | "ollvm" | "llvm" => Some(VLLM_BASE_URL),
-        "mlx" | "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm"
-        | "mlx-openai-server" => Some(MLX_BASE_URL),
-        "apple-ane" | "ane" | "apple-neural-engine" => Some(APPLE_ANE_BASE_URL),
-        "sglang" => Some(SGLANG_BASE_URL),
-        "tgi" | "text-generation-inference" => Some(TGI_BASE_URL),
-        "lmstudio" | "lm-studio" | "lm_studio" | "lm studio" => Some(LMSTUDIO_BASE_URL),
-        "lmdeploy" | "lm-deploy" | "lm_deploy" => Some(LMDEPLOY_BASE_URL),
-        "localai" | "local-ai" | "local_ai" => Some(LOCALAI_BASE_URL),
-        "koboldcpp" | "kobold-cpp" | "kobold" => Some(KOBOLDCPP_BASE_URL),
-        "text-generation-webui"
-        | "text-generation-web-ui"
-        | "textgen-webui"
-        | "textgen_webui"
-        | "oobabooga" => Some(TEXT_GENERATION_WEBUI_BASE_URL),
-        "tabbyapi" | "tabby-api" | "tabby_api" | "exllama" | "exllamav2" => Some(TABBYAPI_BASE_URL),
         "deepseek" => Some(DEEPSEEK_BASE_URL),
+        local if local_backends::local_backend_spec(local).is_some() => {
+            local_backends::local_backend_default_base_url(local)
+        }
         _ => None,
     }
 }
@@ -227,6 +327,11 @@ fn resolve_api_key_literal_or_env_ref(value: &str) -> Option<String> {
 pub fn provider_base_url_from_env(provider: &str) -> Option<String> {
     let raw_provider = provider.trim().to_ascii_lowercase();
     let normalized_provider = normalize_runtime_provider_name(raw_provider.as_str());
+    if let Some(url) = local_backends::local_backend_base_url_from_env(raw_provider.as_str())
+        .or_else(|| local_backends::local_backend_base_url_from_env(normalized_provider.as_str()))
+    {
+        return Some(url);
+    }
     let env_var = match raw_provider.as_str() {
         "minimax-cn" | "minimax_cn" => "MINIMAX_CN_BASE_URL",
         _ => match normalized_provider.as_str() {
@@ -257,20 +362,6 @@ pub fn provider_base_url_from_env(provider: &str) -> Option<String> {
             "arcee" => "ARCEE_BASE_URL",
             "tencent-tokenhub" => "TOKENHUB_BASE_URL",
             "deepseek" => "DEEPSEEK_BASE_URL",
-            "ollama-local" | "ollama" => "OLLAMA_BASE_URL",
-            "llama-cpp" | "llama.cpp" | "llamacpp" | "llamafile" => "LLAMA_CPP_BASE_URL",
-            "vllm" | "ollvm" | "llvm" => "VLLM_BASE_URL",
-            "mlx" | "mlx-lm" | "apple-mlx" | "vmlx" | "omlx" | "mlx-vlm" | "mlxvlm"
-            | "mlx-openai-server" => "MLX_BASE_URL",
-            "apple-ane" | "ane" | "apple-neural-engine" => "APPLE_ANE_BASE_URL",
-            "sglang" => "SGLANG_BASE_URL",
-            "tgi" | "text-generation-inference" => "TGI_BASE_URL",
-            "lmstudio" => "LMSTUDIO_BASE_URL",
-            "lmdeploy" => "LMDEPLOY_BASE_URL",
-            "localai" => "LOCALAI_BASE_URL",
-            "koboldcpp" => "KOBOLDCPP_BASE_URL",
-            "text-generation-webui" => "TEXT_GENERATION_WEBUI_BASE_URL",
-            "tabbyapi" => "TABBYAPI_BASE_URL",
             _ => return None,
         },
     };
@@ -280,70 +371,16 @@ pub fn provider_base_url_from_env(provider: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-fn provider_is_local_backend(provider: &str) -> bool {
-    matches!(
-        provider.trim().to_ascii_lowercase().as_str(),
-        "ollama-local"
-            | "llama-cpp"
-            | "vllm"
-            | "mlx"
-            | "apple-ane"
-            | "sglang"
-            | "tgi"
-            | "lmstudio"
-            | "lmdeploy"
-            | "localai"
-            | "koboldcpp"
-            | "text-generation-webui"
-            | "tabbyapi"
-    )
-}
-
 pub fn allow_no_api_key(
     provider_name: &str,
     runtime_provider: &str,
     base_url: Option<&str>,
 ) -> bool {
-    provider_is_local_backend(runtime_provider)
-        || provider_is_local_backend(provider_name)
+    local_backends::is_local_backend_provider(runtime_provider)
+        || local_backends::is_local_backend_provider(provider_name)
         || runtime_provider == "bedrock"
         || provider_name == "bedrock"
-        || base_url.is_some_and(url_is_local_or_private)
-}
-
-fn url_is_local_or_private(base_url: &str) -> bool {
-    let trimmed = base_url.trim();
-    let no_scheme = trimmed
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(trimmed);
-    let authority = no_scheme.split('/').next().unwrap_or(no_scheme).trim();
-    let host = if authority.starts_with('[') {
-        authority
-            .find(']')
-            .map(|idx| authority[1..idx].to_string())
-            .unwrap_or_else(|| authority.trim_matches(&['[', ']'][..]).to_string())
-    } else {
-        authority
-            .split(':')
-            .next()
-            .unwrap_or(authority)
-            .trim()
-            .to_string()
-    }
-    .to_ascii_lowercase();
-
-    if host == "localhost" {
-        return true;
-    }
-
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        return match ip {
-            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
-            std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local(),
-        };
-    }
-    false
+        || base_url.is_some_and(local_backends::is_local_or_private_base_url)
 }
 
 /// Resolve API key / token for a named LLM provider from well-known environment variables.
@@ -367,6 +404,11 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
             .filter(|s| !s.trim().is_empty());
     }
     let provider = normalize_runtime_provider_name(raw_provider.as_str());
+    if let Some(api_key) = local_backends::local_backend_api_key_from_env(raw_provider.as_str())
+        .or_else(|| local_backends::local_backend_api_key_from_env(provider.as_str()))
+    {
+        return Some(api_key);
+    }
     match provider.as_str() {
         "openai" => std::env::var("HERMES_OPENAI_API_KEY")
             .ok()
@@ -471,49 +513,6 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
             .ok()
             .filter(|s| !s.trim().is_empty()),
         "ollama-cloud" => std::env::var("OLLAMA_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "ollama-local" => std::env::var("OLLAMA_LOCAL_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| std::env::var("OLLAMA_API_KEY").ok())
-            .filter(|s| !s.trim().is_empty()),
-        "llama-cpp" => std::env::var("LLAMA_CPP_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "vllm" => std::env::var("VLLM_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "mlx" => std::env::var("MLX_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "apple-ane" => std::env::var("APPLE_ANE_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "sglang" => std::env::var("SGLANG_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "tgi" => std::env::var("TGI_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| std::env::var("HUGGINGFACE_API_KEY").ok())
-            .filter(|s| !s.trim().is_empty()),
-        "lmstudio" => std::env::var("LMSTUDIO_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "lmdeploy" => std::env::var("LMDEPLOY_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "localai" => std::env::var("LOCALAI_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "koboldcpp" => std::env::var("KOBOLDCPP_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "text-generation-webui" => std::env::var("TEXT_GENERATION_WEBUI_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "tabbyapi" => std::env::var("TABBYAPI_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
         "opencode-go" => std::env::var("OPENCODE_GO_API_KEY")
@@ -732,20 +731,9 @@ pub fn build_provider_with_auth_resolver(
             .with_optional_request_timeout_seconds(request_timeout_seconds);
             Arc::new(p)
         }
-        "ollama-local"
-        | "llama-cpp"
-        | "vllm"
-        | "mlx"
-        | "apple-ane"
-        | "sglang"
-        | "tgi"
-        | "lmstudio"
-        | "lmdeploy"
-        | "localai"
-        | "koboldcpp"
-        | "text-generation-webui"
-        | "tabbyapi" => {
-            let url = base_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
+        local if local_backends::local_backend_spec(local).is_some() => {
+            let spec = local_backends::local_backend_spec(local).expect("local spec checked");
+            let url = base_url.unwrap_or_else(|| spec.default_base_url.to_string());
             Arc::new(
                 GenericProvider::new(url, &api_key, model_name.as_str())
                     .with_optional_request_timeout_seconds(request_timeout_seconds)
@@ -845,24 +833,6 @@ mod tests {
 
     #[tokio::test]
     async fn build_provider_routes_chatgpt_openai_oauth_to_responses_backend() {
-        let _guard = env_test_lock();
-        let _env = EnvSnapshot::capture(&[
-            "HERMES_OPENAI_API_KEY",
-            "OPENAI_API_KEY",
-            "HERMES_OPENAI_CODEX_API_KEY",
-            "OPENAI_BASE_URL",
-            "HERMES_OPENAI_CODEX_BASE_URL",
-        ]);
-        for key in [
-            "HERMES_OPENAI_API_KEY",
-            "OPENAI_API_KEY",
-            "HERMES_OPENAI_CODEX_API_KEY",
-            "OPENAI_BASE_URL",
-            "HERMES_OPENAI_CODEX_BASE_URL",
-        ] {
-            std::env::remove_var(key);
-        }
-
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/responses"))
@@ -909,20 +879,6 @@ mod tests {
 
     #[tokio::test]
     async fn provider_auth_resolver_supplies_openai_oauth_token() {
-        let _guard = env_test_lock();
-        let _env = EnvSnapshot::capture(&[
-            "HERMES_OPENAI_API_KEY",
-            "OPENAI_API_KEY",
-            "HERMES_OPENAI_CODEX_API_KEY",
-        ]);
-        for key in [
-            "HERMES_OPENAI_API_KEY",
-            "OPENAI_API_KEY",
-            "HERMES_OPENAI_CODEX_API_KEY",
-        ] {
-            std::env::remove_var(key);
-        }
-
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/responses"))
@@ -949,17 +905,32 @@ mod tests {
             },
         );
         let token = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ1c2VyLXh5eiIsImV4cCI6OTk5OTk5OTk5OSwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7ImNoYXRncHRfYWNjb3VudF9pZCI6ImFjY3Qtb3BlbmFpLXByby1yZXNvbHZlciIsImNoYXRncHRfcGxhbl90eXBlIjoicGx1cyJ9fQ.sig";
-        let provider = build_provider_with_auth_resolver(
-            &config,
-            "openai:gpt-5.5",
-            Some(&|provider| {
-                if provider == "openai" {
-                    Some(token.to_string())
-                } else {
-                    None
-                }
-            }),
-        );
+        let provider = {
+            let _guard = env_test_lock();
+            let _env = EnvSnapshot::capture(&[
+                "HERMES_OPENAI_API_KEY",
+                "OPENAI_API_KEY",
+                "HERMES_OPENAI_CODEX_API_KEY",
+            ]);
+            for key in [
+                "HERMES_OPENAI_API_KEY",
+                "OPENAI_API_KEY",
+                "HERMES_OPENAI_CODEX_API_KEY",
+            ] {
+                std::env::remove_var(key);
+            }
+            build_provider_with_auth_resolver(
+                &config,
+                "openai:gpt-5.5",
+                Some(&|provider| {
+                    if provider == "openai" {
+                        Some(token.to_string())
+                    } else {
+                        None
+                    }
+                }),
+            )
+        };
 
         let response = provider
             .chat_completion(
@@ -978,6 +949,85 @@ mod tests {
             Some("resolver-oauth-ok")
         );
         server.verify().await;
+    }
+
+    #[test]
+    fn local_backend_specs_cover_macos_open_source_server_family() {
+        let providers: Vec<&str> = local_backend_specs()
+            .iter()
+            .map(|spec| spec.provider)
+            .collect();
+        for expected in [
+            "ollama-local",
+            "llama-cpp",
+            "vllm",
+            "mlx",
+            "apple-ane",
+            "sglang",
+            "tgi",
+            "lmstudio",
+            "lmdeploy",
+            "localai",
+            "koboldcpp",
+            "text-generation-webui",
+            "tabbyapi",
+        ] {
+            assert!(providers.contains(&expected), "missing {expected}");
+        }
+        assert_eq!(
+            local_backend_spec("llamafile").map(|spec| spec.provider),
+            Some("llama-cpp")
+        );
+        assert_eq!(
+            local_backend_spec("omlx").map(|spec| spec.provider),
+            Some("mlx")
+        );
+        assert_eq!(
+            local_backend_spec("exllamav2").map(|spec| spec.provider),
+            Some("tabbyapi")
+        );
+    }
+
+    #[test]
+    fn provider_runtime_diagnostic_reports_openai_pro_and_local_no_key() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(&[
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "HERMES_OPENAI_CODEX_API_KEY",
+            "LLAMA_CPP_BASE_URL",
+            "LLAMA_CPP_API_KEY",
+        ]);
+        for key in [
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "HERMES_OPENAI_CODEX_API_KEY",
+            "LLAMA_CPP_BASE_URL",
+            "LLAMA_CPP_API_KEY",
+        ] {
+            std::env::remove_var(key);
+        }
+
+        let mut openai_cfg = GatewayConfig::default();
+        openai_cfg.llm_providers.insert(
+            "openai".to_string(),
+            LlmProviderConfig {
+                api_key: Some("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ1c2VyLXh5eiIsImV4cCI6OTk5OTk5OTk5OSwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7ImNoYXRncHRfYWNjb3VudF9pZCI6ImFjY3Qtb3BlbmFpLXByby1kaWFnIiwib3JnYW5pemF0aW9uX2lkIjoib3JnIn19.sig".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+        let openai = provider_runtime_diagnostic(&openai_cfg, "openai:gpt-5.5");
+        assert_eq!(openai.runtime_provider, "openai");
+        assert!(openai.api_key_present);
+        assert_eq!(openai.api_key_source.as_deref(), Some("config.api_key"));
+        assert!(openai.uses_openai_pro_backend);
+
+        let local_cfg = GatewayConfig::default();
+        let local = provider_runtime_diagnostic(&local_cfg, "llamafile:local-gguf");
+        assert_eq!(local.runtime_provider, "llama-cpp");
+        assert_eq!(local.base_url.as_deref(), Some("http://127.0.0.1:8080/v1"));
+        assert!(!local.api_key_present);
+        assert!(local.local_no_key_allowed);
     }
 
     #[test]

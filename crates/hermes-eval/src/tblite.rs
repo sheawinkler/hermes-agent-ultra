@@ -98,6 +98,12 @@ impl TaskRollout for SmokeRollout {
         Ok(json!({
             "smoke": true,
             "task_id": task.task_id,
+            "instruction": task.instruction,
+            "context": task.context,
+            "response": format!(
+                "deterministic smoke rollout for task_id={} instruction={}",
+                task.task_id, task.instruction
+            ),
             "note": "deterministic smoke rollout; use --rollout agent for live agent evals",
         }))
     }

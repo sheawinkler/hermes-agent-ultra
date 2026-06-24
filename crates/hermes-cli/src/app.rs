@@ -4544,16 +4544,18 @@ mod tests {
     fn test_run_agent_quorum_arm_persists_artifact_even_on_voter_failures() {
         let _guard = env_test_lock();
         let prev_home = std::env::var("HERMES_HOME").ok();
+        let prev_passes = std::env::var("HERMES_QUORUM_VOTER_PASSES").ok();
         let tmp = tempfile::tempdir().expect("tempdir");
         std::env::set_var("HERMES_HOME", tmp.path());
+        std::env::set_var("HERMES_QUORUM_VOTER_PASSES", "1");
 
         let _ = set_quorum_policy(
             true,
             Some(3),
             Some(vec![
-                "openai:gpt-4o".to_string(),
-                "anthropic:claude-3-5-sonnet".to_string(),
-                "nous:openai/gpt-5.5-pro".to_string(),
+                "custom:quorum-voter-a".to_string(),
+                "custom:quorum-voter-b".to_string(),
+                "custom:quorum-voter-c".to_string(),
             ]),
         )
         .expect("set quorum policy");
@@ -4602,6 +4604,10 @@ mod tests {
         match prev_home {
             Some(v) => std::env::set_var("HERMES_HOME", v),
             None => std::env::remove_var("HERMES_HOME"),
+        }
+        match prev_passes {
+            Some(v) => std::env::set_var("HERMES_QUORUM_VOTER_PASSES", v),
+            None => std::env::remove_var("HERMES_QUORUM_VOTER_PASSES"),
         }
     }
 
