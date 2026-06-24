@@ -426,6 +426,16 @@ impl SqliteSessionSearchBackend {
             .replace('_', "\\_")
     }
 
+    fn sanitize_fts5_query(raw: &str) -> Option<String> {
+        let terms = raw
+            .split_whitespace()
+            .map(str::trim)
+            .filter(|term| !term.is_empty())
+            .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+            .collect::<Vec<_>>();
+        (!terms.is_empty()).then(|| terms.join(" "))
+    }
+
     fn id_match_score(needle: &str, values: &[&str]) -> u8 {
         if values
             .iter()
@@ -1122,14 +1132,16 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
 
                 let fts_available = self.fts_enabled && Self::fts_table_exists(&conn)?;
                 let mut search_degraded = None;
+                let fts_query = Self::sanitize_fts5_query(query);
                 if tasks.len() < limit && fts_available {
-                    let hidden_placeholders = HIDDEN_SESSION_SOURCES
-                        .iter()
-                        .map(|_| "?".to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let mut sql = String::from(
-                        "SELECT m.session_id, s.created_at, s.platform, s.model,
+                    if let Some(fts_query) = fts_query {
+                        let hidden_placeholders = HIDDEN_SESSION_SOURCES
+                            .iter()
+                            .map(|_| "?".to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let mut sql = String::from(
+                            "SELECT m.session_id, s.created_at, s.platform, s.model,
                                 s.parent_session_id, s.model_config,
                                 p.end_reason, p.ended_at,
                                 bm25(messages_fts) AS rank
@@ -1142,111 +1154,112 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                            AND m.content != ''
                            AND m.active = 1
                            AND COALESCE(s.platform, '') NOT IN (",
-                    );
-                    sql.push_str(&hidden_placeholders);
-                    sql.push(')');
+                        );
+                        sql.push_str(&hidden_placeholders);
+                        sql.push(')');
 
-                    let mut role_values = Vec::new();
-                    if let Some(raw_roles) = role_filter {
-                        for role in raw_roles
-                            .split(',')
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                        {
-                            role_values.push(role.to_string());
+                        let mut role_values = Vec::new();
+                        if let Some(raw_roles) = role_filter {
+                            for role in raw_roles
+                                .split(',')
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                            {
+                                role_values.push(role.to_string());
+                            }
+                            if !role_values.is_empty() {
+                                let placeholders = (0..role_values.len())
+                                    .map(|_| "?".to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                sql.push_str(&format!(" AND m.role IN ({})", placeholders));
+                            }
                         }
-                        if !role_values.is_empty() {
-                            let placeholders = (0..role_values.len())
-                                .map(|_| "?".to_string())
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            sql.push_str(&format!(" AND m.role IN ({})", placeholders));
-                        }
-                    }
-                    sql.push_str(" ORDER BY rank LIMIT 50");
+                        sql.push_str(" ORDER BY rank LIMIT 50");
 
-                    let mut stmt = conn.prepare(&sql).map_err(|e| {
-                        ToolError::ExecutionFailed(format!(
-                            "Failed to prepare session search query: {}",
-                            e
-                        ))
-                    })?;
-
-                    let mut values: Vec<rusqlite::types::Value> =
-                        vec![rusqlite::types::Value::Text(query.to_string())];
-                    values.extend(
-                        HIDDEN_SESSION_SOURCES
-                            .iter()
-                            .map(|s| rusqlite::types::Value::Text((*s).to_string())),
-                    );
-                    values.extend(role_values.into_iter().map(rusqlite::types::Value::Text));
-                    let params = rusqlite::params_from_iter(values.iter());
-
-                    let rows = stmt
-                        .query_map(params, |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, Option<String>>(1)?,
-                                row.get::<_, Option<String>>(2)?
-                                    .unwrap_or_else(|| "cli".to_string()),
-                                row.get::<_, Option<String>>(3)?,
-                                row.get::<_, Option<String>>(4)?,
-                                row.get::<_, Option<String>>(5)?,
-                                row.get::<_, Option<String>>(6)?,
-                                row.get::<_, Option<String>>(7)?,
-                            ))
-                        })
-                        .map_err(|e| {
+                        let mut stmt = conn.prepare(&sql).map_err(|e| {
                             ToolError::ExecutionFailed(format!(
-                                "Session search query failed: {}",
+                                "Failed to prepare session search query: {}",
                                 e
                             ))
                         })?;
 
-                    for row in rows.flatten() {
-                        if tasks.len() >= limit {
-                            break;
-                        }
-                        let (
-                            raw_session_id,
-                            raw_started_at,
-                            _raw_source,
-                            _raw_model,
-                            parent_session_id,
-                            model_config,
-                            parent_end_reason,
-                            parent_ended_at,
-                        ) = row;
-                        let resolved_session_id = Self::visible_session_id_for_row(
-                            &conn,
-                            &raw_session_id,
-                            parent_session_id.as_deref(),
-                            model_config.as_deref(),
-                            raw_started_at.as_deref(),
-                            parent_end_reason.as_deref(),
-                            parent_ended_at.as_deref(),
+                        let mut values: Vec<rusqlite::types::Value> =
+                            vec![rusqlite::types::Value::Text(fts_query)];
+                        values.extend(
+                            HIDDEN_SESSION_SOURCES
+                                .iter()
+                                .map(|s| rusqlite::types::Value::Text((*s).to_string())),
                         );
-                        let logical_key = Self::logical_session_key_for_row(
-                            &conn,
-                            &raw_session_id,
-                            parent_session_id.as_deref(),
-                            model_config.as_deref(),
-                            raw_started_at.as_deref(),
-                            parent_end_reason.as_deref(),
-                            parent_ended_at.as_deref(),
-                        );
-                        if let Some(ref current_root) = current_lineage_root {
-                            if &logical_key == current_root {
+                        values.extend(role_values.into_iter().map(rusqlite::types::Value::Text));
+                        let params = rusqlite::params_from_iter(values.iter());
+
+                        let rows = stmt
+                            .query_map(params, |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, Option<String>>(1)?,
+                                    row.get::<_, Option<String>>(2)?
+                                        .unwrap_or_else(|| "cli".to_string()),
+                                    row.get::<_, Option<String>>(3)?,
+                                    row.get::<_, Option<String>>(4)?,
+                                    row.get::<_, Option<String>>(5)?,
+                                    row.get::<_, Option<String>>(6)?,
+                                    row.get::<_, Option<String>>(7)?,
+                                ))
+                            })
+                            .map_err(|e| {
+                                ToolError::ExecutionFailed(format!(
+                                    "Session search query failed: {}",
+                                    e
+                                ))
+                            })?;
+
+                        for row in rows.flatten() {
+                            if tasks.len() >= limit {
+                                break;
+                            }
+                            let (
+                                raw_session_id,
+                                raw_started_at,
+                                _raw_source,
+                                _raw_model,
+                                parent_session_id,
+                                model_config,
+                                parent_end_reason,
+                                parent_ended_at,
+                            ) = row;
+                            let resolved_session_id = Self::visible_session_id_for_row(
+                                &conn,
+                                &raw_session_id,
+                                parent_session_id.as_deref(),
+                                model_config.as_deref(),
+                                raw_started_at.as_deref(),
+                                parent_end_reason.as_deref(),
+                                parent_ended_at.as_deref(),
+                            );
+                            let logical_key = Self::logical_session_key_for_row(
+                                &conn,
+                                &raw_session_id,
+                                parent_session_id.as_deref(),
+                                model_config.as_deref(),
+                                raw_started_at.as_deref(),
+                                parent_end_reason.as_deref(),
+                                parent_ended_at.as_deref(),
+                            );
+                            if let Some(ref current_root) = current_lineage_root {
+                                if &logical_key == current_root {
+                                    continue;
+                                }
+                            }
+                            if !seen.insert(logical_key) {
                                 continue;
                             }
-                        }
-                        if !seen.insert(logical_key) {
-                            continue;
-                        }
-                        if let Some(task) =
-                            Self::load_summary_task(&conn, &resolved_session_id, query, false)?
-                        {
-                            tasks.push(task);
+                            if let Some(task) =
+                                Self::load_summary_task(&conn, &resolved_session_id, query, false)?
+                            {
+                                tasks.push(task);
+                            }
                         }
                     }
                 } else if !fts_available {
@@ -1679,6 +1692,35 @@ mod tests {
             ],
             "{output}"
         );
+    }
+
+    #[tokio::test]
+    async fn search_sanitizes_colon_queries_for_fts5() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "colon-search-session",
+            None,
+            None,
+            None,
+            None,
+            "2026-06-03T09:02:00Z",
+        );
+        insert_message(
+            &conn,
+            "colon-search-session",
+            "user",
+            "workspace:hermes contains a literal colon token",
+        );
+
+        let output = backend
+            .search(Some("workspace:hermes"), None, 5, None)
+            .await
+            .expect("colon query should not be parsed as an FTS5 column filter");
+        let ids = result_ids(&output);
+
+        assert_eq!(ids, vec!["colon-search-session".to_string()], "{output}");
     }
 
     #[tokio::test]

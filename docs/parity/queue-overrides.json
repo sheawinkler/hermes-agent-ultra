@@ -3911,6 +3911,26 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream desktop remote-artifact authenticated download is superseded by Rust gateway/media delivery boundaries; Electron artifacts UI and Python web_server files endpoint are outside the Rust-only runtime."
+    },
+    "d1771114eda9": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust session_search now sanitizes FTS5 MATCH input by quoting query terms before execution, so colon-containing queries are treated as literal search text instead of FTS column filters. Regression coverage proves workspace:hermes searches return matching sessions without error."
+    },
+    "2e0c9083db84": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust PluginManager now exposes tool_request and tool_execution middleware primitives, AgentLoop applies request rewrites before guards/hooks and wraps real tool handler execution with a single-use next_call-equivalent chain. Unit and agent-loop tests cover argument adaptation, execution wrapping, and real autonomous tool execution."
+    },
+    "5abe45674dc7": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust tool execution middleware catches middleware panics and preserves the downstream result when next_call already ran, including error ToolResult values. Regression coverage proves downstream failures survive middleware post-processing failure."
+    },
+    "c37c6eaf296a": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust already provides Home Assistant as first-class native runtime surface: REST backend, ha_list_entities/ha_get_state/ha_list_services/ha_call_service handlers, homeassistant toolset and aliases, send-message platform routing, and gateway adapter coverage. The upstream Python bundled-plugin migration is represented by Rust-native built-in registration and platform contract tests rather than a Python plugin package."
     }
   },
   "subject_patterns": [

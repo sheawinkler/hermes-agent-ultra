@@ -14,7 +14,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use hermes_core::{AgentError, ToolHandler, ToolSchema};
+use hermes_core::{AgentError, ToolHandler, ToolResult, ToolSchema};
 
 // ---------------------------------------------------------------------------
 // HookType
@@ -83,6 +83,60 @@ pub enum HookResult {
     /// Hook encountered an error.
     Error(String),
 }
+
+#[derive(Debug, Clone)]
+pub struct ToolRequestMiddlewareContext {
+    pub tool_name: String,
+    pub args: Value,
+    pub original_args: Value,
+    pub turn: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolRequestMiddlewareUpdate {
+    pub args: Value,
+    pub source: Option<String>,
+    pub reason: Option<String>,
+}
+
+impl ToolRequestMiddlewareUpdate {
+    pub fn new(args: Value) -> Self {
+        Self {
+            args,
+            source: None,
+            reason: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolRequestMiddlewareResult {
+    pub args: Value,
+    pub original_args: Value,
+    pub changed: bool,
+    pub trace: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolExecutionMiddlewareContext {
+    pub tool_name: String,
+    pub tool_call_id: String,
+    pub args: Value,
+    pub original_args: Value,
+    pub turn: u32,
+}
+
+pub type ToolRequestMiddleware =
+    Arc<dyn Fn(&ToolRequestMiddlewareContext) -> Option<ToolRequestMiddlewareUpdate> + Send + Sync>;
+
+pub type ToolExecutionMiddleware = Arc<
+    dyn Fn(
+            &ToolExecutionMiddlewareContext,
+            &mut dyn FnMut(Option<Value>) -> ToolResult,
+        ) -> ToolResult
+        + Send
+        + Sync,
+>;
 
 // ---------------------------------------------------------------------------
 // PluginManifest
@@ -157,6 +211,8 @@ pub trait ContextEngine: Send + Sync {
 /// Plugins use this to register hooks, tools, and CLI commands.
 pub struct PluginContext {
     hooks: HashMap<HookType, Vec<Arc<dyn Fn(&Value) -> HookResult + Send + Sync>>>,
+    tool_request_middleware: Vec<ToolRequestMiddleware>,
+    tool_execution_middleware: Vec<ToolExecutionMiddleware>,
     tools: Vec<(ToolSchema, Arc<dyn ToolHandler>)>,
     cli_commands: Vec<PluginCliCommand>,
     context_engine: Option<Arc<dyn ContextEngine>>,
@@ -167,6 +223,8 @@ impl PluginContext {
     pub fn new() -> Self {
         Self {
             hooks: HashMap::new(),
+            tool_request_middleware: Vec::new(),
+            tool_execution_middleware: Vec::new(),
             tools: Vec::new(),
             cli_commands: Vec::new(),
             context_engine: None,
@@ -181,6 +239,16 @@ impl PluginContext {
         callback: Arc<dyn Fn(&Value) -> HookResult + Send + Sync>,
     ) {
         self.hooks.entry(hook).or_default().push(callback);
+    }
+
+    /// Register middleware that can rewrite tool arguments before execution.
+    pub fn on_tool_request(&mut self, callback: ToolRequestMiddleware) {
+        self.tool_request_middleware.push(callback);
+    }
+
+    /// Register middleware that can wrap or replace tool execution.
+    pub fn on_tool_execution(&mut self, callback: ToolExecutionMiddleware) {
+        self.tool_execution_middleware.push(callback);
     }
 
     /// Register a tool provided by the plugin.
@@ -330,6 +398,123 @@ impl PluginManager {
                 }
             })
             .collect()
+    }
+
+    pub fn apply_tool_request_middleware(
+        &self,
+        tool_name: &str,
+        args: Value,
+        turn: u32,
+    ) -> ToolRequestMiddlewareResult {
+        let original_args = args.clone();
+        let mut current_args = args;
+        let mut trace = Vec::new();
+
+        for callback in &self.context.tool_request_middleware {
+            let ctx = ToolRequestMiddlewareContext {
+                tool_name: tool_name.to_string(),
+                args: current_args.clone(),
+                original_args: original_args.clone(),
+                turn,
+            };
+            let Ok(result) =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(&ctx)))
+            else {
+                tracing::warn!(tool = tool_name, "Plugin tool request middleware panicked");
+                continue;
+            };
+            let Some(update) = result else {
+                continue;
+            };
+            current_args = update.args;
+            trace.push(serde_json::json!({
+                "source": update.source.unwrap_or_else(|| "plugin".to_string()),
+                "reason": update.reason,
+            }));
+        }
+
+        ToolRequestMiddlewareResult {
+            changed: current_args != original_args,
+            args: current_args,
+            original_args,
+            trace,
+        }
+    }
+
+    pub fn run_tool_execution_middleware<F>(
+        &self,
+        ctx: ToolExecutionMiddlewareContext,
+        mut terminal_call: F,
+    ) -> ToolResult
+    where
+        F: FnMut(Value) -> ToolResult,
+    {
+        fn call_at<F>(
+            callbacks: &[ToolExecutionMiddleware],
+            index: usize,
+            base_ctx: &ToolExecutionMiddlewareContext,
+            payload: Value,
+            terminal_call: &mut F,
+        ) -> ToolResult
+        where
+            F: FnMut(Value) -> ToolResult,
+        {
+            if index >= callbacks.len() {
+                return terminal_call(payload);
+            }
+
+            let callback = callbacks[index].clone();
+            let mut call_ctx = base_ctx.clone();
+            call_ctx.args = payload.clone();
+            let mut next_called = false;
+            let mut next_result: Option<ToolResult> = None;
+            let result = {
+                let mut next_call = |next_payload: Option<Value>| -> ToolResult {
+                    if next_called {
+                        return ToolResult::err(
+                            &call_ctx.tool_call_id,
+                            "Middleware next_call may only be called once.",
+                        );
+                    }
+                    next_called = true;
+                    let result = call_at(
+                        callbacks,
+                        index + 1,
+                        base_ctx,
+                        next_payload.unwrap_or_else(|| call_ctx.args.clone()),
+                        terminal_call,
+                    );
+                    next_result = Some(result.clone());
+                    result
+                };
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    callback(&call_ctx, &mut next_call)
+                }))
+            };
+
+            match result {
+                Ok(result) => result,
+                Err(_) => {
+                    tracing::warn!(
+                        tool = call_ctx.tool_name,
+                        "Plugin tool execution middleware panicked"
+                    );
+                    if let Some(result) = next_result {
+                        result
+                    } else {
+                        call_at(callbacks, index + 1, base_ctx, payload, terminal_call)
+                    }
+                }
+            }
+        }
+
+        call_at(
+            &self.context.tool_execution_middleware,
+            0,
+            &ctx,
+            ctx.args.clone(),
+            &mut terminal_call,
+        )
     }
 
     /// Get all tools registered via plugin contexts.
@@ -598,6 +783,122 @@ mod tests {
         let results = mgr.invoke_hook(HookType::PreLlmCall, &serde_json::json!({}));
         assert_eq!(results.len(), 1);
         assert!(matches!(results[0], HookResult::InjectContext(_)));
+    }
+
+    #[test]
+    fn test_tool_request_middleware_rewrites_args_with_original_snapshot() {
+        let mut ctx = PluginContext::new();
+        ctx.on_tool_request(Arc::new(|request| {
+            assert_eq!(request.tool_name, "terminal");
+            assert_eq!(request.original_args["cmd"], "pwd");
+            let mut args = request.args.clone();
+            args["cmd"] = Value::String("ls".to_string());
+            let mut update = ToolRequestMiddlewareUpdate::new(args);
+            update.source = Some("test".to_string());
+            update.reason = Some(format!("turn {}", request.turn));
+            Some(update)
+        }));
+        let mgr = PluginManager {
+            plugins: HashMap::new(),
+            context: ctx,
+        };
+
+        let result =
+            mgr.apply_tool_request_middleware("terminal", serde_json::json!({"cmd": "pwd"}), 7);
+
+        assert!(result.changed);
+        assert_eq!(result.args["cmd"], "ls");
+        assert_eq!(result.original_args["cmd"], "pwd");
+        assert_eq!(result.trace[0]["source"], "test");
+    }
+
+    #[test]
+    fn test_tool_execution_middleware_can_wrap_next_call() {
+        let mut ctx = PluginContext::new();
+        ctx.on_tool_execution(Arc::new(|request, next_call| {
+            let mut args = request.args.clone();
+            args["cmd"] = Value::String("rewritten".to_string());
+            let mut result = next_call(Some(args));
+            result.content = format!("wrapped: {}", result.content);
+            result
+        }));
+        let mgr = PluginManager {
+            plugins: HashMap::new(),
+            context: ctx,
+        };
+        let middleware_ctx = ToolExecutionMiddlewareContext {
+            tool_name: "terminal".to_string(),
+            tool_call_id: "tc1".to_string(),
+            args: serde_json::json!({"cmd": "original"}),
+            original_args: serde_json::json!({"cmd": "original"}),
+            turn: 1,
+        };
+
+        let result = mgr.run_tool_execution_middleware(middleware_ctx, |args| {
+            ToolResult::ok("tc1", format!("ran {}", args["cmd"].as_str().unwrap()))
+        });
+
+        assert!(!result.is_error);
+        assert_eq!(result.content, "wrapped: ran rewritten");
+    }
+
+    #[test]
+    fn test_tool_execution_next_call_is_single_use() {
+        let calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let mut ctx = PluginContext::new();
+        ctx.on_tool_execution(Arc::new(|_request, next_call| {
+            let first = next_call(None);
+            assert_eq!(first.content, "terminal result");
+            next_call(None)
+        }));
+        let mgr = PluginManager {
+            plugins: HashMap::new(),
+            context: ctx,
+        };
+        let middleware_ctx = ToolExecutionMiddlewareContext {
+            tool_name: "terminal".to_string(),
+            tool_call_id: "tc1".to_string(),
+            args: serde_json::json!({}),
+            original_args: serde_json::json!({}),
+            turn: 1,
+        };
+        let calls_for_terminal = calls.clone();
+
+        let result = mgr.run_tool_execution_middleware(middleware_ctx, move |_args| {
+            calls_for_terminal.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            ToolResult::ok("tc1", "terminal result")
+        });
+
+        assert!(result.is_error);
+        assert!(result.content.contains("next_call may only be called once"));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_tool_execution_middleware_preserves_downstream_failure_after_panic() {
+        let mut ctx = PluginContext::new();
+        ctx.on_tool_execution(Arc::new(|_request, next_call| {
+            let _ = next_call(None);
+            panic!("middleware post-processing failed");
+        }));
+        let mgr = PluginManager {
+            plugins: HashMap::new(),
+            context: ctx,
+        };
+        let middleware_ctx = ToolExecutionMiddlewareContext {
+            tool_name: "terminal".to_string(),
+            tool_call_id: "tc1".to_string(),
+            args: serde_json::json!({}),
+            original_args: serde_json::json!({}),
+            turn: 1,
+        };
+
+        let result = mgr.run_tool_execution_middleware(middleware_ctx, |_args| {
+            ToolResult::err("tc1", "downstream failed")
+        });
+
+        assert!(result.is_error);
+        assert_eq!(result.content, "downstream failed");
     }
 
     #[test]
