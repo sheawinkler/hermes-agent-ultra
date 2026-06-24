@@ -320,7 +320,7 @@ pub(crate) async fn gateway_handle_message_non_streaming(
     } = deps;
 
     gateway_consume_pending_clarify_answer(&clarify, &messages, &ctx, false).await;
-    hermes_cli::media_wiring::refresh_flowy_media_backends(&runtime_tools, None);
+    crate::media_wiring::refresh_flowy_media_backends(&runtime_tools, None);
     let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
     let _effective_model =
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), &ctx);
@@ -618,7 +618,7 @@ pub(crate) async fn gateway_handle_message_streaming(
     } = deps;
 
     gateway_consume_pending_clarify_answer(&clarify, &messages, &ctx, true).await;
-    hermes_cli::media_wiring::refresh_flowy_media_backends(&runtime_tools, None);
+    crate::media_wiring::refresh_flowy_media_backends(&runtime_tools, None);
     let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
     let _effective_model =
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), &ctx);
