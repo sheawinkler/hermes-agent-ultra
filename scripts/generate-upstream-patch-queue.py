@@ -175,6 +175,13 @@ def fetch_remote_branch(repo_root: Path, remote: str, branch: str) -> None:
     raise RuntimeError(f"git fetch {remote} {branch} failed: {proc.stderr.strip()}")
 
 
+def repo_relative_or_absolute(path: Path, repo_root: Path) -> str:
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def classify_ticket(files: list[str]) -> int:
     votes: Counter[int] = Counter()
     for f in files:
@@ -665,7 +672,7 @@ def main() -> int:
             "total_commits": len(rows),
             "by_target_ticket": {str(k): v for k, v in sorted(by_ticket.items())},
             "by_disposition": dict(sorted(by_disposition.items())),
-            "overrides_path": str(overrides_path),
+            "overrides_path": repo_relative_or_absolute(overrides_path, repo_root),
             "patch_equivalent_count": len(patch_equivalent),
         },
         "commits": rows,

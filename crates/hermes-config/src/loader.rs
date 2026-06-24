@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub use hermes_core::ConfigError;
 
 use crate::config::{
-    GatewayConfig, LlmProviderConfig, ProxyConfig, TerminalBackendType, TerminalConfig,
-    TerminalHomeMode, WebConfig,
+    DisplayConfig, GatewayConfig, LlmProviderConfig, ProxyConfig, TerminalBackendType,
+    TerminalConfig, TerminalHomeMode, WebConfig,
 };
 use crate::merge::merge_configs;
 use crate::paths;
@@ -366,6 +366,7 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
 
     bridge_terminal_config_to_env(&config.terminal);
     bridge_web_config_to_env(&config.web);
+    bridge_display_config_to_env(&config.display);
 
     // Layer 3: environment variables (highest priority)
     apply_env_overrides(&mut config);
@@ -788,6 +789,23 @@ fn apply_user_config_patch_dotted(
         ["web", "crawl_backend"] => {
             config.web.crawl_backend = value.trim().to_string();
         }
+        ["display", "busy_input_mode"] => {
+            let normalized = match value.trim().to_ascii_lowercase().as_str() {
+                "queue" | "queued" => "queue",
+                "steer" | "steering" => "steer",
+                "interrupt" | "interrupted" | "replace" | "" => "interrupt",
+                _ => {
+                    return Err(ConfigError::ValidationError(format!(
+                        "display.busy_input_mode must be one of interrupt, queue, steer: {value}"
+                    )));
+                }
+            };
+            config.display.busy_input_mode = Some(normalized.to_string());
+        }
+        ["display", "busy_ack_enabled"] => {
+            config.display.busy_ack_enabled =
+                Some(parse_config_bool("display.busy_ack_enabled", value)?);
+        }
         ["sessions", "auto_prune"] => {
             let normalized = value.trim().to_ascii_lowercase();
             let parsed = match normalized.as_str() {
@@ -1085,6 +1103,14 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
         } else {
             config.web.crawl_backend.clone()
         }),
+        ["display", "busy_input_mode"] => Ok(config
+            .display
+            .busy_input_mode
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "interrupt".to_string())),
+        ["display", "busy_ack_enabled"] => Ok(config.display.busy_ack_enabled().to_string()),
         ["sessions", "auto_prune"] => Ok(config.sessions.auto_prune.to_string()),
         ["sessions", "retention_days"] => Ok(config.sessions.retention_days.to_string()),
         ["sessions", "vacuum_after_prune"] => Ok(config.sessions.vacuum_after_prune.to_string()),
@@ -1471,9 +1497,29 @@ pub fn web_config_env_bridge_key(key: &str) -> Option<&'static str> {
         .find_map(|(config_key, env_key)| (*config_key == normalized).then_some(*env_key))
 }
 
+pub fn display_config_env_bridge_pairs() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("busy_input_mode", "HERMES_GATEWAY_BUSY_INPUT_MODE"),
+        ("busy_ack_enabled", "HERMES_GATEWAY_BUSY_ACK_ENABLED"),
+    ]
+}
+
+pub fn display_config_env_bridge_key(key: &str) -> Option<&'static str> {
+    let normalized = key
+        .trim()
+        .strip_prefix("display.")
+        .unwrap_or_else(|| key.trim())
+        .replace('-', "_")
+        .to_ascii_lowercase();
+    display_config_env_bridge_pairs()
+        .iter()
+        .find_map(|(config_key, env_key)| (*config_key == normalized).then_some(*env_key))
+}
+
 fn config_env_bridge_key(key: &str) -> Option<String> {
     terminal_config_env_bridge_key(key)
         .or_else(|| web_config_env_bridge_key(key))
+        .or_else(|| display_config_env_bridge_key(key))
         .map(ToString::to_string)
 }
 
@@ -1943,6 +1989,31 @@ fn apply_web_env_overrides(config: &mut WebConfig) {
     }
 }
 
+fn bridge_display_config_to_env(display: &DisplayConfig) {
+    if let Some(mode) = display
+        .busy_input_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        set_env_if_missing("HERMES_GATEWAY_BUSY_INPUT_MODE", mode.to_string());
+    }
+    if let Some(enabled) = display.busy_ack_enabled {
+        set_env_if_missing("HERMES_GATEWAY_BUSY_ACK_ENABLED", enabled.to_string());
+    }
+}
+
+fn apply_display_env_overrides(config: &mut DisplayConfig) {
+    if let Some(v) = env_var_nonempty("HERMES_GATEWAY_BUSY_INPUT_MODE") {
+        config.busy_input_mode = Some(v);
+    }
+    if let Some(v) = env_var_nonempty("HERMES_GATEWAY_BUSY_ACK_ENABLED") {
+        if let Some(parsed) = parse_bool_env("HERMES_GATEWAY_BUSY_ACK_ENABLED", &v) {
+            config.busy_ack_enabled = Some(parsed);
+        }
+    }
+}
+
 fn apply_terminal_env_overrides(config: &mut TerminalConfig) {
     if let Some(v) =
         env_var_nonempty("TERMINAL_ENV").or_else(|| env_var_nonempty("TERMINAL_BACKEND"))
@@ -2092,6 +2163,7 @@ fn apply_terminal_env_overrides(config: &mut TerminalConfig) {
 pub fn apply_env_overrides(config: &mut GatewayConfig) {
     apply_terminal_env_overrides(&mut config.terminal);
     apply_web_env_overrides(&mut config.web);
+    apply_display_env_overrides(&mut config.display);
 
     if let Ok(v) = std::env::var("HERMES_MODEL") {
         config.model = Some(v);
@@ -2385,6 +2457,13 @@ mod tests {
 
     fn clear_web_env_bridge_vars() {
         for (_, env_key) in web_config_env_bridge_pairs() {
+            // SAFETY: tests serialize env mutation with ENV_LOCK.
+            unsafe { std::env::remove_var(env_key) };
+        }
+    }
+
+    fn clear_display_env_bridge_vars() {
+        for (_, env_key) in display_config_env_bridge_pairs() {
             // SAFETY: tests serialize env mutation with ENV_LOCK.
             unsafe { std::env::remove_var(env_key) };
         }
@@ -2882,6 +2961,89 @@ personalities: null
         let env_text = std::fs::read_to_string(dir.path().join(".env")).unwrap();
         assert!(env_text.contains("HERMES_WEB_SEARCH_BACKEND=brave-free"));
         clear_web_env_bridge_vars();
+    }
+
+    #[test]
+    fn display_config_bridge_map_covers_busy_runtime_keys() {
+        let keys = display_config_env_bridge_pairs()
+            .iter()
+            .map(|(key, _)| *key)
+            .collect::<std::collections::HashSet<_>>();
+        for key in ["busy_input_mode", "busy_ack_enabled"] {
+            assert!(keys.contains(key), "missing display bridge key: {key}");
+            assert!(
+                display_config_env_bridge_key(&format!("display.{key}")).is_some(),
+                "display.{key} should map to an env var"
+            );
+        }
+    }
+
+    #[test]
+    fn set_user_config_value_bridges_display_busy_keys() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_display_env_bridge_vars();
+        let dir = tempdir().unwrap();
+        for (key, value, env_key) in [
+            (
+                "display.busy_input_mode",
+                "steer",
+                "HERMES_GATEWAY_BUSY_INPUT_MODE",
+            ),
+            (
+                "display.busy_ack_enabled",
+                "false",
+                "HERMES_GATEWAY_BUSY_ACK_ENABLED",
+            ),
+        ] {
+            let result = set_user_config_value(dir.path(), key, value).unwrap();
+            assert!(result.wrote_config(), "{key} should write config");
+            assert!(result.wrote_env(), "{key} should write env");
+            assert_eq!(result.env_key.as_deref(), Some(env_key));
+        }
+        let env_text = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert!(env_text.contains("HERMES_GATEWAY_BUSY_INPUT_MODE=steer"));
+        assert!(env_text.contains("HERMES_GATEWAY_BUSY_ACK_ENABLED=false"));
+        clear_display_env_bridge_vars();
+    }
+
+    #[test]
+    fn load_config_bridges_display_yaml_to_env_without_overriding_existing_env() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_display_env_bridge_vars();
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            r#"
+display:
+  busy_input_mode: steer
+  busy_ack_enabled: false
+"#,
+        )
+        .unwrap();
+        unsafe { std::env::set_var("HERMES_GATEWAY_BUSY_INPUT_MODE", "queue") };
+
+        let cfg =
+            load_config(Some(dir.path().to_string_lossy().as_ref())).expect("load display config");
+
+        assert_eq!(cfg.display.normalized_busy_input_mode(), "queue");
+        assert!(!cfg.display.busy_ack_enabled());
+        assert_eq!(
+            std::env::var("HERMES_GATEWAY_BUSY_INPUT_MODE")
+                .ok()
+                .as_deref(),
+            Some("queue")
+        );
+        assert_eq!(
+            std::env::var("HERMES_GATEWAY_BUSY_ACK_ENABLED")
+                .ok()
+                .as_deref(),
+            Some("false")
+        );
+        clear_display_env_bridge_vars();
     }
 
     #[test]

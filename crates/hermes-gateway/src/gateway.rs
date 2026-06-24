@@ -36,6 +36,10 @@ use crate::hooks::{HookEvent, HookRegistry};
 use crate::media::validate_media_delivery_path;
 use crate::platforms::helpers::{extract_inline_images, extract_media_markers};
 use crate::session::{Session, SessionManager};
+use crate::session_control::{
+    ActiveSessionControl, BusyInputMode, BusySessionCoordinator, MessageEvent, MessageType,
+    ProcessingOutcome, SessionSource,
+};
 use crate::stream::{StreamConfig, StreamManager};
 
 const DEFAULT_MESSAGE_DEDUP_CAPACITY: usize = 4096;
@@ -188,6 +192,8 @@ pub struct GatewayRuntimeContext {
     pub yolo: bool,
     pub reasoning: bool,
     pub mcp_reload_generation: u64,
+    /// Registration handle for attaching live interrupt/steer controls to a busy session.
+    pub busy_control: Option<BusyControlRegistration>,
     /// Messages queued by handlers to be delivered only after the main reply.
     pub deferred_post_delivery_messages: Option<Arc<StdMutex<Vec<String>>>>,
     /// Release flag shared with handlers for post-delivery gating.
@@ -228,6 +234,39 @@ pub type StreamingMessageHandlerWithContext = Arc<
         > + Send
         + Sync,
 >;
+
+#[derive(Clone)]
+pub struct BusyControlRegistration {
+    session_key: String,
+    coordinator: Arc<RwLock<BusySessionCoordinator>>,
+}
+
+impl std::fmt::Debug for BusyControlRegistration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BusyControlRegistration")
+            .field("session_key", &self.session_key)
+            .finish_non_exhaustive()
+    }
+}
+
+impl BusyControlRegistration {
+    fn new(
+        session_key: impl Into<String>,
+        coordinator: Arc<RwLock<BusySessionCoordinator>>,
+    ) -> Self {
+        Self {
+            session_key: session_key.into(),
+            coordinator,
+        }
+    }
+
+    pub async fn attach(&self, control: Arc<dyn ActiveSessionControl>) -> bool {
+        self.coordinator
+            .write()
+            .await
+            .attach_control(&self.session_key, control)
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 struct UsageStats {
@@ -515,6 +554,8 @@ pub struct Gateway {
     platform_access_policies: RwLock<HashMap<String, PlatformAccessPolicy>>,
     /// Bounded duplicate guard for platform redeliveries/restarts.
     message_deduplicator: RwLock<MessageDeduplicator>,
+    /// Active gateway sessions plus queued/steered busy follow-ups.
+    busy_sessions: Arc<RwLock<BusySessionCoordinator>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -644,6 +685,7 @@ impl Gateway {
             hook_registry: RwLock::new(None),
             platform_access_policies: RwLock::new(HashMap::new()),
             message_deduplicator: RwLock::new(MessageDeduplicator::default()),
+            busy_sessions: Arc::new(RwLock::new(BusySessionCoordinator::default())),
         }
     }
 
@@ -859,6 +901,50 @@ impl Gateway {
         sessions.len()
     }
 
+    fn busy_input_mode(&self) -> BusyInputMode {
+        match self.config.display.normalized_busy_input_mode() {
+            "queue" => BusyInputMode::Queue,
+            "steer" => BusyInputMode::Steer,
+            _ => BusyInputMode::Interrupt,
+        }
+    }
+
+    fn incoming_to_busy_event(incoming: &IncomingMessage, text: impl Into<String>) -> MessageEvent {
+        let mut source = SessionSource::new(
+            &incoming.platform,
+            &incoming.chat_id,
+            if incoming.is_dm { "dm" } else { "group" },
+        )
+        .with_user(&incoming.user_id);
+        if let Some(thread_id) = incoming
+            .thread_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            source = source.with_thread(thread_id);
+        }
+        let mut event = MessageEvent::text(text, source);
+        event.message_id = incoming.message_id.clone();
+        event.message_type = MessageType::Text;
+        event
+    }
+
+    fn busy_event_to_incoming(event: MessageEvent) -> IncomingMessage {
+        IncomingMessage {
+            platform: event.source.platform,
+            chat_id: event.source.chat_id,
+            user_id: event
+                .source
+                .user_id
+                .unwrap_or_else(|| "unknown".to_string()),
+            text: event.text,
+            message_id: event.message_id,
+            thread_id: event.source.thread_id,
+            is_dm: event.source.chat_type.eq_ignore_ascii_case("dm"),
+        }
+    }
+
     /// Register a platform adapter under the given name.
     pub async fn register_adapter(
         &self,
@@ -926,6 +1012,33 @@ impl Gateway {
         incoming: &IncomingMessage,
         sender: IncomingSender,
     ) -> Result<(), GatewayError> {
+        let mut current = incoming.clone();
+        for drain_depth in 0..32 {
+            match self
+                .route_message_once_from_sender(&current, sender)
+                .await?
+            {
+                Some(next) => {
+                    current = next;
+                }
+                None => return Ok(()),
+            }
+            if drain_depth == 31 {
+                warn!(
+                    platform = current.platform,
+                    chat_id = current.chat_id,
+                    "busy-session drain depth reached safety cap"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn route_message_once_from_sender(
+        &self,
+        incoming: &IncomingMessage,
+        sender: IncomingSender,
+    ) -> Result<Option<IncomingMessage>, GatewayError> {
         let access_policy = self.platform_access_policy(&incoming.platform).await;
         let is_slash_command = incoming.text.trim_start().starts_with('/');
         if let Some(policy) = access_policy.as_ref() {
@@ -938,7 +1051,7 @@ impl Gateway {
                         chat_id = incoming.chat_id,
                         "Group message denied: channel is ignored by platform policy"
                     );
-                    return Ok(());
+                    return Ok(None);
                 }
                 if !policy.is_channel_allowed(&incoming.chat_id) {
                     debug!(
@@ -946,7 +1059,7 @@ impl Gateway {
                         chat_id = incoming.chat_id,
                         "Group message denied: channel not in platform allowlist"
                     );
-                    return Ok(());
+                    return Ok(None);
                 }
                 match policy.group_mode {
                     GroupAccessMode::Disabled => {
@@ -955,7 +1068,7 @@ impl Gateway {
                             user_id = incoming.user_id,
                             "Group traffic denied by platform policy"
                         );
-                        return Ok(());
+                        return Ok(None);
                     }
                     GroupAccessMode::Allowlist => {
                         if !bypasses_user_allowlist
@@ -967,7 +1080,7 @@ impl Gateway {
                                 user_id = incoming.user_id,
                                 "Group message denied: user not in allowlist"
                             );
-                            return Ok(());
+                            return Ok(None);
                         }
                     }
                     GroupAccessMode::Open => {}
@@ -984,7 +1097,7 @@ impl Gateway {
                     user_id = incoming.user_id,
                     "Slash command denied: user not in platform allowlist"
                 );
-                return Ok(());
+                return Ok(None);
             }
         }
 
@@ -1005,7 +1118,7 @@ impl Gateway {
                         self.send_message(&incoming.platform, &incoming.chat_id, &msg, None)
                             .await?;
                     }
-                    return Ok(());
+                    return Ok(None);
                 }
                 DmDecision::Deny => {
                     debug!(
@@ -1013,7 +1126,7 @@ impl Gateway {
                         platform = incoming.platform,
                         "DM denied for unauthorized user"
                     );
-                    return Ok(());
+                    return Ok(None);
                 }
             }
         }
@@ -1025,7 +1138,7 @@ impl Gateway {
                 message_id = incoming.message_id.as_deref().unwrap_or_default(),
                 "Duplicate platform message redelivery suppressed"
             );
-            return Ok(());
+            return Ok(None);
         }
 
         // 2. Get or create session
@@ -1060,13 +1173,39 @@ impl Gateway {
 
         let mut agent_text_override: Option<String> = None;
 
+        if !is_slash_command {
+            let decision = {
+                let mut busy = self.busy_sessions.write().await;
+                busy.handle_busy_message(
+                    &session_key,
+                    Self::incoming_to_busy_event(incoming, incoming.text.clone()),
+                    self.busy_input_mode(),
+                )
+            };
+            if decision.handled {
+                if self.config.display.busy_ack_enabled() {
+                    if let Some(ack) = decision.ack {
+                        self.send_message_threaded(
+                            &incoming.platform,
+                            &incoming.chat_id,
+                            &ack,
+                            None,
+                            Self::reply_thread_id(incoming),
+                        )
+                        .await?;
+                    }
+                }
+                return Ok(None);
+            }
+        }
+
         // Slash commands are executed directly by the gateway command runtime.
         // Installed skill commands are the exception: after built-ins and quick
         // commands decline them, they are converted into a normal agent turn
         // containing the resolved SKILL.md content.
         if is_slash_command {
             match self.execute_slash_command(incoming, &session_key).await? {
-                SlashCommandOutcome::Handled => return Ok(()),
+                SlashCommandOutcome::Handled => return Ok(None),
                 SlashCommandOutcome::ForwardToAgent { message } => {
                     agent_text_override = Some(message);
                 }
@@ -1115,11 +1254,14 @@ impl Gateway {
         let messages = self.session_manager.get_messages(&session_key).await;
 
         // 5. Process through agent loop (streaming or non-streaming)
+        {
+            let mut busy = self.busy_sessions.write().await;
+            busy.mark_active(&session_key, None);
+        }
         let processing_result = if self.config.streaming_enabled {
-            self.route_streaming(&incoming, messages, &session_key)
-                .await
+            self.route_streaming(incoming, messages, &session_key).await
         } else {
-            self.route_non_streaming(&incoming, messages, &session_key)
+            self.route_non_streaming(incoming, messages, &session_key)
                 .await
         };
 
@@ -1159,8 +1301,20 @@ impl Gateway {
             }
         }
 
+        let pending = {
+            let mut busy = self.busy_sessions.write().await;
+            busy.finish(
+                &session_key,
+                if processing_result.is_ok() {
+                    ProcessingOutcome::Success
+                } else {
+                    ProcessingOutcome::Failure
+                },
+            )
+            .map(Self::busy_event_to_incoming)
+        };
         processing_result?;
-        Ok(())
+        Ok(pending)
     }
 
     fn quick_command_key(raw: &str) -> String {
@@ -1262,6 +1416,12 @@ impl Gateway {
                     | GatewayCommandResult::ShowVersion(text)
                     | GatewayCommandResult::CompressContext(text)
                     | GatewayCommandResult::StopAgent(text) => Some(text),
+                    GatewayCommandResult::QueuePrompt { prompt } => Some(format!(
+                        "🧵 Queued follow-up for the active session: {prompt}"
+                    )),
+                    GatewayCommandResult::SteerPrompt { prompt } => {
+                        Some(format!("🧭 Steering instruction accepted: {prompt}"))
+                    }
                     GatewayCommandResult::SwitchModel { reply, .. }
                     | GatewayCommandResult::SwitchFast { reply, .. }
                     | GatewayCommandResult::SwitchPersonality { reply, .. }
@@ -1584,8 +1744,70 @@ impl Gateway {
                         let _ = self.background_tasks.cancel(&task_id);
                     }
                 }
+                {
+                    let mut busy = self.busy_sessions.write().await;
+                    let _ = busy.interrupt_active(
+                        session_key,
+                        "User requested /stop for the active gateway task.",
+                    );
+                }
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                     .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::QueuePrompt { prompt } => {
+                let active = {
+                    let mut busy = self.busy_sessions.write().await;
+                    let active = busy.is_active(session_key);
+                    if active {
+                        busy.queue_message(
+                            session_key,
+                            Self::incoming_to_busy_event(incoming, prompt.clone()),
+                        );
+                    }
+                    active
+                };
+                let reply = if active {
+                    format!("🧵 Queued follow-up for the active session: {prompt}")
+                } else {
+                    "No active gateway turn is running. Send the prompt normally to start it."
+                        .to_string()
+                };
+                self.send_message_threaded(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &reply,
+                    None,
+                    Self::reply_thread_id(incoming),
+                )
+                .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SteerPrompt { prompt } => {
+                let decision = {
+                    let mut busy = self.busy_sessions.write().await;
+                    busy.handle_busy_message(
+                        session_key,
+                        Self::incoming_to_busy_event(incoming, prompt.clone()),
+                        BusyInputMode::Steer,
+                    )
+                };
+                let reply = if decision.steered {
+                    format!("🧭 Steered the running task: {prompt}")
+                } else if decision.queued {
+                    format!("🧵 No live steering hook was ready; queued follow-up: {prompt}")
+                } else {
+                    "No active gateway turn is running. Use /steer while a task is in flight."
+                        .to_string()
+                };
+                self.send_message_threaded(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &reply,
+                    None,
+                    Self::reply_thread_id(incoming),
+                )
+                .await?;
                 Ok(true)
             }
             GatewayCommandResult::ShowUsage(_) => {
@@ -2384,6 +2606,10 @@ impl Gateway {
             yolo: state.yolo,
             reasoning: state.reasoning,
             mcp_reload_generation,
+            busy_control: Some(BusyControlRegistration::new(
+                session_key,
+                self.busy_sessions.clone(),
+            )),
             deferred_post_delivery_messages: None,
             deferred_post_delivery_released: None,
         }
@@ -2569,9 +2795,13 @@ impl Gateway {
             .into_iter()
             .filter(|(_, status, _)| *status == TaskStatus::Running)
             .count();
+        let (busy_active, busy_pending) = {
+            let busy = self.busy_sessions.read().await;
+            (busy.is_active(session_key), busy.pending_len(session_key))
+        };
 
         format!(
-            "🧭 Gateway status\n- title: {}\n- model: {}\n- provider: {}\n- profile: {}\n- branch: {}\n- personality: {}\n- service tier: {}\n- reasoning: {}\n- verbose: {}\n- tool progress: {}\n- yolo: {}\n- home: {}\n- messages in session: {}\n- running background tasks: {}\n- mcp generation: {}\n- input/output chars: {}/{}",
+            "🧭 Gateway status\n- title: {}\n- model: {}\n- provider: {}\n- profile: {}\n- branch: {}\n- personality: {}\n- service tier: {}\n- reasoning: {}\n- verbose: {}\n- tool progress: {}\n- busy input: {}\n- busy ack: {}\n- busy active: {}\n- busy queued: {}\n- yolo: {}\n- home: {}\n- messages in session: {}\n- running background tasks: {}\n- mcp generation: {}\n- input/output chars: {}/{}",
             title.unwrap_or_else(|| "(untitled)".to_string()),
             state.model.unwrap_or_else(|| "default".to_string()),
             state.provider.unwrap_or_else(|| "default".to_string()),
@@ -2585,6 +2815,14 @@ impl Gateway {
             if state.reasoning { "ON" } else { "OFF" },
             if state.verbose { "ON" } else { "OFF" },
             state.tool_progress.unwrap_or_else(|| "default".to_string()),
+            self.config.display.normalized_busy_input_mode(),
+            if self.config.display.busy_ack_enabled() {
+                "ON"
+            } else {
+                "OFF"
+            },
+            if busy_active { "yes" } else { "no" },
+            busy_pending,
             if state.yolo { "ON" } else { "OFF" },
             state.home.unwrap_or_else(|| "(not set)".to_string()),
             messages.len(),
@@ -3281,6 +3519,12 @@ mod tests {
 
     struct FailingHook;
 
+    #[derive(Default)]
+    struct BusyControlProbe {
+        interrupts: Mutex<Vec<String>>,
+        steers: Mutex<Vec<String>>,
+    }
+
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     struct HermesHomeEnvGuard {
@@ -3320,6 +3564,18 @@ mod tests {
         }
     }
 
+    fn test_incoming(text: impl Into<String>) -> IncomingMessage {
+        IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: text.into(),
+            message_id: None,
+            thread_id: None,
+            is_dm: true,
+        }
+    }
+
     #[async_trait]
     impl HookHandler for RecordingHook {
         async fn handle(&self, event: &HookEvent) -> Result<(), String> {
@@ -3343,6 +3599,17 @@ mod tests {
 
         fn name(&self) -> &str {
             "failing-hook"
+        }
+    }
+
+    impl ActiveSessionControl for BusyControlProbe {
+        fn interrupt(&self, message: &str) {
+            self.interrupts.lock().unwrap().push(message.to_string());
+        }
+
+        fn steer(&self, message: &str) -> bool {
+            self.steers.lock().unwrap().push(message.to_string());
+            true
         }
     }
 
@@ -6764,6 +7031,295 @@ mod tests {
             .map(|(_, ctx)| ctx.clone())
             .expect("agent:end payload should exist");
         assert_eq!(end_payload["success"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn gateway_busy_queue_mode_drains_fifo_followups() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let mut cfg = GatewayConfig::default();
+        cfg.display.busy_input_mode = Some("queue".to_string());
+        let gw = Arc::new(Gateway::new(session_mgr, dm_manager, cfg));
+        gw.register_adapter("test", adapter).await;
+
+        let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let entered_tx = Arc::new(Mutex::new(Some(entered_tx)));
+        let release_rx = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+        let calls_for_handler = calls.clone();
+        let entered_for_handler = entered_tx.clone();
+        let release_for_handler = release_rx.clone();
+        gw.set_message_handler(Arc::new(move |messages| {
+            let calls = calls_for_handler.clone();
+            let entered = entered_for_handler.clone();
+            let release = release_for_handler.clone();
+            Box::pin(async move {
+                let latest = messages
+                    .iter()
+                    .rev()
+                    .find_map(|m| {
+                        (m.role == MessageRole::User)
+                            .then(|| m.content.clone())
+                            .flatten()
+                    })
+                    .unwrap_or_default();
+                calls.lock().unwrap().push(latest.clone());
+                if latest == "first" {
+                    if let Some(tx) = entered.lock().unwrap().take() {
+                        let _ = tx.send(());
+                    }
+                    if let Some(rx) = release.lock().await.take() {
+                        let _ = rx.await;
+                    }
+                }
+                Ok(format!("reply:{latest}"))
+            })
+        }))
+        .await;
+
+        let gw_first = gw.clone();
+        let first_task =
+            tokio::spawn(async move { gw_first.route_message(&test_incoming("first")).await });
+        entered_rx.await.expect("first route should enter handler");
+        gw.route_message(&test_incoming("second"))
+            .await
+            .expect("second route should queue");
+        release_tx.send(()).expect("release first route");
+        first_task
+            .await
+            .expect("first task join")
+            .expect("first route result");
+
+        assert_eq!(
+            calls.lock().unwrap().as_slice(),
+            ["first".to_string(), "second".to_string()]
+        );
+        let texts: Vec<String> = sent
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, text)| text.clone())
+            .collect();
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("Queued for the next turn")));
+        assert!(texts.iter().any(|text| text == "reply:first"));
+        assert!(texts.iter().any(|text| text == "reply:second"));
+    }
+
+    #[tokio::test]
+    async fn gateway_busy_queue_ack_can_be_suppressed() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let mut cfg = GatewayConfig::default();
+        cfg.display.busy_input_mode = Some("queue".to_string());
+        cfg.display.busy_ack_enabled = Some(false);
+        let gw = Arc::new(Gateway::new(session_mgr, dm_manager, cfg));
+        gw.register_adapter("test", adapter).await;
+
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let entered_tx = Arc::new(Mutex::new(Some(entered_tx)));
+        let release_rx = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+        let entered_for_handler = entered_tx.clone();
+        let release_for_handler = release_rx.clone();
+        gw.set_message_handler(Arc::new(move |messages| {
+            let entered = entered_for_handler.clone();
+            let release = release_for_handler.clone();
+            Box::pin(async move {
+                let latest = messages
+                    .iter()
+                    .rev()
+                    .find_map(|m| {
+                        (m.role == MessageRole::User)
+                            .then(|| m.content.clone())
+                            .flatten()
+                    })
+                    .unwrap_or_default();
+                if latest == "first" {
+                    if let Some(tx) = entered.lock().unwrap().take() {
+                        let _ = tx.send(());
+                    }
+                    if let Some(rx) = release.lock().await.take() {
+                        let _ = rx.await;
+                    }
+                }
+                Ok(format!("reply:{latest}"))
+            })
+        }))
+        .await;
+
+        let gw_first = gw.clone();
+        let first_task =
+            tokio::spawn(async move { gw_first.route_message(&test_incoming("first")).await });
+        entered_rx.await.expect("first route should enter handler");
+        gw.route_message(&test_incoming("second"))
+            .await
+            .expect("second route should queue silently");
+        assert!(
+            sent.lock()
+                .unwrap()
+                .iter()
+                .all(|(_, text)| !text.contains("Queued for the next turn")),
+            "automatic busy ack should be suppressed"
+        );
+        release_tx.send(()).expect("release first route");
+        first_task
+            .await
+            .expect("first task join")
+            .expect("first route result");
+    }
+
+    #[tokio::test]
+    async fn gateway_queue_command_bypasses_busy_guard_and_drains() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let mut cfg = GatewayConfig::default();
+        cfg.display.busy_input_mode = Some("interrupt".to_string());
+        let gw = Arc::new(Gateway::new(session_mgr, dm_manager, cfg));
+        gw.register_adapter("test", adapter).await;
+
+        let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let entered_tx = Arc::new(Mutex::new(Some(entered_tx)));
+        let release_rx = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+        let calls_for_handler = calls.clone();
+        let entered_for_handler = entered_tx.clone();
+        let release_for_handler = release_rx.clone();
+        gw.set_message_handler(Arc::new(move |messages| {
+            let calls = calls_for_handler.clone();
+            let entered = entered_for_handler.clone();
+            let release = release_for_handler.clone();
+            Box::pin(async move {
+                let latest = messages
+                    .iter()
+                    .rev()
+                    .find_map(|m| {
+                        (m.role == MessageRole::User)
+                            .then(|| m.content.clone())
+                            .flatten()
+                    })
+                    .unwrap_or_default();
+                calls.lock().unwrap().push(latest.clone());
+                if latest == "first" {
+                    if let Some(tx) = entered.lock().unwrap().take() {
+                        let _ = tx.send(());
+                    }
+                    if let Some(rx) = release.lock().await.take() {
+                        let _ = rx.await;
+                    }
+                }
+                Ok(format!("reply:{latest}"))
+            })
+        }))
+        .await;
+
+        let gw_first = gw.clone();
+        let first_task =
+            tokio::spawn(async move { gw_first.route_message(&test_incoming("first")).await });
+        entered_rx.await.expect("first route should enter handler");
+        gw.route_message(&test_incoming("/queue second"))
+            .await
+            .expect("/queue should bypass and enqueue");
+        release_tx.send(()).expect("release first route");
+        first_task
+            .await
+            .expect("first task join")
+            .expect("first route result");
+
+        assert_eq!(
+            calls.lock().unwrap().as_slice(),
+            ["first".to_string(), "second".to_string()]
+        );
+        assert!(sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, text)| text.contains("Queued follow-up for the active session")));
+    }
+
+    #[tokio::test]
+    async fn gateway_steer_command_uses_attached_busy_control() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Arc::new(Gateway::new(
+            session_mgr,
+            dm_manager,
+            GatewayConfig::default(),
+        ));
+        gw.register_adapter("test", adapter).await;
+
+        let control = Arc::new(BusyControlProbe::default());
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let entered_tx = Arc::new(Mutex::new(Some(entered_tx)));
+        let release_rx = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+        let control_for_handler = control.clone();
+        let entered_for_handler = entered_tx.clone();
+        let release_for_handler = release_rx.clone();
+        gw.set_message_handler_with_context(Arc::new(move |_messages, ctx| {
+            let control = control_for_handler.clone();
+            let entered = entered_for_handler.clone();
+            let release = release_for_handler.clone();
+            Box::pin(async move {
+                if let Some(registration) = ctx.busy_control {
+                    assert!(registration.attach(control).await);
+                }
+                if let Some(tx) = entered.lock().unwrap().take() {
+                    let _ = tx.send(());
+                }
+                if let Some(rx) = release.lock().await.take() {
+                    let _ = rx.await;
+                }
+                Ok("reply:first".to_string())
+            })
+        }))
+        .await;
+
+        let gw_first = gw.clone();
+        let first_task =
+            tokio::spawn(async move { gw_first.route_message(&test_incoming("first")).await });
+        entered_rx.await.expect("first route should attach control");
+        gw.route_message(&test_incoming("/steer check tests"))
+            .await
+            .expect("/steer should use attached control");
+        release_tx.send(()).expect("release first route");
+        first_task
+            .await
+            .expect("first task join")
+            .expect("first route result");
+
+        assert_eq!(
+            control.steers.lock().unwrap().as_slice(),
+            ["check tests".to_string()]
+        );
+        assert!(sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, text)| text.contains("Steered the running task")));
     }
 
     #[tokio::test]

@@ -3931,6 +3931,21 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust already provides Home Assistant as first-class native runtime surface: REST backend, ha_list_entities/ha_get_state/ha_list_services/ha_call_service handlers, homeassistant toolset and aliases, send-message platform routing, and gateway adapter coverage. The upstream Python bundled-plugin migration is represented by Rust-native built-in registration and platform contract tests rather than a Python plugin package."
+    },
+    "2d232c999115": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust gateway: display.busy_input_mode is typed/normalized and bridged through HERMES_GATEWAY_BUSY_INPUT_MODE; active-session plain text can queue instead of interrupting, explicit /queue bypasses the busy guard and enqueues a FIFO follow-up, and gateway tests cover queue drain plus ack suppression."
+    },
+    "2edebedc9eeb": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: /steer is a structured gateway command, active gateway sessions expose a BusyControlRegistration, hermes-cli attaches AgentLoop InterruptController as ActiveSessionControl, and steer sends the trusted hermes_agent::format_steer_marker into the live run with regression coverage."
+    },
+    "635253b9185f": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: display.busy_input_mode accepts interrupt/queue/steer, display.busy_ack_enabled suppresses automatic busy acknowledgements, env/config-set bridges cover HERMES_GATEWAY_BUSY_INPUT_MODE and HERMES_GATEWAY_BUSY_ACK_ENABLED, and gateway tests cover steer fallback/attachment and quiet queueing."
     }
   },
   "subject_patterns": [

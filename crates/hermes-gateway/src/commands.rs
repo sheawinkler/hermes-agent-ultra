@@ -16,6 +16,10 @@ pub enum GatewayCommandResult {
     SwitchPersonality { name: String, reply: String },
     /// Stop the currently running agent task.
     StopAgent(String),
+    /// Queue a follow-up prompt for the currently active session.
+    QueuePrompt { prompt: String },
+    /// Steer the currently active session without starting a new turn.
+    SteerPrompt { prompt: String },
     /// Show usage statistics.
     ShowUsage(String),
     /// Compress the conversation context.
@@ -545,17 +549,18 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
             if args.is_empty() {
                 GatewayCommandResult::Reply("Usage: /queue <prompt>".to_string())
             } else {
-                GatewayCommandResult::Reply(format!(
-                    "🧵 Queued follow-up for the active session: {}",
-                    args
-                ))
+                GatewayCommandResult::QueuePrompt {
+                    prompt: args.clone(),
+                }
             }
         }
         "/steer" => {
             if args.is_empty() {
                 GatewayCommandResult::Reply("Usage: /steer <prompt>".to_string())
             } else {
-                GatewayCommandResult::Reply(format!("🧭 Steering instruction accepted: {}", args))
+                GatewayCommandResult::SteerPrompt {
+                    prompt: args.clone(),
+                }
             }
         }
         "/btw" => {
