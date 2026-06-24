@@ -430,6 +430,17 @@ def main() -> int:
     replay = build_replay_index(coverage, proof, queue, sota)
     budget = build_budget(snapshot, thresholds)
 
+    if args.check:
+        print(f"Checked {repo_root / TREND_JSON}")
+        print(f"Checked {repo_root / TREND_MD}")
+        print(f"Checked {repo_root / REPLAY_JSON}")
+        print(f"Checked {repo_root / REPLAY_MD}")
+        print(f"Checked {repo_root / BUDGET_JSON}")
+        print(f"Checked {repo_root / BUDGET_MD}")
+        if not budget["gate"]["pass"]:
+            return 1
+        return 0
+
     write_json(repo_root / TREND_JSON, trend)
     (repo_root / TREND_MD).write_text(render_trend_md(trend), encoding="utf-8")
     write_json(repo_root / REPLAY_JSON, replay)
@@ -444,8 +455,6 @@ def main() -> int:
     print(f"Wrote {repo_root / BUDGET_JSON}")
     print(f"Wrote {repo_root / BUDGET_MD}")
 
-    if args.check and not budget["gate"]["pass"]:
-        return 1
     return 0
 
 
