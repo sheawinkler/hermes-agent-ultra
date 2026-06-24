@@ -7,7 +7,7 @@ use hermes_cli::cli::Cli;
 use hermes_config::{hermes_home, load_config, load_user_config_file, save_config_yaml};
 use hermes_core::AgentError;
 
-use crate::gateway_main::prompt_yes_no;
+use hermes_cli::gateway_main::prompt_yes_no;
 
 fn profile_aliases_path(profiles_dir: &Path) -> PathBuf {
     profiles_dir.join("aliases.json")

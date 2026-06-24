@@ -320,6 +320,17 @@ pub enum CliCommand {
         /// Enable pyannote speaker diarization.
         diarize: bool,
     },
+    /// `hermes talk <action> [options]` — real-time voice dialog (requires `--features talk`).
+    ///
+    /// Actions: `run` (default), `init`, `list-devices`, `probe-capture`, `probe-playback`, `enroll`.
+    #[cfg(feature = "talk")]
+    Talk {
+        action: Option<String>,
+        /// Path to talk config.toml (default: `$HERMES_HOME/hermes-talk/config.toml`).
+        config: Option<String>,
+        /// Seconds for `probe-capture` / `enroll` (default: 5).
+        seconds: u64,
+    },
     /// Hidden hook for `scripts/install.ps1` / `install.sh --ensure`.
     EnsureDep {
         dep: String,

@@ -7,8 +7,8 @@ use hermes_gateway::gateway::IncomingMessage;
 use hermes_gateway::{Gateway, GatewayError};
 use hermes_tools::PlanPhase;
 
-use hermes_cli::app::bridge_tool_registry;
-use hermes_cli::plan_mode::{
+use crate::app::bridge_tool_registry;
+use crate::plan_mode::{
     PlanApprovalParseStyle, PlanModeSlashAction, PlanTurnPrep, finalize_plan_agent_reply,
     parse_plan_mode_slash_args, plan_mode_help_text, plan_mode_status_text, prepare_plan_turn,
 };

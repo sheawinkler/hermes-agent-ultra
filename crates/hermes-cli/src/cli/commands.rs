@@ -947,6 +947,29 @@ pub fn parse_meeting(args: &[OsString]) -> Result<CliCommand, clap::Error> {
     })
 }
 
+#[cfg(feature = "talk")]
+#[derive(Parser, Debug, Clone)]
+#[command(name = "talk", about = "Real-time voice dialog (ASR + LLM + TTS)")]
+struct TalkArgs {
+    /// Action: `run`, `init`, `list-devices`, `probe-capture`, `probe-playback`, `enroll`.
+    action: Option<String>,
+    /// Path to config.toml (default: `$HERMES_HOME/hermes-talk/config.toml`).
+    #[arg(long)]
+    config: Option<String>,
+    /// Seconds for `probe-capture` / `enroll`.
+    #[arg(long, default_value_t = 5)]
+    seconds: u64,
+}
+
+#[cfg(feature = "talk")]
+pub fn parse_talk(args: &[OsString]) -> Result<CliCommand, clap::Error> {
+    parse_subcommand::<TalkArgs, _>(args, |a| CliCommand::Talk {
+        action: a.action,
+        config: a.config,
+        seconds: a.seconds,
+    })
+}
+
 #[derive(Parser, Debug, Clone)]
 #[command(name = "insights", about = "insights command")]
 struct InsightsArgs {
@@ -1123,8 +1146,8 @@ pub fn parse_ensure_dep(args: &[OsString]) -> Result<CliCommand, clap::Error> {
 /// Fully-specified subcommands for shell completion (built on demand, not at startup).
 pub fn all_subcommand_commands() -> Vec<clap::Command> {
     macro_rules! commands {
-        ($($parser:ty),* $(,)?) => {
-            vec![$(<$parser as CommandFactory>::command()),*]
+        ($($(#[$attr:meta])* $parser:ty),* $(,)?) => {
+            vec![$($(#[$attr])* <$parser as CommandFactory>::command()),*]
         };
     }
 
@@ -1165,6 +1188,8 @@ pub fn all_subcommand_commands() -> Vec<clap::Command> {
         MediaArgs,
         McpArgs,
         MeetingArgs,
+        #[cfg(feature = "talk")]
+        TalkArgs,
         SessionsArgs,
         ResumeArgs,
         InsightsArgs,

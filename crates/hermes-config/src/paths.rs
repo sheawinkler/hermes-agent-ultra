@@ -164,6 +164,19 @@ pub fn cron_dir() -> PathBuf {
     hermes_home().join("cron")
 }
 
+/// Subdirectory under Hermes home for voice dialog (`hermes talk`).
+pub const TALK_SUBDIR: &str = "hermes-talk";
+
+/// `$hermes_home/hermes-talk/`
+pub fn talk_dir() -> PathBuf {
+    hermes_home().join(TALK_SUBDIR)
+}
+
+/// `$hermes_home/hermes-talk/config.toml`
+pub fn talk_config_path() -> PathBuf {
+    talk_dir().join("config.toml")
+}
+
 /// `$hermes_home/interest.db` — local user interest (POI) topic store.
 pub fn interest_db_path() -> PathBuf {
     hermes_home().join("interest.db")
@@ -382,6 +395,8 @@ mod tests {
         assert_eq!(skills_dir(), home.join("skills"));
         assert_eq!(sessions_dir(), home.join("sessions"));
         assert_eq!(cron_dir(), home.join("cron"));
+        assert_eq!(talk_dir(), home.join("hermes-talk"));
+        assert_eq!(talk_config_path(), home.join("hermes-talk/config.toml"));
         assert_eq!(env_path(), home.join(".env"));
 
         // -- Part 2: explicit home override --

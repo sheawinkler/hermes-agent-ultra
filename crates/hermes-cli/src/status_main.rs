@@ -15,7 +15,7 @@ use crate::doctor::{
     best_effort_sweep_expired_pending_pastes, collect_debug_report, prune_old_debug_reports,
     record_pending_paste,
 };
-use crate::state_paths::hermes_state_root;
+use hermes_cli::state_paths::hermes_state_root;
 
 pub(crate) async fn run_status(cli: Cli) -> Result<(), AgentError> {
     println!("Hermes Agent Ultra — Status");
@@ -232,7 +232,7 @@ pub(crate) async fn run_dashboard(
         });
     }
 
-    crate::gateway_runtime::run_gateway(
+    hermes_cli::gateway_runtime::run_gateway(
         cli,
         Some("run".to_string()),
         false,

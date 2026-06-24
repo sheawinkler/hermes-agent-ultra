@@ -1,0 +1,199 @@
+# ============================================================
+# hermes-talk 完整配置模板
+# `hermes talk init` 会复制到 $HERMES_HOME/hermes-talk/config.toml
+#
+# 所有配置节均保留；当前桌面默认 sherpa-onnx，其它 backend 字段以注释形式保留。
+# 切换云端：改 [asr]/[tts] backend = "bailian" 并填写 [dashscope]。
+# 切换 Rockchip：改 backend = "local" 并启用 [asr.local] / [tts.local]。
+# ============================================================
+
+# ============================================================
+# 语音识别 (ASR)
+# backend: sherpa | bailian | cloud | dashscope | local | rockchip
+# ============================================================
+[asr]
+backend = "sherpa"
+sample_rate = 16000
+chunk_ms = 100
+format = "pcm"
+# model = "fun-asr-realtime"              # 云端 ASR 模型（backend = bailian 时使用）
+# language_hints = ["zh", "en", "ja", "yue", "ko"]
+
+[asr.sherpa]
+model = "models/sensevoice/model.int8.onnx"
+tokens = "models/sensevoice/tokens.txt"
+language = "auto"
+use_itn = true
+num_threads = 2
+provider = "cpu"
+
+# Rockchip NPU ASR（backend = local 时启用）
+[asr.local]
+# data_path = "data"
+# auth_config = '{ "trial": 1, "rkauth_modules_config": [{ "module": "asr", "license_path": "auth/key_asr.lic" }] }'
+
+# ============================================================
+# 语音合成 (TTS)
+# backend: sherpa | bailian | cloud | dashscope | local | rockchip
+# ============================================================
+[tts]
+backend = "sherpa"
+sample_rate = 24000
+format = "pcm"
+# model = "cosyvoice-v3-flash"          # 云端 TTS 模型
+# voice = "longanyang"                  # 云端 TTS 音色
+# language_hints = ["zh", "en"]
+
+[tts.sherpa]
+model = "models/kokoro/model.onnx"
+voices = "models/kokoro/voices.bin"
+tokens = "models/kokoro/tokens.txt"
+data_dir = "models/kokoro/espeak-ng-data"
+dict_dir = "models/kokoro/dict"
+lexicon = "models/kokoro/lexicon-us-en.txt,models/kokoro/lexicon-zh.txt"
+length_scale = 1.0
+# lang = "zh"
+sid = 0
+speed = 1.0
+num_threads = 2
+provider = "cpu"
+
+# Rockchip NPU TTS（backend = local 时启用）
+[tts.local]
+# auth_config = '{ "trial": 1, "license_path": "auth/key_tts.lic" }'
+# model_path = "models/rk3588"
+# dicts_path = "frontend_extras"
+# speaker_id = 0
+# alpha = 1.0
+
+# ============================================================
+# 云端 DashScope（backend = bailian/cloud/dashscope 时必填）
+# 也可设置环境变量 DASHSCOPE_API_KEY
+# ============================================================
+[dashscope]
+api_key = "sk-your-dashscope-key"
+ws_url = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+
+# ============================================================
+# 大语言模型 (LLM)
+# ============================================================
+[llm]
+base_url = "http://127.0.0.1:11080/v1"
+api_key = "sk-your-key"
+model = "your-model"
+system_prompt = "语音助手，先短答。"
+max_tokens = 80
+temperature = 0.7
+warmup_on_start = true
+user_id = "user"
+tools_enabled = false
+thinking_enabled = false
+# thinking_budget = 8192
+# reasoning_effort = "medium"
+# execute_allowlist = ["date", "uptime", "powershell", "cmd", "ipconfig", "systeminfo"]
+
+[llm.aipc_talk]
+transport = "channel"
+session_key = "talk-hermes"
+url = "ws://127.0.0.1:9100"
+# timeout_secs = 120
+# model = "auto"
+# provider = "openai"
+# 远程 bridge 示例:
+# transport = "ws"
+# url = "ws://127.0.0.1:9100"
+
+# ============================================================
+# 唤醒词（KWS，需 models/kws-zh-en/）
+# ============================================================
+[wake]
+enabled = true
+phrases = ["小白小白"]
+ack_reply = "哎，我在！"
+grace_after_wake_sec = 5
+idle_after_turn_sec = 30
+sleep_phrases = ["休眠", "安静", "mute", "闭嘴", "别说了", "停止", "silence", "shut up"]
+model_dir = "models/kws-zh-en"
+tokens_type = "phone+ppinyin"
+lexicon = "models/kws-zh-en/en.phone"
+boost_score = 2.0
+trigger_threshold = 0.35
+num_threads = 2
+# 以下留空时由 model_dir 自动推导
+# encoder = "models/kws-zh-en/encoder.onnx"
+# decoder = "models/kws-zh-en/decoder.onnx"
+# joiner = "models/kws-zh-en/joiner.onnx"
+# tokens = "models/kws-zh-en/tokens.txt"
+# bpe_model = "models/kws-zh-en/bpe.model"
+# phrase = "小白小白"                   # 已废弃，请用 phrases
+
+# ============================================================
+# 会话编排
+# ============================================================
+[orchestrator]
+min_silence_ms = 450
+endpoint_silence_ms = 800
+trigger_on_asr_final = true
+cold_start_sec = 1
+min_final_chars = 2
+grace_min_final_chars = 2
+sentence_min_len = 12
+tts_first_chunk_chars = 6
+barge_in_frames = 2
+barge_in_enabled = true
+speculative_llm = false
+speculative_stable_ms = 400
+min_rms_trigger = 0.0
+min_rms_barge_in = 0.0
+barge_in_sustain_frames = 4
+barge_in_cooldown_ms = 1000
+barge_in_requires_wake = true
+max_context_messages = 20
+offline_continuation_ms = 800
+vad_mode = 3
+
+# ============================================================
+# 音频设备（留空 = 系统默认）
+# ============================================================
+[audio]
+input_device = ""
+output_device = ""
+
+# ============================================================
+# VAD 语音活动检测（Silero，需 models/vad/silero_vad.onnx）
+# ============================================================
+[vad]
+model_path = "models/vad/silero_vad.onnx"
+threshold = 0.5
+min_silence_duration = 0.55
+min_speech_duration = 0.25
+max_speech_duration = 15.0
+
+# ============================================================
+# 音频降噪（DPDFNet，需 models/denoise/dpdfnet_baseline.onnx）
+# ============================================================
+[denoise]
+enabled = false
+variant = "dpdfnet_baseline"
+model_dir = "models/denoise"
+# model_path = "models/denoise/dpdfnet_baseline.onnx"
+
+# ============================================================
+# 回声消除（Speex AEC）
+# ============================================================
+[aec]
+enabled = false
+frame_size = 256
+filter_length = 2048
+enable_preprocess = false
+delay_ms = 0
+
+# ============================================================
+# 声纹验证（需先 `hermes talk enroll`）
+# ============================================================
+[speaker]
+enabled = false
+threshold = 0.6
+model_dir = "models/speaker"
+# model_path = "models/speaker/3dspeaker.onnx"
+voiceprint_path = "voiceprint.bin"

@@ -99,6 +99,37 @@ pub async fn deliver_cron_completion_to_webhooks(
     Ok(())
 }
 
+/// POST each [`CronCompletionEvent`] to every URL in `webhooks.json` (same file as `hermes webhook`).
+pub async fn run_cron_webhook_delivery_loop(
+    mut rx: tokio::sync::broadcast::Receiver<CronCompletionEvent>,
+    webhooks_json: std::path::PathBuf,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+
+    let client = match webhook_http_client() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("cron webhooks: HTTP client build failed: {e}");
+            return;
+        }
+    };
+
+    loop {
+        let ev = match rx.recv().await {
+            Ok(ev) => ev,
+            Err(RecvError::Lagged(n)) => {
+                tracing::debug!(n, "cron webhook receiver lagged; skipped messages");
+                continue;
+            }
+            Err(RecvError::Closed) => break,
+        };
+
+        if let Err(e) = deliver_cron_completion_to_webhooks(&webhooks_json, &ev, &client).await {
+            tracing::warn!("cron webhook delivery: {e}");
+        }
+    }
+}
+
 /// Default HTTP client for gateway cron webhook sidecar.
 pub fn webhook_http_client() -> Result<reqwest::Client, AgentError> {
     reqwest::Client::builder()

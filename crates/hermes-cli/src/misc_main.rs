@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::auth_main::{mask_secret, run_auth};
 use crate::provenance::{provenance_sidecar_path_for_artifact, verify_artifact_provenance};
-use crate::state_paths::hermes_state_root;
+use hermes_cli::state_paths::hermes_state_root;
 
 pub(crate) async fn run_dump(
     cli: Cli,

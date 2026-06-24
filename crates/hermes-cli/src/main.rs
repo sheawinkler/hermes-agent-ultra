@@ -3,25 +3,17 @@
 //! Initializes logging, parses CLI arguments, and dispatches to the
 //! appropriate subcommand handler.
 
-mod auth_main;
 mod cli_setup;
 mod cron_main;
 mod dispatch;
 mod doctor;
-mod gateway_handlers;
-mod gateway_main;
-mod gateway_plan_mode;
-mod gateway_process;
-mod gateway_runtime;
 mod interactive_lock;
 mod misc_main;
-mod oneshot;
 mod profile_main;
 mod provenance;
 mod route_learning;
 mod session_resume;
 mod setup;
-mod state_paths;
 mod status_main;
 
 #[cfg(test)]
@@ -29,22 +21,20 @@ mod main_tests;
 
 pub(crate) use cli_setup::{run_config, run_model, run_tools};
 pub(crate) use cron_main::{run_cron, run_webhook};
-pub(crate) use gateway_runtime::run_gateway;
-pub(crate) use misc_main::read_setup_stdin_line;
-pub(crate) use oneshot::{
-    handle_local_slash_query, oneshot_auto_verify_oauth_provider, oneshot_should_use_app_runtime,
-    print_app_oneshot_result,
+pub(crate) use hermes_cli::auth_main;
+pub(crate) use hermes_cli::gateway_process;
+pub(crate) use hermes_cli::gateway_runtime::{gateway_platform_menu_label, run_gateway};
+pub(crate) use hermes_cli::oneshot::{
+    handle_local_slash_query, infer_oauth_provider_from_error_message, oneshot_auth_is_refreshable,
+    oneshot_auto_verify_oauth_provider, oneshot_should_use_app_runtime, print_app_oneshot_result,
+    query_is_local_slash_command,
 };
-pub(crate) use state_paths::{hermes_state_root, log_legacy_home_env_hint};
+pub(crate) use hermes_cli::state_paths::{hermes_state_root, log_legacy_home_env_hint};
+pub(crate) use misc_main::read_setup_stdin_line;
 pub(crate) use status_main::{run_dashboard, run_debug, run_logs, run_status};
 
-use auth_main::lookup_secret_from_vault;
-use hermes_auth::FileTokenStore;
 use hermes_cli::App;
-use hermes_cli::app::provider_api_key_from_env;
 use hermes_cli::cli::Cli;
-use hermes_cli::paths::CliStateRoot;
-use hermes_config::load_config;
 use hermes_core::AgentError;
 use hermes_telemetry::init_telemetry_from_env;
 use interactive_lock::InteractiveSessionLockGuard;
@@ -117,13 +107,15 @@ async fn async_main(cli: Cli) {
     dispatch::run(cli).await;
 }
 
-fn init_tracing(verbose: bool, interactive_tui: bool, gateway: bool) {
+fn init_tracing(verbose: bool, interactive_tui: bool, gateway: bool, talk: bool) {
     let default = if interactive_tui {
         if verbose {
             "info,rustls=warn,hyper=warn,h2=warn"
         } else {
             "error,rustls=warn,hyper=warn,h2=warn"
         }
+    } else if talk {
+        "info,rustls=warn,hyper=warn,h2=warn"
     } else if verbose {
         "debug,hermes_cron=debug,rustls=warn,hyper=warn,h2=warn"
     } else if gateway {
@@ -160,60 +152,4 @@ async fn run_interactive(cli: Cli) -> Result<(), AgentError> {
     let _session_lock = InteractiveSessionLockGuard::acquire(&hermes_state_root(&cli))?;
     let app = App::new(cli).await?;
     hermes_cli::tui::run(app).await
-}
-
-pub(crate) async fn prompt_line(prompt: impl Into<String>) -> Result<String, AgentError> {
-    let prompt = prompt.into();
-    let line = tokio::task::spawn_blocking(move || {
-        use std::io::{self, Write};
-        print!("{}", prompt);
-        let _ = io::stdout().flush();
-        let mut buf = String::new();
-        io::stdin().read_line(&mut buf).map(|_| buf)
-    })
-    .await
-    .map_err(|e| AgentError::Io(format!("stdin task: {}", e)))?
-    .map_err(|e| AgentError::Io(format!("stdin: {}", e)))?;
-    Ok(line.trim().to_string())
-}
-
-pub(crate) async fn resolve_llm_login_token(
-    cli: &Cli,
-    provider: &str,
-) -> Result<String, AgentError> {
-    if let Some(k) = provider_api_key_from_env(provider) {
-        return Ok(k);
-    }
-    let vault_path = CliStateRoot::from_state_root(&hermes_state_root(cli)).secret_vault();
-    if vault_path.exists() {
-        let store = FileTokenStore::new(vault_path).await?;
-        if let Some((_provider, token)) = lookup_secret_from_vault(&store, provider).await {
-            return Ok(token);
-        }
-    }
-    let cfg =
-        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
-    if let Some(k) = cfg
-        .llm_providers
-        .get(provider)
-        .and_then(|c| c.api_key.as_deref())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        return Ok(k.to_string());
-    }
-    let fallback_var = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
-    let msg = format!(
-        "No API key in env or config for provider '{}'.\n\
-         Set {} (or `hermes secrets set {}`; plaintext fallback: `hermes config set llm.{}.api_key ...`) or paste key now: ",
-        provider, fallback_var, provider, provider
-    );
-    let pasted = prompt_line(msg).await?;
-    if pasted.is_empty() {
-        return Err(AgentError::Config(format!(
-            "Missing API key for provider '{}'",
-            provider
-        )));
-    }
-    Ok(pasted)
 }

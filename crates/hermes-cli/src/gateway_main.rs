@@ -5,15 +5,15 @@
 //!
 //! Functions in this module access their parent (`super::`) for a few items:
 //! - `crate::auth_main::run_auth`
-//! - `super::prompt_line`
+//! - `crate::prompt::prompt_line`
 //!
 //! Inbound message loops live in `crate::gateway_runtime`.
 
+use crate::app::{async_tool_dispatch_for, build_agent_config, build_provider};
+use crate::cli::Cli;
+use crate::whatsapp_wizard;
 use hermes_agent::AgentLoop;
 use hermes_agent::session_persistence::SessionPersistence;
-use hermes_cli::app::{async_tool_dispatch_for, build_agent_config, build_provider};
-use hermes_cli::cli::Cli;
-use hermes_cli::whatsapp_wizard;
 use hermes_config::{
     GatewayConfig, PlatformConfig, UnauthorizedDmBehavior, hermes_home, load_user_config_file,
 };
@@ -308,9 +308,9 @@ pub(crate) fn set_extra_string_if_nonempty(platform: &mut PlatformConfig, key: &
     }
 }
 
-pub(crate) async fn prompt_yes_no(question: &str, default_yes: bool) -> Result<bool, AgentError> {
+pub async fn prompt_yes_no(question: &str, default_yes: bool) -> Result<bool, AgentError> {
     let hint = if default_yes { "[Y/n]" } else { "[y/N]" };
-    let ans = super::prompt_line(format!("{question} {hint}: ")).await?;
+    let ans = crate::prompt::prompt_line(format!("{question} {hint}: ")).await?;
     if ans.trim().is_empty() {
         return Ok(default_yes);
     }
@@ -359,7 +359,7 @@ pub(crate) async fn resolve_telegram_bot_token_for_gateway_setup(
         "Telegram bot token (from @BotFather): "
     };
 
-    let entered = super::prompt_line(prompt).await?;
+    let entered = crate::prompt::prompt_line(prompt).await?;
     let trimmed = entered.trim();
     if !trimmed.is_empty() {
         return Ok(trimmed.to_string());
@@ -965,28 +965,30 @@ pub(crate) async fn configure_platform_basic_prompts(
 
     match key {
         "discord" => {
-            let token = super::prompt_line("Discord bot token: ").await?;
+            let token = crate::prompt::prompt_line("Discord bot token: ").await?;
             if !token.trim().is_empty() {
                 p.token = Some(token.trim().to_string());
             }
-            let app_id = super::prompt_line("Discord application_id (optional): ").await?;
+            let app_id = crate::prompt::prompt_line("Discord application_id (optional): ").await?;
             set_extra_string_if_nonempty(p, "application_id", &app_id);
             let allowed =
-                super::prompt_line("Discord allowed users (comma-separated, optional): ").await?;
+                crate::prompt::prompt_line("Discord allowed users (comma-separated, optional): ")
+                    .await?;
             if !allowed.trim().is_empty() {
                 p.allowed_users = parse_csv_list(&allowed);
             }
-            let home = super::prompt_line("Discord home channel (optional): ").await?;
+            let home = crate::prompt::prompt_line("Discord home channel (optional): ").await?;
             if !home.trim().is_empty() {
                 p.home_channel = Some(home.trim().to_string());
             }
         }
         "slack" => {
-            let token = super::prompt_line("Slack bot token (xoxb-...): ").await?;
+            let token = crate::prompt::prompt_line("Slack bot token (xoxb-...): ").await?;
             if !token.trim().is_empty() {
                 p.token = Some(token.trim().to_string());
             }
-            let app_token = super::prompt_line("Slack app token (xapp-..., optional): ").await?;
+            let app_token =
+                crate::prompt::prompt_line("Slack app token (xapp-..., optional): ").await?;
             set_extra_string_if_nonempty(p, "app_token", &app_token);
             let socket_mode = prompt_yes_no("Slack use socket_mode?", true).await?;
             p.extra.insert(
@@ -996,61 +998,66 @@ pub(crate) async fn configure_platform_basic_prompts(
         }
         "matrix" => {
             let homeserver =
-                super::prompt_line("Matrix homeserver_url (e.g. https://matrix.org): ").await?;
+                crate::prompt::prompt_line("Matrix homeserver_url (e.g. https://matrix.org): ")
+                    .await?;
             set_extra_string_if_nonempty(p, "homeserver_url", &homeserver);
-            let user_id = super::prompt_line("Matrix user_id (e.g. @bot:matrix.org): ").await?;
+            let user_id =
+                crate::prompt::prompt_line("Matrix user_id (e.g. @bot:matrix.org): ").await?;
             set_extra_string_if_nonempty(p, "user_id", &user_id);
-            let token = super::prompt_line("Matrix access token: ").await?;
+            let token = crate::prompt::prompt_line("Matrix access token: ").await?;
             if !token.trim().is_empty() {
                 p.token = Some(token.trim().to_string());
             }
-            let room = super::prompt_line("Matrix home room_id (optional): ").await?;
+            let room = crate::prompt::prompt_line("Matrix home room_id (optional): ").await?;
             set_extra_string_if_nonempty(p, "room_id", &room);
         }
         "mattermost" => {
-            let server_url = super::prompt_line("Mattermost server_url: ").await?;
+            let server_url = crate::prompt::prompt_line("Mattermost server_url: ").await?;
             set_extra_string_if_nonempty(p, "server_url", &server_url);
-            let token = super::prompt_line("Mattermost bot token: ").await?;
+            let token = crate::prompt::prompt_line("Mattermost bot token: ").await?;
             if !token.trim().is_empty() {
                 p.token = Some(token.trim().to_string());
             }
-            let team_id = super::prompt_line("Mattermost team_id (optional): ").await?;
+            let team_id = crate::prompt::prompt_line("Mattermost team_id (optional): ").await?;
             set_extra_string_if_nonempty(p, "team_id", &team_id);
-            let home = super::prompt_line("Mattermost home channel (optional): ").await?;
+            let home = crate::prompt::prompt_line("Mattermost home channel (optional): ").await?;
             if !home.trim().is_empty() {
                 p.home_channel = Some(home.trim().to_string());
             }
         }
         "signal" => {
             let account =
-                super::prompt_line("Signal phone_number/account (e.g. +15551234567): ").await?;
+                crate::prompt::prompt_line("Signal phone_number/account (e.g. +15551234567): ")
+                    .await?;
             set_extra_string_if_nonempty(p, "phone_number", &account);
             let api_url =
-                super::prompt_line("Signal api_url (default http://localhost:8080): ").await?;
+                crate::prompt::prompt_line("Signal api_url (default http://localhost:8080): ")
+                    .await?;
             set_extra_string_if_nonempty(p, "api_url", &api_url);
         }
         "dingtalk" => {
-            let client_id = super::prompt_line("DingTalk client_id/appkey: ").await?;
+            let client_id = crate::prompt::prompt_line("DingTalk client_id/appkey: ").await?;
             set_extra_string_if_nonempty(p, "client_id", &client_id);
-            let client_secret = super::prompt_line("DingTalk client_secret: ").await?;
+            let client_secret = crate::prompt::prompt_line("DingTalk client_secret: ").await?;
             set_extra_string_if_nonempty(p, "client_secret", &client_secret);
         }
         "feishu" => {
-            let app_id = super::prompt_line("Feishu/Lark app_id: ").await?;
+            let app_id = crate::prompt::prompt_line("Feishu/Lark app_id: ").await?;
             set_extra_string_if_nonempty(p, "app_id", &app_id);
-            let app_secret = super::prompt_line("Feishu/Lark app_secret: ").await?;
+            let app_secret = crate::prompt::prompt_line("Feishu/Lark app_secret: ").await?;
             set_extra_string_if_nonempty(p, "app_secret", &app_secret);
-            let verify = super::prompt_line("Feishu verification_token (optional): ").await?;
+            let verify =
+                crate::prompt::prompt_line("Feishu verification_token (optional): ").await?;
             set_extra_string_if_nonempty(p, "verification_token", &verify);
-            let encrypt_key = super::prompt_line("Feishu encrypt_key (optional): ").await?;
+            let encrypt_key = crate::prompt::prompt_line("Feishu encrypt_key (optional): ").await?;
             set_extra_string_if_nonempty(p, "encrypt_key", &encrypt_key);
         }
         "wecom" => {
-            let bot_id = super::prompt_line("WeCom AI Bot bot_id (WECOM_BOT_ID): ").await?;
+            let bot_id = crate::prompt::prompt_line("WeCom AI Bot bot_id (WECOM_BOT_ID): ").await?;
             set_extra_string_if_nonempty(p, "bot_id", &bot_id);
-            let secret = super::prompt_line("WeCom AI Bot secret (WECOM_SECRET): ").await?;
+            let secret = crate::prompt::prompt_line("WeCom AI Bot secret (WECOM_SECRET): ").await?;
             set_extra_string_if_nonempty(p, "secret", &secret);
-            let ws = super::prompt_line(
+            let ws = crate::prompt::prompt_line(
                 "WeCom websocket_url (default wss://openws.work.weixin.qq.com): ",
             )
             .await?;
@@ -1059,31 +1066,33 @@ pub(crate) async fn configure_platform_basic_prompts(
             }
         }
         "wecom_callback" => {
-            let corp_id = super::prompt_line("WeCom callback corp_id: ").await?;
+            let corp_id = crate::prompt::prompt_line("WeCom callback corp_id: ").await?;
             set_extra_string_if_nonempty(p, "corp_id", &corp_id);
-            let corp_secret = super::prompt_line("WeCom callback corp_secret: ").await?;
+            let corp_secret = crate::prompt::prompt_line("WeCom callback corp_secret: ").await?;
             set_extra_string_if_nonempty(p, "corp_secret", &corp_secret);
-            let agent_id = super::prompt_line("WeCom callback agent_id: ").await?;
+            let agent_id = crate::prompt::prompt_line("WeCom callback agent_id: ").await?;
             set_extra_string_if_nonempty(p, "agent_id", &agent_id);
-            let token = super::prompt_line("WeCom callback token: ").await?;
+            let token = crate::prompt::prompt_line("WeCom callback token: ").await?;
             set_extra_string_if_nonempty(p, "token", &token);
-            let aes = super::prompt_line("WeCom callback encoding_aes_key: ").await?;
+            let aes = crate::prompt::prompt_line("WeCom callback encoding_aes_key: ").await?;
             set_extra_string_if_nonempty(p, "encoding_aes_key", &aes);
-            let host = super::prompt_line("WeCom callback host (default 0.0.0.0): ").await?;
+            let host =
+                crate::prompt::prompt_line("WeCom callback host (default 0.0.0.0): ").await?;
             set_extra_string_if_nonempty(p, "host", &host);
-            let port = super::prompt_line("WeCom callback port (default 8645): ").await?;
+            let port = crate::prompt::prompt_line("WeCom callback port (default 8645): ").await?;
             if let Ok(v) = port.trim().parse::<u16>() {
                 p.extra
                     .insert("port".to_string(), serde_json::Value::from(v));
             }
             let path =
-                super::prompt_line("WeCom callback path (default /wecom/callback): ").await?;
+                crate::prompt::prompt_line("WeCom callback path (default /wecom/callback): ")
+                    .await?;
             set_extra_string_if_nonempty(p, "path", &path);
         }
         "qqbot" => {
-            let app_id = super::prompt_line("QQBot app_id: ").await?;
+            let app_id = crate::prompt::prompt_line("QQBot app_id: ").await?;
             set_extra_string_if_nonempty(p, "app_id", &app_id);
-            let secret = super::prompt_line("QQBot client_secret: ").await?;
+            let secret = crate::prompt::prompt_line("QQBot client_secret: ").await?;
             set_extra_string_if_nonempty(p, "client_secret", &secret);
             let markdown = prompt_yes_no("QQBot markdown_support?", true).await?;
             p.extra.insert(
@@ -1092,72 +1101,75 @@ pub(crate) async fn configure_platform_basic_prompts(
             );
         }
         "bluebubbles" => {
-            let server_url = super::prompt_line("BlueBubbles server_url: ").await?;
+            let server_url = crate::prompt::prompt_line("BlueBubbles server_url: ").await?;
             set_extra_string_if_nonempty(p, "server_url", &server_url);
-            let password = super::prompt_line("BlueBubbles password: ").await?;
+            let password = crate::prompt::prompt_line("BlueBubbles password: ").await?;
             set_extra_string_if_nonempty(p, "password", &password);
         }
         "email" => {
-            let username = super::prompt_line("Email username/address: ").await?;
+            let username = crate::prompt::prompt_line("Email username/address: ").await?;
             set_extra_string_if_nonempty(p, "username", &username);
-            let password = super::prompt_line("Email password/app password: ").await?;
+            let password = crate::prompt::prompt_line("Email password/app password: ").await?;
             set_extra_string_if_nonempty(p, "password", &password);
-            let imap_host = super::prompt_line("Email imap_host: ").await?;
+            let imap_host = crate::prompt::prompt_line("Email imap_host: ").await?;
             set_extra_string_if_nonempty(p, "imap_host", &imap_host);
-            let smtp_host = super::prompt_line("Email smtp_host: ").await?;
+            let smtp_host = crate::prompt::prompt_line("Email smtp_host: ").await?;
             set_extra_string_if_nonempty(p, "smtp_host", &smtp_host);
-            let imap_port = super::prompt_line("Email imap_port (default 993): ").await?;
+            let imap_port = crate::prompt::prompt_line("Email imap_port (default 993): ").await?;
             if let Ok(v) = imap_port.trim().parse::<u16>() {
                 p.extra
                     .insert("imap_port".to_string(), serde_json::Value::from(v));
             }
-            let smtp_port = super::prompt_line("Email smtp_port (default 587): ").await?;
+            let smtp_port = crate::prompt::prompt_line("Email smtp_port (default 587): ").await?;
             if let Ok(v) = smtp_port.trim().parse::<u16>() {
                 p.extra
                     .insert("smtp_port".to_string(), serde_json::Value::from(v));
             }
         }
         "sms" => {
-            let sid = super::prompt_line("Twilio account_sid: ").await?;
+            let sid = crate::prompt::prompt_line("Twilio account_sid: ").await?;
             set_extra_string_if_nonempty(p, "account_sid", &sid);
-            let auth = super::prompt_line("Twilio auth_token: ").await?;
+            let auth = crate::prompt::prompt_line("Twilio auth_token: ").await?;
             set_extra_string_if_nonempty(p, "auth_token", &auth);
-            let from = super::prompt_line("Twilio from_number (E.164): ").await?;
+            let from = crate::prompt::prompt_line("Twilio from_number (E.164): ").await?;
             set_extra_string_if_nonempty(p, "from_number", &from);
         }
         "homeassistant" => {
             let base_url =
-                super::prompt_line("HomeAssistant base_url (e.g. http://127.0.0.1:8123): ").await?;
+                crate::prompt::prompt_line("HomeAssistant base_url (e.g. http://127.0.0.1:8123): ")
+                    .await?;
             set_extra_string_if_nonempty(p, "base_url", &base_url);
-            let token = super::prompt_line("HomeAssistant long_lived_token: ").await?;
+            let token = crate::prompt::prompt_line("HomeAssistant long_lived_token: ").await?;
             if !token.trim().is_empty() {
                 p.token = Some(token.trim().to_string());
             }
-            let webhook_id = super::prompt_line("HomeAssistant webhook_id (optional): ").await?;
+            let webhook_id =
+                crate::prompt::prompt_line("HomeAssistant webhook_id (optional): ").await?;
             set_extra_string_if_nonempty(p, "webhook_id", &webhook_id);
         }
         "webhook" => {
-            let secret = super::prompt_line("Webhook secret: ").await?;
+            let secret = crate::prompt::prompt_line("Webhook secret: ").await?;
             set_extra_string_if_nonempty(p, "secret", &secret);
-            let port = super::prompt_line("Webhook port (default 9000): ").await?;
+            let port = crate::prompt::prompt_line("Webhook port (default 9000): ").await?;
             if let Ok(v) = port.trim().parse::<u16>() {
                 p.extra
                     .insert("port".to_string(), serde_json::Value::from(v));
             }
-            let path = super::prompt_line("Webhook path (default /webhook): ").await?;
+            let path = crate::prompt::prompt_line("Webhook path (default /webhook): ").await?;
             set_extra_string_if_nonempty(p, "path", &path);
         }
         "api_server" => {
-            let host = super::prompt_line("API server host (default 127.0.0.1): ").await?;
+            let host = crate::prompt::prompt_line("API server host (default 127.0.0.1): ").await?;
             set_extra_string_if_nonempty(p, "host", &host);
-            let port = super::prompt_line("API server port (default 8090): ").await?;
+            let port = crate::prompt::prompt_line("API server port (default 8090): ").await?;
             if let Ok(v) = port.trim().parse::<u16>() {
                 p.extra
                     .insert("port".to_string(), serde_json::Value::from(v));
             }
-            let token =
-                super::prompt_line("API server auth_token (required for non-loopback host): ")
-                    .await?;
+            let token = crate::prompt::prompt_line(
+                "API server auth_token (required for non-loopback host): ",
+            )
+            .await?;
             set_extra_string_if_nonempty(p, "auth_token", &token);
         }
         _ => {}
@@ -1192,7 +1204,7 @@ pub(crate) async fn configure_gateway_platform(
                 .or_insert_with(PlatformConfig::default);
             wx.enabled = true;
             println!("Direct message policy: 1)pairing 2)open 3)allowlist 4)disabled");
-            let dm_choice = super::prompt_line("Choose [1-4] (default 1): ").await?;
+            let dm_choice = crate::prompt::prompt_line("Choose [1-4] (default 1): ").await?;
             match dm_choice.trim() {
                 "2" => {
                     wx.extra
@@ -1202,7 +1214,8 @@ pub(crate) async fn configure_gateway_platform(
                 }
                 "3" => {
                     let ids = parse_csv_list(
-                        &super::prompt_line("Allowed Weixin user IDs (comma-separated): ").await?,
+                        &crate::prompt::prompt_line("Allowed Weixin user IDs (comma-separated): ")
+                            .await?,
                     );
                     wx.extra
                         .insert("dm_policy".to_string(), serde_json::json!("allowlist"));
@@ -1227,7 +1240,7 @@ pub(crate) async fn configure_gateway_platform(
                 }
             }
             println!("Group policy: 1)disabled 2)open 3)allowlist");
-            let group_choice = super::prompt_line("Choose [1-3] (default 1): ").await?;
+            let group_choice = crate::prompt::prompt_line("Choose [1-3] (default 1): ").await?;
             match group_choice.trim() {
                 "2" => {
                     wx.extra
@@ -1237,7 +1250,8 @@ pub(crate) async fn configure_gateway_platform(
                 }
                 "3" => {
                     let ids = parse_csv_list(
-                        &super::prompt_line("Allowed Weixin group IDs (comma-separated): ").await?,
+                        &crate::prompt::prompt_line("Allowed Weixin group IDs (comma-separated): ")
+                            .await?,
                     );
                     wx.extra
                         .insert("group_policy".to_string(), serde_json::json!("allowlist"));
@@ -1255,7 +1269,7 @@ pub(crate) async fn configure_gateway_platform(
                         .insert("group_allow_from".to_string(), serde_json::json!([]));
                 }
             }
-            let home = super::prompt_line("Weixin home channel (optional): ").await?;
+            let home = crate::prompt::prompt_line("Weixin home channel (optional): ").await?;
             if !home.trim().is_empty() {
                 wx.home_channel = Some(home.trim().to_string());
             }
@@ -1288,7 +1302,7 @@ pub(crate) async fn configure_gateway_platform(
             println!(
                 "Telegram user ID: message @userinfobot on Telegram to get your numeric user ID."
             );
-            let allowed = super::prompt_line(
+            let allowed = crate::prompt::prompt_line(
                 "Telegram allowed user IDs (comma-separated, required; use * for any user): ",
             )
             .await?;
@@ -1300,7 +1314,7 @@ pub(crate) async fn configure_gateway_platform(
             }
             apply_telegram_allowlists(tg, &allowed_users);
 
-            let group_allowed = super::prompt_line(
+            let group_allowed = crate::prompt::prompt_line(
                 "Telegram group-only allowed user IDs (comma-separated, optional): ",
             )
             .await?;
@@ -1318,9 +1332,10 @@ pub(crate) async fn configure_gateway_platform(
                 );
             }
 
-            let group_chats =
-                super::prompt_line("Telegram allowed group chat IDs (comma-separated, optional): ")
-                    .await?;
+            let group_chats = crate::prompt::prompt_line(
+                "Telegram allowed group chat IDs (comma-separated, optional): ",
+            )
+            .await?;
             let group_chat_ids = parse_csv_list(&group_chats);
             if !group_chat_ids.is_empty() {
                 tg.extra.insert(
@@ -1342,7 +1357,7 @@ pub(crate) async fn configure_gateway_platform(
                 println!(
                     "Webhook mode: Telegram pushes updates to your HTTPS endpoint (HTTP API)."
                 );
-                let webhook_url = super::prompt_line(
+                let webhook_url = crate::prompt::prompt_line(
                     "Telegram webhook URL (HTTPS, e.g. https://my-app.example.com/telegram): ",
                 )
                 .await?;
@@ -1356,7 +1371,7 @@ pub(crate) async fn configure_gateway_platform(
 
                 let mut webhook_secret = String::new();
                 while webhook_secret.trim().is_empty() {
-                    webhook_secret = super::prompt_line(
+                    webhook_secret = crate::prompt::prompt_line(
                         "Telegram webhook secret (required; generate with: openssl rand -hex 32): ",
                     )
                     .await?;
@@ -1370,13 +1385,14 @@ pub(crate) async fn configure_gateway_platform(
                 );
 
                 let port =
-                    super::prompt_line("Telegram webhook listen port (default 8443): ").await?;
+                    crate::prompt::prompt_line("Telegram webhook listen port (default 8443): ")
+                        .await?;
                 if let Ok(v) = port.trim().parse::<u16>() {
                     tg.extra
                         .insert("webhook_port".to_string(), serde_json::Value::from(v));
                 }
             }
-            let home = super::prompt_line("Telegram home channel (optional): ").await?;
+            let home = crate::prompt::prompt_line("Telegram home channel (optional): ").await?;
             if !home.trim().is_empty() {
                 tg.home_channel = Some(home.trim().to_string());
             }

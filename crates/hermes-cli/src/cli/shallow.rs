@@ -137,6 +137,12 @@ pub enum ShallowCommand {
         #[arg(trailing_var_arg = true, hide = true, allow_hyphen_values = true)]
         _rest: Vec<String>,
     },
+    #[cfg(feature = "talk")]
+    #[command(disable_help_flag = true)]
+    Talk {
+        #[arg(trailing_var_arg = true, hide = true, allow_hyphen_values = true)]
+        _rest: Vec<String>,
+    },
     #[command(disable_help_flag = true)]
     Interest {
         #[arg(trailing_var_arg = true, hide = true, allow_hyphen_values = true)]

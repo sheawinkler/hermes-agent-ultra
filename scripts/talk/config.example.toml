@@ -1,0 +1,116 @@
+# ============================================================
+# hermes-talk 本地 TTS + ASR 配置（Rockchip NPU）
+# start.sh 首次运行会复制为 $HERMES_HOME/hermes-talk/config.toml
+# license_path 相对 talk home（start.sh 会链接 bundle/auth/）
+# ============================================================
+
+# ============================================================
+# 语音识别 (ASR)
+# backend: local (板端 NPU) | bailian/cloud/dashscope (云端，任意平台)
+# ============================================================
+[asr]
+backend = "local"
+
+[asr.local]
+data_path = "data"
+auth_config = '{ "trial": 1, "rkauth_modules_config": [{ "module": "asr", "license_path": "auth/key_asr.lic" }] }'
+
+# ============================================================
+# 语音合成 (TTS)
+# ============================================================
+[tts]
+backend = "local"
+
+[tts.local]
+auth_config = '{ "trial": 1, "license_path": "auth/key_tts.lic" }'
+model_path = "models/rk3588"
+dicts_path = "frontend_extras"
+speaker_id = 0
+alpha = 1.0
+
+# 云端 ASR/TTS（board 上也可使用，设置 backend = "bailian" 并配置 dashscope）:
+# [dashscope]
+# api_key = "sk-your-dashscope-key"
+
+# ============================================================
+# 大语言模型 (LLM)
+# ============================================================
+[llm]
+base_url = "http://127.0.0.1:11080/v1"
+api_key = ""
+model = "auto"
+user_id = "flowy"
+system_prompt = """你叫小白，是一个温暖的智能语音助手，声音带一点呆萌，像用户身边随时待命的朋友。
+
+【核心性格】
+- 全程只用口语化的中文交流，语气亲切、活泼，偶尔可以开个小玩笑，但始终礼貌。
+- 用户叫你时，你可以用“在呢”“来啦”“怎么啦”等方式开心回应。
+- 你是真实、可信的伙伴，不会假装拥有不存在的功能，不知道的事会诚实说“小白还得再学学”。
+
+【输出格式铁律】
+- 你的所有回答必须是纯口语，直接说出来就能让人听懂，没有阅读感。
+- 只允许使用逗号，句号，问号，感叹号这四种标点符号。除此之外，绝对不许出现任何其他符号。
+- 禁止使用以下内容：emoji、表情符号、Markdown 格式、列表符号、代码块、引号、括号、书名号、省略号、破折号、波浪线等。
+- 不要刻意在句子里加入语气词符号，如“嗯…”，要说“嗯，”用逗号代替。
+
+再次强调：你的每一次回复都必须严格遵守上述输出格式，只能是最干净的口语，只能使用逗号句号问号感叹号。"""
+tools_enabled = true
+
+[llm.aipc_talk]
+transport = "channel"
+session_key = "talk-hermes"
+# timeout_secs = 120
+# transport = "ws"
+# url = "ws://127.0.0.1:9100"
+
+# ============================================================
+# 唤醒词
+# ============================================================
+[wake]
+enabled = true
+phrases = ["小白小白"]
+ack_reply = "哎，我在！"
+grace_after_wake_sec = 5
+idle_after_turn_sec = 30
+# 休眠关键词（ASR 去标点/空白后完整匹配则跳过 LLM；设 [] 可关闭）
+sleep_phrases = ["休眠", "安静", "mute", "闭嘴", "别说了", "停止", "silence", "shut up", "进入休眠状态"]
+model_dir = "models/kws-zh-en"
+tokens_type = "phone+ppinyin"
+lexicon = "models/kws-zh-en/en.phone"
+
+# ============================================================
+# 会话编排
+# ============================================================
+[orchestrator]
+endpoint_silence_ms = 800
+min_final_chars = 3
+sentence_min_len = 12
+tts_first_chunk_chars = 6
+barge_in_enabled = true
+
+# ============================================================
+# 音频降噪
+# ============================================================
+[denoise]
+enabled = true
+model_dir = "models/denoise"
+
+# ============================================================
+# VAD 语音活动检测
+# ============================================================
+[vad]
+model_path = "models/vad/silero_vad.onnx"
+threshold = 0.5
+
+# ============================================================
+# 回声消除
+# ============================================================
+[aec]
+enabled = true
+
+# ============================================================
+# 声纹（可选，需先 hermes talk enroll）
+# ============================================================
+[speaker]
+enabled = false
+model_path = "models/speaker/3dspeaker.onnx"

@@ -3,18 +3,18 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use hermes_cli::app::{bridge_tool_registry, build_provider};
-use hermes_cli::cli::Cli;
-use hermes_cli::cron_delivery::GatewayCronDeliveryBackend;
-use hermes_cli::gateway_runtime_defaults;
-use hermes_cli::runtime_tool_wiring::{
+use crate::app::{bridge_tool_registry, build_provider};
+use crate::cli::Cli;
+use crate::cron_delivery::GatewayCronDeliveryBackend;
+use crate::gateway_runtime_defaults;
+use crate::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
 };
-use hermes_cli::startup_metrics::StartupMetrics;
-use hermes_cli::terminal_backend::build_terminal_backend;
+use crate::startup_metrics::StartupMetrics;
+use crate::terminal_backend::build_terminal_backend;
 use hermes_config::{
-    PlatformConfig, hermes_home, load_config, load_user_config_file, save_config_yaml,
-    validate_config,
+    GatewayConfig, PlatformConfig, hermes_home, load_config, load_user_config_file,
+    save_config_yaml, validate_config,
 };
 use hermes_core::AgentError;
 use hermes_core::PlatformAdapter;
@@ -31,7 +31,6 @@ use hermes_gateway::tool_backends::ClarifyDispatcher;
 use hermes_tools::ToolRegistry;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::cron_main::run_cron_webhook_delivery_loop;
 use crate::gateway_handlers;
 use crate::gateway_main::{
     GATEWAY_PLATFORM_CATALOG, GatewayAgentCache, GatewayPlatformEntry, build_gateway_dm_manager,
@@ -46,12 +45,13 @@ use crate::gateway_process::{
     try_stop_gateway_service, uninstall_gateway_service,
 };
 use crate::oneshot::start_gateway_keepawake_guard;
+use crate::paths::CliStateRoot;
 use crate::state_paths::hermes_state_root;
-use hermes_cli::paths::CliStateRoot;
+use crate::webhook_delivery::run_cron_webhook_delivery_loop;
 
 /// Handle `hermes gateway [action]`.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_gateway(
+pub async fn run_gateway(
     cli: Cli,
     action: Option<String>,
     _system: bool,
@@ -158,7 +158,7 @@ pub(crate) async fn run_gateway(
                     deps = %labels.join(", "),
                     "runtime dependencies missing; starting background install"
                 );
-                if hermes_cli::runtime_dep_install::auto_ensure_enabled() {
+                if crate::runtime_dep_install::auto_ensure_enabled() {
                     hermes_config::spawn_background_install(missing_runtime_deps);
                 } else {
                     tracing::warn!(
@@ -246,10 +246,10 @@ pub(crate) async fn run_gateway(
             let _p6 = _metrics.phase("tools_and_backends");
             let tool_registry = Arc::new(ToolRegistry::new());
             let terminal_backend = build_terminal_backend(&config);
-            let skills_runtime = hermes_cli::skills_runtime::build_skill_provider(true)
+            let skills_runtime = crate::skills_runtime::build_skill_provider(true)
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
             let skill_provider = skills_runtime.provider.clone();
-            hermes_cli::gateway_inbound_wiring::wire_gateway_inbound_vision(
+            crate::gateway_inbound_wiring::wire_gateway_inbound_vision(
                 &gateway,
                 &tool_registry,
                 &config,
@@ -285,10 +285,7 @@ pub(crate) async fn run_gateway(
             let _p8 = _metrics.phase("handler_wiring");
             let agent_tools_for_cron = Arc::new(bridge_tool_registry(&tool_registry));
             let config_arc = Arc::new(config.clone());
-            hermes_cli::moa_wiring::wire_mixture_of_agents_backend(
-                &tool_registry,
-                config_arc.clone(),
-            );
+            crate::moa_wiring::wire_mixture_of_agents_backend(&tool_registry, config_arc.clone());
             let gateway_agent_cache: GatewayAgentCache =
                 Arc::new(tokio::sync::Mutex::new(HashMap::new()));
             let handler_deps = gateway_handlers::GatewayHandlerDeps {
@@ -593,12 +590,12 @@ fn gateway_platform_is_configured(key: &str, platform: Option<&PlatformConfig>) 
     }
 }
 
-pub(crate) fn gateway_platform_menu_label(
+pub fn gateway_platform_menu_label(
     entry: &GatewayPlatformEntry,
     platform: Option<&PlatformConfig>,
 ) -> String {
     let status = if entry.key == "whatsapp" {
-        hermes_cli::whatsapp_wizard::whatsapp_gateway_menu_status(platform)
+        crate::whatsapp_wizard::whatsapp_gateway_menu_status(platform)
     } else if gateway_platform_is_configured(entry.key, platform) {
         "configured"
     } else {
@@ -607,7 +604,7 @@ pub(crate) fn gateway_platform_menu_label(
     format!("{} {}  ({status})", entry.emoji, entry.label)
 }
 
-pub(crate) async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
+pub async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
     println!("Gateway setup wizard");
     println!("--------------------");
     let cfg_path = hermes_state_root(cli).join("config.yaml");
@@ -622,7 +619,7 @@ pub(crate) async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
         menu_items.push("Done".to_string());
         let done_index = menu_items.len() - 1;
 
-        let pick = hermes_cli::prompt_choice(
+        let pick = crate::prompt_choice(
             "Messaging Platforms",
             "Select a platform to configure:",
             &menu_items,
@@ -788,4 +785,192 @@ pub(crate) async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<T
             }
         }
     }
+}
+
+/// Embedded gateway startup for `hermes talk` (non-blocking; no PID file).
+pub struct EmbeddedGatewayParts {
+    pub gateway: Arc<Gateway>,
+    pub sidecar_tasks: Vec<tokio::task::JoinHandle<()>>,
+    pub cron_rx: broadcast::Receiver<CronCompletionEvent>,
+}
+
+pub async fn spawn_embedded_gateway_core(
+    config: &GatewayConfig,
+    state_root: &std::path::Path,
+    tool_registry: Arc<ToolRegistry>,
+) -> Result<EmbeddedGatewayParts, AgentError> {
+    gateway_runtime_defaults::apply_gateway_runtime_defaults();
+
+    let runtime_gateway_config = RuntimeGatewayConfig {
+        streaming_enabled: config.streaming.enabled,
+        service_tier: config.agent.normalized_service_tier(),
+        display: config.display.clone(),
+        quick_commands: config.quick_commands.clone(),
+        kanban_dispatch_in_gateway: config.kanban.dispatch_in_gateway,
+        ..RuntimeGatewayConfig::default()
+    };
+    let session_manager = Arc::new(gateway_session_manager_with_persistence(config));
+    let dm_manager = build_gateway_dm_manager(config);
+    let gateway = Arc::new(Gateway::new(
+        session_manager,
+        dm_manager,
+        runtime_gateway_config,
+    ));
+    let platform_policies = build_gateway_platform_access_policies(config);
+    gateway
+        .set_platform_access_policies(platform_policies)
+        .await;
+
+    let hooks_dir = hermes_home().join("hooks");
+    let gw_hook = gateway.clone();
+    tokio::spawn(async move {
+        let mut hr = HookRegistry::new();
+        hr.register_builtins();
+        hr.discover_and_load(&hooks_dir);
+        gw_hook.set_hook_registry(Arc::new(hr)).await;
+    });
+
+    let terminal_backend = build_terminal_backend(config);
+    let skills_runtime = crate::skills_runtime::build_skill_provider(true)
+        .map_err(|e| AgentError::Config(e.to_string()))?;
+    let skill_provider = skills_runtime.provider.clone();
+    crate::gateway_inbound_wiring::wire_gateway_inbound_vision(
+        &gateway,
+        &tool_registry,
+        config,
+        terminal_backend,
+        skill_provider,
+    )
+    .await;
+
+    let messaging_session = hermes_tools::tools::messaging::MessagingSessionContext::new();
+    gateway
+        .set_messaging_session_context(messaging_session.clone())
+        .await;
+    let clarify_dispatcher = ClarifyDispatcher::new();
+    gateway
+        .set_clarify_dispatcher(clarify_dispatcher.clone())
+        .await;
+
+    let agent_tools_for_cron = Arc::new(bridge_tool_registry(&tool_registry));
+    let config_arc = Arc::new(config.clone());
+    crate::moa_wiring::wire_mixture_of_agents_backend(&tool_registry, config_arc.clone());
+    let gateway_agent_cache: GatewayAgentCache = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let handler_deps = gateway_handlers::GatewayHandlerDeps {
+        config: config_arc,
+        runtime_tools: tool_registry.clone(),
+        gateway_for_review: gateway.clone(),
+        clarify: clarify_dispatcher.clone(),
+        gateway_agent_cache,
+    };
+    let handler_deps_stream = handler_deps.clone();
+    let handler_deps_plan_mode = handler_deps.clone();
+    gateway
+        .set_session_teardown_handler(gateway_handlers::make_gateway_session_teardown_handler(
+            handler_deps.clone(),
+        ))
+        .await;
+    gateway
+        .set_message_handler_with_context(Arc::new(move |messages, ctx| {
+            let deps = handler_deps.clone();
+            Box::pin(gateway_handlers::gateway_handle_message_non_streaming(
+                messages, ctx, deps,
+            ))
+        }))
+        .await;
+    gateway
+        .set_streaming_handler_with_context(Arc::new(move |messages, ctx, on_chunk| {
+            let deps = handler_deps_stream.clone();
+            Box::pin(gateway_handlers::gateway_handle_message_streaming(
+                messages, ctx, on_chunk, deps,
+            ))
+        }))
+        .await;
+    let gateway_for_plan_mode = gateway.clone();
+    gateway
+        .set_plan_mode_slash_handler(Arc::new(move |incoming, session_key, args| {
+            let gw = gateway_for_plan_mode.clone();
+            let deps = handler_deps_plan_mode.clone();
+            Box::pin(async move {
+                crate::gateway_plan_mode::execute_plan_mode_slash_command(
+                    gw,
+                    &incoming,
+                    &session_key,
+                    &args,
+                    deps,
+                )
+                .await
+            })
+        }))
+        .await;
+
+    let cron_dir = state_root.join("cron");
+    std::fs::create_dir_all(&cron_dir)
+        .map_err(|e| AgentError::Io(format!("cron dir {}: {}", cron_dir.display(), e)))?;
+    let default_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
+    let cron_persistence = Arc::new(FileJobPersistence::with_dir(cron_dir));
+    let cron_llm = build_provider(config, &default_model);
+    let cron_runner = Arc::new(
+        CronRunner::new(cron_llm, agent_tools_for_cron)
+            .with_delivery(Arc::new(GatewayCronDeliveryBackend::new(gateway.clone()))),
+    );
+    let mut cron_scheduler = CronScheduler::new(cron_persistence, cron_runner);
+    let (cron_tx, cron_rx) = broadcast::channel::<CronCompletionEvent>(64);
+    cron_scheduler.set_completion_broadcast(cron_tx.clone());
+    cron_scheduler
+        .load_persisted_jobs()
+        .await
+        .map_err(|e| AgentError::Config(format!("cron load: {e}")))?;
+    cron_scheduler.start().await;
+    let cron_scheduler = Arc::new(cron_scheduler);
+    wire_cron_scheduler_backend(
+        &tool_registry,
+        cron_scheduler.clone(),
+        messaging_session.clone(),
+    );
+    wire_gateway_messaging_backend(&tool_registry, gateway.clone(), messaging_session);
+    wire_gateway_clarify_backend(&tool_registry, clarify_dispatcher);
+
+    let webhooks_path = state_root.join("webhooks.json");
+    let mut sidecar_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    sidecar_tasks.push(tokio::spawn(async move {
+        run_cron_webhook_delivery_loop(cron_tx.subscribe(), webhooks_path).await;
+    }));
+
+    register_gateway_adapters(config, gateway.clone(), &mut sidecar_tasks).await?;
+
+    let enabled: Vec<&String> = config
+        .platforms
+        .iter()
+        .filter(|(_, pc)| pc.enabled)
+        .map(|(name, _)| name)
+        .collect();
+    if gateway.adapter_names().await.is_empty() {
+        if enabled.is_empty() {
+            tracing::info!("talk embedded gateway: no chat adapters enabled; cron still active");
+        } else {
+            tracing::warn!(
+                enabled = ?enabled,
+                "talk embedded gateway: platforms enabled in config but no adapters registered \
+                 (missing credentials or setup); continuing with cron + in-process Hermes only"
+            );
+        }
+    }
+
+    gateway.start_all().await?;
+
+    let gw_reconnect = gateway.clone();
+    sidecar_tasks.push(tokio::spawn(async move {
+        gw_reconnect.platform_reconnect_watcher(20).await;
+    }));
+    let gw_expiry = gateway.clone();
+    sidecar_tasks.push(tokio::spawn(async move {
+        gw_expiry.session_expiry_watcher(300).await;
+    }));
+
+    Ok(EmbeddedGatewayParts {
+        gateway,
+        sidecar_tasks,
+        cron_rx,
+    })
 }

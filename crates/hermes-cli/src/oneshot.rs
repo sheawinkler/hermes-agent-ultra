@@ -2,14 +2,14 @@
 
 use std::collections::HashSet;
 
-use hermes_cli::App;
-use hermes_cli::cli::Cli;
+use crate::App;
+use crate::cli::Cli;
 use hermes_core::AgentError;
 use hermes_core::MessageRole;
 
 use crate::auth_main::{normalize_auth_provider, provider_supports_oauth};
 
-pub(crate) fn auth_error_message(err: &AgentError) -> Option<String> {
+pub fn auth_error_message(err: &AgentError) -> Option<String> {
     match err {
         AgentError::LlmApi(msg)
         | AgentError::Config(msg)
@@ -20,7 +20,7 @@ pub(crate) fn auth_error_message(err: &AgentError) -> Option<String> {
     }
 }
 
-pub(crate) fn oneshot_auth_is_refreshable(message: &str) -> bool {
+pub fn oneshot_auth_is_refreshable(message: &str) -> bool {
     message.contains("401")
         || message.contains("403")
         || message.contains("unauthorized")
@@ -31,7 +31,7 @@ pub(crate) fn oneshot_auth_is_refreshable(message: &str) -> bool {
         || message.contains("expired")
 }
 
-pub(crate) fn infer_oauth_provider_from_error_message(message: &str) -> Option<String> {
+pub fn infer_oauth_provider_from_error_message(message: &str) -> Option<String> {
     if message.contains("portal.nousresearch.com")
         || message.contains("inference-api.nousresearch.com")
         || message.contains(" provider nous")
@@ -69,11 +69,11 @@ pub(crate) fn infer_oauth_provider_from_error_message(message: &str) -> Option<S
     None
 }
 
-pub(crate) fn query_is_local_slash_command(query: &str) -> bool {
+pub fn query_is_local_slash_command(query: &str) -> bool {
     query.trim_start().starts_with('/')
 }
 
-pub(crate) fn env_truthy(key: &str) -> bool {
+pub fn env_truthy(key: &str) -> bool {
     std::env::var(key)
         .ok()
         .map(|raw| {
@@ -85,13 +85,13 @@ pub(crate) fn env_truthy(key: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn oneshot_should_use_app_runtime(query: &str) -> bool {
+pub fn oneshot_should_use_app_runtime(query: &str) -> bool {
     !query_is_local_slash_command(query)
         && (env_truthy("HERMES_ONESHOT_APP_RUNTIME") || env_truthy("HERMES_QUORUM_AUTO_ARM"))
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn start_gateway_keepawake_guard() -> Option<keepawake::KeepAwake> {
+pub fn start_gateway_keepawake_guard() -> Option<keepawake::KeepAwake> {
     if !gateway_running_on_ac_power() {
         tracing::info!("gateway keep-awake skipped on Windows: system is on battery");
         return None;
@@ -136,9 +136,9 @@ fn gateway_running_on_ac_power() -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(crate) fn start_gateway_keepawake_guard() {}
+pub fn start_gateway_keepawake_guard() {}
 
-pub(crate) fn print_app_oneshot_result(app: &App) {
+pub fn print_app_oneshot_result(app: &App) {
     if let Some(reply) = app.session.messages.iter().rev().find_map(|message| {
         if message.role == MessageRole::Assistant {
             message
@@ -155,7 +155,7 @@ pub(crate) fn print_app_oneshot_result(app: &App) {
     }
 }
 
-pub(crate) async fn handle_local_slash_query(cli: Cli, query: &str) -> Result<bool, AgentError> {
+pub async fn handle_local_slash_query(cli: Cli, query: &str) -> Result<bool, AgentError> {
     if !query_is_local_slash_command(query) {
         return Ok(false);
     }
@@ -164,7 +164,7 @@ pub(crate) async fn handle_local_slash_query(cli: Cli, query: &str) -> Result<bo
     Ok(true)
 }
 
-pub(crate) fn oneshot_auto_verify_oauth_provider(
+pub fn oneshot_auto_verify_oauth_provider(
     err: &AgentError,
     provider_override: Option<&str>,
     model_override: Option<&str>,

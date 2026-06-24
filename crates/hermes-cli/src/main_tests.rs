@@ -31,15 +31,15 @@ use crate::doctor::{
     capture_debug_log_snapshot, debug_pending_pastes_path, replay_integrity_for_file,
     replay_manifest_json, run_doctor_self_heal, sweep_expired_pending_pastes,
 };
-use crate::gateway_main::{
-    GATEWAY_PLATFORM_CATALOG, apply_telegram_allowlists, build_api_server_config,
-    gateway_agent_signature, gateway_requirement_issues, matrix_home_room_for_platform,
-    register_gateway_adapters, run_sessions_db_auto_maintenance,
-};
 use crate::profile_main::{run_profile, validate_profile_name, write_active_profile_name};
 use crate::{
     gateway_platform_menu_label, hermes_state_root, infer_oauth_provider_from_error_message,
     oneshot_auth_is_refreshable, oneshot_auto_verify_oauth_provider, query_is_local_slash_command,
+};
+use hermes_cli::gateway_main::{
+    GATEWAY_PLATFORM_CATALOG, apply_telegram_allowlists, build_api_server_config,
+    gateway_agent_signature, gateway_requirement_issues, matrix_home_room_for_platform,
+    register_gateway_adapters, run_sessions_db_auto_maintenance,
 };
 use hermes_cli::paths::CliStateRoot;
 

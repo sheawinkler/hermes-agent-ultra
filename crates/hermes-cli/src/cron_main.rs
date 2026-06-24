@@ -652,37 +652,8 @@ pub(crate) async fn run_webhook(
 
 /// POST each [`CronCompletionEvent`] to every URL in `webhooks.json` (same file as `hermes webhook`).
 pub(crate) async fn run_cron_webhook_delivery_loop(
-    mut rx: broadcast::Receiver<CronCompletionEvent>,
+    rx: broadcast::Receiver<CronCompletionEvent>,
     webhooks_json: PathBuf,
 ) {
-    use tokio::sync::broadcast::error::RecvError;
-
-    let client = match hermes_cli::webhook_delivery::webhook_http_client() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("cron webhooks: HTTP client build failed: {e}");
-            return;
-        }
-    };
-
-    loop {
-        let ev = match rx.recv().await {
-            Ok(ev) => ev,
-            Err(RecvError::Lagged(n)) => {
-                tracing::debug!(n, "cron webhook receiver lagged; skipped messages");
-                continue;
-            }
-            Err(RecvError::Closed) => break,
-        };
-
-        if let Err(e) = hermes_cli::webhook_delivery::deliver_cron_completion_to_webhooks(
-            &webhooks_json,
-            &ev,
-            &client,
-        )
-        .await
-        {
-            tracing::warn!("cron webhook delivery: {e}");
-        }
-    }
+    hermes_cli::webhook_delivery::run_cron_webhook_delivery_loop(rx, webhooks_json).await
 }

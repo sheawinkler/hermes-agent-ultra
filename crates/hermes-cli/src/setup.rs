@@ -1248,7 +1248,7 @@ pub(crate) async fn run_setup(cli: crate::Cli) -> Result<(), AgentError> {
     }
 
     if full_setup
-        && crate::gateway_main::prompt_yes_no("\nConfigure optional setup sections now?", true)
+        && hermes_cli::gateway_main::prompt_yes_no("\nConfigure optional setup sections now?", true)
             .await?
     {
         crate::cli_setup::run_optional_setup_sections(&cli, &disk).await?;

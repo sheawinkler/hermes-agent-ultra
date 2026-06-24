@@ -91,6 +91,8 @@ fn parse_shallow_command(
         ShallowCommand::Plugins { .. } => commands::parse_plugins(args),
         ShallowCommand::Memory { .. } => commands::parse_memory(args),
         ShallowCommand::Meeting { .. } => commands::parse_meeting(args),
+        #[cfg(feature = "talk")]
+        ShallowCommand::Talk { .. } => commands::parse_talk(args),
         ShallowCommand::Interest { .. } => commands::parse_interest(args),
         ShallowCommand::Contribute { .. } => commands::parse_contribute(args),
         ShallowCommand::Server { .. } => commands::parse_server(args),

@@ -17,7 +17,7 @@ pub(crate) fn gateway_lock_path_for_pid_path(pid_path: &Path) -> PathBuf {
     pid_path.with_file_name("gateway.lock")
 }
 
-pub(crate) fn read_gateway_pid(path: &Path) -> Option<u32> {
+pub fn read_gateway_pid(path: &Path) -> Option<u32> {
     let raw = std::fs::read_to_string(path).ok()?;
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -72,7 +72,7 @@ fn gateway_pid_commandline(pid: u32) -> Option<String> {
 }
 
 #[cfg(unix)]
-pub(crate) fn gateway_pid_is_alive(pid: u32) -> bool {
+pub fn gateway_pid_is_alive(pid: u32) -> bool {
     if unsafe { libc::kill(pid as libc::pid_t, 0) != 0 } {
         return false;
     }
@@ -83,7 +83,7 @@ pub(crate) fn gateway_pid_is_alive(pid: u32) -> bool {
 }
 
 #[cfg(not(unix))]
-pub(crate) fn gateway_pid_is_alive(_pid: u32) -> bool {
+pub fn gateway_pid_is_alive(_pid: u32) -> bool {
     false
 }
 
@@ -328,7 +328,7 @@ pub(crate) fn try_restart_gateway_service() -> Result<bool, AgentError> {
     }
 }
 
-pub(crate) fn gateway_service_status() -> Result<Option<String>, AgentError> {
+pub fn gateway_service_status() -> Result<Option<String>, AgentError> {
     #[cfg(target_os = "macos")]
     {
         let Some(plist_path) = gateway_launchd_plist_path() else {

@@ -17,9 +17,9 @@ use hermes_config::{
 };
 use hermes_core::AgentError;
 
-use crate::gateway_main::prompt_yes_no;
-use crate::gateway_runtime::run_gateway_setup;
-use crate::state_paths::hermes_state_root;
+use hermes_cli::gateway_main::prompt_yes_no;
+use hermes_cli::gateway_runtime::run_gateway_setup;
+use hermes_cli::state_paths::hermes_state_root;
 pub(crate) async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), AgentError> {
     let config =
         load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;

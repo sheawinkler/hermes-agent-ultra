@@ -19,6 +19,8 @@ mod plugins;
 mod server;
 mod server_config;
 mod sessions;
+#[cfg(feature = "talk")]
+mod talk;
 mod whatsapp;
 
 pub use acp::handle_cli_acp;
@@ -37,6 +39,8 @@ pub use pairing::handle_cli_pairing;
 pub use plugins::{handle_cli_external_plugin_subcommand, handle_cli_plugins};
 pub use server::handle_cli_server;
 pub use sessions::handle_cli_sessions;
+#[cfg(feature = "talk")]
+pub use talk::handle_cli_talk;
 pub use whatsapp::handle_cli_whatsapp;
 
 pub(crate) use plugins::{discover_plugin_surface, render_plugin_surface_table};

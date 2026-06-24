@@ -1,0 +1,100 @@
+model: custom:auto
+max_turns: 250
+tools:
+  - bash
+  - read
+  - write
+  - edit
+  - glob
+  - grep
+  - web_search
+  - web_fetch
+budget:
+  max_result_size_chars: 100000
+  max_aggregate_chars: 1000000
+platforms:
+  wecom:
+    enabled: true
+    unauthorized_dm_behavior: ignore
+    group_sessions_per_user: false
+    allowed_users: []
+    admin_users: []
+    extra:
+      allow_from:
+        - '*'
+      bot_id: aibHDYBhMxONDWaexjD8_E_xDUzTszWQPUg
+      corp_id: ww2d3fc241767f40fd
+      dm_policy: open
+      group_allow_from: []
+      group_policy: open
+      secret: 46QiBZzMRuZqowAtcE2bBNUaGzQZrzk1B4F6EPD3VTg
+      websocket_url: wss://openws.work.weixin.qq.com
+platform_toolsets:
+  cli:
+    - hermes-cli
+  slack:
+    - hermes-slack
+  discord:
+    - hermes-discord
+  telegram:
+    - hermes-telegram
+  whatsapp:
+    - hermes-whatsapp
+session:
+  reset_policy:
+    type: idle
+    timeout_minutes: 30
+  compression_enabled: false
+  platform_overrides: {}
+sessions:
+  auto_prune: false
+  retention_days: 90
+  vacuum_after_prune: true
+  min_interval_hours: 24
+streaming:
+  enabled: true
+  edit_interval_ms: 300
+  buffer_threshold: 20
+  max_message_length: 4096
+terminal:
+  backend: local
+  timeout: 120
+  max_output_size: 1048576
+llm_providers:
+  custom:
+    api_key: sk-xxxxxxx
+    base_url: http://127.0.0.1:11080/v1
+    model: auto
+smart_model_routing:
+  enabled: false
+  max_simple_chars: 160
+  max_simple_words: 28
+approval:
+  enabled: false
+  dangerous_commands: []
+  require_approval: false
+  whitelist_commands: []
+security:
+  allow_private_urls: false
+skills:
+  enabled: []
+  disabled: []
+tools_config:
+  enabled: []
+  disabled: []
+  per_tool: {}
+mcp_servers: []
+profile:
+  available: []
+agent:
+  memory_nudge_interval: 10
+  skill_creation_nudge_interval: 10
+  skip_context_files: false
+  background_review_enabled: true
+  code_index_enabled: true
+  code_index_max_files: 32
+  code_index_max_symbols: 160
+  lsp_context_enabled: true
+  lsp_context_max_chars: 2800
+hooks_auto_accept: true
+hooks:

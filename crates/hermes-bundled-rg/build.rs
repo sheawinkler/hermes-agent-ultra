@@ -12,6 +12,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=rg-version.txt");
     println!("cargo:rerun-if-env-changed=TARGET");
+    println!("cargo:rerun-if-env-changed=HERMES_BUNDLED_RG_ARCHIVE_DIR");
     println!("cargo:rustc-env=HERMES_BUNDLED_RG_VERSION={version}");
 
     let (suffix, ext) = target_triple(&target).expect("unsupported TARGET for bundled ripgrep");
@@ -23,8 +24,23 @@ fn main() {
     std::fs::create_dir_all(&cache_dir).expect("create cache dir");
     let archive_path = cache_dir.join(&archive);
     if !archive_path.is_file() {
-        eprintln!("hermes-bundled-rg: downloading {url}");
-        download(&url, &archive_path);
+        if let Some(local_dir) = std::env::var_os("HERMES_BUNDLED_RG_ARCHIVE_DIR") {
+            let local_archive = PathBuf::from(local_dir).join(&archive);
+            if !local_archive.is_file() {
+                panic!(
+                    "HERMES_BUNDLED_RG_ARCHIVE_DIR does not contain expected archive: {}",
+                    local_archive.display()
+                );
+            }
+            eprintln!(
+                "hermes-bundled-rg: using prefetched {}",
+                local_archive.display()
+            );
+            std::fs::copy(&local_archive, &archive_path).expect("copy prefetched archive");
+        } else {
+            eprintln!("hermes-bundled-rg: downloading {url}");
+            download(&url, &archive_path);
+        }
     }
 
     let binary_name = if target.contains("windows") {

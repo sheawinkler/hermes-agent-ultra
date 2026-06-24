@@ -4,17 +4,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use aes_gcm::Aes256Gcm;
-use aes_gcm::aead::{Aead, KeyInit};
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use chrono::{DateTime, Utc};
-use hermes_auth::{
-    AuthManager, FileTokenStore, OAuth2Endpoints, OAuthCredential, exchange_refresh_token,
-};
-use hermes_cli::Cli;
-use hermes_cli::app::provider_api_key_from_env;
-use hermes_cli::auth::{
+use crate::Cli;
+use crate::app::provider_api_key_from_env;
+use crate::auth::{
     ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL, AnthropicOAuthLoginOptions,
     CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL, CodexDeviceCodeOptions,
     DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS, GeminiOAuthLoginOptions,
@@ -29,8 +21,16 @@ use hermes_cli::auth::{
     resolve_qwen_runtime_credentials, save_codex_auth_state, save_nous_auth_state,
     save_openai_auth_state, save_provider_auth_state,
 };
-use hermes_cli::paths::CliStateRoot;
-use hermes_cli::providers::{OAUTH_CAPABLE_PROVIDERS, known_providers};
+use crate::paths::CliStateRoot;
+use crate::providers::{OAUTH_CAPABLE_PROVIDERS, known_providers};
+use aes_gcm::Aes256Gcm;
+use aes_gcm::aead::{Aead, KeyInit};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use chrono::{DateTime, Utc};
+use hermes_auth::{
+    AuthManager, FileTokenStore, OAuth2Endpoints, OAuthCredential, exchange_refresh_token,
+};
 use hermes_config::{
     GatewayConfig, PlatformConfig, hermes_home, load_config, load_user_config_file,
     save_config_yaml, validate_config,
@@ -42,13 +42,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{hermes_state_root, prompt_line, resolve_llm_login_token};
 use crate::gateway_main::{configure_platform_basic_prompts, platform_token_or_extra};
+use crate::prompt::prompt_line;
+use crate::state_paths::hermes_state_root;
 
 /// Default auth provider: CLI arg, then `HERMES_AUTH_DEFAULT_PROVIDER`, then `nous`.
 ///
 /// Set `HERMES_AUTH_DEFAULT_PROVIDER=telegram` if you primarily use the Telegram gateway.
-pub(crate) fn resolve_auth_provider(provider: Option<String>) -> String {
+pub fn resolve_auth_provider(provider: Option<String>) -> String {
     if let Some(raw) = provider.filter(|s| !s.trim().is_empty()) {
         return normalize_auth_provider(&raw);
     }
@@ -70,7 +71,7 @@ pub(crate) fn resolve_auth_provider(provider: Option<String>) -> String {
     normalize_auth_provider(&raw)
 }
 
-pub(crate) fn infer_default_auth_provider_from_config() -> Option<String> {
+pub fn infer_default_auth_provider_from_config() -> Option<String> {
     let cfg = load_config(None).ok()?;
     let model = cfg.model?;
     let provider = model
@@ -80,7 +81,7 @@ pub(crate) fn infer_default_auth_provider_from_config() -> Option<String> {
     Some(provider.to_string())
 }
 
-pub(crate) fn normalize_auth_provider(provider: &str) -> String {
+pub fn normalize_auth_provider(provider: &str) -> String {
     match provider.trim().to_ascii_lowercase().as_str() {
         "wechat" | "wx" => "weixin".to_string(),
         "qq" => "qqbot".to_string(),
@@ -119,7 +120,7 @@ pub(crate) fn normalize_auth_provider(provider: &str) -> String {
     }
 }
 
-pub(crate) fn gateway_platform_provider_key(provider: &str) -> Option<&'static str> {
+pub fn gateway_platform_provider_key(provider: &str) -> Option<&'static str> {
     match provider {
         "discord" => Some("discord"),
         "slack" => Some("slack"),
@@ -142,7 +143,7 @@ pub(crate) fn gateway_platform_provider_key(provider: &str) -> Option<&'static s
     }
 }
 
-pub(crate) fn normalize_secret_provider(provider: &str) -> String {
+pub fn normalize_secret_provider(provider: &str) -> String {
     let p = provider.trim().to_ascii_lowercase();
     match p.as_str() {
         "github-copilot" => "copilot".to_string(),
@@ -172,7 +173,7 @@ pub(crate) fn normalize_secret_provider(provider: &str) -> String {
     }
 }
 
-pub(crate) fn secret_provider_aliases(provider: &str) -> Vec<String> {
+pub fn secret_provider_aliases(provider: &str) -> Vec<String> {
     match normalize_secret_provider(provider).as_str() {
         "anthropic" => vec![
             "anthropic".to_string(),
@@ -233,7 +234,7 @@ pub(crate) fn secret_provider_aliases(provider: &str) -> Vec<String> {
     }
 }
 
-pub(crate) fn provider_env_var(provider: &str) -> Option<&'static str> {
+pub fn provider_env_var(provider: &str) -> Option<&'static str> {
     match normalize_secret_provider(provider).as_str() {
         "openai" => Some("HERMES_OPENAI_API_KEY"),
         "openai-codex" => Some("HERMES_OPENAI_CODEX_API_KEY"),
@@ -274,14 +275,14 @@ pub(crate) fn provider_env_var(provider: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn provider_supports_oauth(provider: &str) -> bool {
+pub fn provider_supports_oauth(provider: &str) -> bool {
     let normalized = normalize_auth_provider(provider);
-    hermes_cli::providers::OAUTH_CAPABLE_PROVIDERS
+    crate::providers::OAUTH_CAPABLE_PROVIDERS
         .iter()
         .any(|candidate| candidate.eq_ignore_ascii_case(normalized.as_str()))
 }
 
-pub(crate) fn resolve_auth_type_for_provider(provider: &str, requested: Option<&str>) -> String {
+pub fn resolve_auth_type_for_provider(provider: &str, requested: Option<&str>) -> String {
     if let Some(raw) = requested.map(str::trim).filter(|v| !v.is_empty()) {
         return raw.replace('-', "_").to_ascii_lowercase();
     }
@@ -292,13 +293,13 @@ pub(crate) fn resolve_auth_type_for_provider(provider: &str, requested: Option<&
     }
 }
 
-pub(crate) fn parse_rfc3339_utc(value: Option<&str>) -> Option<DateTime<Utc>> {
+pub fn parse_rfc3339_utc(value: Option<&str>) -> Option<DateTime<Utc>> {
     value
         .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
         .map(|dt| dt.with_timezone(&Utc))
 }
 
-pub(crate) fn parse_unix_millis_utc(value: Option<i64>) -> Option<DateTime<Utc>> {
+pub fn parse_unix_millis_utc(value: Option<i64>) -> Option<DateTime<Utc>> {
     value.and_then(DateTime::from_timestamp_millis)
 }
 
@@ -323,7 +324,7 @@ pub(crate) struct AuthPoolStore {
     pub(crate) providers: BTreeMap<String, Vec<AuthPoolEntry>>,
 }
 
-pub(crate) fn load_auth_pool_store(path: &Path) -> Result<AuthPoolStore, AgentError> {
+pub fn load_auth_pool_store(path: &Path) -> Result<AuthPoolStore, AgentError> {
     if !path.exists() {
         return Ok(AuthPoolStore::default());
     }
@@ -332,7 +333,7 @@ pub(crate) fn load_auth_pool_store(path: &Path) -> Result<AuthPoolStore, AgentEr
     serde_json::from_str(&raw).map_err(|e| AgentError::Config(format!("parse pool: {}", e)))
 }
 
-pub(crate) fn save_auth_pool_store(path: &Path, store: &AuthPoolStore) -> Result<(), AgentError> {
+pub fn save_auth_pool_store(path: &Path, store: &AuthPoolStore) -> Result<(), AgentError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
@@ -342,7 +343,7 @@ pub(crate) fn save_auth_pool_store(path: &Path, store: &AuthPoolStore) -> Result
         .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
 }
 
-pub(crate) fn resolve_pool_target(entries: &[AuthPoolEntry], target: &str) -> Option<usize> {
+pub fn resolve_pool_target(entries: &[AuthPoolEntry], target: &str) -> Option<usize> {
     if let Ok(index) = target.parse::<usize>() {
         if index >= 1 && index <= entries.len() {
             return Some(index - 1);
@@ -354,7 +355,7 @@ pub(crate) fn resolve_pool_target(entries: &[AuthPoolEntry], target: &str) -> Op
     entries.iter().position(|e| e.label == target)
 }
 
-pub(crate) async fn lookup_secret_from_vault(
+pub async fn lookup_secret_from_vault(
     token_store: &FileTokenStore,
     provider: &str,
 ) -> Option<(String, String)> {
@@ -368,7 +369,45 @@ pub(crate) async fn lookup_secret_from_vault(
     None
 }
 
-pub(crate) async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentError> {
+pub async fn resolve_llm_login_token(cli: &Cli, provider: &str) -> Result<String, AgentError> {
+    if let Some(k) = provider_api_key_from_env(provider) {
+        return Ok(k);
+    }
+    let vault_path = CliStateRoot::from_state_root(&hermes_state_root(cli)).secret_vault();
+    if vault_path.exists() {
+        let store = FileTokenStore::new(vault_path).await?;
+        if let Some((_provider, token)) = lookup_secret_from_vault(&store, provider).await {
+            return Ok(token);
+        }
+    }
+    let cfg =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
+    if let Some(k) = cfg
+        .llm_providers
+        .get(provider)
+        .and_then(|c| c.api_key.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Ok(k.to_string());
+    }
+    let fallback_var = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
+    let msg = format!(
+        "No API key in env or config for provider '{}'.\n\
+         Set {} (or `hermes secrets set {}`; plaintext fallback: `hermes config set llm.{}.api_key ...`) or paste key now: ",
+        provider, fallback_var, provider, provider
+    );
+    let pasted = prompt_line(msg).await?;
+    if pasted.is_empty() {
+        return Err(AgentError::Config(format!(
+            "Missing API key for provider '{}'",
+            provider
+        )));
+    }
+    Ok(pasted)
+}
+
+pub async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentError> {
     let path = CliStateRoot::from_state_root(&hermes_state_root(cli)).secret_vault();
     if !path.exists() {
         return Ok(());
@@ -378,7 +417,7 @@ pub(crate) async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result
     let mut hydrated_nous_from_vault = false;
 
     if let Some((_provider, token)) = lookup_secret_from_vault(&store, "nous").await {
-        hermes_cli::env_vars::set_var("NOUS_API_KEY", token);
+        crate::env_vars::set_var("NOUS_API_KEY", token);
         hydrated_nous_from_vault = true;
     }
 
@@ -392,12 +431,9 @@ pub(crate) async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result
         .await
         {
             Ok(creds) => {
-                hermes_cli::env_vars::set_var("NOUS_API_KEY", creds.api_key.clone());
+                crate::env_vars::set_var("NOUS_API_KEY", creds.api_key.clone());
                 if !creds.base_url.trim().is_empty() {
-                    hermes_cli::env_vars::set_var(
-                        "NOUS_INFERENCE_BASE_URL",
-                        creds.base_url.clone(),
-                    );
+                    crate::env_vars::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
                 }
                 let expires_at = parse_rfc3339_utc(creds.expires_at.as_deref());
                 let _ = manager
@@ -471,20 +507,20 @@ pub(crate) async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result
                 if let Some((_provider, secret)) = lookup_secret_from_vault(&store, provider).await
                 {
                     if secret.trim() != current.trim() {
-                        hermes_cli::env_vars::set_var(env_var, secret);
+                        crate::env_vars::set_var(env_var, secret);
                     }
                 }
             }
             continue;
         }
         if let Some((_provider, secret)) = lookup_secret_from_vault(&store, provider).await {
-            hermes_cli::env_vars::set_var(env_var, secret);
+            crate::env_vars::set_var(env_var, secret);
         }
     }
     Ok(())
 }
 
-pub(crate) fn mask_secret(secret: &str) -> String {
+pub fn mask_secret(secret: &str) -> String {
     if secret.is_empty() {
         return "(empty)".to_string();
     }
@@ -498,24 +534,24 @@ pub(crate) fn mask_secret(secret: &str) -> String {
     )
 }
 
-pub(crate) fn is_weixin_provider(provider: &str) -> bool {
+pub fn is_weixin_provider(provider: &str) -> bool {
     provider == "weixin"
 }
 
-pub(crate) fn is_truthy(v: &str) -> bool {
+pub fn is_truthy(v: &str) -> bool {
     matches!(
         v.trim().to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
 }
 
-pub(crate) fn secret_stdout_allowed() -> bool {
+pub fn secret_stdout_allowed() -> bool {
     std::env::var("HERMES_ALLOW_SECRET_STDOUT")
         .ok()
         .is_some_and(|v| is_truthy(&v))
 }
 
-pub(crate) async fn telegram_bot_token_from_env_or_prompt() -> Result<String, AgentError> {
+pub async fn telegram_bot_token_from_env_or_prompt() -> Result<String, AgentError> {
     if let Ok(t) = std::env::var("TELEGRAM_BOT_TOKEN") {
         let t = t.trim().to_string();
         if !t.is_empty() {
@@ -541,7 +577,7 @@ pub(crate) async fn telegram_bot_token_from_env_or_prompt() -> Result<String, Ag
     Ok(t)
 }
 
-pub(crate) async fn weixin_account_id_from_env_or_prompt() -> Result<String, AgentError> {
+pub async fn weixin_account_id_from_env_or_prompt() -> Result<String, AgentError> {
     if let Ok(v) = std::env::var("WEIXIN_ACCOUNT_ID") {
         let v = v.trim().to_string();
         if !v.is_empty() {
@@ -567,14 +603,14 @@ pub(crate) async fn weixin_account_id_from_env_or_prompt() -> Result<String, Age
     Ok(v)
 }
 
-pub(crate) fn weixin_account_file_path(account_id: &str) -> PathBuf {
+pub fn weixin_account_file_path(account_id: &str) -> PathBuf {
     hermes_home()
         .join("weixin")
         .join("accounts")
         .join(format!("{account_id}.json"))
 }
 
-pub(crate) fn load_persisted_weixin_token(account_id: &str) -> Option<String> {
+pub fn load_persisted_weixin_token(account_id: &str) -> Option<String> {
     let p = weixin_account_file_path(account_id);
     let s = std::fs::read_to_string(p).ok()?;
     let v: serde_json::Value = serde_json::from_str(&s).ok()?;
@@ -585,7 +621,7 @@ pub(crate) fn load_persisted_weixin_token(account_id: &str) -> Option<String> {
         .map(String::from)
 }
 
-pub(crate) fn save_persisted_weixin_account(
+pub fn save_persisted_weixin_account(
     account_id: &str,
     token: &str,
     base_url: Option<&str>,
@@ -607,9 +643,7 @@ pub(crate) fn save_persisted_weixin_account(
     Ok(())
 }
 
-pub(crate) async fn weixin_token_from_env_or_prompt(
-    account_id: &str,
-) -> Result<String, AgentError> {
+pub async fn weixin_token_from_env_or_prompt(account_id: &str) -> Result<String, AgentError> {
     if let Ok(v) = std::env::var("WEIXIN_TOKEN") {
         let v = v.trim().to_string();
         if !v.is_empty() {
@@ -639,9 +673,7 @@ pub(crate) async fn weixin_token_from_env_or_prompt(
     Ok(v)
 }
 
-pub(crate) async fn qqbot_app_id_from_env_or_prompt(
-    existing: Option<&str>,
-) -> Result<String, AgentError> {
+pub async fn qqbot_app_id_from_env_or_prompt(existing: Option<&str>) -> Result<String, AgentError> {
     if let Ok(v) = std::env::var("QQ_APP_ID") {
         let v = v.trim().to_string();
         if !v.is_empty() {
@@ -673,7 +705,7 @@ pub(crate) async fn qqbot_app_id_from_env_or_prompt(
     Ok(app_id)
 }
 
-pub(crate) async fn qqbot_client_secret_from_env_or_prompt(
+pub async fn qqbot_client_secret_from_env_or_prompt(
     existing: Option<&str>,
 ) -> Result<String, AgentError> {
     if let Ok(v) = std::env::var("QQ_CLIENT_SECRET") {
@@ -708,7 +740,7 @@ pub(crate) async fn qqbot_client_secret_from_env_or_prompt(
     Ok(secret)
 }
 
-pub(crate) fn qqbot_portal_host_from_disk(disk: &GatewayConfig) -> String {
+pub fn qqbot_portal_host_from_disk(disk: &GatewayConfig) -> String {
     if let Some(cfg) = disk.platforms.get("qqbot") {
         for key in ["portal_host", "qq_portal_host"] {
             if let Some(v) = cfg.extra.get(key).and_then(|v| v.as_str()) {
@@ -728,7 +760,7 @@ pub(crate) fn qqbot_portal_host_from_disk(disk: &GatewayConfig) -> String {
     "q.qq.com".to_string()
 }
 
-pub(crate) fn qqbot_onboard_endpoints_from_disk(disk: &GatewayConfig) -> (String, String) {
+pub fn qqbot_onboard_endpoints_from_disk(disk: &GatewayConfig) -> (String, String) {
     let mut create_path = "/lite/create_bind_task".to_string();
     let mut poll_path = "/lite/poll_bind_result".to_string();
 
@@ -769,7 +801,7 @@ pub(crate) fn qqbot_onboard_endpoints_from_disk(disk: &GatewayConfig) -> (String
     (create_path, poll_path)
 }
 
-pub(crate) fn qqbot_generate_bind_key_base64() -> String {
+pub fn qqbot_generate_bind_key_base64() -> String {
     let mut key = [0u8; 32];
     rand::rngs::SysRng
         .try_fill_bytes(&mut key)
@@ -777,7 +809,7 @@ pub(crate) fn qqbot_generate_bind_key_base64() -> String {
     BASE64_STANDARD.encode(key)
 }
 
-pub(crate) fn qqbot_extract_string(v: &serde_json::Value, keys: &[&str]) -> Option<String> {
+pub fn qqbot_extract_string(v: &serde_json::Value, keys: &[&str]) -> Option<String> {
     for key in keys {
         if let Some(s) = v.get(*key).and_then(|x| x.as_str()) {
             let s = s.trim();
@@ -789,7 +821,7 @@ pub(crate) fn qqbot_extract_string(v: &serde_json::Value, keys: &[&str]) -> Opti
     None
 }
 
-pub(crate) fn qqbot_extract_i64(v: &serde_json::Value, keys: &[&str]) -> Option<i64> {
+pub fn qqbot_extract_i64(v: &serde_json::Value, keys: &[&str]) -> Option<i64> {
     for key in keys {
         if let Some(raw) = v.get(*key) {
             if let Some(parsed) = raw.as_i64() {
@@ -803,7 +835,7 @@ pub(crate) fn qqbot_extract_i64(v: &serde_json::Value, keys: &[&str]) -> Option<
     None
 }
 
-pub(crate) fn qqbot_decrypt_secret(
+pub fn qqbot_decrypt_secret(
     encrypted_base64: &str,
     key_base64: &str,
 ) -> Result<String, AgentError> {
@@ -836,14 +868,14 @@ pub(crate) fn qqbot_decrypt_secret(
         .map_err(|e| AgentError::Config(format!("qqbot qr decrypt: invalid utf-8: {e}")))
 }
 
-pub(crate) fn qqbot_connect_url(task_id: &str) -> String {
+pub fn qqbot_connect_url(task_id: &str) -> String {
     format!(
         "https://q.qq.com/qqbot/openclaw/connect.html?task_id={}&_wv=2&source=hermes",
         urlencoding::encode(task_id.trim())
     )
 }
 
-pub(crate) fn qqbot_api_headers() -> reqwest::header::HeaderMap {
+pub fn qqbot_api_headers() -> reqwest::header::HeaderMap {
     use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -855,7 +887,7 @@ pub(crate) fn qqbot_api_headers() -> reqwest::header::HeaderMap {
     headers
 }
 
-pub(crate) fn qqbot_join_https_url(host: &str, path: &str) -> String {
+pub fn qqbot_join_https_url(host: &str, path: &str) -> String {
     let host = host.trim().trim_end_matches('/');
     let path = path.trim();
     if path.starts_with('/') {
@@ -865,7 +897,7 @@ pub(crate) fn qqbot_join_https_url(host: &str, path: &str) -> String {
     }
 }
 
-pub(crate) async fn qqbot_create_bind_task(
+pub async fn qqbot_create_bind_task(
     client: &reqwest::Client,
     portal_host: &str,
     create_path: &str,
@@ -907,7 +939,7 @@ pub(crate) async fn qqbot_create_bind_task(
     Ok(task_id)
 }
 
-pub(crate) async fn qqbot_poll_bind_result(
+pub async fn qqbot_poll_bind_result(
     client: &reqwest::Client,
     portal_host: &str,
     poll_path: &str,
@@ -949,7 +981,7 @@ pub(crate) async fn qqbot_poll_bind_result(
     Ok((status, app_id, encrypted_secret, user_openid))
 }
 
-pub(crate) async fn qqbot_qr_login_flow(
+pub async fn qqbot_qr_login_flow(
     portal_host: &str,
     create_path: &str,
     poll_path: &str,
@@ -1025,7 +1057,7 @@ pub(crate) const WECOM_QR_QUERY_URL: &str = "https://work.weixin.qq.com/ai/qc/qu
 pub(crate) const WECOM_QR_CODE_PAGE: &str =
     "https://work.weixin.qq.com/ai/qc/gen?source=hermes&scode=";
 
-pub(crate) fn wecom_qr_page_url(scode: &str) -> String {
+pub fn wecom_qr_page_url(scode: &str) -> String {
     format!(
         "{}{}",
         WECOM_QR_CODE_PAGE,
@@ -1033,9 +1065,7 @@ pub(crate) fn wecom_qr_page_url(scode: &str) -> String {
     )
 }
 
-pub(crate) async fn wecom_bot_id_from_env_or_prompt(
-    existing: Option<&str>,
-) -> Result<String, AgentError> {
+pub async fn wecom_bot_id_from_env_or_prompt(existing: Option<&str>) -> Result<String, AgentError> {
     if let Some(v) = existing.map(str::trim).filter(|s| !s.is_empty()) {
         return Ok(v.to_string());
     }
@@ -1055,9 +1085,7 @@ pub(crate) async fn wecom_bot_id_from_env_or_prompt(
     Ok(s.to_string())
 }
 
-pub(crate) async fn wecom_secret_from_env_or_prompt(
-    existing: Option<&str>,
-) -> Result<String, AgentError> {
+pub async fn wecom_secret_from_env_or_prompt(existing: Option<&str>) -> Result<String, AgentError> {
     if let Some(v) = existing.map(str::trim).filter(|s| !s.is_empty()) {
         return Ok(v.to_string());
     }
@@ -1077,9 +1105,7 @@ pub(crate) async fn wecom_secret_from_env_or_prompt(
     Ok(s.to_string())
 }
 
-pub(crate) async fn wecom_qr_login_flow(
-    timeout_seconds: u64,
-) -> Result<(String, String), AgentError> {
+pub async fn wecom_qr_login_flow(timeout_seconds: u64) -> Result<(String, String), AgentError> {
     const WECOM_QR_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
     let client = reqwest::Client::builder()
@@ -1171,7 +1197,7 @@ pub(crate) async fn wecom_qr_login_flow(
     )))
 }
 
-pub(crate) fn weixin_login_base_url_from_disk(disk: &GatewayConfig) -> String {
+pub fn weixin_login_base_url_from_disk(disk: &GatewayConfig) -> String {
     if let Some(wx) = disk.platforms.get("weixin") {
         if let Some(v) = wx.extra.get("base_url").and_then(|v| v.as_str()) {
             let s = v.trim();
@@ -1189,7 +1215,7 @@ pub(crate) fn weixin_login_base_url_from_disk(disk: &GatewayConfig) -> String {
     "https://ilinkai.weixin.qq.com".to_string()
 }
 
-pub(crate) fn weixin_login_endpoints_from_disk(disk: &GatewayConfig) -> (String, String) {
+pub fn weixin_login_endpoints_from_disk(disk: &GatewayConfig) -> (String, String) {
     let mut start_ep = "ilink/bot/get_bot_qrcode".to_string();
     let mut poll_ep = "ilink/bot/get_qrcode_status".to_string();
     if let Some(wx) = disk.platforms.get("weixin") {
@@ -1219,7 +1245,7 @@ pub(crate) fn weixin_login_endpoints_from_disk(disk: &GatewayConfig) -> (String,
     (start_ep, poll_ep)
 }
 
-pub(crate) fn weixin_extract_string(v: &serde_json::Value, keys: &[&str]) -> Option<String> {
+pub fn weixin_extract_string(v: &serde_json::Value, keys: &[&str]) -> Option<String> {
     for key in keys {
         if let Some(s) = v.get(*key).and_then(|x| x.as_str()) {
             let s = s.trim();
@@ -1231,7 +1257,7 @@ pub(crate) fn weixin_extract_string(v: &serde_json::Value, keys: &[&str]) -> Opt
     None
 }
 
-pub(crate) fn render_qr_to_terminal(data: &str) {
+pub fn render_qr_to_terminal(data: &str) {
     let code = match QrCode::new(data.as_bytes()) {
         Ok(c) => c,
         Err(e) => {
@@ -1280,7 +1306,7 @@ pub(crate) fn render_qr_to_terminal(data: &str) {
     }
 }
 
-pub(crate) async fn weixin_qr_login_flow(
+pub async fn weixin_qr_login_flow(
     base_url: &str,
     start_ep: &str,
     poll_ep: &str,
@@ -1403,7 +1429,7 @@ pub(crate) async fn weixin_qr_login_flow(
 }
 
 /// Separate top-level function (not nested inside weixin_qr_login_flow)
-pub(crate) async fn fetch_weixin_qr(
+pub async fn fetch_weixin_qr(
     client: &reqwest::Client,
     base: &str,
     start_ep: &str,
@@ -1433,10 +1459,7 @@ pub(crate) async fn fetch_weixin_qr(
         .map_err(|e| AgentError::Io(format!("weixin qr get_bot_qrcode parse: {e}")))
 }
 
-pub(crate) async fn print_auth_status_matrix(
-    cli: &Cli,
-    manager: &AuthManager,
-) -> Result<(), AgentError> {
+pub async fn print_auth_status_matrix(cli: &Cli, manager: &AuthManager) -> Result<(), AgentError> {
     let cfg_path = hermes_state_root(cli).join("config.yaml");
     let disk = load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
 
@@ -1534,7 +1557,7 @@ pub(crate) enum AuthVerifyOutcome {
 }
 
 impl AuthVerifyOutcome {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Valid => "valid",
             Self::ValidRefreshed => "valid_refreshed",
@@ -1545,7 +1568,7 @@ impl AuthVerifyOutcome {
         }
     }
 
-    pub(crate) fn is_success(self) -> bool {
+    pub fn is_success(self) -> bool {
         matches!(self, Self::Valid | Self::ValidRefreshed | Self::Unverified)
     }
 }
@@ -1561,7 +1584,7 @@ pub(crate) struct AuthVerifyResult {
     pub(crate) detail: Option<String>,
 }
 
-pub(crate) fn auth_verify_source(
+pub fn auth_verify_source(
     env_present: bool,
     store_present: bool,
     auth_state_present: bool,
@@ -1577,7 +1600,7 @@ pub(crate) fn auth_verify_source(
     }
 }
 
-pub(crate) fn oauth_refresh_config_for_provider(provider: &str) -> Option<(String, String)> {
+pub fn oauth_refresh_config_for_provider(provider: &str) -> Option<(String, String)> {
     let token_url = match provider {
         "openai" => std::env::var("HERMES_OPENAI_OAUTH_TOKEN_URL")
             .ok()
@@ -1629,7 +1652,7 @@ pub(crate) fn oauth_refresh_config_for_provider(provider: &str) -> Option<(Strin
     Some((token_url, client_id))
 }
 
-pub(crate) async fn refresh_oauth_store_credential(
+pub async fn refresh_oauth_store_credential(
     provider: &str,
     current: &OAuthCredential,
 ) -> Result<OAuthCredential, AgentError> {
@@ -1660,7 +1683,7 @@ pub(crate) async fn refresh_oauth_store_credential(
     Ok(refreshed)
 }
 
-pub(crate) async fn ensure_openai_oauth_credential(
+pub async fn ensure_openai_oauth_credential(
     provider: &str,
     token_store: &FileTokenStore,
     manager: &AuthManager,
@@ -1694,7 +1717,7 @@ pub(crate) async fn ensure_openai_oauth_credential(
     Ok(Some(credential))
 }
 
-pub(crate) fn print_auth_verify_result(result: &AuthVerifyResult) {
+pub fn print_auth_verify_result(result: &AuthVerifyResult) {
     println!(
         "Auth verify: provider='{}', status={}, source={}, credential_present={}, oauth_state_present={}{}{}",
         result.provider,
@@ -1715,7 +1738,7 @@ pub(crate) fn print_auth_verify_result(result: &AuthVerifyResult) {
     );
 }
 
-pub(crate) fn nous_auth_error_requires_fresh_login(err: &AgentError) -> bool {
+pub fn nous_auth_error_requires_fresh_login(err: &AgentError) -> bool {
     let text = err.to_string().to_ascii_lowercase();
     text.contains("invalid_grant")
         || text.contains("refresh token reuse")
@@ -1726,7 +1749,7 @@ pub(crate) fn nous_auth_error_requires_fresh_login(err: &AgentError) -> bool {
         || text.contains("no refresh token")
 }
 
-pub(crate) async fn save_nous_runtime_credential(
+pub async fn save_nous_runtime_credential(
     manager: &AuthManager,
     resolved: &NousRuntimeCredentials,
 ) -> Result<(), AgentError> {
@@ -1742,7 +1765,7 @@ pub(crate) async fn save_nous_runtime_credential(
         .await
 }
 
-pub(crate) async fn fresh_nous_login_and_save(
+pub async fn fresh_nous_login_and_save(
     manager: &AuthManager,
 ) -> Result<(NousRuntimeCredentials, PathBuf, NousAuthState), AgentError> {
     let _ = clear_provider_auth_state("nous")?;
@@ -1759,7 +1782,7 @@ pub(crate) async fn fresh_nous_login_and_save(
     Ok((resolved, auth_path, state))
 }
 
-pub(crate) async fn resolve_or_fresh_login_nous(
+pub async fn resolve_or_fresh_login_nous(
     manager: &AuthManager,
     use_existing: bool,
 ) -> Result<(NousRuntimeCredentials, PathBuf, bool, NousAuthState), AgentError> {
@@ -1796,7 +1819,7 @@ pub(crate) async fn resolve_or_fresh_login_nous(
     Ok((resolved, auth_path, false, state))
 }
 
-pub(crate) async fn verify_single_oauth_provider(
+pub async fn verify_single_oauth_provider(
     provider: &str,
     token_store: &FileTokenStore,
     manager: &AuthManager,
@@ -2092,7 +2115,7 @@ pub(crate) async fn verify_single_oauth_provider(
     Ok(result)
 }
 
-pub(crate) async fn run_auth_verify(
+pub async fn run_auth_verify(
     provider: &str,
     token_store: &FileTokenStore,
     manager: &AuthManager,
@@ -2139,7 +2162,7 @@ pub(crate) async fn run_auth_verify(
     }
 }
 
-pub(crate) async fn run_auth(
+pub async fn run_auth(
     cli: Cli,
     action: Option<String>,
     provider: Option<String>,
@@ -3000,7 +3023,7 @@ pub(crate) async fn run_auth(
                 return Ok(());
             }
             if provider == "copilot" || provider == "github-copilot" {
-                let access_token = hermes_cli::copilot_auth::start_copilot_device_flow().await?;
+                let access_token = crate::copilot_auth::start_copilot_device_flow().await?;
                 manager
                     .save_credential(OAuthCredential {
                         provider: "copilot".to_string(),
@@ -3029,7 +3052,7 @@ pub(crate) async fn run_auth(
                     expires_at: None,
                 })
                 .await?;
-            let msg = hermes_cli::auth::login(&provider).await?;
+            let msg = crate::auth::login(&provider).await?;
             println!("{}", msg);
         }
         "logout" => {
@@ -3085,7 +3108,7 @@ pub(crate) async fn run_auth(
                 );
                 return Ok(());
             }
-            let msg = hermes_cli::auth::logout(&provider).await?;
+            let msg = crate::auth::logout(&provider).await?;
             token_store.remove(&provider).await?;
             if provider_supports_oauth(&provider) {
                 let _ = clear_provider_auth_state(&provider)?;
@@ -3319,7 +3342,7 @@ pub(crate) async fn run_auth(
     Ok(())
 }
 
-pub(crate) async fn run_secrets(
+pub async fn run_secrets(
     cli: Cli,
     action: Option<String>,
     provider: Option<String>,

@@ -1,4 +1,4 @@
-﻿/target
+/target
 # 第三方参考仓库通常放在上级目录 ~/workspace/research/GEO-AI
 GEO-AI/
 **/*.rs.bk
@@ -30,5 +30,14 @@ infographic/
 dist/
 *.zip
 
+# hermes-talk runtime models (packaging source of truth for `make package-talk-rockchip`)
+.models/
+
+# aarch64 cross toolchain cache (copied locally for `cross` Docker; do not symlink outside repo)
+.cross-cache/
+/.cross-cache/
+
 .local-wip-backup/
 .cargo\config.toml
+
+/target-check

@@ -302,6 +302,32 @@ impl ToolCallParser for HermesToolCallParser {
         }
 
         if calls.is_empty() {
+            let func_shorthand_re = Regex::new(r#"(?s)<function=(\w+)>([\s\S]*?)</function>"#).unwrap();
+            let param_shorthand_re =
+                Regex::new(r#"(?s)<parameter=(\w+)>([\s\S]*?)</parameter>"#).unwrap();
+            for func_caps in func_shorthand_re.captures_iter(content) {
+                let name = func_caps.get(1).unwrap().as_str().to_string();
+                let body = func_caps.get(2).unwrap().as_str();
+                let mut args = serde_json::Map::new();
+                for param_caps in param_shorthand_re.captures_iter(body) {
+                    let pname = param_caps.get(1).unwrap().as_str().to_string();
+                    let pval = param_caps.get(2).unwrap().as_str().trim().to_string();
+                    let val: serde_json::Value =
+                        serde_json::from_str(&pval).unwrap_or(serde_json::Value::String(pval));
+                    args.insert(pname, val);
+                }
+                calls.push(ToolCall {
+                    id: next_call_id(),
+                    function: FunctionCall {
+                        name,
+                        arguments: serde_json::Value::Object(args).to_string(),
+                    },
+                    extra_content: None,
+                });
+            }
+        }
+
+        if calls.is_empty() {
             let bare_tool_call_re = Regex::new(r"(?s)<tool_call>\s*(.*?)\s*</tool_call>").unwrap();
             for call_caps in bare_tool_call_re.captures_iter(content) {
                 let payload = call_caps.get(1).unwrap().as_str().trim();
@@ -373,9 +399,15 @@ pub fn separate_text_and_calls(content: &str) -> (String, Vec<ToolCall>) {
     let bare_tool_call_re = Regex::new(r"(?s)<tool_call>\s*.*?\s*</tool_call>").unwrap();
     result = bare_tool_call_re.replace_all(&result, "").to_string();
 
-    // Remove namespace-prefixed tool_call wrappers (e.g. <minimax:tool_call>...</minimax:tool_call>)
+    // Remove namespace-prefixed tool_call wrappers (e.g. <seed:tool_call>...</seed:tool_call>)
     let ns_tool_call_re = Regex::new(r#"(?s)<\w+:tool_call[^>]*>.*?</\w+:tool_call>"#).unwrap();
     result = ns_tool_call_re.replace_all(&result, "").to_string();
+
+    // Remove Seed/Llama shorthand: <function=name><parameter=key>val</parameter></function>
+    let func_shorthand_re = Regex::new(r#"(?s)<function=\w+>.*?</function>"#).unwrap();
+    result = func_shorthand_re.replace_all(&result, "").to_string();
+    let param_shorthand_re = Regex::new(r#"(?s)<parameter=\w+>.*?</parameter>"#).unwrap();
+    result = param_shorthand_re.replace_all(&result, "").to_string();
 
     // Remove standalone <invoke name="...">...</invoke> blocks (without <function_calls>)
     let standalone_invoke_re = Regex::new(r#"(?s)<invoke\s+name="[^"]+">.*?</invoke>"#).unwrap();
@@ -736,6 +768,21 @@ Proceeding now.
         let calls = parse_tool_calls(content).unwrap();
         // Namespace-prefixed wrappers should NOT be parsed as tool calls.
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn test_parse_seed_shorthand_function_parameter() {
+        let content = r#"reasoning
+<seed:tool_call>
+<function=execute_command><parameter=command>powershell -Command "Get-Date"</parameter></function>
+</seed:tool_call>"#;
+        let calls = parse_tool_calls(content).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.name, "execute_command");
+        assert!(calls[0].function.arguments.contains("Get-Date"));
+        let (text, _) = separate_text_and_calls(content);
+        assert!(!text.contains("<function="));
+        assert!(!text.contains("<seed:tool_call"));
     }
 
     #[test]

@@ -6,6 +6,12 @@ passthrough = [
     "AWS_LC_SYS_CMAKE_BUILDER",
     # Writable inside the cross container (do not forward host ~/.cache).
     "XDG_CACHE_HOME=/tmp/cross-cache",
+    # hermes-talk / sherpa-onnx cross (set by `make prefetch-talk-aarch64`)
+    "SHERPA_ONNX_ARCHIVE_DIR",
+    "HERMES_BUNDLED_RG_ARCHIVE_DIR",
+    # hermes-talk rockchip local ASR/TTS (set by `make release-talk-rockchip-arm64`)
+    "RK_TTS_SDK_DIR",
+    "RK_ASR_SDK_DIR",
     # cross also forwards host http(s)_proxy after passthrough; use a LAN-reachable
     # proxy on the host (not 127.0.0.1) before `cross build`, e.g.:
     #   export https_proxy=http://192.168.31.90:7890
@@ -13,4 +19,37 @@ passthrough = [
     "https_proxy",
     "HTTP_PROXY",
     "HTTPS_PROXY",
+]
+
+# hermes-talk (cpal + sherpa-onnx) needs arm64 ALSA headers when cross-compiling.
+[target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "bash -ec 'export DEBIAN_FRONTEND=noninteractive; dpkg --add-architecture arm64; apt-get -o Acquire::http::Timeout=60 update -qq && apt-get install -y -qq --no-install-recommends libasound2-dev:arm64 xz-utils bzip2'",
+]
+
+[target.aarch64-unknown-linux-gnu.env]
+passthrough = [
+    "PKG_CONFIG_ALLOW_CROSS",
+    "SHERPA_ONNX_ARCHIVE_DIR",
+    "HERMES_BUNDLED_RG_ARCHIVE_DIR",
+    "LIBCLANG_PATH",
+    "RK_TTS_SDK_DIR",
+    "RK_ASR_SDK_DIR",
+    "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER",
+    "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
+    "BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu",
+]
+
+[target.aarch64-unknown-linux-musl]
+pre-build = [
+    "bash -ec 'export DEBIAN_FRONTEND=noninteractive; dpkg --add-architecture arm64; apt-get -o Acquire::http::Timeout=60 update -qq && apt-get install -y -qq --no-install-recommends libasound2-dev:arm64 xz-utils bzip2'",
+]
+
+[target.aarch64-unknown-linux-musl.env]
+passthrough = [
+    "PKG_CONFIG_ALLOW_CROSS",
+    "SHERPA_ONNX_ARCHIVE_DIR",
+    "HERMES_BUNDLED_RG_ARCHIVE_DIR",
+    "LIBCLANG_PATH",
+    "BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_musl",
 ]

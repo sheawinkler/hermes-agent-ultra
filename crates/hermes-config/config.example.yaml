@@ -1,0 +1,49 @@
+# Hermes Agent Ultra - default config (created by hermes talk init / home bootstrap)
+# Edit API keys and model settings before running embedded talk or gateway.
+
+model: custom:auto
+max_turns: 250
+
+tools:
+  - bash
+  - read
+  - write
+  - edit
+  - glob
+  - grep
+  - web_search
+  - web_fetch
+
+terminal:
+  backend: local
+  timeout: 120
+  max_output_size: 1048576
+
+llm_providers:
+  custom:
+    api_key: sk-your-key
+    base_url: http://127.0.0.1:11080/v1
+    model: auto
+
+smart_model_routing:
+  enabled: false
+
+approval:
+  enabled: false
+  require_approval: false
+
+security:
+  allow_private_urls: false
+
+platforms: {}
+
+skills:
+  enabled: []
+  disabled: []
+
+tools_config:
+  enabled: []
+  disabled: []
+  per_tool: {}
+
+mcp_servers: []

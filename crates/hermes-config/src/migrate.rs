@@ -13,6 +13,37 @@ use crate::paths::{
     intermediate_home_basename, legacy_home_basename, primary_home_basename, user_home_dir,
 };
 
+/// Standard Hermes Ultra home subdirectories (same set as `hermes setup`).
+pub const HOME_LAYOUT_SUBDIRS: &[&str] =
+    &["profiles", "sessions", "logs", "skills", "cron", "cache"];
+
+const DEFAULT_CONFIG_YAML: &str = include_str!("../config.example.yaml");
+
+/// Ensure the effective Hermes Ultra home exists with the standard directory layout.
+///
+/// Idempotent: creates missing roots only; never overwrites existing files.
+pub fn ensure_hermes_home_layout(home_dir: Option<&str>) -> PathBuf {
+    let home = ensure_migrated_hermes_home(home_dir);
+    for sub in HOME_LAYOUT_SUBDIRS {
+        let _ = std::fs::create_dir_all(home.join(sub));
+    }
+    seed_default_config_yaml(&home);
+    home
+}
+
+/// Write `config.yaml` when missing (never overwrites an existing file).
+fn seed_default_config_yaml(home: &Path) {
+    let path = home.join("config.yaml");
+    if path.exists() {
+        return;
+    }
+    if let Err(err) = std::fs::write(&path, DEFAULT_CONFIG_YAML) {
+        tracing::warn!(path = %path.display(), error = %err, "failed to seed config.yaml");
+        return;
+    }
+    tracing::info!(path = %path.display(), "created default config.yaml");
+}
+
 /// Ensure the effective Hermes Ultra home exists (empty if newly created).
 ///
 /// Resolution order:
@@ -285,6 +316,33 @@ mod tests {
             match original_ultra {
                 Some(v) => std::env::set_var("HERMES_AGENT_ULTRA_HOME", v),
                 None => std::env::remove_var("HERMES_AGENT_ULTRA_HOME"),
+            }
+        }
+    }
+
+    #[test]
+    fn ensure_home_layout_creates_standard_subdirs() {
+        let _g = test_lock::lock();
+        let original = std::env::var("HERMES_HOME").ok();
+
+        let tmp = tempdir().expect("tempdir");
+        let home = tmp.path().join(".hermes-agent-ultra");
+
+        unsafe {
+            std::env::set_var("HERMES_HOME", home.to_string_lossy().as_ref());
+        }
+
+        let resolved = ensure_hermes_home_layout(None);
+        assert_eq!(resolved, home);
+        for sub in HOME_LAYOUT_SUBDIRS {
+            assert!(home.join(sub).is_dir(), "missing subdir {sub}");
+        }
+        assert!(home.join("config.yaml").is_file(), "missing config.yaml");
+
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var("HERMES_HOME", v),
+                None => std::env::remove_var("HERMES_HOME"),
             }
         }
     }
