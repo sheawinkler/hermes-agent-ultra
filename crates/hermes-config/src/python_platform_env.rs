@@ -23,9 +23,36 @@ fn comma_list_to_strings(raw: &str) -> Vec<String> {
 }
 
 fn json_array_or_csv(raw: &str) -> Vec<String> {
-    serde_json::from_str::<Vec<String>>(raw)
-        .unwrap_or_else(|_| comma_list_to_strings(raw))
-        .into_iter()
+    if let Ok(value) = serde_json::from_str::<Value>(raw) {
+        let values = match value {
+            Value::Array(values) => values
+                .into_iter()
+                .filter_map(|value| match value {
+                    Value::String(s) => Some(s),
+                    Value::Number(n) => Some(n.to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            Value::String(s) => vec![s],
+            _ => Vec::new(),
+        };
+        if !values.is_empty() {
+            return values
+                .into_iter()
+                .flat_map(|s| {
+                    s.replace('\n', ",")
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|part| !part.is_empty())
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+        }
+    }
+
+    raw.replace('\n', ",")
+        .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
@@ -453,10 +480,73 @@ fn apply_discord_env(config: &mut GatewayConfig) {
     }
 }
 
+fn apply_slack_env(config: &mut GatewayConfig) {
+    let token = env_nonempty("SLACK_BOT_TOKEN");
+    let app_token = env_nonempty("SLACK_APP_TOKEN");
+    let socket_mode = env_nonempty("SLACK_SOCKET_MODE");
+    let reactions = env_nonempty("SLACK_REACTIONS");
+    let require_mention = env_nonempty("SLACK_REQUIRE_MENTION");
+    let bot_user_id = env_nonempty("SLACK_BOT_USER_ID").or_else(|| env_nonempty("SLACK_BOT_ID"));
+    let mention_patterns = env_nonempty("SLACK_MENTION_PATTERNS");
+    let allowed_users = env_nonempty("SLACK_ALLOWED_USERS");
+
+    if token.is_none()
+        && app_token.is_none()
+        && socket_mode.is_none()
+        && reactions.is_none()
+        && require_mention.is_none()
+        && bot_user_id.is_none()
+        && mention_patterns.is_none()
+        && allowed_users.is_none()
+    {
+        return;
+    }
+
+    let slack = config
+        .platforms
+        .entry("slack".into())
+        .or_insert_with(PlatformConfig::default);
+    if let Some(token) = token {
+        let enabled_was_explicit = slack
+            .extra
+            .remove("_enabled_explicit")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !slack.enabled && !enabled_was_explicit {
+            slack.enabled = true;
+        }
+        slack.token = Some(token);
+    }
+    if let Some(v) = app_token {
+        set_extra(slack, "app_token", json!(v));
+    }
+    if let Some(v) = socket_mode {
+        set_extra(slack, "socket_mode", json!(env_bool(&v)));
+    }
+    if let Some(v) = reactions {
+        set_extra(slack, "reactions", json!(env_bool(&v)));
+    }
+    if let Some(v) = require_mention {
+        let parsed = env_bool(&v);
+        slack.require_mention = Some(parsed);
+        set_extra(slack, "require_mention", json!(parsed));
+    }
+    if let Some(v) = bot_user_id {
+        set_extra(slack, "bot_user_id", json!(v));
+    }
+    if let Some(v) = mention_patterns {
+        set_extra(slack, "mention_patterns", json!(json_array_or_csv(&v)));
+    }
+    if let Some(v) = allowed_users {
+        slack.allowed_users = comma_list_to_strings(&v);
+    }
+}
+
 /// 应用与 Python 文档一致的平台环境变量到 `platforms`。
 pub fn apply_python_named_platform_env(config: &mut GatewayConfig) {
     apply_telegram_env(config);
     apply_discord_env(config);
+    apply_slack_env(config);
     apply_weixin_env(config);
     apply_dingtalk_env(config);
     apply_mattermost_env(config);
@@ -721,6 +811,106 @@ mod tests {
 
         unsafe {
             std::env::remove_var("TELEGRAM_REPLY_TO_MODE");
+        }
+    }
+
+    #[test]
+    fn json_array_or_csv_splits_mixed_newline_and_csv_fallback() {
+        assert_eq!(
+            json_array_or_csv("chompy\\b\n@hermes, sigma"),
+            vec!["chompy\\b", "@hermes", "sigma"]
+        );
+        assert_eq!(
+            json_array_or_csv(r#""wake one,wake two""#),
+            vec!["wake one", "wake two"]
+        );
+    }
+
+    #[test]
+    fn slack_env_sets_socket_mode_require_mention_and_patterns() {
+        let _env = env_lock();
+        unsafe {
+            std::env::set_var("SLACK_BOT_TOKEN", "slack-token");
+            std::env::set_var("SLACK_APP_TOKEN", "xapp-token");
+            std::env::set_var("SLACK_SOCKET_MODE", "true");
+            std::env::set_var("SLACK_REACTIONS", "0");
+            std::env::set_var("SLACK_REQUIRE_MENTION", "yes");
+            std::env::set_var("SLACK_BOT_USER_ID", "UBOT");
+            std::env::set_var("SLACK_MENTION_PATTERNS", "chompy\\b\n@hermes, sigma");
+            std::env::set_var("SLACK_ALLOWED_USERS", "U1, U2");
+        }
+
+        let mut cfg = GatewayConfig::default();
+        apply_python_named_platform_env(&mut cfg);
+        let slack = cfg.platforms.get("slack").expect("slack block");
+        assert!(slack.enabled);
+        assert_eq!(slack.token.as_deref(), Some("slack-token"));
+        assert_eq!(slack.require_mention, Some(true));
+        assert_eq!(slack.allowed_users, vec!["U1", "U2"]);
+        assert_eq!(
+            slack.extra.get("app_token").and_then(|v| v.as_str()),
+            Some("xapp-token")
+        );
+        assert_eq!(
+            slack.extra.get("socket_mode").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            slack.extra.get("reactions").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            slack.extra.get("bot_user_id").and_then(|v| v.as_str()),
+            Some("UBOT")
+        );
+        assert_eq!(
+            slack
+                .extra
+                .get("mention_patterns")
+                .and_then(|v| v.as_array())
+                .map(|items| items
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .collect::<Vec<_>>()),
+            Some(vec!["chompy\\b", "@hermes", "sigma"])
+        );
+
+        unsafe {
+            std::env::remove_var("SLACK_BOT_TOKEN");
+            std::env::remove_var("SLACK_APP_TOKEN");
+            std::env::remove_var("SLACK_SOCKET_MODE");
+            std::env::remove_var("SLACK_REACTIONS");
+            std::env::remove_var("SLACK_REQUIRE_MENTION");
+            std::env::remove_var("SLACK_BOT_USER_ID");
+            std::env::remove_var("SLACK_MENTION_PATTERNS");
+            std::env::remove_var("SLACK_ALLOWED_USERS");
+        }
+    }
+
+    #[test]
+    fn slack_env_token_respects_explicit_disable_marker() {
+        let _env = env_lock();
+        unsafe {
+            std::env::set_var("SLACK_BOT_TOKEN", "slack-token");
+        }
+
+        let mut cfg = GatewayConfig::default();
+        let slack = cfg
+            .platforms
+            .entry("slack".to_string())
+            .or_insert_with(PlatformConfig::default);
+        slack.enabled = false;
+        slack
+            .extra
+            .insert("_enabled_explicit".to_string(), json!(true));
+
+        apply_python_named_platform_env(&mut cfg);
+        let slack = cfg.platforms.get("slack").expect("slack block");
+        assert!(!slack.enabled);
+        assert_eq!(slack.token.as_deref(), Some("slack-token"));
+
+        unsafe {
+            std::env::remove_var("SLACK_BOT_TOKEN");
         }
     }
 

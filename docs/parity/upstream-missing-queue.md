@@ -1,25 +1,25 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T08:21:54.340532+00:00`
+Generated: `2026-06-25T09:41:00.732386+00:00`
 
-- Range: `origin/main..upstream/main`; total commits tracked: `6997`.
+- Range: `origin/main..upstream/main`; total commits tracked: `7011`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3132 |
+| #20 | GPAR-01 tests+CI parity | 3139 |
 | #21 | GPAR-02 skills parity | 130 |
 | #22 | GPAR-03 UX parity | 957 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 22 |
 | #25 | GPAR-06 packaging/docs/install parity | 145 |
-| #26 | GPAR-07 upstream queue backfill | 2123 |
+| #26 | GPAR-07 upstream queue backfill | 2130 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 207 |
-| ported | 385 |
-| superseded | 6329 |
+| pending | 206 |
+| ported | 391 |
+| superseded | 6338 |
 
 ## First 100 Pending Commits
 
@@ -123,5 +123,5 @@ Generated: `2026-06-25T08:21:54.340532+00:00`
 | `7130d60861a9` | #22 | feat(providers): remove google-gemini-cli + google-antigravity OAuth providers (#50492) |
 | `0768ed3b33e4` | #26 | docs(agents): fix stale platform adapter path in token-lock note |
 | `95d53c3bcb06` | #20 | feat(cli): /reasoning full — show complete thinking, not 10-line clamp (#50499) |
-| `4314d451ca96` | #20 | fix(gateway): accept any inbound file type across all messaging platforms |
-| `b5bd66eac9b1` | #20 | fix(telegram): observed/replied group docs of any type are cached too |
+| `b9b4756ab480` | #22 | fix dashboard chat session titles |
+| `a61baa961572` | #26 | feat(desktop): PR-style file diffs in chat |

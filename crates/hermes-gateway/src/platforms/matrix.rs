@@ -231,6 +231,20 @@ pub struct RoomMember {
     pub membership: String,
 }
 
+/// Matrix room identity metadata used for DM-vs-room routing decisions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatrixRoomIdentity {
+    pub room_id: String,
+    pub room_name: Option<String>,
+    pub canonical_alias: Option<String>,
+    pub server_name: Option<String>,
+    pub joined_member_count: Option<usize>,
+    pub is_direct_account_data: bool,
+    pub direct_conflict: bool,
+    pub chat_type: String,
+    pub display_name: String,
+}
+
 // ---------------------------------------------------------------------------
 // E2EE support
 // ---------------------------------------------------------------------------
@@ -1638,6 +1652,90 @@ impl MatrixAdapter {
         Ok(members)
     }
 
+    fn room_server_name(room_id: &str) -> Option<String> {
+        room_id
+            .rsplit_once(':')
+            .map(|(_, server)| server.trim())
+            .filter(|server| !server.is_empty())
+            .map(str::to_string)
+    }
+
+    pub fn classify_room_identity(
+        room_id: &str,
+        room_name: Option<String>,
+        canonical_alias: Option<String>,
+        joined_member_count: Option<usize>,
+        is_direct_account_data: bool,
+    ) -> MatrixRoomIdentity {
+        let has_explicit_name = room_name
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|name| !name.is_empty());
+        let is_likely_dm = joined_member_count.is_some_and(|count| count <= 2)
+            || (joined_member_count.is_none() && is_direct_account_data && !has_explicit_name);
+        let direct_conflict = is_direct_account_data
+            && has_explicit_name
+            && joined_member_count.is_none_or(|n| n > 2);
+        let display_name = room_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                canonical_alias
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|alias| !alias.is_empty())
+            })
+            .unwrap_or(room_id)
+            .to_string();
+
+        MatrixRoomIdentity {
+            room_id: room_id.to_string(),
+            room_name,
+            canonical_alias,
+            server_name: Self::room_server_name(room_id),
+            joined_member_count,
+            is_direct_account_data,
+            direct_conflict,
+            chat_type: if is_likely_dm { "dm" } else { "room" }.to_string(),
+            display_name,
+        }
+    }
+
+    pub async fn resolve_room_identity(
+        &self,
+        room_id: &str,
+        is_direct_account_data: bool,
+    ) -> MatrixRoomIdentity {
+        let room_name = match self.get_room_name(room_id).await {
+            Ok(name) => name,
+            Err(err) => {
+                debug!(room_id, error = %err, "Matrix room name lookup unavailable");
+                None
+            }
+        };
+        let joined_member_count = match self.get_room_members(room_id).await {
+            Ok(members) => Some(
+                members
+                    .iter()
+                    .filter(|member| member.membership == "join")
+                    .count(),
+            ),
+            Err(err) => {
+                debug!(room_id, error = %err, "Matrix room member count lookup unavailable");
+                None
+            }
+        };
+
+        Self::classify_room_identity(
+            room_id,
+            room_name,
+            None,
+            joined_member_count,
+            is_direct_account_data,
+        )
+    }
+
     /// Get the power levels for a room.
     pub async fn get_room_power_levels(
         &self,
@@ -2637,6 +2735,54 @@ mod tests {
             Some("image/png")
         );
         assert_eq!(normalized_image_content_type(Some("text/plain")), None);
+    }
+
+    #[test]
+    fn matrix_room_identity_uses_member_count_for_named_dm() {
+        let identity = MatrixAdapter::classify_room_identity(
+            "!dm:example.org",
+            Some("Alice & Hermes".into()),
+            None,
+            Some(2),
+            true,
+        );
+
+        assert_eq!(identity.chat_type, "dm");
+        assert!(!identity.direct_conflict);
+        assert_eq!(identity.display_name, "Alice & Hermes");
+        assert_eq!(identity.server_name.as_deref(), Some("example.org"));
+    }
+
+    #[test]
+    fn matrix_room_identity_marks_stale_direct_room_conflict() {
+        let identity = MatrixAdapter::classify_room_identity(
+            "!room:example.org",
+            Some("Project Room".into()),
+            Some("#project:example.org".into()),
+            Some(3),
+            true,
+        );
+
+        assert_eq!(identity.chat_type, "room");
+        assert!(identity.direct_conflict);
+        assert_eq!(identity.joined_member_count, Some(3));
+    }
+
+    #[test]
+    fn matrix_room_identity_falls_back_to_direct_name_heuristic_without_count() {
+        let unnamed_direct =
+            MatrixAdapter::classify_room_identity("!legacy:example.org", None, None, None, true);
+        assert_eq!(unnamed_direct.chat_type, "dm");
+
+        let named_direct = MatrixAdapter::classify_room_identity(
+            "!legacy-room:example.org",
+            Some("Explicit Room".into()),
+            None,
+            None,
+            true,
+        );
+        assert_eq!(named_direct.chat_type, "room");
+        assert!(named_direct.direct_conflict);
     }
 
     #[tokio::test]

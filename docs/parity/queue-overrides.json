@@ -4453,6 +4453,36 @@
       "disposition": "superseded",
       "notes": "Upstream fixes a Python re import and Python test relocation after WhatsApp adapter plugin migration. The Rust WhatsApp module is compile-tested under the whatsapp feature and has no Python adapter import path.",
       "owner": "rust-runtime"
+    },
+    "49662687646d": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust Slack Socket Mode session handling now enforces require_mention with literal <@bot_user_id> mentions and documented mention_patterns wake-word regexes. CLI config mapping and SLACK_MENTION_PATTERNS env bridging are covered by focused Rust tests."
+    },
+    "441bd6d8dbe5": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust Slack mention-pattern parsing accepts JSON list/string values and mixed newline/comma fallback from SLACK_MENTION_PATTERNS, with tests covering the CSV/newline split regression."
+    },
+    "4aa793345ec9": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust Matrix adapter now has MatrixRoomIdentity classification and async resolution helpers that use joined_member_count <= 2 as the primary DM signal, preserve named DMs, and flag stale m.direct conflicts for rooms with 3+ members. Focused tests cover named DM and stale direct-room behavior."
+    },
+    "404b06ac4fc3": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust Telegram send paths now surface Bot API parameters.retry_after as typed GatewayError::RateLimited for JSON and multipart sends, preserving server-requested flood-control delay instead of flattening it into a generic SendFailed string. Focused tests cover retry_after parsing and typed error mapping."
+    },
+    "4314d451ca96": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust gateway media cache already accepts arbitrary inbound document bytes and records unknown types as application/octet-stream, while Slack/Telegram/Discord document surfaces preserve file metadata and focused media/Telegram document tests cover the behavior."
+    },
+    "b5bd66eac9b1": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust Telegram parser already preserves current documents and replied group documents when the addressed message has no own media, only filtering oversized documents. Existing Telegram parse tests cover document metadata and replied-document size behavior."
     }
   },
   "subject_patterns": [

@@ -13,7 +13,6 @@ use crate::config::{
 };
 use crate::merge::merge_configs;
 use crate::paths;
-use crate::platform::PlatformConfig;
 
 // ---------------------------------------------------------------------------
 // ConfigError conversion helpers
@@ -2363,25 +2362,6 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
             for provider in config.llm_providers.values_mut() {
                 provider.base_url = Some(v.clone());
             }
-        }
-    }
-
-    if let Ok(token) = std::env::var("SLACK_BOT_TOKEN") {
-        let trimmed = token.trim();
-        if !trimmed.is_empty() {
-            let slack = config
-                .platforms
-                .entry("slack".to_string())
-                .or_insert_with(PlatformConfig::default);
-            let enabled_was_explicit = slack
-                .extra
-                .remove("_enabled_explicit")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if !slack.enabled && !enabled_was_explicit {
-                slack.enabled = true;
-            }
-            slack.token = Some(trimmed.to_string());
         }
     }
 

@@ -1891,6 +1891,8 @@ impl TelegramAdapter {
             Ok(resp) => {
                 let description = resp
                     .description
+                    .as_deref()
+                    .map(str::to_string)
                     .unwrap_or_else(|| format!("{method} failed"));
                 if Self::thread_or_reply_missing(&description)
                     && Self::strip_thread_fields_for_fallback(&mut body)
@@ -1899,13 +1901,12 @@ impl TelegramAdapter {
                     if retry.ok {
                         return Ok(retry);
                     }
-                    return Err(GatewayError::SendFailed(
-                        retry
-                            .description
-                            .unwrap_or_else(|| format!("{method} fallback failed")),
+                    return Err(Self::telegram_response_error(
+                        &format!("{method} fallback"),
+                        &retry,
                     ));
                 }
-                Err(GatewayError::SendFailed(description))
+                Err(Self::telegram_response_error(method, &resp))
             }
             Err(err) if Self::gateway_error_thread_or_reply_missing(&err) => {
                 if Self::strip_thread_fields_for_fallback(&mut body) {
@@ -2186,10 +2187,9 @@ impl TelegramAdapter {
         let status = resp.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let body_text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!(
-                "Rate limited on {}: {}",
-                request.method, body_text
-            )));
+            return Err(GatewayError::RateLimited {
+                retry_after_secs: Self::retry_after_from_telegram_body(&body_text),
+            });
         }
 
         let result: TelegramResponse<SentMessage> = resp.json().await.map_err(|e| {
@@ -2208,11 +2208,7 @@ impl TelegramAdapter {
                 )
             })
         } else {
-            Err(GatewayError::SendFailed(
-                result
-                    .description
-                    .unwrap_or_else(|| format!("{} failed", request.method)),
-            ))
+            Err(Self::telegram_response_error(request.method, &result))
         }
     }
 
@@ -2740,6 +2736,31 @@ impl TelegramAdapter {
     /// Detects HTTP 429 (rate limited) responses, extracts `retry_after`
     /// from the response body, sleeps, then retries up to
     /// `RATE_LIMIT_MAX_RETRIES` times.
+    fn telegram_response_error<T>(method: &str, response: &TelegramResponse<T>) -> GatewayError {
+        if let Some(retry_after_secs) = response
+            .parameters
+            .as_ref()
+            .and_then(|parameters| parameters.retry_after)
+        {
+            return GatewayError::RateLimited {
+                retry_after_secs: Some(retry_after_secs),
+            };
+        }
+
+        GatewayError::SendFailed(
+            response
+                .description
+                .clone()
+                .unwrap_or_else(|| format!("{method} failed")),
+        )
+    }
+
+    fn retry_after_from_telegram_body(text: &str) -> Option<u64> {
+        serde_json::from_str::<serde_json::Value>(text)
+            .ok()
+            .and_then(|value| value.get("parameters")?.get("retry_after")?.as_u64())
+    }
+
     async fn post_json<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
@@ -2757,17 +2778,13 @@ impl TelegramAdapter {
             if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 let text = resp.text().await.unwrap_or_default();
 
-                let retry_after = serde_json::from_str::<serde_json::Value>(&text)
-                    .ok()
-                    .and_then(|v| v.get("parameters")?.get("retry_after")?.as_u64())
-                    .unwrap_or(5);
+                let retry_after = Self::retry_after_from_telegram_body(&text).unwrap_or(5);
 
                 retries += 1;
                 if retries > RATE_LIMIT_MAX_RETRIES {
-                    return Err(GatewayError::SendFailed(format!(
-                        "Rate limited after {} retries (retry_after={}s): {}",
-                        retries, retry_after, text
-                    )));
+                    return Err(GatewayError::RateLimited {
+                        retry_after_secs: Some(retry_after),
+                    });
                 }
 
                 warn!(
@@ -2781,6 +2798,11 @@ impl TelegramAdapter {
 
             if !status.is_success() {
                 let text = resp.text().await.unwrap_or_default();
+                if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    return Err(GatewayError::RateLimited {
+                        retry_after_secs: Self::retry_after_from_telegram_body(&text),
+                    });
+                }
                 return Err(GatewayError::SendFailed(format!(
                     "Telegram API returned HTTP {}: {}",
                     status, text
@@ -4800,6 +4822,37 @@ mod tests {
         let resp: TelegramResponse<serde_json::Value> = serde_json::from_str(json).unwrap();
         assert!(!resp.ok);
         assert_eq!(resp.parameters.as_ref().unwrap().retry_after, Some(5));
+    }
+
+    #[test]
+    fn telegram_response_error_uses_typed_retry_after() {
+        let resp: TelegramResponse<serde_json::Value> = serde_json::from_value(serde_json::json!({
+            "ok": false,
+            "description": "Too Many Requests: retry after 37",
+            "parameters": {"retry_after": 37}
+        }))
+        .unwrap();
+        let err = TelegramAdapter::telegram_response_error("sendRichMessage", &resp);
+        assert!(matches!(
+            err,
+            GatewayError::RateLimited {
+                retry_after_secs: Some(37)
+            }
+        ));
+    }
+
+    #[test]
+    fn telegram_retry_after_parser_reads_bot_api_body() {
+        assert_eq!(
+            TelegramAdapter::retry_after_from_telegram_body(
+                r#"{"ok":false,"parameters":{"retry_after":25}}"#
+            ),
+            Some(25)
+        );
+        assert_eq!(
+            TelegramAdapter::retry_after_from_telegram_body(r#"{"ok":false}"#),
+            None
+        );
     }
 
     #[test]

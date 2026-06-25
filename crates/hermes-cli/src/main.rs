@@ -4715,7 +4715,11 @@ fn extra_string_set(platform_cfg: &PlatformConfig, key: &str) -> HashSet<String>
     values
 }
 
-#[cfg(any(feature = "gateway-telegram", feature = "gateway-whatsapp"))]
+#[cfg(any(
+    feature = "gateway-slack",
+    feature = "gateway-telegram",
+    feature = "gateway-whatsapp"
+))]
 fn extra_string_vec(platform_cfg: &PlatformConfig, key: &str) -> Vec<String> {
     let Some(raw) = platform_cfg.extra.get(key) else {
         return Vec::new();
@@ -5759,6 +5763,13 @@ async fn register_gateway_adapters(
                     app_token: extra_string(platform_cfg, "app_token"),
                     socket_mode: extra_bool(platform_cfg, "socket_mode", false),
                     reactions: extra_bool(platform_cfg, "reactions", true),
+                    require_mention: platform_cfg
+                        .require_mention
+                        .or_else(|| extra_bool_loose(platform_cfg, "require_mention"))
+                        .unwrap_or(false),
+                    bot_user_id: extra_string(platform_cfg, "bot_user_id")
+                        .or_else(|| extra_string(platform_cfg, "bot_id")),
+                    mention_patterns: extra_string_vec(platform_cfg, "mention_patterns"),
                     proxy: Default::default(),
                 };
                 match SlackAdapter::new(slack_cfg) {
