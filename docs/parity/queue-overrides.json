@@ -1762,6 +1762,14 @@
       "disposition": "ported",
       "notes": "Rust ACP sessions now include client-provided MCP server toolsets through live ToolRegistry mcp-{server} toolsets and explicit aliases, so tools.list, /tools, initialize tool names, ToolsetManager resolution, and registered MCP dispatch all see the session MCP surface. Focused tests cover toolset expansion and ACP MCP tool visibility."
     },
+    "93d6e730288e": {
+      "disposition": "ported",
+      "notes": "Rust now exposes late-registered MCP tools to active agents by refreshing the CLI App agent snapshot from the live ToolRegistry, rebuilding planner schemas, and merging live mcp-* toolsets into default platform tool planning while preserving explicit custom platform filters. Tests cover added tools, equal-size replacements, /reload-mcp command refresh, default/custom MCP planning, and the McpManager discovery-to-registry contract."
+    },
+    "2f7c4858a764": {
+      "disposition": "ported",
+      "notes": "Rust /reload-mcp now performs the stale-snapshot refresh that upstream added for late TUI MCP discovery: it re-bridges the active AgentLoop registry from the live ToolRegistry, reports added/removed tools, refreshes model-visible schemas, and keeps connector renegotiation explicitly restart-bound. Focused CLI tests cover late-added MCP tools and same-count replacement visibility."
+    },
     "f81395975025": {
       "disposition": "superseded",
       "notes": "Upstream simple-terminal registration is superseded by Rust TerminalHandler and LocalBackend command execution, explicit background=true lifecycle tracking, timeout/workdir/schema contracts, and process-management tests without the Python Morph VM dependency."
