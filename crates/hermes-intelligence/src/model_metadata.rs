@@ -85,8 +85,9 @@ static DEFAULT_CONTEXT_LENGTHS: &[(&str, u64)] = &[
     ("gemma-4-31b", 256_000),
     ("gemma-3", 131_072),
     ("gemma", 8_192),
-    // DeepSeek
-    ("deepseek", 128_000),
+    // DeepSeek (V4: 1M context window — deepseek-chat/deepseek-reasoner
+    // are aliases for deepseek-v4-flash non-thinking/thinking modes)
+    ("deepseek", 1_000_000),
     // Meta
     ("llama", 131_072),
     // Qwen
@@ -332,7 +333,8 @@ pub fn known_models() -> Vec<ModelInfo> {
         ModelInfo {
             name: "deepseek-chat".into(),
             provider: "deepseek".into(),
-            context_window: 128_000,
+            // V4-Flash non-thinking mode: 1M context, 384K max output
+            context_window: 1_000_000,
             max_output_tokens: Some(8_192),
             supports_vision: false,
             supports_tools: true,
@@ -344,7 +346,8 @@ pub fn known_models() -> Vec<ModelInfo> {
         ModelInfo {
             name: "deepseek-reasoner".into(),
             provider: "deepseek".into(),
-            context_window: 128_000,
+            // V4-Flash thinking mode: 1M context, 384K max output
+            context_window: 1_000_000,
             max_output_tokens: Some(8_192),
             supports_vision: false,
             supports_tools: true,

@@ -125,7 +125,7 @@ fn init_tracing(verbose: bool, interactive_tui: bool, gateway: bool, talk: bool)
     } else if verbose {
         "debug,hermes_cron=debug,rustls=warn,hyper=warn,h2=warn"
     } else if gateway {
-        "warn,hermes_cron=info,rustls=warn,hyper=warn,h2=warn"
+        "warn,hermes_cron=info,cache_diag=info,rustls=warn,hyper=warn,h2=warn"
     } else {
         "warn,rustls=warn,hyper=warn,h2=warn"
     };

@@ -134,8 +134,10 @@ fn anthropic_still_gets_reasoning_echo() {
 async fn compression_digest_is_never_re_summarized() {
     let engine = DefaultContextEngine::new();
 
-    // Create 40 messages to exceed the foldEconomics MIN_FOLD_TOKENS (400).
-    let msgs: Vec<Value> = (0..40)
+    // Create 80 messages — partition_fold keeps small user turns verbatim,
+    // so only assistant messages fold.  ~27 assistant messages × ~20 tokens
+    // = ~540 tokens → passes the foldEconomics MIN_FOLD_TOKENS (400).
+    let msgs: Vec<Value> = (0..80)
         .map(|i| {
             json!({"role": if i % 2 == 0 { "user" } else { "assistant" }, "content": format!("message {i} with some extra padding text to consume tokens and push past the budget threshold")})
         })
@@ -143,10 +145,18 @@ async fn compression_digest_is_never_re_summarized() {
 
     // First compression: should produce a digest.
     let r1 = engine.compress(&msgs, 200).await.unwrap();
-    assert!(r1.len() < 40, "first compress should reduce count");
+    assert!(r1.len() < 80, "first compress should reduce count");
 
-    // Verify the digest has the compression-summary marker in user role.
-    let first_summary = &r1[0];
+    // Verify a digest with the compression-summary marker exists.
+    let first_summary_idx = r1
+        .iter()
+        .position(|m| {
+            m.get("content")
+                .and_then(|c| c.as_str())
+                .is_some_and(|c| c.starts_with("<compression-summary>"))
+        })
+        .expect("digest must be present");
+    let first_summary = &r1[first_summary_idx];
     assert_eq!(first_summary["role"], "user");
     assert!(
         first_summary["content"]
@@ -159,10 +169,11 @@ async fn compression_digest_is_never_re_summarized() {
     // Second compression over the already-compressed result:
     // the existing digest must NOT be re-summarized.
     let r2 = engine.compress(&r1, 200).await.unwrap();
-    let second_first = &r2[0];
-    assert_eq!(second_first["role"], "user");
-    // The first digest should still be the leading message, unchanged.
-    assert_eq!(second_first["content"], first_summary["content"]);
+    // The first digest should still be present, unchanged.
+    assert!(
+        r2.iter().any(|m| m["content"] == first_summary["content"]),
+        "existing digest must not be re-summarized"
+    );
 }
 
 // ---------------------------------------------------------------------------

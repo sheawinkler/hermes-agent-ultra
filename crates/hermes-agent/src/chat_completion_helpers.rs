@@ -213,10 +213,11 @@ impl AgentLoop {
                         let prev = state.last_prefix_shape.clone();
                         let s_hit = state.session_cache_hit;
                         let s_miss = state.session_cache_miss;
+                        let rewrite_ver = state.compaction_count;
                         let (new_shape, _diag) = crate::cache_diagnostics::trace_turn(
                             ctx.get_messages(),
                             tool_schemas,
-                            0, // log_rewrite_version — TODO: wire compression count
+                            rewrite_ver,
                             response.usage.as_ref(),
                             prev.as_ref(),
                             s_hit,

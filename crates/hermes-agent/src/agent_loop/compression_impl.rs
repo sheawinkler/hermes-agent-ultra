@@ -89,6 +89,14 @@ impl AgentLoop {
         }
 
         self.invalidate_cached_system_prompt();
+
+        // Increment compaction count for cache diagnostics — each compaction
+        // resets the byte-stable prefix, so this counter lets trace_turn
+        // report "log_rewrite" as a cache-miss reason.
+        if let Ok(mut state) = self.state.lock() {
+            state.compaction_count = state.compaction_count.saturating_add(1);
+        }
+
         let (new_system, _) = self.active_cached_system_prompt(&task_hint, &tool_schemas);
         let mut final_messages = compressed;
         Self::patch_leading_system_message(&mut final_messages, &new_system);
@@ -134,10 +142,76 @@ impl AgentLoop {
     pub(crate) async fn auto_compress_if_over_threshold(&self, ctx: &mut ContextManager) {
         let total_chars = ctx.total_chars();
         let max_c = ctx.max_context_chars().max(1);
+        let pct = (total_chars * 100) / max_c;
+
+        // Soft compaction threshold (50%): report growing context once
+        // WITHOUT triggering compaction, preserving the cache-first prefix.
+        // Ported from Reasonix compact.go maybeCompact softCompactRatio.
+        const SOFT_THRESHOLD_PCT: usize = 50;
+        const COMPACT_TRIGGER_PCT: usize = 80;
+        if (SOFT_THRESHOLD_PCT..COMPACT_TRIGGER_PCT).contains(&pct) {
+            let should_notice = if let Ok(mut state) = self.state.lock() {
+                let was_noticed = state.soft_compact_noticed;
+                state.soft_compact_noticed = true;
+                // Context dropped below the trigger — a healthy compaction
+                // buys breathing room.  Clear the stuck latch so auto-compaction
+                // resumes if context grows past the trigger again.
+                state.consecutive_compacts = 0;
+                state.compact_stuck = false;
+                !was_noticed
+            } else {
+                false
+            };
+            if should_notice {
+                tracing::info!(
+                    "Context reached {}% of window; keeping cache-first prefix until compact threshold 80%",
+                    pct
+                );
+                crate::hooks::emit_status(
+                    self,
+                    "lifecycle",
+                    &format!(
+                        "Context at {}% — cache prefix preserved until 80% threshold",
+                        pct
+                    ),
+                );
+            }
+            return;
+        }
+
+        // Below soft threshold: clear the noticed flag so the notice
+        // fires again the next time context grows past 50%.
+        if pct < SOFT_THRESHOLD_PCT {
+            let _ = self.state.lock().map(|mut state| {
+                state.soft_compact_noticed = false;
+                state.consecutive_compacts = 0;
+                state.compact_stuck = false;
+            });
+        }
+
         if !self.context_compression_should_run(ctx).await {
             return;
         }
-        let pct = (total_chars * 100) / max_c;
+
+        // Stuck guard: if two consecutive compactions failed to bring
+        // context below the trigger, pause auto-compaction.  The system
+        // prompt plus one verbatim turn already exceeds the window —
+        // re-firing every turn is the loop users hit, so pause and say
+        // why.  Ported from Reasonix compact.go compactStuck.
+        let is_stuck = if let Ok(state) = self.state.lock() {
+            state.compact_stuck
+        } else {
+            false
+        };
+        if is_stuck {
+            tracing::warn!(
+                "Auto-compaction paused: context window too small for compaction to help \
+                 (system prompt + one turn exceeds 80% of window). Raise context_window \
+                 or shrink tool output. Manual /compress still works."
+            );
+            return;
+        }
+
         tracing::info!("Context pressure at {}%, triggering compression", pct);
         crate::hooks::emit_status(
             self,
@@ -146,6 +220,43 @@ impl AgentLoop {
         );
         self.compress_context(ctx).await;
         let after_chars = ctx.total_chars();
+
+        // Stuck guard: if context is still above the trigger after
+        // compaction, increment the consecutive counter.  Two strikes
+        // pauses auto-compaction to avoid cache thrashing.
+        let after_pct = (after_chars * 100) / max_c;
+        if after_pct >= COMPACT_TRIGGER_PCT {
+            let should_warn = if let Ok(mut state) = self.state.lock() {
+                state.consecutive_compacts = state.consecutive_compacts.saturating_add(1);
+                if state.consecutive_compacts >= 2 {
+                    state.compact_stuck = true;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if should_warn {
+                tracing::warn!(
+                    "Auto-compaction paused: context window too small for compaction to help \
+                     (system prompt + one turn exceeds 80% of window). Raise context_window \
+                     or shrink tool output."
+                );
+                crate::hooks::emit_status(
+                    self,
+                    "lifecycle",
+                    "Auto-compaction paused — context window too small",
+                );
+            }
+        } else {
+            // Compaction brought context under the trigger — healthy.
+            if let Ok(mut state) = self.state.lock() {
+                state.consecutive_compacts = 0;
+                state.compact_stuck = false;
+            }
+        }
+
         self.emit_compaction_contextlattice_checkpoint(total_chars, after_chars, max_c);
     }
 

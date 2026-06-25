@@ -126,7 +126,14 @@ impl DefaultContextEngine {
             }
         }
 
-        self.heuristic_summary(removed_messages, removed_count, removed_tokens, keep_count)
+        let heuristic = self.heuristic_summary(removed_messages, removed_count, removed_tokens, keep_count);
+        if heuristic.trim().is_empty() {
+            // Final fallback: deterministic marker so compaction always
+            // frees context even when the summarizer is unreachable.
+            // Ported from Reasonix compact.go mechanicalFoldDigest.
+            return mechanical_fold_digest(removed_count);
+        }
+        heuristic
     }
 
     async fn llm_summary_via_endpoint(
@@ -334,13 +341,40 @@ impl ContextEngine for DefaultContextEngine {
             return Ok(messages.to_vec());
         }
 
+        // Stage 1: Prune stale tool results (free — no API call).
+        // Replace large old tool outputs with placeholders before
+        // considering summarization.  Ported from Reasonix prune.go.
+        let mut messages: Vec<Value> = messages.to_vec();
+        let pinned = pinned_prefix_len(&messages, target_tokens);
+        let initial_keep = std::cmp::max(
+            std::cmp::max(2, (messages.len() as f64 * self.keep_ratio) as usize),
+            pinned,
+        );
+        let initial_remove_end = messages.len() - initial_keep + pinned;
+        let (pruned_results, pruned_saved) =
+            prune_stale_tool_results(&mut messages, pinned, initial_remove_end);
+
+        // Re-estimate after pruning; if pruning alone brought us under
+        // target, skip the summarizer entirely.
+        let current_tokens = self.estimate_tokens(&messages);
+        if current_tokens <= target_tokens {
+            if pruned_results > 0 {
+                tracing::info!(
+                    pruned_results,
+                    pruned_saved,
+                    "Pruning alone freed enough context; summarizer skipped"
+                );
+            }
+            return Ok(messages);
+        }
+
         // Count leading compression summaries + first user turn that must
         // never enter the removed region (Reasonix pinnedPrefixLen).
         // A later fold that re-summarizes an earlier digest would silently
         // drop user facts and destroy the byte-stable cache prefix.
         // The first user turn carries the user's original goal/constraints;
         // keeping it verbatim ensures those facts survive all compactions.
-        let pinned = pinned_prefix_len(messages, target_tokens);
+        let pinned = pinned_prefix_len(&messages, target_tokens);
 
         // Keep the last `keep_ratio` fraction of messages, but never
         // fewer than `pinned` (protects existing digests).
@@ -354,12 +388,10 @@ impl ContextEngine for DefaultContextEngine {
         // Skip pinned digests (they must never be re-summarized).
         let remove_start = pinned;
         let remove_end = removed_count + pinned;
-        let effective_removed = if remove_end > remove_start && remove_end <= messages.len() {
-            remove_end - remove_start
-        } else {
+        if remove_end <= remove_start || remove_end > messages.len() {
             // Nothing left to remove after protecting digests.
-            return Ok(messages.to_vec());
-        };
+            return Ok(messages);
+        }
 
         // Fold economics: skip compaction when the foldable region is too
         // small to justify the summarizer API call (≈400 tokens minimum).
@@ -373,25 +405,49 @@ impl ContextEngine for DefaultContextEngine {
             })
             .sum();
         if foldable_tokens < MIN_FOLD_TOKENS {
-            return Ok(messages.to_vec());
+            return Ok(messages);
         }
 
-        let removed_tokens: u64 = foldable_tokens;
+        // Partition the region: keep small user turns and prior digests
+        // verbatim, fold the rest into a summary.
+        // Ported from Reasonix compact.go partitionFold.
+        let (kept, fold) = partition_fold(&messages[remove_start..remove_end], target_tokens);
+
+        // If nothing to fold (all user turns were small enough to keep),
+        // no summarization needed.
+        if fold.is_empty() {
+            return Ok(messages);
+        }
+
+        // Recalculate fold economics on just the foldable part.
+        let fold_tokens: u64 = fold
+            .iter()
+            .map(|m| {
+                let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                estimate_tokens_rough(content)
+            })
+            .sum();
+        if fold_tokens < MIN_FOLD_TOKENS {
+            return Ok(messages);
+        }
+
+        let removed_tokens: u64 = fold_tokens;
 
         let summary = self
             .maybe_generate_summary(
-                &messages[remove_start..remove_end],
-                effective_removed,
+                &fold,
+                fold.len(),
                 removed_tokens,
                 keep_count,
             )
             .await;
 
-        // Build result: keep pinned digests at front, insert new summary,
-        // then append the tail messages.
-        let mut result = Vec::with_capacity(pinned + 1 + (messages.len() - remove_end));
+        // Build result: pinned + kept (verbatim user turns) + summary + tail.
+        let mut result = Vec::with_capacity(pinned + kept.len() + 1 + (messages.len() - remove_end));
         // Preserve pinned compression-summary messages verbatim.
         result.extend_from_slice(&messages[..pinned]);
+        // Preserve small user turns and prior digests from the fold region.
+        result.extend(kept);
         result.push(serde_json::json!({
             "role": "user",
             "content": format!("<compression-summary>\n{}\n</compression-summary>", summary),
@@ -461,6 +517,139 @@ fn is_compression_summary(msg: &Value) -> bool {
             .get("content")
             .and_then(|c| c.as_str())
             .is_some_and(|c| c.trim_start().starts_with("<compression-summary>"))
+}
+
+// ---------------------------------------------------------------------------
+// Prune stale tool results — free context reduction (no API call)
+// ---------------------------------------------------------------------------
+
+/// Minimum tool-result size (in bytes) to be eligible for pruning.
+/// Ported from Reasonix prune.go `minPruneBytes`.
+const MIN_PRUNE_BYTES: usize = 1024;
+
+/// Marker prefix for pruned tool results, matching Reasonix convention.
+const PRUNED_MARKER: &str = "[elided tool result — ";
+
+/// Prune stale tool results in the compaction region, replacing large old
+/// tool outputs with compact placeholders.  This is the free Stage 1 of
+/// compaction: no summarizer API call, no message dropped — tool_call/result
+/// pairing and assistant content are untouched.
+///
+/// Ported from Reasonix `prune.go PruneStaleToolResults`.  Returns the number
+/// of results pruned and characters saved.
+fn prune_stale_tool_results(
+    messages: &mut [Value],
+    region_start: usize,
+    region_end: usize,
+) -> (usize, usize) {
+    let mut results = 0usize;
+    let mut saved_chars = 0usize;
+
+    for i in region_start..region_end.min(messages.len()) {
+        let msg = &mut messages[i];
+        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        if role != "tool" {
+            continue;
+        }
+        let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
+        if content.len() < MIN_PRUNE_BYTES {
+            continue;
+        }
+        // Skip already-pruned results (idempotent).
+        if content.starts_with(PRUNED_MARKER) {
+            continue;
+        }
+        // Skip error messages — they carry diagnostic value.
+        let trimmed = content.trim().to_ascii_lowercase();
+        if trimmed.starts_with("error:") || trimmed.starts_with("blocked:") {
+            continue;
+        }
+        let tool_name = msg
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("unknown");
+        let placeholder = format!(
+            "{}{}, {} bytes dropped to save context; re-run the tool if the data is needed again]",
+            PRUNED_MARKER,
+            tool_name,
+            content.len()
+        );
+        saved_chars += content.len() - placeholder.len();
+        if let Some(c) = msg.get_mut("content") {
+            *c = Value::String(placeholder);
+        }
+        results += 1;
+    }
+
+    if results > 0 {
+        tracing::info!(
+            results,
+            saved_chars,
+            "Pruned stale tool results before compaction (free context reduction)"
+        );
+    }
+    (results, saved_chars)
+}
+
+// ---------------------------------------------------------------------------
+// Partition fold — keep small user turns verbatim, fold the rest
+// ---------------------------------------------------------------------------
+
+/// Maximum token count for a user turn to be kept verbatim in the fold.
+/// Larger turns (pasted content) stay foldable so the kept-verbatim floor
+/// never starves the window.  Ported from Reasonix `maxPinnedFirstUserTokens`.
+const MAX_PINNABLE_USER_TOKENS: u64 = 1500;
+
+/// Ceiling on pinning a user turn as a fraction of the target window.
+/// Ported from Reasonix `pinnedFirstUserWindowFrac`.
+const PINNABLE_USER_WINDOW_FRAC: f64 = 0.15;
+
+/// Partition a compaction region into what is kept verbatim and what folds
+/// into the summary.
+///
+/// **Kept verbatim**: small user turns (a fact the user stated is never
+/// summarized away) and prior compression summaries (a later fold never
+/// re-summarizes an earlier digest, preventing drift that silently drops
+/// user-stated facts after the second compaction).
+///
+/// **Folded**: everything else (assistant messages, tool results, large
+/// user turns).
+///
+/// Ported from Reasonix `compact.go partitionFold`.
+fn partition_fold(region: &[Value], target_tokens: u64) -> (Vec<Value>, Vec<Value>) {
+    let max_tok = MAX_PINNABLE_USER_TOKENS
+        .min((target_tokens as f64 * PINNABLE_USER_WINDOW_FRAC) as u64);
+    let mut kept = Vec::new();
+    let mut fold = Vec::new();
+    for m in region {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        if is_compression_summary(m) {
+            kept.push(m.clone());
+        } else if role == "user" {
+            let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("");
+            if estimate_tokens_rough(content) <= max_tok {
+                kept.push(m.clone());
+            } else {
+                fold.push(m.clone());
+            }
+        } else {
+            fold.push(m.clone());
+        }
+    }
+    (kept, fold)
+}
+
+/// Deterministic stand-in used when the summarizer is unreachable or
+/// produces empty output.  The foldable region is already accounted for
+/// (archived in Reasonix), so the digest just notes the gap and points
+/// the model at the user for anything it needs from before this point.
+///
+/// Ported from Reasonix `compact.go mechanicalFoldDigest`.
+fn mechanical_fold_digest(n: usize) -> String {
+    format!(
+        "{n} earlier message(s) were folded here to free context, but the automatic summary was unavailable. \
+         Ask the user if you need details from before this point."
+    )
 }
 
 /// Compute the leading prefix length that must never be compacted.
@@ -699,19 +888,47 @@ mod tests {
     #[tokio::test]
     async fn test_default_engine_compress() {
         let engine = DefaultContextEngine::new();
-        // foldEconomics requires >= 400 tokens in the foldable region.
-        // 40 messages × ~20 tokens each = ~800 tokens → passes threshold.
-        let messages = make_messages(40);
+        // partition_fold keeps small user turns verbatim; only assistant
+        // messages fold.  With 80 messages, ~27 assistant messages land in
+        // the fold region at ~20 tokens each = ~540 tokens → passes the
+        // 400-token foldEconomics threshold.
+        let messages = make_messages(80);
         let result = engine.compress(&messages, 200).await.unwrap();
-        assert!(result.len() < 40);
+        assert!(result.len() < 80, "compressed result should be smaller");
+        // The compression summary should appear somewhere in the result
+        // (after pinned prefix and kept user turns).
         assert!(
-            result[0]
-                .get("content")
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .contains("compressed")
+            result.iter().any(|m| {
+                m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| c.contains("compression-summary"))
+            }),
+            "a compression-summary should be present in the result"
         );
+    }
+
+    #[tokio::test]
+    async fn test_partition_fold_preserves_small_user_turns() {
+        // partition_fold should keep small user turns verbatim and only
+        // fold assistant/tool messages into the summary.
+        let messages = make_messages(80);
+        let pinned = pinned_prefix_len(&messages, 200);
+        let keep_count = std::cmp::max(
+            std::cmp::max(2, (80.0 * 0.33) as usize),
+            pinned,
+        );
+        let remove_end = 80 - keep_count + pinned;
+        let (kept, fold) = partition_fold(&messages[pinned..remove_end], 200);
+        // All kept messages should be user turns (small enough to pin).
+        assert!(!kept.is_empty(), "some user turns should be kept verbatim");
+        assert!(kept.iter().all(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("user")
+        }), "only user turns should be kept verbatim");
+        // All folded messages should be assistant turns.
+        assert!(!fold.is_empty(), "some assistant messages should be folded");
+        assert!(fold.iter().all(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("assistant")
+        }), "only assistant messages should be folded");
     }
 
     #[tokio::test]

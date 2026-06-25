@@ -70,6 +70,27 @@ pub struct AgentSharedState {
     pub(crate) session_cache_hit: u64,
     /// Cumulative session-level cache-miss tokens (from provider usage reports).
     pub(crate) session_cache_miss: u64,
+    /// Number of compaction/rewrite events in this session.
+    /// Each compaction resets the byte-stable prefix, so this counter
+    /// is passed as `log_rewrite_version` to cache diagnostics to
+    /// explain cache misses caused by context compression.
+    pub(crate) compaction_count: u32,
+    /// Whether the soft compaction notice (50% threshold) has been emitted.
+    /// Resets to false when context drops below the soft threshold.
+    /// Ported from Reasonix `compact.go` `softCompactNoticed`.
+    pub(crate) soft_compact_noticed: bool,
+    /// Number of consecutive compactions that did not bring context below
+    /// the trigger threshold.  When this reaches 2, `compact_stuck` is set
+    /// and auto-compaction pauses until the prompt naturally drops below
+    /// the trigger (e.g. by the user starting a shorter turn).
+    /// Ported from Reasonix `compact.go` `consecutiveCompacts`.
+    pub(crate) consecutive_compacts: u32,
+    /// When true, auto-compaction is paused because two consecutive
+    /// compactions failed to bring context under the trigger — the system
+    /// prompt plus one verbatim turn already exceeds the window.  The user
+    /// is warned to raise `context_window` or shrink tool output.
+    /// Ported from Reasonix `compact.go` `compactStuck`.
+    pub(crate) compact_stuck: bool,
 }
 
 impl AgentSharedState {
@@ -103,6 +124,10 @@ impl AgentSharedState {
             last_prefix_shape: None,
             session_cache_hit: 0,
             session_cache_miss: 0,
+            compaction_count: 0,
+            soft_compact_noticed: false,
+            consecutive_compacts: 0,
+            compact_stuck: false,
         }
     }
 }

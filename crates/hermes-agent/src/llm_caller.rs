@@ -593,6 +593,28 @@ pub(crate) async fn collect_stream_llm_response(
 
         let message = assemble_stream_assistant_message(&content, &reasoning_content, &tool_calls);
 
+        // Cache diagnostics: capture prefix shape, compare with
+        // previous turn, log hit/miss breakdown.  Mirrors the
+        // non-streaming path in call_llm_with_retry_inner.
+        if let Ok(mut state) = agent.state.lock() {
+            let prev = state.last_prefix_shape.clone();
+            let s_hit = state.session_cache_hit;
+            let s_miss = state.session_cache_miss;
+            let rewrite_ver = state.compaction_count;
+            let (new_shape, diag) = crate::cache_diagnostics::trace_turn(
+                ctx.get_messages(),
+                tool_schemas,
+                rewrite_ver,
+                last_usage.as_ref(),
+                prev.as_ref(),
+                s_hit,
+                s_miss,
+            );
+            state.last_prefix_shape = Some(new_shape);
+            state.session_cache_hit = diag.session_hit;
+            state.session_cache_miss = diag.session_miss;
+        }
+
         return Ok(StreamCollectOutcome::Complete(LlmResponse {
             message,
             usage: last_usage,
