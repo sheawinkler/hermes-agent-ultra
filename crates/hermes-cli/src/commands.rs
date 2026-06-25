@@ -3702,6 +3702,7 @@ async fn dispatch_slash_command(
         "/autocompact" => handle_autocompact_command(app, args),
         "/compress" => handle_compress_command(app, args),
         "/clear-queue" => handle_clear_queue_command(app),
+        "/billing" => handle_billing_command(app, args).await,
         "/usage" => handle_usage_command(app),
         "/insights" => handle_insights_command(app),
         "/stop" => handle_stop_command(app),
@@ -6477,6 +6478,12 @@ fn format_usage_cost_usd(cost: f64) -> String {
     } else {
         format!("${cost:.4}")
     }
+}
+
+async fn handle_billing_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let output = crate::billing::handle_billing_slash_args(args).await?;
+    emit_command_output(app, output);
+    Ok(CommandResult::Handled)
 }
 
 fn handle_usage_command(app: &mut App) -> Result<CommandResult, AgentError> {
@@ -29373,6 +29380,28 @@ mod tests {
         hermes_core::credits::clear_last_nous_credits_state();
     }
 
+    #[tokio::test]
+    async fn billing_command_renders_billing_surface_when_logged_out() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let _real_home_guard = EnvVarGuard::set("HOME", tmp.path());
+        let _auth_file_guard = EnvVarGuard::set("HERMES_AUTH_FILE", tmp.path().join("auth.json"));
+        let _nous_oauth_guard =
+            EnvVarGuard::set("HERMES_NOUS_OAUTH_FILE", tmp.path().join("nous_oauth.json"));
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_slash_command(&mut app, "/billing", &[])
+            .await
+            .expect("billing command");
+
+        assert_eq!(result, CommandResult::Handled);
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("Nous billing"));
+        assert!(output.contains("Not logged into Nous Portal"));
+        assert!(output.contains("Manage on portal:"));
+    }
+
     #[test]
     fn test_acp_setup_browser_dependency_checks_forward_yes_flag() {
         let mut calls = Vec::new();
@@ -29517,7 +29546,7 @@ mod tests {
         assert_eq!(canonical_command("/bp"), "/blueprint");
         assert_eq!(canonical_command("/v"), "/version");
         assert_eq!(canonical_command("/credits"), "/usage");
-        assert_eq!(canonical_command("/billing"), "/usage");
+        assert_eq!(canonical_command("/billing"), "/billing");
         assert_eq!(canonical_command("/suggest"), "/suggestions");
         assert!(autocomplete("/cre").contains(&"/credits"));
         assert!(autocomplete("/bill").contains(&"/billing"));
@@ -30178,7 +30207,7 @@ mod tests {
         assert_eq!(canonical_command("/summary"), "/recap");
         assert_eq!(canonical_command("/whoami"), "/profile");
         assert_eq!(canonical_command("/v"), "/version");
-        assert_eq!(canonical_command("/billing"), "/usage");
+        assert_eq!(canonical_command("/billing"), "/billing");
         assert_eq!(canonical_command("/credits"), "/usage");
         assert_eq!(canonical_command("/suggest"), "/suggestions");
         assert_eq!(canonical_command("/footer"), "/statusbar");

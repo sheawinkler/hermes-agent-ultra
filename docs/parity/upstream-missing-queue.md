@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T02:46:52.230351+00:00`
+Generated: `2026-06-25T03:33:51.999047+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `6978`.
 
@@ -17,15 +17,14 @@ Generated: `2026-06-25T02:46:52.230351+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 239 |
-| ported | 356 |
+| pending | 238 |
+| ported | 357 |
 | superseded | 6307 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `73cd8622f9fc` | #22 | feat(billing): /billing terminal billing — interactive TUI + CLI client (#45449) |
 | `36851fa576eb` | #20 | fix(docker): support WebUI installs from read-only sources (#48541) |
 | `cfb55de5ea49` | #21 | Update Stripe Projects skill docs (#48673) |
 | `c7b7f92ec14a` | #20 | fix(openviking): sync structured turns with tool parts |
@@ -125,3 +124,4 @@ Generated: `2026-06-25T02:46:52.230351+00:00`
 | `6183e8ce1b5e` | #20 | fix(telegram): make Bot API 10.1 rich messages opt-in (default off) |
 | `587b5b9ac223` | #23 | fix(backup): capture memory-provider state stored outside HERMES_HOME (#50325) |
 | `2a4542333ee1` | #26 | fix(photon): classify Envoy overflow errors as retryable; add typing cooldown |
+| `9578e52795e3` | #26 | fix(photon): detect unexpected sidecar death and trigger reconnect |

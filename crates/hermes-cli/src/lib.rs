@@ -14,6 +14,7 @@ pub mod alpha_runtime;
 pub mod app;
 pub mod auth;
 pub mod banner;
+pub mod billing;
 pub mod checklist;
 pub mod claw_migrate;
 pub mod cli;
