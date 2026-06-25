@@ -676,6 +676,9 @@ impl TuiState {
             self.live_thinking.push(' ');
         }
         self.live_thinking.push_str(chunk);
+        if crate::commands::reasoning_full_enabled() {
+            return;
+        }
         const MAX_CHARS: usize = 260;
         if self.live_thinking.chars().count() > MAX_CHARS {
             let tail: String = self
@@ -2156,7 +2159,11 @@ fn render_live_details(
                     .bg(colors.background),
             ),
             Span::styled(
-                truncate_chars(&state.live_thinking, 140),
+                if crate::commands::reasoning_full_enabled() {
+                    state.live_thinking.clone()
+                } else {
+                    truncate_chars(&state.live_thinking, 140)
+                },
                 Style::default().fg(colors.accent).bg(colors.background),
             ),
         ]));
@@ -5851,6 +5858,21 @@ mod tests {
         test_env_lock::lock()
     }
 
+    struct ReasoningFullGuard;
+
+    impl ReasoningFullGuard {
+        fn set(enabled: bool) -> Self {
+            crate::commands::set_reasoning_full(enabled);
+            Self
+        }
+    }
+
+    impl Drop for ReasoningFullGuard {
+        fn drop(&mut self) {
+            crate::commands::set_reasoning_full(false);
+        }
+    }
+
     #[test]
     fn test_input_mode_display() {
         assert_eq!(InputMode::Normal.to_string(), "NORMAL");
@@ -6037,11 +6059,23 @@ mod tests {
 
     #[test]
     fn test_append_live_thinking_is_capped() {
+        let _guard = env_test_lock();
+        let _reasoning_guard = ReasoningFullGuard::set(false);
         let mut state = TuiState::default();
         let long = "x".repeat(400);
         state.append_live_thinking(&long);
         assert!(state.live_thinking.chars().count() <= 260);
         assert!(state.live_thinking.starts_with('…'));
+    }
+
+    #[test]
+    fn test_append_live_thinking_keeps_full_when_reasoning_full_enabled() {
+        let _guard = env_test_lock();
+        let _reasoning_guard = ReasoningFullGuard::set(true);
+        let mut state = TuiState::default();
+        let long = "x".repeat(400);
+        state.append_live_thinking(&long);
+        assert_eq!(state.live_thinking, long);
     }
 
     #[test]

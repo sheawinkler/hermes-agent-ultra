@@ -1226,17 +1226,22 @@ pub async fn provider_model_ids_with_client(
     client: &ModelsDevClient,
 ) -> Vec<String> {
     let normalized = canonical_provider_id(provider);
-    let curated = provider_curated_models(&normalized);
+    let catalog_provider = if normalized == "nous-api" {
+        "nous"
+    } else {
+        normalized.as_str()
+    };
+    let curated = provider_curated_models(catalog_provider);
     if curated.is_empty() {
         return Vec::new();
     }
-    if let Some(cached) = load_provider_catalog_cache(&normalized) {
+    if let Some(cached) = load_provider_catalog_cache(catalog_provider) {
         if !cached.is_empty() {
             return cached;
         }
     }
 
-    let computed = if normalized == "bedrock" {
+    let computed = if catalog_provider == "bedrock" {
         let region = resolve_bedrock_region();
         let mut seen: HashSet<String> = HashSet::new();
         let mut merged: Vec<String> = Vec::new();
@@ -1261,7 +1266,7 @@ pub async fn provider_model_ids_with_client(
             }
         }
         merged
-    } else if matches!(normalized.as_str(), "nous" | "nous-api") {
+    } else if catalog_provider == "nous" {
         // Nous model picker should always include curated compatibility picks
         // (including kimi-k2.6), then append live/models.dev discoveries.
         let mut seen: HashSet<String> = HashSet::new();
@@ -1297,7 +1302,7 @@ pub async fn provider_model_ids_with_client(
         } else {
             merged
         }
-    } else if normalized == "huggingface" {
+    } else if catalog_provider == "huggingface" {
         // For Hugging Face, prefer curated stable picks first, then append live
         // router models and models.dev-discovered agentic entries.
         let mut seen: HashSet<String> = HashSet::new();
@@ -1331,12 +1336,12 @@ pub async fn provider_model_ids_with_client(
         }
         merged
     } else if matches!(
-        normalized.as_str(),
+        catalog_provider,
         "gmi" | "arcee" | "xiaomi" | "tencent-tokenhub"
     ) {
         let mut seen: HashSet<String> = HashSet::new();
         let mut merged: Vec<String> = Vec::new();
-        if let Some((base_url, token)) = openai_compatible_catalog_credentials(&normalized) {
+        if let Some((base_url, token)) = openai_compatible_catalog_credentials(catalog_provider) {
             let live = fetch_openai_compatible_live_models(base_url.as_str(), Some(&token)).await;
             for model in live {
                 let key = model.to_ascii_lowercase();
@@ -1352,13 +1357,13 @@ pub async fn provider_model_ids_with_client(
             }
         }
         merged
-    } else if is_local_openai_compatible_provider(&normalized) {
+    } else if is_local_openai_compatible_provider(catalog_provider) {
         let mut seen: HashSet<String> = HashSet::new();
         let mut merged: Vec<String> = Vec::new();
-        if let Some(base_url) = local_provider_resolved_base_url(&normalized) {
+        if let Some(base_url) = local_provider_resolved_base_url(catalog_provider) {
             let live = fetch_openai_compatible_live_models(
                 base_url.as_str(),
-                local_provider_api_key(&normalized).as_deref(),
+                local_provider_api_key(catalog_provider).as_deref(),
             )
             .await;
             for model in live {
@@ -1375,19 +1380,19 @@ pub async fn provider_model_ids_with_client(
             }
         }
         merged
-    } else if !is_models_dev_preferred_provider(&normalized) {
+    } else if !is_models_dev_preferred_provider(catalog_provider) {
         curated.iter().map(|model| model.to_string()).collect()
     } else {
         // Best-effort refresh: if fetch/list fails or returns empty, curated stays as fallback.
         client.fetch(false).await;
-        let models_dev = client.list_agentic_models(&normalized);
+        let models_dev = client.list_agentic_models(catalog_provider);
         if models_dev.is_empty() {
             curated.iter().map(|model| model.to_string()).collect()
         } else {
             merge_with_models_dev(&models_dev, curated)
         }
     };
-    persist_provider_catalog_cache(&normalized, &computed);
+    persist_provider_catalog_cache(catalog_provider, &computed);
     computed
 }
 
@@ -1811,6 +1816,9 @@ mod tests {
 
     #[tokio::test]
     async fn nous_provider_uses_curated_plus_openrouter_agentic_catalog() {
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _env = ScopedCatalogEnv::new(tmp.path());
         let client = seeded_client(json!({
             "openrouter": {
                 "models": {
