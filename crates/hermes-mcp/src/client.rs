@@ -97,6 +97,9 @@ pub type LlmCallback = Arc<
 
 const DEFAULT_MCP_CALL_TIMEOUT_SECS: u64 = 300;
 const MAX_MCP_CALL_TIMEOUT_SECS: u64 = 900;
+const DEFAULT_MCP_KEEPALIVE_INTERVAL_SECS: u64 = 180;
+const MIN_MCP_KEEPALIVE_INTERVAL_SECS: u64 = 5;
+const MCP_KEEPALIVE_PROBE_TIMEOUT_SECS: u64 = 30;
 const STALE_TRANSPORT_MARKERS: &[&str] = &[
     "closedresourceerror",
     "closed resource",
@@ -226,6 +229,9 @@ pub struct McpServerConfig {
     /// Whether this server supports concurrent tool calls from one session.
     #[serde(default)]
     pub supports_parallel_tool_calls: bool,
+    /// Optional liveness probe cadence for HTTP/SSE sessions, in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keepalive_interval: Option<u64>,
     /// Optional sampling policy for server-initiated LLM requests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sampling: Option<SamplingConfig>,
@@ -245,6 +251,7 @@ impl std::fmt::Debug for McpServerConfig {
                 "supports_parallel_tool_calls",
                 &self.supports_parallel_tool_calls,
             )
+            .field("keepalive_interval", &self.keepalive_interval)
             .field("sampling", &self.sampling)
             .field(
                 "auth_provider",
@@ -261,6 +268,7 @@ impl PartialEq for McpServerConfig {
             && self.env == other.env
             && self.url == other.url
             && self.supports_parallel_tool_calls == other.supports_parallel_tool_calls
+            && self.keepalive_interval == other.keepalive_interval
             && self.sampling == other.sampling
     }
 }
@@ -274,6 +282,7 @@ impl McpServerConfig {
             env: HashMap::new(),
             url: None,
             supports_parallel_tool_calls: false,
+            keepalive_interval: None,
             sampling: None,
             auth_provider: None,
         }
@@ -287,6 +296,7 @@ impl McpServerConfig {
             env: HashMap::new(),
             url: Some(url.into()),
             supports_parallel_tool_calls: false,
+            keepalive_interval: None,
             sampling: None,
             auth_provider: None,
         }
@@ -295,6 +305,12 @@ impl McpServerConfig {
     /// Set explicit parallel-tool-call capability for this server.
     pub fn with_parallel_tool_calls(mut self, enabled: bool) -> Self {
         self.supports_parallel_tool_calls = enabled;
+        self
+    }
+
+    /// Set the HTTP/SSE session keepalive cadence in seconds.
+    pub fn with_keepalive_interval(mut self, seconds: u64) -> Self {
+        self.keepalive_interval = Some(seconds);
         self
     }
 
@@ -699,6 +715,8 @@ pub struct McpClient {
     sampling_metrics: SamplingMetrics,
     /// Timestamp when the client connected (for uptime tracking).
     connected_at: Option<Instant>,
+    /// Latched when a server returns JSON-RPC -32601 for optional `ping`.
+    ping_unsupported: bool,
 }
 
 impl McpClient {
@@ -718,6 +736,7 @@ impl McpClient {
             sampling_tool_rounds: 0,
             sampling_metrics: SamplingMetrics::default(),
             connected_at: None,
+            ping_unsupported: false,
         }
     }
 
@@ -761,6 +780,7 @@ impl McpClient {
 
         self.connected = true;
         self.connected_at = Some(Instant::now());
+        self.ping_unsupported = false;
 
         Ok(())
     }
@@ -898,6 +918,73 @@ impl McpClient {
     /// Return the uptime of this connection, if connected.
     pub fn uptime(&self) -> Option<std::time::Duration> {
         self.connected_at.map(|t| t.elapsed())
+    }
+
+    /// Cheaply exercise the MCP session so HTTP/SSE servers do not expire it idle.
+    pub async fn keepalive_probe(&mut self) -> Result<(), McpError> {
+        if !self.ping_unsupported {
+            match tokio::time::timeout(
+                Duration::from_secs(MCP_KEEPALIVE_PROBE_TIMEOUT_SECS),
+                self.send_request("ping", serde_json::json!({})),
+            )
+            .await
+            {
+                Ok(Ok(_)) => return Ok(()),
+                Ok(Err(err)) if matches!(err, McpError::MethodNotFound(_)) => {
+                    if self.tools.is_empty() {
+                        return Err(err);
+                    }
+                    self.ping_unsupported = true;
+                    info!(
+                        "MCP server does not implement optional ping; using tools/list for keepalive on this connection."
+                    );
+                }
+                Ok(Err(err)) => return Err(err),
+                Err(_) => {
+                    return Err(McpError::ConnectionError(format!(
+                        "MCP keepalive ping timed out after {}s",
+                        MCP_KEEPALIVE_PROBE_TIMEOUT_SECS
+                    )));
+                }
+            }
+        }
+
+        tokio::time::timeout(
+            Duration::from_secs(MCP_KEEPALIVE_PROBE_TIMEOUT_SECS),
+            self.list_tools(),
+        )
+        .await
+        .map_err(|_| {
+            McpError::ConnectionError(format!(
+                "MCP keepalive tools/list timed out after {}s",
+                MCP_KEEPALIVE_PROBE_TIMEOUT_SECS
+            ))
+        })??;
+        Ok(())
+    }
+
+    async fn reconnect_after_keepalive_failure(&mut self) -> Result<(), McpError> {
+        let config = self.config.clone();
+        let sampling_config = self.sampling_config.clone();
+        let sampling_callback = self.sampling_callback.clone();
+        if let Some(mut transport) = self.transport.take() {
+            let _ = transport.close().await;
+        }
+        self.connected = false;
+        self.connected_at = None;
+        self.tools.clear();
+        self.resources.clear();
+
+        let mut replacement = McpClient::new(config);
+        if let Some(config) = sampling_config {
+            replacement.set_sampling_config(config);
+        }
+        if let Some(callback) = sampling_callback {
+            replacement.set_sampling_callback(callback);
+        }
+        replacement.connect().await?;
+        *self = replacement;
+        Ok(())
     }
 
     /// Set the sampling configuration for server-initiated LLM requests.
@@ -1676,6 +1763,111 @@ struct ManagedMcpClient {
     registered_tools: Vec<String>,
     available: Arc<AtomicBool>,
     connected_at: Instant,
+    keepalive_shutdown: Arc<AtomicBool>,
+    keepalive_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+fn mcp_keepalive_interval_duration(config: &McpServerConfig) -> Duration {
+    Duration::from_secs(
+        config
+            .keepalive_interval
+            .unwrap_or(DEFAULT_MCP_KEEPALIVE_INTERVAL_SECS)
+            .max(MIN_MCP_KEEPALIVE_INTERVAL_SECS),
+    )
+}
+
+fn spawn_keepalive_task(
+    server_name: String,
+    config: &McpServerConfig,
+    client: SharedMcpClient,
+    available: Arc<AtomicBool>,
+    shutdown: Arc<AtomicBool>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if !config.is_http() {
+        return None;
+    }
+    let interval = mcp_keepalive_interval_duration(config);
+    Some(tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(interval).await;
+            if shutdown.load(Ordering::SeqCst) || !available.load(Ordering::SeqCst) {
+                break;
+            }
+
+            let probe = {
+                let mut client = client.lock().await;
+                client.keepalive_probe().await
+            };
+            if probe.is_ok() {
+                continue;
+            }
+
+            let probe_err = probe.expect_err("probe failed");
+            warn!(
+                "MCP server '{}' keepalive failed ({}); reconnecting once",
+                server_name, probe_err
+            );
+            let reconnect = {
+                let mut client = client.lock().await;
+                client.reconnect_after_keepalive_failure().await
+            };
+            if let Err(err) = reconnect {
+                warn!(
+                    "MCP server '{}' keepalive reconnect failed: {}",
+                    server_name, err
+                );
+                available.store(false, Ordering::SeqCst);
+                break;
+            }
+        }
+    }))
+}
+
+fn make_managed_client(
+    name: &str,
+    client: McpClient,
+    tool_registry: &ToolRegistry,
+) -> ManagedMcpClient {
+    let cached_tools = client.cached_tools().to_vec();
+    let cached_resources = client.cached_resources().to_vec();
+    let transport_type = transport_type_for_config(&client.config).to_string();
+    let config = client.config.clone();
+    let shared_client = Arc::new(tokio::sync::Mutex::new(client));
+    let available = Arc::new(AtomicBool::new(true));
+    let registered_tools = register_mcp_tools_in_registry(
+        tool_registry,
+        name,
+        Arc::clone(&shared_client),
+        &cached_tools,
+        Arc::clone(&available),
+    );
+    let keepalive_shutdown = Arc::new(AtomicBool::new(false));
+    let keepalive_task = spawn_keepalive_task(
+        name.to_string(),
+        &config,
+        Arc::clone(&shared_client),
+        Arc::clone(&available),
+        Arc::clone(&keepalive_shutdown),
+    );
+    ManagedMcpClient {
+        client: shared_client,
+        config,
+        transport_type,
+        cached_tools,
+        cached_resources,
+        registered_tools,
+        available,
+        connected_at: Instant::now(),
+        keepalive_shutdown,
+        keepalive_task,
+    }
+}
+
+fn stop_keepalive_task(managed: &mut ManagedMcpClient) {
+    managed.keepalive_shutdown.store(true, Ordering::SeqCst);
+    if let Some(task) = managed.keepalive_task.take() {
+        task.abort();
+    }
 }
 
 fn register_mcp_tools_in_registry(
@@ -1800,35 +1992,15 @@ impl McpManager {
         }
         client.connect().await?;
 
-        let tools = client.cached_tools();
-        debug!("Discovered {} tools from server '{}'", tools.len(), name);
-
-        let cached_tools = tools.to_vec();
-        let cached_resources = client.cached_resources().to_vec();
-        let transport_type = transport_type_for_config(&client.config).to_string();
-        let config = client.config.clone();
-        let shared_client = Arc::new(tokio::sync::Mutex::new(client));
-        let available = Arc::new(AtomicBool::new(true));
-        let registered_tools = register_mcp_tools_in_registry(
-            self.tool_registry.as_ref(),
-            name,
-            Arc::clone(&shared_client),
-            &cached_tools,
-            Arc::clone(&available),
+        debug!(
+            "Discovered {} tools from server '{}'",
+            client.cached_tools().len(),
+            name
         );
 
         self.clients.insert(
             name.to_string(),
-            ManagedMcpClient {
-                client: shared_client,
-                config,
-                transport_type,
-                cached_tools,
-                cached_resources,
-                registered_tools,
-                available,
-                connected_at: Instant::now(),
-            },
+            make_managed_client(name, client, self.tool_registry.as_ref()),
         );
         Ok(())
     }
@@ -1845,31 +2017,9 @@ impl McpManager {
         }
         let mut client = McpClient::new(config);
         client.finish_connect_with_transport(transport).await?;
-        let cached_tools = client.cached_tools().to_vec();
-        let cached_resources = client.cached_resources().to_vec();
-        let transport_type = transport_type_for_config(&client.config).to_string();
-        let config = client.config.clone();
-        let shared_client = Arc::new(tokio::sync::Mutex::new(client));
-        let available = Arc::new(AtomicBool::new(true));
-        let registered_tools = register_mcp_tools_in_registry(
-            self.tool_registry.as_ref(),
-            name,
-            Arc::clone(&shared_client),
-            &cached_tools,
-            Arc::clone(&available),
-        );
         self.clients.insert(
             name.to_string(),
-            ManagedMcpClient {
-                client: shared_client,
-                config,
-                transport_type,
-                cached_tools,
-                cached_resources,
-                registered_tools,
-                available,
-                connected_at: Instant::now(),
-            },
+            make_managed_client(name, client, self.tool_registry.as_ref()),
         );
         Ok(())
     }
@@ -1954,30 +2104,9 @@ impl McpManager {
                             "Discovered {} tools from MCP server '{}'",
                             report.tool_count, report.name
                         );
-                        let cached_tools = client.cached_tools().to_vec();
-                        let cached_resources = client.cached_resources().to_vec();
-                        let config = client.config.clone();
-                        let shared_client = Arc::new(tokio::sync::Mutex::new(client));
-                        let available = Arc::new(AtomicBool::new(true));
-                        let registered_tools = register_mcp_tools_in_registry(
-                            self.tool_registry.as_ref(),
-                            &report.name,
-                            Arc::clone(&shared_client),
-                            &cached_tools,
-                            Arc::clone(&available),
-                        );
                         self.clients.insert(
                             report.name.clone(),
-                            ManagedMcpClient {
-                                client: shared_client,
-                                config,
-                                transport_type: report.transport_type.clone(),
-                                cached_tools,
-                                cached_resources,
-                                registered_tools,
-                                available,
-                                connected_at: Instant::now(),
-                            },
+                            make_managed_client(&report.name, client, self.tool_registry.as_ref()),
                         );
                     }
                     reports.push((index, report));
@@ -2015,8 +2144,9 @@ impl McpManager {
 
     /// Disconnect from an MCP server and remove it from the active list.
     pub async fn disconnect(&mut self, name: &str) -> Result<(), McpError> {
-        if let Some(managed) = self.clients.remove(name) {
+        if let Some(mut managed) = self.clients.remove(name) {
             info!("Disconnecting from MCP server: {}", name);
+            stop_keepalive_task(&mut managed);
             managed.available.store(false, Ordering::SeqCst);
             deregister_mcp_tools(self.tool_registry.as_ref(), managed.registered_tools);
             let mut client = managed.client.lock().await;
@@ -2341,8 +2471,9 @@ impl McpManager {
 mod tests {
     use super::{
         cache_mcp_image_block, is_stale_transport_error, mcp_call_timeout_duration,
-        validate_mcp_server_config, LlmCallback, McpClient, McpManager, McpServerConfig,
-        SamplingConfig,
+        mcp_keepalive_interval_duration, validate_mcp_server_config, LlmCallback, McpClient,
+        McpManager, McpServerConfig, SamplingConfig, DEFAULT_MCP_KEEPALIVE_INTERVAL_SECS,
+        MIN_MCP_KEEPALIVE_INTERVAL_SECS,
     };
     use crate::transport::McpTransport;
     use crate::McpError;
@@ -2411,6 +2542,29 @@ mod tests {
         std::env::set_var("HERMES_MCP_CALL_TIMEOUT_SECS", "9999");
         assert_eq!(mcp_call_timeout_duration().as_secs(), 900);
         std::env::remove_var("HERMES_MCP_CALL_TIMEOUT_SECS");
+    }
+
+    #[test]
+    fn mcp_keepalive_interval_defaults_and_clamps_floor() {
+        assert_eq!(
+            mcp_keepalive_interval_duration(&McpServerConfig::http("http://localhost/mcp"))
+                .as_secs(),
+            DEFAULT_MCP_KEEPALIVE_INTERVAL_SECS
+        );
+        assert_eq!(
+            mcp_keepalive_interval_duration(
+                &McpServerConfig::http("http://localhost/mcp").with_keepalive_interval(1)
+            )
+            .as_secs(),
+            MIN_MCP_KEEPALIVE_INTERVAL_SECS
+        );
+        assert_eq!(
+            mcp_keepalive_interval_duration(
+                &McpServerConfig::http("http://localhost/mcp").with_keepalive_interval(10)
+            )
+            .as_secs(),
+            10
+        );
     }
 
     #[test]
@@ -2535,6 +2689,139 @@ mod tests {
         assert!(!client.is_connected());
         assert!(client.cached_tools().is_empty());
         assert!(client.cached_resources().is_empty());
+    }
+
+    #[tokio::test]
+    async fn keepalive_probe_uses_ping_instead_of_tools_list_payload() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let closed = Arc::new(AtomicBool::new(false));
+        let transport = FakeTransport::new_with_sent(
+            vec![
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "fake", "version": "0"}
+                    }
+                }),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {
+                        "tools": [{
+                            "name": "pingable",
+                            "description": "tool",
+                            "inputSchema": {"type": "object"}
+                        }]
+                    }
+                }),
+                json!({"jsonrpc": "2.0", "id": 3, "result": {}}),
+            ],
+            closed,
+            sent.clone(),
+        );
+        let mut client = McpClient::new(McpServerConfig::http("http://localhost/mcp"));
+        client
+            .finish_connect_with_transport(Box::new(transport))
+            .await
+            .expect("connect fake http server");
+
+        client.keepalive_probe().await.expect("keepalive ping");
+
+        let methods: Vec<String> = sent
+            .lock()
+            .expect("sent lock")
+            .iter()
+            .filter_map(|msg| {
+                msg.get("method")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+            .collect();
+        assert_eq!(
+            methods,
+            vec![
+                "initialize",
+                "notifications/initialized",
+                "tools/list",
+                "ping"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn keepalive_probe_latches_ping_unsupported_and_falls_back_to_tools_list() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let closed = Arc::new(AtomicBool::new(false));
+        let tool_result = json!({
+            "tools": [{
+                "name": "fallback",
+                "description": "tool",
+                "inputSchema": {"type": "object"}
+            }]
+        });
+        let transport = FakeTransport::new_with_sent(
+            vec![
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "fake", "version": "0"}
+                    }
+                }),
+                json!({"jsonrpc": "2.0", "id": 2, "result": tool_result.clone()}),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "error": {"code": -32601, "message": "Method not found: ping"}
+                }),
+                json!({"jsonrpc": "2.0", "id": 4, "result": tool_result.clone()}),
+                json!({"jsonrpc": "2.0", "id": 5, "result": tool_result}),
+            ],
+            closed,
+            sent.clone(),
+        );
+        let mut client = McpClient::new(McpServerConfig::http("http://localhost/mcp"));
+        client
+            .finish_connect_with_transport(Box::new(transport))
+            .await
+            .expect("connect fake http server");
+
+        client
+            .keepalive_probe()
+            .await
+            .expect("first fallback keepalive");
+        assert!(client.ping_unsupported);
+        client
+            .keepalive_probe()
+            .await
+            .expect("latched fallback keepalive");
+
+        let methods: Vec<String> = sent
+            .lock()
+            .expect("sent lock")
+            .iter()
+            .filter_map(|msg| {
+                msg.get("method")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+            .collect();
+        assert_eq!(
+            methods,
+            vec![
+                "initialize",
+                "notifications/initialized",
+                "tools/list",
+                "ping",
+                "tools/list",
+                "tools/list"
+            ]
+        );
     }
 
     #[tokio::test]

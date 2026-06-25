@@ -1713,6 +1713,9 @@ pub struct McpServerEntry {
     /// Whether this MCP server supports parallel tool calls safely.
     #[serde(default)]
     pub supports_parallel_tool_calls: bool,
+    /// Optional HTTP/SSE session keepalive cadence in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keepalive_interval: Option<u64>,
 }
 
 /// Active profile info.
@@ -2046,6 +2049,7 @@ mcp_servers:
   - name: local
     command: hermes-mcp
     auth: null
+    keepalive_interval: 10
 "#,
         )
         .expect("null-valued config fields should deserialize");
@@ -2059,6 +2063,7 @@ mcp_servers:
         assert_eq!(cfg.tts["provider"], serde_json::Value::Null);
         assert_eq!(cfg.mcp_servers.len(), 1);
         assert_eq!(cfg.mcp_servers[0].name, "local");
+        assert_eq!(cfg.mcp_servers[0].keepalive_interval, Some(10));
     }
 
     #[test]

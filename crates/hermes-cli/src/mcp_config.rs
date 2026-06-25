@@ -35,6 +35,8 @@ pub struct McpServerEntry {
     pub enabled: bool,
     #[serde(default)]
     pub supports_parallel_tool_calls: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keepalive_interval: Option<u64>,
     #[serde(default)]
     pub warnings: Vec<String>,
 }
@@ -96,6 +98,8 @@ struct RawMcpServerEntry {
     enabled: Option<bool>,
     #[serde(default)]
     supports_parallel_tool_calls: bool,
+    #[serde(default)]
+    keepalive_interval: Option<u64>,
 }
 
 fn default_enabled() -> bool {
@@ -148,6 +152,7 @@ fn parse_entry(name: &str, raw: RawMcpServerEntry) -> Result<McpServerEntry, Str
         url,
         enabled: raw.enabled.unwrap_or(true),
         supports_parallel_tool_calls: raw.supports_parallel_tool_calls,
+        keepalive_interval: raw.keepalive_interval,
         warnings,
     })
 }
@@ -216,7 +221,8 @@ mod tests {
                 "url": "https://example.com/mcp",
                 "command": "npx",
                 "args": ["-y", "server"],
-                "supports_parallel_tool_calls": true
+                "supports_parallel_tool_calls": true,
+                "keepalive_interval": 10
               }
             }"#,
         )
@@ -225,6 +231,7 @@ mod tests {
         assert_eq!(entry.transport_kind(), McpTransportKind::Http);
         assert_eq!(entry.transport_display(), "https://example.com/mcp");
         assert!(entry.supports_parallel_tool_calls);
+        assert_eq!(entry.keepalive_interval, Some(10));
         assert_eq!(cfg.warnings().count(), 1);
         assert!(cfg
             .warnings()
