@@ -1,12 +1,12 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T11:50:12.042888+00:00`
+Generated: `2026-06-25T12:20:28.572991+00:00`
 
-- Range: `origin/main..upstream/main`; total commits tracked: `7011`.
+- Range: `origin/main..upstream/main`; total commits tracked: `7012`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3139 |
+| #20 | GPAR-01 tests+CI parity | 3140 |
 | #21 | GPAR-02 skills parity | 130 |
 | #22 | GPAR-03 UX parity | 957 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
@@ -17,9 +17,9 @@ Generated: `2026-06-25T11:50:12.042888+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 197 |
-| ported | 397 |
-| superseded | 6341 |
+| pending | 196 |
+| ported | 398 |
+| superseded | 6342 |
 
 ## First 100 Pending Commits
 
@@ -44,7 +44,6 @@ Generated: `2026-06-25T11:50:12.042888+00:00`
 | `553cf4f97757` | #26 | feat(desktop): restart the gateway from Cmd+K, with statusbar spinner feedback |
 | `a1639921ac44` | #26 | fix(desktop): offer a Restart gateway action on messaging save/toggle toasts |
 | `929dbf777801` | #26 | fix(desktop): make rendered logs selectable so they can be copied |
-| `b6e2a54a94f5` | #20 | fix(mcp): address adversarial review round 1 (cache parity, gates, races) |
 | `f06508836dd4` | #26 | docs(security): enumerate cron job scripts in §2.3 credential scoping |
 | `2bd1977d8fad` | #26 | chore: release v0.17.0 (2026.6.19) |
 | `866f1d65c4aa` | #26 | chore(desktop): sync package.json version fallback to 0.17.0 (#49236) |
@@ -125,3 +124,4 @@ Generated: `2026-06-25T11:50:12.042888+00:00`
 | `86e4521cb1d9` | #23 | fix(delivery): make cron output truncation configurable + adapter-aware |
 | `e9cd8c5bf3ea` | #23 | fix(delivery): drop env-var knob, flag all chunking adapters |
 | `d4fa2db1c5df` | #26 | fix(desktop): show all of a provider's models when searching the composer picker |
+| `ff85af3fc7d3` | #20 | feat(goals): /goal wait <pid> — park the loop on a background process (#50503) |

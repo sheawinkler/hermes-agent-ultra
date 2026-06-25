@@ -2865,14 +2865,14 @@ impl App {
     }
 
     pub fn refresh_agent_tool_snapshot(&mut self) -> AgentToolSnapshotRefresh {
-        let before = sorted_tool_names(self.agent.tool_registry.names());
+        let before = sorted_tool_schema_names(&self.tool_schemas);
         self.tool_schemas = hermes_tool_planning::resolve_platform_tool_schemas(
             &self.config,
             "cli",
             &self.tool_registry,
         );
         self.rebuild_agent_for_active_session();
-        let after = sorted_tool_names(self.agent.tool_registry.names());
+        let after = sorted_tool_schema_names(&self.tool_schemas);
         let before_set: BTreeSet<_> = before.iter().cloned().collect();
         let after_set: BTreeSet<_> = after.iter().cloned().collect();
 
@@ -4213,11 +4213,15 @@ mod tests {
         }
     }
 
-    fn register_test_tool(tools: &ToolRegistry, name: &'static str) {
+    fn register_test_tool_in_toolset(
+        tools: &ToolRegistry,
+        name: &'static str,
+        toolset: &'static str,
+    ) {
         let handler: Arc<dyn hermes_core::ToolHandler> = Arc::new(TestToolHandler { name });
         tools.register(
             name,
-            "test",
+            toolset,
             handler.schema(),
             handler,
             Arc::new(|| true),
@@ -4227,6 +4231,10 @@ mod tests {
             "T",
             None,
         );
+    }
+
+    fn register_test_tool(tools: &ToolRegistry, name: &'static str) {
+        register_test_tool_in_toolset(tools, name, "test");
     }
 
     fn build_minimal_test_app() -> App {
@@ -4360,6 +4368,31 @@ mod tests {
         assert_eq!(refresh.before_count, 0);
         assert_eq!(refresh.after_count, 0);
         assert!(!refresh.changed());
+    }
+
+    #[test]
+    fn refresh_agent_tool_snapshot_reports_advertised_surface_only() {
+        let mut app = build_minimal_test_app();
+        Arc::make_mut(&mut app.config)
+            .platform_toolsets
+            .insert("cli".to_string(), vec!["test".to_string()]);
+        register_test_tool(&app.tool_registry, "allowed_tool");
+        register_test_tool_in_toolset(&app.tool_registry, "mcp_srv_hidden", "mcp-srv");
+
+        let refresh = app.refresh_agent_tool_snapshot();
+
+        assert_eq!(refresh.before_count, 0);
+        assert_eq!(refresh.after_count, 1);
+        assert_eq!(refresh.added, vec!["allowed_tool".to_string()]);
+        assert!(refresh.removed.is_empty());
+        assert!(app
+            .tool_schemas
+            .iter()
+            .any(|schema| schema.name == "allowed_tool"));
+        assert!(!app
+            .tool_schemas
+            .iter()
+            .any(|schema| schema.name == "mcp_srv_hidden"));
     }
 
     #[test]
@@ -6212,7 +6245,11 @@ mod tests {
 // Helper: bridge hermes_tools::ToolRegistry → agent_loop::ToolRegistry
 // ---------------------------------------------------------------------------
 
-fn sorted_tool_names(mut names: Vec<String>) -> Vec<String> {
+fn sorted_tool_schema_names(schemas: &[ToolSchema]) -> Vec<String> {
+    let mut names = schemas
+        .iter()
+        .map(|schema| schema.name.clone())
+        .collect::<Vec<_>>();
     names.sort();
     names
 }
