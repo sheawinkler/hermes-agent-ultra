@@ -4926,6 +4926,21 @@ fn handle_managed_app_run_complete(
     state.awaiting_run_complete = false;
 }
 
+fn finalize_interrupted_tui_session(app: &mut App, state: &mut TuiState, reason: &str) {
+    let partial_assistant = if state.stream_buffer.trim().is_empty() {
+        None
+    } else {
+        Some(state.stream_buffer.clone())
+    };
+    if let Err(err) = app.finalize_interrupted_tui_session(partial_assistant.as_deref(), reason) {
+        tracing::warn!(reason, error = %err, "interrupted TUI session autosave skipped");
+        state.push_activity(format!("⚠ interrupted autosave skipped: {}", err));
+    } else if !app.messages.is_empty() {
+        state.push_activity("interrupted session snapshot flushed".to_string());
+    }
+    state.awaiting_run_complete = false;
+}
+
 fn extract_file_like_hints(text: &str, limit: usize) -> Vec<String> {
     let mut out = Vec::new();
     for token in text.split_whitespace() {
@@ -5366,6 +5381,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                             if state.processing {
                                 app.interrupt_controller.interrupt(None);
                                 abort_and_join_task(&mut active_agent_task).await;
+                                finalize_interrupted_tui_session(&mut app, &mut state, "ctrl_c");
                                 tui.event_sender().send(Event::Interrupt).ok();
                             }
                             app.running = false;
@@ -5399,6 +5415,13 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         if should_quit {
                             app.interrupt_controller.interrupt(None);
                             abort_and_join_task(&mut active_agent_task).await;
+                            if state.processing {
+                                finalize_interrupted_tui_session(
+                                    &mut app,
+                                    &mut state,
+                                    "tui_quit",
+                                );
+                            }
                             app.running = false;
                             break 'main_loop;
                         }
@@ -5702,6 +5725,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                     }
                     Some(Event::Interrupt) => {
                         abort_and_join_task(&mut active_agent_task).await;
+                        finalize_interrupted_tui_session(&mut app, &mut state, "interrupt_event");
                         state.finish_processing_cycle("⏹ interrupted after");
                         state.stream_buffer.clear();
                         state.stream_muted = false;
@@ -5713,6 +5737,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                     Some(Event::Shutdown) => {
                         app.interrupt_controller.interrupt(None);
                         abort_and_join_task(&mut active_agent_task).await;
+                        finalize_interrupted_tui_session(&mut app, &mut state, "shutdown_signal");
                         state.finish_processing_cycle("⏹ interrupted after");
                         state.stream_buffer.clear();
                         state.stream_muted = false;

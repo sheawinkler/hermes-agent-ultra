@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T11:10:05.059592+00:00`
+Generated: `2026-06-25T11:29:12.057671+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7011`.
 
@@ -17,9 +17,9 @@ Generated: `2026-06-25T11:10:05.059592+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 202 |
-| ported | 395 |
-| superseded | 6338 |
+| pending | 198 |
+| ported | 396 |
+| superseded | 6341 |
 
 ## First 100 Pending Commits
 
@@ -53,16 +53,13 @@ Generated: `2026-06-25T11:10:05.059592+00:00`
 | `d4e7dd609da6` | #23 | refactor(windows): tidy managed-node resolver helpers |
 | `a7983d5ad768` | #20 | fix(dashboard): hide sidecar sessions from history (#49269) |
 | `d799284b1554` | #21 | feat(optional-skills/creative-ideation): expand to v2.1.0 method library (#42402) |
-| `5f55f0ff85f0` | #20 | feat(teams): native send_video/send_voice/send_document attachments (#49308) |
 | `8ebe37f6ad2d` | #26 | feat(desktop): notify renderer when GPU acceleration is disabled due to remote display |
-| `8cf7df867e7d` | #20 | fix(plugins): silence raft check_fn log spam for users without raft CLI |
 | `1b7b4d138a67` | #26 | fix(desktop): handle slash exec dispatch payloads (#49358) |
 | `236f0597e562` | #26 | feat(desktop): pop the composer out into a draggable floating window |
 | `f697c97e02f0` | #26 | fix(desktop): keep floating composer radius consistent with docked |
 | `eed78d6ebb51` | #26 | fix(desktop): composer popout polish — peel-off placement, panels, chip editing |
 | `ae8db1ab531b` | #26 | fix(desktop): mute hidden link-title window so historical links don't autoplay audio |
 | `7eb9678c5470` | #26 | test(desktop): cover link-title window audio muting |
-| `a7dd98c8609c` | #23 | fix(env): guard remaining malformed int/float env var casts with utils helpers |
 | `5600105478ff` | #20 | refactor(gateway): migrate slack/dingtalk/whatsapp/matrix/feishu/telegram/wecom/email/sms adapters to bundled plugins |
 | `404fe730b7a2` | #26 | fix: add tooltips to right sidebar header buttons |
 | `838daca9f4cf` | #26 | chore(desktop): format tooltip indentation + author map for #49697 |
@@ -91,7 +88,6 @@ Generated: `2026-06-25T11:10:05.059592+00:00`
 | `72e4cca00ecc` | #26 | docs(config): correct MCP docs path in cli-config.yaml.example |
 | `8666fd7635ba` | #26 | fix(desktop): preserve other providers' hide-all in model visibility dialog |
 | `461fcc096479` | #26 | test(desktop): harden model-visibility toggle + dedupe default expansion |
-| `c7e8854cb383` | #20 | fix(tui): persist session messages on force-quit / signal shutdown |
 | `fb3d31ba8b77` | #26 | feat(desktop): add Update now button to About panel |
 | `0e47f68a479a` | #26 | fix(desktop): rename branched session via session.title RPC |
 | `7f43378931f3` | #26 | test(desktop): cover renameSessionPreferringRpc routing |
@@ -125,3 +121,7 @@ Generated: `2026-06-25T11:10:05.059592+00:00`
 | `ac128af1cec3` | #26 | feat(desktop): syntax-highlight inline diffs via Shiki |
 | `64a507da44d2` | #20 | feat(relay): handle passthrough_forward over the WS (Phase 5 §5.1, gateway half) (#50702) |
 | `61c266b0dc75` | #26 | style(desktop): soften dark-mode syntax highlighting |
+| `8845f3316c26` | #20 | fix(security): restrict dashboard plugin backend import to bundled plugins (#43719) |
+| `2e779d11a03d` | #23 | feat(mem0): v3 API, OSS mode, update/delete tools, telemetry & review fixes (#15624) |
+| `86e4521cb1d9` | #23 | fix(delivery): make cron output truncation configurable + adapter-aware |
+| `e9cd8c5bf3ea` | #23 | fix(delivery): drop env-var knob, flag all chunking adapters |

@@ -4503,6 +4503,26 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust Telegram parser already preserves current documents and replied group documents when the addressed message has no own media, only filtering oversized documents. Existing Telegram parse tests cover document metadata and replied-document size behavior."
+    },
+    "c7e8854cb383": {
+      "disposition": "ported",
+      "notes": "Rust TUI force-quit/signal shutdown now flushes the best available session transcript before clearing stream state: durable messages plus partial streamed assistant text are persisted to the session snapshot, memory providers receive on_session_end, and plugins receive on_session_end with interrupted=true. Covered by hermes-cli finalizer and lifecycle tests.",
+      "owner": "rust-runtime"
+    },
+    "5f55f0ff85f0": {
+      "disposition": "superseded",
+      "notes": "Upstream Teams media attachment fix targets the Python Teams chat plugin. Hermes Agent Ultra Rust gateway has no Teams chat adapter module; its Rust Teams surface is the meeting-summary pipeline, while chat media delivery is handled generically through Gateway::send_message media markers and registered adapter send_file/send_image_url implementations.",
+      "owner": "rust-runtime"
+    },
+    "8cf7df867e7d": {
+      "disposition": "superseded",
+      "notes": "Upstream Raft check_fn log-spam fix targets a Python bundled raft platform plugin. Hermes Agent Ultra Rust gateway has no raft platform adapter/check_fn registration path, so the repeated load_gateway_config warning failure mode is absent.",
+      "owner": "rust-runtime"
+    },
+    "a7dd98c8609c": {
+      "disposition": "superseded",
+      "notes": "Upstream malformed int/float env crash class is Python ValueError-specific. Rust numeric env reads in the corresponding config/gateway/agent/tool surfaces are fail-soft through parse().ok(), if-let Ok(...), or unwrap_or(default), so malformed values do not panic during adapter/agent init.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [

@@ -2564,6 +2564,74 @@ impl App {
         let _ = plugin_manager.invoke_hook(hook, &context);
     }
 
+    fn notify_memory_session_end(&self, messages: &[hermes_core::Message]) {
+        let Some(memory_manager) = self.agent.memory_manager.as_ref() else {
+            return;
+        };
+        let Ok(memory_manager) = memory_manager.lock() else {
+            tracing::warn!("Memory manager lock poisoned during interrupted session finalize");
+            return;
+        };
+        let as_values = messages
+            .iter()
+            .filter_map(|message| serde_json::to_value(message).ok())
+            .collect::<Vec<_>>();
+        memory_manager.on_session_end(&as_values);
+    }
+
+    fn invoke_interrupted_session_end_hook(&self, reason: &str) {
+        let Some(plugin_manager) = self.agent.plugin_manager.as_ref() else {
+            return;
+        };
+        let Ok(plugin_manager) = plugin_manager.lock() else {
+            tracing::warn!(
+                hook = HookType::OnSessionEnd.as_str(),
+                "Plugin manager lock poisoned"
+            );
+            return;
+        };
+        let context = serde_json::json!({
+            "session_id": self.session_id.as_str(),
+            "completed": false,
+            "interrupted": true,
+            "model": self.current_model.as_str(),
+            "platform": "tui",
+            "reason": reason,
+        });
+        let _ = plugin_manager.invoke_hook(HookType::OnSessionEnd, &context);
+    }
+
+    /// Flush the best available TUI transcript when the process exits before
+    /// `AgentRunComplete` can publish the final agent result.
+    pub fn finalize_interrupted_tui_session(
+        &mut self,
+        partial_assistant: Option<&str>,
+        reason: &str,
+    ) -> Result<(), AgentError> {
+        if let Some(partial) = partial_assistant
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            let duplicate_tail = self
+                .messages
+                .last()
+                .and_then(|message| message.content.as_deref())
+                .is_some_and(|content| content.trim() == partial);
+            if !duplicate_tail {
+                self.messages.push(hermes_core::Message::assistant(partial));
+            }
+        }
+
+        if self.messages.is_empty() && self.session_objective.is_none() {
+            return Ok(());
+        }
+
+        self.persist_session_snapshot(None)?;
+        self.notify_memory_session_end(&self.messages);
+        self.invoke_interrupted_session_end_hook(reason);
+        Ok(())
+    }
+
     fn notify_memory_session_switch(
         &self,
         new_session_id: &str,
@@ -4623,6 +4691,30 @@ mod tests {
                     HookResult::Ok
                 }),
             );
+            let end_seen = self.seen.clone();
+            ctx.on(
+                HookType::OnSessionEnd,
+                Arc::new(move |value| {
+                    let session_id = value
+                        .get("session_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let interrupted = value
+                        .get("interrupted")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let reason = value
+                        .get("reason")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    end_seen.lock().unwrap().push((
+                        format!("on_session_end:interrupted={interrupted}:reason={reason}"),
+                        session_id,
+                    ));
+                    HookResult::Ok
+                }),
+            );
         }
     }
 
@@ -4681,6 +4773,29 @@ mod tests {
         );
         assert_eq!(app.session_id, "test-session");
         assert_eq!(app.agent.config.session_id.as_deref(), Some("test-session"));
+    }
+
+    #[test]
+    fn finalize_interrupted_tui_session_invokes_session_end_hook() {
+        let _guard = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut app = build_minimal_test_app();
+        app.state_root = tmp.path().join("custom-state-root");
+        app.session_id = "hooked-force-quit".to_string();
+        app.messages = vec![hermes_core::Message::user("still save this")];
+        let seen = Arc::new(StdMutex::new(Vec::new()));
+        attach_lifecycle_recorder(&mut app, seen.clone());
+
+        app.finalize_interrupted_tui_session(None, "shutdown_signal")
+            .expect("finalize interrupted session");
+
+        assert_eq!(
+            seen.lock().unwrap().clone(),
+            vec![(
+                "on_session_end:interrupted=true:reason=shutdown_signal".to_string(),
+                "hooked-force-quit".to_string()
+            )]
+        );
     }
 
     #[test]
@@ -5030,6 +5145,66 @@ mod tests {
             .join("sessions")
             .join("persist-after-run.json");
         assert!(path.exists());
+        let raw = std::fs::read_to_string(path).expect("read snapshot");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("parse snapshot");
+        assert_eq!(
+            value
+                .get("messages")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.len()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn finalize_interrupted_tui_session_persists_user_and_partial_stream() {
+        let _guard = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut app = build_minimal_test_app();
+        app.state_root = tmp.path().join("custom-state-root");
+        app.session_id = "force-quit-session".to_string();
+        app.messages = vec![hermes_core::Message::user("diagnose this")];
+
+        app.finalize_interrupted_tui_session(Some("partial answer"), "ctrl_c")
+            .expect("finalize interrupted session");
+
+        let path = app
+            .state_root
+            .join("sessions")
+            .join("force-quit-session.json");
+        let raw = std::fs::read_to_string(path).expect("read snapshot");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("parse snapshot");
+        let contents = value
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .expect("messages")
+            .iter()
+            .filter_map(|message| message.get("content").and_then(|v| v.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(contents, vec!["diagnose this", "partial answer"]);
+    }
+
+    #[test]
+    fn finalize_interrupted_tui_session_does_not_duplicate_partial_tail() {
+        let _guard = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut app = build_minimal_test_app();
+        app.state_root = tmp.path().join("custom-state-root");
+        app.session_id = "force-quit-dedupe".to_string();
+        app.messages = vec![
+            hermes_core::Message::user("question"),
+            hermes_core::Message::assistant("partial answer"),
+        ];
+
+        app.finalize_interrupted_tui_session(Some("partial answer"), "shutdown_signal")
+            .expect("finalize interrupted session");
+
+        assert_eq!(app.messages.len(), 2);
+        let path = app
+            .state_root
+            .join("sessions")
+            .join("force-quit-dedupe.json");
         let raw = std::fs::read_to_string(path).expect("read snapshot");
         let value: serde_json::Value = serde_json::from_str(&raw).expect("parse snapshot");
         assert_eq!(
