@@ -84,7 +84,6 @@ fn base_weights() -> HashMap<String, f64> {
     w.insert("delegation".into(), 0.3);
     w.insert("cronjob".into(), 0.2);
     w.insert("rl_training".into(), 0.2);
-    w.insert("messaging".into(), 0.1);
     w.insert("homeassistant".into(), 0.1);
     w.insert("tts".into(), 0.1);
     w.insert("voice".into(), 0.1);

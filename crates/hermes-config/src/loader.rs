@@ -628,7 +628,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, display.busy_input_mode|busy_ack_enabled|memory_notifications, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -805,6 +805,10 @@ fn apply_user_config_patch_dotted(
         ["display", "busy_ack_enabled"] => {
             config.display.busy_ack_enabled =
                 Some(parse_config_bool("display.busy_ack_enabled", value)?);
+        }
+        ["display", "memory_notifications"] => {
+            config.display.memory_notifications =
+                Some(parse_config_bool("display.memory_notifications", value)?);
         }
         ["sessions", "auto_prune"] => {
             let normalized = value.trim().to_ascii_lowercase();
@@ -1111,6 +1115,9 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .map(|s| s.to_string())
             .unwrap_or_else(|| "interrupt".to_string())),
         ["display", "busy_ack_enabled"] => Ok(config.display.busy_ack_enabled().to_string()),
+        ["display", "memory_notifications"] => {
+            Ok(config.display.memory_notifications_enabled().to_string())
+        }
         ["sessions", "auto_prune"] => Ok(config.sessions.auto_prune.to_string()),
         ["sessions", "retention_days"] => Ok(config.sessions.retention_days.to_string()),
         ["sessions", "vacuum_after_prune"] => Ok(config.sessions.vacuum_after_prune.to_string()),
@@ -1501,6 +1508,10 @@ pub fn display_config_env_bridge_pairs() -> &'static [(&'static str, &'static st
     &[
         ("busy_input_mode", "HERMES_GATEWAY_BUSY_INPUT_MODE"),
         ("busy_ack_enabled", "HERMES_GATEWAY_BUSY_ACK_ENABLED"),
+        (
+            "memory_notifications",
+            "HERMES_MEMORY_NOTIFICATIONS_ENABLED",
+        ),
     ]
 }
 
@@ -2001,6 +2012,9 @@ fn bridge_display_config_to_env(display: &DisplayConfig) {
     if let Some(enabled) = display.busy_ack_enabled {
         set_env_if_missing("HERMES_GATEWAY_BUSY_ACK_ENABLED", enabled.to_string());
     }
+    if let Some(enabled) = display.memory_notifications {
+        set_env_if_missing("HERMES_MEMORY_NOTIFICATIONS_ENABLED", enabled.to_string());
+    }
 }
 
 fn apply_display_env_overrides(config: &mut DisplayConfig) {
@@ -2010,6 +2024,11 @@ fn apply_display_env_overrides(config: &mut DisplayConfig) {
     if let Some(v) = env_var_nonempty("HERMES_GATEWAY_BUSY_ACK_ENABLED") {
         if let Some(parsed) = parse_bool_env("HERMES_GATEWAY_BUSY_ACK_ENABLED", &v) {
             config.busy_ack_enabled = Some(parsed);
+        }
+    }
+    if let Some(v) = env_var_nonempty("HERMES_MEMORY_NOTIFICATIONS_ENABLED") {
+        if let Some(parsed) = parse_bool_env("HERMES_MEMORY_NOTIFICATIONS_ENABLED", &v) {
+            config.memory_notifications = Some(parsed);
         }
     }
 }
@@ -2969,7 +2988,11 @@ personalities: null
             .iter()
             .map(|(key, _)| *key)
             .collect::<std::collections::HashSet<_>>();
-        for key in ["busy_input_mode", "busy_ack_enabled"] {
+        for key in [
+            "busy_input_mode",
+            "busy_ack_enabled",
+            "memory_notifications",
+        ] {
             assert!(keys.contains(key), "missing display bridge key: {key}");
             assert!(
                 display_config_env_bridge_key(&format!("display.{key}")).is_some(),
@@ -2979,7 +3002,7 @@ personalities: null
     }
 
     #[test]
-    fn set_user_config_value_bridges_display_busy_keys() {
+    fn set_user_config_value_bridges_display_runtime_keys() {
         use tempfile::tempdir;
 
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -2996,6 +3019,11 @@ personalities: null
                 "false",
                 "HERMES_GATEWAY_BUSY_ACK_ENABLED",
             ),
+            (
+                "display.memory_notifications",
+                "false",
+                "HERMES_MEMORY_NOTIFICATIONS_ENABLED",
+            ),
         ] {
             let result = set_user_config_value(dir.path(), key, value).unwrap();
             assert!(result.wrote_config(), "{key} should write config");
@@ -3005,6 +3033,7 @@ personalities: null
         let env_text = std::fs::read_to_string(dir.path().join(".env")).unwrap();
         assert!(env_text.contains("HERMES_GATEWAY_BUSY_INPUT_MODE=steer"));
         assert!(env_text.contains("HERMES_GATEWAY_BUSY_ACK_ENABLED=false"));
+        assert!(env_text.contains("HERMES_MEMORY_NOTIFICATIONS_ENABLED=false"));
         clear_display_env_bridge_vars();
     }
 

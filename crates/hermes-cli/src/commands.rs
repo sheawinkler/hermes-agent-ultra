@@ -71,12 +71,13 @@ use crate::kanban::{
 };
 use crate::mcp_config::{load_mcp_config, load_mcp_config_if_exists, McpTransportKind};
 use crate::model_switch::{
-    cached_provider_catalog_status, curated_provider_slugs, format_stale_auxiliary_warning,
-    normalize_provider_model, provider_catalog_entries_for_config, provider_model_ids,
-    provider_model_ids_for_config, provider_slug_from_provider_model, provider_slugs_for_config,
-    DEFAULT_VISIBLE_MODELS_PER_PROVIDER,
+    cached_provider_catalog_status, clear_provider_catalog_cache, curated_provider_slugs,
+    format_stale_auxiliary_warning, normalize_provider_model, provider_catalog_entries_for_config,
+    provider_model_ids, provider_model_ids_for_config, provider_slug_from_provider_model,
+    provider_slugs_for_config,
 };
 use crate::pairing_store::{PairingStatus, PairingStore};
+use crate::providers::canonical_provider_id;
 use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
 use hermes_config::{GatewayConfig, LlmProviderConfig};
 
@@ -4854,6 +4855,77 @@ async fn handle_model_harness_command(
     Ok(CommandResult::Handled)
 }
 
+fn resolve_model_refresh_provider(app: &App, args: &[&str]) -> String {
+    let raw = args.first().copied().unwrap_or_default().trim();
+    if raw.is_empty() {
+        return canonical_provider_id(provider_slug_from_provider_model(&app.current_model));
+    }
+    if let Some((provider, _)) = raw.split_once(':') {
+        return canonical_provider_id(provider.trim());
+    }
+    canonical_provider_id(raw)
+}
+
+async fn handle_model_refresh_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let provider = resolve_model_refresh_provider(app, args);
+    if provider.trim().is_empty() {
+        emit_command_output(app, "Usage: /model refresh [provider|provider:model]");
+        return Ok(CommandResult::Handled);
+    }
+
+    let known_provider = provider_slugs_for_config(&app.config)
+        .iter()
+        .any(|slug| slug.eq_ignore_ascii_case(&provider));
+    let cache_cleared = clear_provider_catalog_cache(&provider)?;
+    let models = provider_model_ids_for_config(&provider, &app.config).await;
+    let cache_status = cached_provider_catalog_status(&provider);
+
+    let mut out = String::new();
+    let _ = writeln!(out, "Model catalog refreshed");
+    let _ = writeln!(out, "provider: {}", provider);
+    let _ = writeln!(out, "known_provider: {}", yes_no(known_provider));
+    let _ = writeln!(out, "cache_cleared: {}", yes_no(cache_cleared));
+    let _ = writeln!(out, "catalog_total: {}", models.len());
+    match cache_status {
+        Some(status) => {
+            let _ = writeln!(
+                out,
+                "catalog_cache: verified={} age_secs={}",
+                yes_no(status.verified),
+                status
+                    .age_secs
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "n/a".to_string())
+            );
+        }
+        None => {
+            let _ = writeln!(out, "catalog_cache: unavailable");
+        }
+    }
+    if models.is_empty() {
+        let _ = writeln!(out, "models_sample: (none)");
+        if !known_provider {
+            let _ = writeln!(
+                out,
+                "note: provider is not registered; configure llm_providers or use a known provider."
+            );
+        }
+    } else {
+        let sample = models
+            .iter()
+            .take(8)
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(out, "models_sample: {}", sample);
+    }
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
 fn handle_model_backend_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     let action = args.first().copied().unwrap_or("list").to_ascii_lowercase();
     match action.as_str() {
@@ -4948,6 +5020,9 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
         }
         if sub.eq_ignore_ascii_case("harness") {
             return handle_model_harness_command(app, &args[1..]).await;
+        }
+        if sub.eq_ignore_ascii_case("refresh") {
+            return handle_model_refresh_command(app, &args[1..]).await;
         }
         if sub.eq_ignore_ascii_case("explain") {
             return handle_model_explain_command(app, &args[1..], false).await;
@@ -13972,8 +14047,7 @@ async fn handle_provider_command(app: &mut App) -> Result<CommandResult, AgentEr
         emit_command_output(app, "No providers registered.");
         return Ok(CommandResult::Handled);
     }
-    let entries =
-        provider_catalog_entries_for_config(&app.config, DEFAULT_VISIBLE_MODELS_PER_PROVIDER).await;
+    let entries = provider_catalog_entries_for_config(&app.config).await;
     if entries.is_empty() {
         emit_command_output(
             app,
@@ -31085,6 +31159,36 @@ install_command: "uv pip install -r requirements.txt"
         assert!(line.contains("backend=qdrant"));
         assert!(line.contains("model=text-embedding-3-large"));
         assert!(line.contains("dimension=3072"));
+    }
+
+    #[tokio::test]
+    async fn model_refresh_command_clears_cache_and_lists_configured_provider() {
+        let _lock = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        let mut cfg = (*app.config).clone();
+        cfg.llm_providers.insert(
+            "wide-provider".to_string(),
+            LlmProviderConfig {
+                models: vec!["model-a".to_string(), "model-b".to_string()],
+                discover_models: false,
+                ..LlmProviderConfig::default()
+            },
+        );
+        app.config = Arc::new(cfg);
+
+        handle_model_command(&mut app, &["refresh", "wide-provider"])
+            .await
+            .expect("refresh model catalog");
+
+        let out = latest_ui_assistant_text(&app);
+        assert!(out.contains("Model catalog refreshed"));
+        assert!(out.contains("provider: wide-provider"));
+        assert!(out.contains("known_provider: yes"));
+        assert!(out.contains("cache_cleared: no"));
+        assert!(out.contains("catalog_total: 2"));
+        assert!(out.contains("models_sample: model-a, model-b"));
     }
 
     #[test]

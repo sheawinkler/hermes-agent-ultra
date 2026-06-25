@@ -332,6 +332,14 @@ pub struct DisplayConfig {
     )]
     pub busy_ack_enabled: Option<bool>,
 
+    /// Whether background memory/self-improvement summaries should be sent.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_option_boolish",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub memory_notifications: Option<bool>,
+
     /// Per-platform display overrides keyed by normalized platform name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub platforms: BTreeMap<String, PlatformDisplayConfig>,
@@ -368,6 +376,10 @@ impl DisplayConfig {
 
     pub fn busy_ack_enabled(&self) -> bool {
         self.busy_ack_enabled.unwrap_or(true)
+    }
+
+    pub fn memory_notifications_enabled(&self) -> bool {
+        self.memory_notifications.unwrap_or(true)
     }
 }
 
@@ -2083,6 +2095,7 @@ display:
   tool_progress: all
   busy_input_mode: steer
   busy_ack_enabled: "false"
+  memory_notifications: "false"
   platforms:
     telegram:
       tool_progress: off
@@ -2097,6 +2110,7 @@ agent:
         assert_eq!(cfg.display.platform_tool_progress("slack"), Some("all"));
         assert_eq!(cfg.display.normalized_busy_input_mode(), "steer");
         assert!(!cfg.display.busy_ack_enabled());
+        assert!(!cfg.display.memory_notifications_enabled());
         assert_eq!(
             cfg.agent.normalized_service_tier().as_deref(),
             Some("priority")

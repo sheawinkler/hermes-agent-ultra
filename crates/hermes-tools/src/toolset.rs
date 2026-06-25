@@ -66,8 +66,6 @@ pub const TOOLSET_CODE_EXECUTION: &[&str] = &["execute_code"];
 pub const TOOLSET_DELEGATION: &[&str] = &["delegate_task"];
 /// Cron job management tools.
 pub const TOOLSET_CRONJOB: &[&str] = &["cronjob"];
-/// Cross-platform messaging tools.
-pub const TOOLSET_MESSAGING: &[&str] = &["send_message"];
 /// Home Assistant integration tools.
 pub const TOOLSET_HOMEASSISTANT: &[&str] = &[
     "ha_list_entities",
@@ -285,10 +283,6 @@ impl ToolsetManager {
             TOOLSET_CRONJOB.iter().map(|s| s.to_string()).collect(),
         ));
         self.register(Toolset::new(
-            "messaging",
-            TOOLSET_MESSAGING.iter().map(|s| s.to_string()).collect(),
-        ));
-        self.register(Toolset::new(
             "homeassistant",
             TOOLSET_HOMEASSISTANT
                 .iter()
@@ -327,7 +321,8 @@ impl ToolsetManager {
             TOOLSET_CODING.iter().map(|s| s.to_string()).collect(),
         ));
 
-        // Platform composite toolsets
+        // Platform composite toolsets. Outbound platform sends are explicit
+        // gateway/cron/CLI runtime actions, not model-callable defaults.
         self.register(Toolset::with_includes(
             "hermes-cli",
             vec![
@@ -347,7 +342,6 @@ impl ToolsetManager {
                 "code_execution",
                 "delegation",
                 "cronjob",
-                "messaging",
                 "homeassistant",
                 "tts",
                 "system",
@@ -796,13 +790,14 @@ mod tests {
         assert!(tools.contains(&"web_crawl".to_string()));
         assert!(tools.contains(&"terminal".to_string()));
         assert!(tools.contains(&"read_file".to_string()));
-        // Python parity core for CLI.
+        // Python parity core for CLI, excluding tools that must not be
+        // agent-callable by default.
         assert!(tools.contains(&"image_generate".to_string()));
         assert!(tools.contains(&"video_generate".to_string()));
         assert!(tools.contains(&"spotify_playback".to_string()));
         assert!(tools.contains(&"session_search".to_string()));
         assert!(tools.contains(&"text_to_speech".to_string()));
-        assert!(tools.contains(&"send_message".to_string()));
+        assert!(!tools.contains(&"send_message".to_string()));
         assert!(tools.contains(&"ha_call_service".to_string()));
         assert!(tools.contains(&"cronjob".to_string()));
         assert!(tools.contains(&"auth_snapshot".to_string()));
@@ -947,8 +942,8 @@ mod tests {
         ] {
             let tools = manager.resolve_toolset_unfiltered(preset).unwrap();
             assert!(
-                tools.contains(&"send_message".to_string()),
-                "preset {preset} should include send_message"
+                !tools.contains(&"send_message".to_string()),
+                "preset {preset} should not expose send_message as an agent-callable tool"
             );
             assert!(
                 tools.contains(&"terminal".to_string()),
