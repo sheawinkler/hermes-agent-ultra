@@ -9,6 +9,7 @@
 //! App Home tab publishing, interactive component handling, modals, user info,
 //! reactions, topic setting, and permalinks.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -29,6 +30,39 @@ const SLACK_API_BASE: &str = "https://slack.com/api";
 
 /// Maximum message length for Slack (4000 characters for text blocks).
 const MAX_MESSAGE_LENGTH: usize = 4000;
+
+const SLACK_AUDIO_MIME_TO_EXT: &[(&str, &str)] = &[
+    ("audio/ogg", ".ogg"),
+    ("audio/opus", ".ogg"),
+    ("audio/mpeg", ".mp3"),
+    ("audio/mp3", ".mp3"),
+    ("audio/wav", ".wav"),
+    ("audio/x-wav", ".wav"),
+    ("audio/webm", ".webm"),
+    ("audio/mp4", ".m4a"),
+    ("audio/x-m4a", ".m4a"),
+    ("audio/m4a", ".m4a"),
+    ("audio/aac", ".m4a"),
+    ("audio/flac", ".flac"),
+    ("audio/x-flac", ".flac"),
+];
+
+const SLACK_STT_SUPPORTED_EXTS: &[&str] = &[
+    ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm", ".ogg", ".aac", ".flac",
+];
+
+const SLACK_EXT_TO_AUDIO_MIME: &[(&str, &str)] = &[
+    (".mp4", "audio/mp4"),
+    (".m4a", "audio/mp4"),
+    (".mp3", "audio/mpeg"),
+    (".mpeg", "audio/mpeg"),
+    (".mpga", "audio/mpeg"),
+    (".wav", "audio/wav"),
+    (".webm", "audio/webm"),
+    (".ogg", "audio/ogg"),
+    (".aac", "audio/aac"),
+    (".flac", "audio/flac"),
+];
 
 fn default_true() -> bool {
     true
@@ -204,6 +238,37 @@ pub struct SlackEvent {
     pub bot_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlackMediaKind {
+    Audio,
+    Video,
+    Image,
+    Document,
+    Unsupported,
+}
+
+/// Slack file attachment metadata preserved by the Socket Mode parser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlackMediaFile {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub mimetype: Option<String>,
+    pub subtype: Option<String>,
+    pub url_private: Option<String>,
+    pub url_private_download: Option<String>,
+    pub kind: SlackMediaKind,
+    pub cache_extension: Option<String>,
+    pub reported_mime_type: Option<String>,
+}
+
+impl SlackMediaFile {
+    pub fn download_url(&self) -> Option<&str> {
+        self.url_private_download
+            .as_deref()
+            .or(self.url_private.as_deref())
+    }
+}
+
 /// Incoming message parsed from a Slack event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncomingSlackMessage {
@@ -213,6 +278,7 @@ pub struct IncomingSlackMessage {
     pub ts: String,
     pub thread_ts: Option<String>,
     pub is_bot: bool,
+    pub media_files: Vec<SlackMediaFile>,
 }
 
 /// Token-free mention policy used by Socket Mode routing.
@@ -230,6 +296,55 @@ impl SlackMentionPolicy {
             bot_user_id: config.bot_user_id.clone(),
             mention_patterns: config.mention_patterns.clone(),
         }
+    }
+}
+
+impl SlackMediaFile {
+    fn from_value(file: &serde_json::Value) -> Option<Self> {
+        let id = slack_value_string(file, "id");
+        let name = slack_value_string(file, "name");
+        let mimetype =
+            slack_value_string(file, "mimetype").or_else(|| slack_value_string(file, "mime_type"));
+        let subtype = slack_value_string(file, "subtype");
+        let url_private = slack_value_string(file, "url_private");
+        let url_private_download = slack_value_string(file, "url_private_download");
+
+        if id.is_none()
+            && name.is_none()
+            && mimetype.is_none()
+            && subtype.is_none()
+            && url_private.is_none()
+            && url_private_download.is_none()
+        {
+            return None;
+        }
+
+        let kind = slack_media_kind(name.as_deref(), mimetype.as_deref(), subtype.as_deref());
+        let (cache_extension, reported_mime_type) = if kind == SlackMediaKind::Audio {
+            let ext = resolve_slack_audio_ext(name.as_deref(), mimetype.as_deref());
+            let reported = slack_audio_mime_for_ext(&ext).to_string();
+            (Some(ext), Some(reported))
+        } else {
+            (
+                None,
+                mimetype
+                    .as_deref()
+                    .map(slack_mime_key)
+                    .filter(|s| !s.is_empty()),
+            )
+        };
+
+        Some(Self {
+            id,
+            name,
+            mimetype,
+            subtype,
+            url_private,
+            url_private_download,
+            kind,
+            cache_extension,
+            reported_mime_type,
+        })
     }
 }
 
@@ -1023,6 +1138,7 @@ impl SlackAdapter {
             .get("thread_ts")
             .and_then(|v| v.as_str())
             .map(String::from);
+        let media_files = parse_slack_media_files(event);
 
         Some(IncomingSlackMessage {
             channel,
@@ -1031,6 +1147,7 @@ impl SlackAdapter {
             ts,
             thread_ts,
             is_bot: false,
+            media_files,
         })
     }
 
@@ -1444,6 +1561,141 @@ fn slack_event_is_dm(envelope: &SocketModeEnvelope, channel_id: &str) -> bool {
     matches!(channel_type, "im" | "mpim") || channel_id.starts_with('D')
 }
 
+fn slack_value_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn slack_mime_key(raw: &str) -> String {
+    raw.split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn slack_filename_ext(file_name: &str) -> Option<String> {
+    Path::new(file_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| format!(".{}", ext.to_ascii_lowercase()))
+}
+
+fn slack_stt_extension_supported(ext: &str) -> bool {
+    SLACK_STT_SUPPORTED_EXTS.contains(&ext)
+}
+
+fn resolve_slack_audio_ext(file_name: Option<&str>, mimetype: Option<&str>) -> String {
+    if let Some(ext) = file_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .and_then(slack_filename_ext)
+        .filter(|ext| slack_stt_extension_supported(ext))
+    {
+        return ext;
+    }
+
+    let mime_key = mimetype.map(slack_mime_key).unwrap_or_default();
+    if let Some((_, ext)) = SLACK_AUDIO_MIME_TO_EXT
+        .iter()
+        .find(|(known, _)| *known == mime_key)
+    {
+        return (*ext).to_string();
+    }
+
+    ".m4a".to_string()
+}
+
+fn slack_audio_mime_for_ext(ext: &str) -> &'static str {
+    SLACK_EXT_TO_AUDIO_MIME
+        .iter()
+        .find_map(|(known, mime)| (*known == ext).then_some(*mime))
+        .unwrap_or("audio/mp4")
+}
+
+fn slack_file_is_voice_clip(name: Option<&str>, subtype: Option<&str>) -> bool {
+    if subtype
+        .map(str::trim)
+        .map(|s| s.eq_ignore_ascii_case("slack_audio"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    name.map(str::trim)
+        .map(|s| s.to_ascii_lowercase())
+        .map(|s| s.starts_with("audio_message"))
+        .unwrap_or(false)
+}
+
+fn slack_media_kind(
+    name: Option<&str>,
+    mimetype: Option<&str>,
+    subtype: Option<&str>,
+) -> SlackMediaKind {
+    let mime_key = mimetype.map(slack_mime_key).unwrap_or_default();
+    let ext = name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .and_then(slack_filename_ext);
+    let voice_clip = slack_file_is_voice_clip(name, subtype);
+
+    if mime_key.starts_with("audio/") || voice_clip {
+        return SlackMediaKind::Audio;
+    }
+
+    if matches!(
+        ext.as_deref(),
+        Some(".m4a" | ".mp3" | ".mpeg" | ".mpga" | ".wav" | ".ogg" | ".aac" | ".flac")
+    ) {
+        return SlackMediaKind::Audio;
+    }
+
+    if mime_key.starts_with("video/")
+        || matches!(ext.as_deref(), Some(".mp4" | ".m4v" | ".mov" | ".webm"))
+    {
+        return SlackMediaKind::Video;
+    }
+
+    if mime_key.starts_with("image/")
+        || matches!(
+            ext.as_deref(),
+            Some(".png" | ".jpg" | ".jpeg" | ".gif" | ".webp")
+        )
+    {
+        return SlackMediaKind::Image;
+    }
+
+    if mime_key.starts_with("application/")
+        || mime_key.starts_with("text/")
+        || matches!(
+            ext.as_deref(),
+            Some(".pdf" | ".md" | ".txt" | ".csv" | ".json" | ".docx" | ".xlsx" | ".pptx" | ".zip")
+        )
+    {
+        return SlackMediaKind::Document;
+    }
+
+    SlackMediaKind::Unsupported
+}
+
+fn parse_slack_media_files(event: &serde_json::Value) -> Vec<SlackMediaFile> {
+    event
+        .get("files")
+        .and_then(|files| files.as_array())
+        .map(|files| {
+            files
+                .iter()
+                .filter_map(SlackMediaFile::from_value)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn parse_slack_mention_pattern_values(raw: &str) -> Vec<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -1643,6 +1895,137 @@ mod tests {
         assert_eq!(msg.user_id, Some("U456".into()));
         assert_eq!(msg.text, "hello bot");
         assert!(!msg.is_bot);
+        assert!(msg.media_files.is_empty());
+    }
+
+    #[test]
+    fn slack_audio_ext_resolution_preserves_container_extensions() {
+        assert_eq!(
+            resolve_slack_audio_ext(Some("audio_message.mp4"), Some("audio/mp4")),
+            ".mp4"
+        );
+        assert_eq!(
+            resolve_slack_audio_ext(Some("voice.ogg"), Some("audio/ogg")),
+            ".ogg"
+        );
+        assert_eq!(
+            resolve_slack_audio_ext(Some("clip.m4a"), Some("audio/x-m4a")),
+            ".m4a"
+        );
+        assert_eq!(resolve_slack_audio_ext(Some(""), Some("audio/mp4")), ".m4a");
+        assert_eq!(
+            resolve_slack_audio_ext(Some("weird"), Some("audio/x-future-codec")),
+            ".m4a"
+        );
+    }
+
+    #[test]
+    fn slack_voice_clip_detection_uses_stable_slack_markers() {
+        assert!(slack_file_is_voice_clip(Some("audio_message.mp4"), None));
+        assert!(slack_file_is_voice_clip(
+            Some("clip.mp4"),
+            Some("slack_audio")
+        ));
+        assert!(!slack_file_is_voice_clip(Some("vacation.mp4"), None));
+        assert!(!slack_file_is_voice_clip(
+            Some("screen_recording.mp4"),
+            Some("slack_video")
+        ));
+    }
+
+    #[test]
+    fn parse_event_preserves_audio_mp4_voice_attachment_metadata() {
+        let env = SocketModeEnvelope {
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env123".into()),
+            payload: Some(serde_json::json!({
+                "event": {
+                    "type": "message",
+                    "text": "",
+                    "channel": "C123",
+                    "user": "U456",
+                    "ts": "1.0",
+                    "files": [{
+                        "id": "F1",
+                        "name": "audio_message.mp4",
+                        "mimetype": "audio/mp4",
+                        "url_private": "https://files.slack.test/F1",
+                        "url_private_download": "https://files.slack.test/F1/download"
+                    }]
+                }
+            })),
+        };
+
+        let msg = SlackAdapter::parse_event(&env).unwrap();
+        assert_eq!(msg.media_files.len(), 1);
+        let file = &msg.media_files[0];
+        assert_eq!(file.kind, SlackMediaKind::Audio);
+        assert_eq!(file.cache_extension.as_deref(), Some(".mp4"));
+        assert_eq!(file.reported_mime_type.as_deref(), Some("audio/mp4"));
+        assert_eq!(
+            file.download_url(),
+            Some("https://files.slack.test/F1/download")
+        );
+    }
+
+    #[test]
+    fn parse_event_reroutes_video_mp4_slack_voice_clip_to_audio() {
+        let env = SocketModeEnvelope {
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env123".into()),
+            payload: Some(serde_json::json!({
+                "event": {
+                    "type": "message",
+                    "text": "",
+                    "channel": "C123",
+                    "user": "U456",
+                    "ts": "1.0",
+                    "files": [{
+                        "id": "F2",
+                        "name": "voice.wav",
+                        "subtype": "slack_audio",
+                        "mimetype": "video/mp4",
+                        "url_private": "https://files.slack.test/F2"
+                    }]
+                }
+            })),
+        };
+
+        let msg = SlackAdapter::parse_event(&env).unwrap();
+        let file = &msg.media_files[0];
+        assert_eq!(file.kind, SlackMediaKind::Audio);
+        assert_eq!(file.cache_extension.as_deref(), Some(".wav"));
+        assert_eq!(file.reported_mime_type.as_deref(), Some("audio/wav"));
+    }
+
+    #[test]
+    fn parse_event_keeps_real_slack_video_on_video_path() {
+        let env = SocketModeEnvelope {
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env123".into()),
+            payload: Some(serde_json::json!({
+                "event": {
+                    "type": "message",
+                    "text": "watch this",
+                    "channel": "C123",
+                    "user": "U456",
+                    "ts": "1.0",
+                    "files": [{
+                        "id": "F3",
+                        "name": "vacation.mp4",
+                        "subtype": "slack_video",
+                        "mimetype": "video/mp4",
+                        "url_private": "https://files.slack.test/F3"
+                    }]
+                }
+            })),
+        };
+
+        let msg = SlackAdapter::parse_event(&env).unwrap();
+        let file = &msg.media_files[0];
+        assert_eq!(file.kind, SlackMediaKind::Video);
+        assert_eq!(file.cache_extension, None);
+        assert_eq!(file.reported_mime_type.as_deref(), Some("video/mp4"));
     }
 
     #[test]
