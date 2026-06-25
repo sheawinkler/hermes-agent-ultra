@@ -23,6 +23,7 @@ use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 
 use crate::adapter::{describe_secret, AdapterProxyConfig, BasePlatformAdapter};
+use crate::pairing::{PairingManager, PairingState};
 
 /// Maximum message length for Discord (2000 characters).
 const MAX_MESSAGE_LENGTH: usize = 2000;
@@ -1097,6 +1098,33 @@ impl DiscordInteractionAuthPolicy {
             DiscordAuthDecision::Deny(DiscordAuthDenyReason::AllowedUsersOrRoles)
         }
     }
+}
+
+/// Component button authorization with pairing-store fallback.
+///
+/// Allowlist/role policy remains authoritative. When that fails, an explicitly
+/// approved pairing entry authorizes the same Discord user id, matching the
+/// gateway-level pairing path without relaxing fail-closed behavior for unknown
+/// users.
+pub fn discord_component_allows_with_pairing(
+    policy: &DiscordInteractionAuthPolicy,
+    subject: &DiscordInteractionSubject,
+    pairing: Option<&PairingManager>,
+) -> bool {
+    if policy.component_allows(subject) {
+        return true;
+    }
+    let Some(user_id) = subject
+        .user_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    pairing
+        .and_then(|manager| manager.state(user_id))
+        .is_some_and(|state| state == PairingState::Approved)
 }
 
 /// Determine whether a Discord message may be routed without an explicit bot mention.
@@ -4559,6 +4587,33 @@ mod tests {
         assert!(!policy.component_allows(&DiscordInteractionSubject::default()));
         assert!(DiscordInteractionAuthPolicy::default()
             .component_allows(&DiscordInteractionSubject::default()));
+    }
+
+    #[test]
+    fn discord_component_auth_allows_approved_pairing_store_user() {
+        let policy = DiscordInteractionAuthPolicy {
+            allowed_user_ids: ["11111"].into_iter().map(String::from).collect(),
+            ..DiscordInteractionAuthPolicy::default()
+        };
+        let pairing = PairingManager::new();
+        pairing.approve("99999");
+
+        assert!(discord_component_allows_with_pairing(
+            &policy,
+            &DiscordInteractionSubject::user("99999"),
+            Some(&pairing)
+        ));
+        assert!(!discord_component_allows_with_pairing(
+            &policy,
+            &DiscordInteractionSubject::user("77777"),
+            Some(&pairing)
+        ));
+        pairing.deny("99999");
+        assert!(!discord_component_allows_with_pairing(
+            &policy,
+            &DiscordInteractionSubject::user("99999"),
+            Some(&pairing)
+        ));
     }
 
     #[test]

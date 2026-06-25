@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T19:43:56.129312+00:00`
+Generated: `2026-06-25T22:03:06.847934+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7021`.
 
@@ -17,9 +17,9 @@ Generated: `2026-06-25T19:43:56.129312+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 162 |
-| ported | 425 |
-| superseded | 6358 |
+| pending | 143 |
+| ported | 433 |
+| superseded | 6369 |
 
 ## First 100 Pending Commits
 
@@ -36,8 +36,6 @@ Generated: `2026-06-25T19:43:56.129312+00:00`
 | `d91b8d8368bb` | #26 | test(desktop): make keyVar a typed EnvVarInfo factory |
 | `b936f92b25b4` | #26 | fix(desktop): render send/prefill directive notices (/goal, /undo) (#49073) |
 | `db744e7d1e58` | #21 | feat(simplify-code): add risk-tiered application, Chesterton's Fence, slop + silent failure detection |
-| `9026a8c78974` | #22 | feat(gateway): add Raft bundled platform plugin with activity hooks |
-| `7d86178cf51a` | #26 | fix(raft): set stdin=DEVNULL on bridge subprocess |
 | `6308d3416ab9` | #26 | fix(desktop): rename "Restart messaging" -> "Restart gateway" |
 | `553cf4f97757` | #26 | feat(desktop): restart the gateway from Cmd+K, with statusbar spinner feedback |
 | `a1639921ac44` | #26 | fix(desktop): offer a Restart gateway action on messaging save/toggle toasts |
@@ -47,7 +45,6 @@ Generated: `2026-06-25T19:43:56.129312+00:00`
 | `866f1d65c4aa` | #26 | chore(desktop): sync package.json version fallback to 0.17.0 (#49236) |
 | `7a7b56d49830` | #23 | fix(windows): prefer managed node for whatsapp and desktop |
 | `d4e7dd609da6` | #23 | refactor(windows): tidy managed-node resolver helpers |
-| `a7983d5ad768` | #20 | fix(dashboard): hide sidecar sessions from history (#49269) |
 | `d799284b1554` | #21 | feat(optional-skills/creative-ideation): expand to v2.1.0 method library (#42402) |
 | `8ebe37f6ad2d` | #26 | feat(desktop): notify renderer when GPU acceleration is disabled due to remote display |
 | `1b7b4d138a67` | #26 | fix(desktop): handle slash exec dispatch payloads (#49358) |
@@ -56,7 +53,6 @@ Generated: `2026-06-25T19:43:56.129312+00:00`
 | `eed78d6ebb51` | #26 | fix(desktop): composer popout polish — peel-off placement, panels, chip editing |
 | `ae8db1ab531b` | #26 | fix(desktop): mute hidden link-title window so historical links don't autoplay audio |
 | `7eb9678c5470` | #26 | test(desktop): cover link-title window audio muting |
-| `5600105478ff` | #20 | refactor(gateway): migrate slack/dingtalk/whatsapp/matrix/feishu/telegram/wecom/email/sms adapters to bundled plugins |
 | `404fe730b7a2` | #26 | fix: add tooltips to right sidebar header buttons |
 | `838daca9f4cf` | #26 | chore(desktop): format tooltip indentation + author map for #49697 |
 | `75b36a138f43` | #22 | feat(pets): TUI pet pane, picker + gateway RPCs |
@@ -86,8 +82,6 @@ Generated: `2026-06-25T19:43:56.129312+00:00`
 | `7f43378931f3` | #26 | test(desktop): cover renameSessionPreferringRpc routing |
 | `ed81f0b633c7` | #26 | fix(desktop): log session.title RPC failure before REST fallback |
 | `65a477f12e35` | #26 | feat(desktop): add Update now button to About panel (#50186) |
-| `2a4542333ee1` | #26 | fix(photon): classify Envoy overflow errors as retryable; add typing cooldown |
-| `9578e52795e3` | #26 | fix(photon): detect unexpected sidecar death and trigger reconnect |
 | `6bbacc223899` | #26 | fix(desktop): make cold-start port-announcement deadline tolerant |
 | `f72690825e76` | #26 | fix(desktop/windows): stop in-app update from cascading into a backend restart loop (#50381) |
 | `745c4db235bd` | #26 | feat(desktop/windows): show update-in-progress feedback before the desktop exits (#50419) (#50448) |
@@ -105,7 +99,6 @@ Generated: `2026-06-25T19:43:56.129312+00:00`
 | `a61baa961572` | #26 | feat(desktop): PR-style file diffs in chat |
 | `c6fbd5a10494` | #26 | style(desktop): lead --dt-font-mono with bundled JetBrains Mono |
 | `ac128af1cec3` | #26 | feat(desktop): syntax-highlight inline diffs via Shiki |
-| `64a507da44d2` | #20 | feat(relay): handle passthrough_forward over the WS (Phase 5 §5.1, gateway half) (#50702) |
 | `61c266b0dc75` | #26 | style(desktop): soften dark-mode syntax highlighting |
 | `d4fa2db1c5df` | #26 | fix(desktop): show all of a provider's models when searching the composer picker |
 | `17dfc6bec4a8` | #26 | fix(desktop): set AppUserModelID on Windows so notifications fire (#50808) |
@@ -121,7 +114,14 @@ Generated: `2026-06-25T19:43:56.129312+00:00`
 | `d0af7fc954fe` | #26 | feat(desktop): detect tool previews into composer status stack |
 | `48a8f8416937` | #26 | fix(desktop): toggle preview rail and open in browser |
 | `7daa6d83fcaa` | #26 | style(desktop): soften inline code and expanded tool chrome |
-| `45bc4fb37fa8` | #20 | feat(relay): declare relevance policy to the connector + document the management plane (#51248) |
 | `45540cfb5ef1` | #25 | ci: run only the lanes a PR affects (python/frontend/site) |
 | `2977e7454377` | #25 | ci: build Docker on main + release only, never on PRs |
 | `56b4ef74a631` | #25 | ci: make dependency installs resilient to transient flakes |
+| `05c896cf5249` | #25 | ci: refactor paths & clones |
+| `a0471e24648e` | #25 | fix(ci): only run supplychain checks in pr |
+| `9fd2b2cb9fab` | #26 | fix(desktop): replace native title tooltips with styled Tip component |
+| `97888fed483c` | #25 | fix(install): drop system-browser fallback + auto-repair stale snap override |
+| `72bfc48e63a1` | #22 | feat(tui): track background subagents in the status bar (#51485) |
+| `935f2bc48daa` | #26 | docs(relay): add §3.4 — obligations on a future scale-to-zero behaviour layer (#51633) |
+| `281a439ad483` | #26 | fix(desktop): guard composer mutations when the composer core isn't bound (#51728) |
+| `0ef86febe25f` | #20 | docs(sessions): clarify sessions.json is the gateway routing index, not the session list (#51726) |
