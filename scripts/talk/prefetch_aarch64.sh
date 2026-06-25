@@ -54,4 +54,28 @@ else
     echo "  ripgrep already cached at ${RG_DIR}/${RG_ARCHIVE}"
 fi
 
+echo "=== Downloading mold (fast linker for aarch64 cross release) ==="
+MOLD_VER=2.36.0
+MOLD_DIR="${CACHE}/mold"
+MOLD_ARCHIVE="mold-${MOLD_VER}-x86_64-linux.tar.gz"
+MOLD_URL="https://github.com/rui314/mold/releases/download/v${MOLD_VER}/${MOLD_ARCHIVE}"
+
+mkdir -p "${MOLD_DIR}"
+if [[ ! -x "${MOLD_DIR}/bin/mold" ]]; then
+    if [[ ! -f "${MOLD_DIR}/${MOLD_ARCHIVE}" ]]; then
+        echo "  GET ${MOLD_URL}"
+        curl -fsSL -o "${MOLD_DIR}/${MOLD_ARCHIVE}" "${MOLD_URL}"
+    fi
+    TMP="${MOLD_DIR}/.extract-tmp"
+    rm -rf "${TMP}"
+    mkdir -p "${TMP}"
+    tar xzf "${MOLD_DIR}/${MOLD_ARCHIVE}" -C "${TMP}"
+    rm -rf "${MOLD_DIR}/bin" "${MOLD_DIR}/lib" "${MOLD_DIR}/share" 2>/dev/null || true
+    mv "${TMP}/mold-${MOLD_VER}-x86_64-linux"/* "${MOLD_DIR}/"
+    rm -rf "${TMP}"
+    echo "  mold installed to ${MOLD_DIR}/bin/mold"
+else
+    echo "  mold already cached at ${MOLD_DIR}/bin/mold"
+fi
+
 echo "=== Done ==="

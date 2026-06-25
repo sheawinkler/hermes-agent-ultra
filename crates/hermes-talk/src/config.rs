@@ -533,6 +533,7 @@ pub struct LlmConfig {
     #[serde(default = "default_system_prompt")]
     pub system_prompt: String,
     #[serde(default = "default_max_tokens")]
+    /// Forwarded to the LLM API request only; the talk client does not truncate streamed output.
     pub max_tokens: u32,
     #[serde(default = "default_temperature")]
     pub temperature: f32,

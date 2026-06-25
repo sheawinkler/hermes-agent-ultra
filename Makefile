@@ -87,6 +87,7 @@ CROSS_CACHE := $(ROOT)/.cross-cache
 DIST        := $(ROOT)/target/dist
 GCC_AARCH64 := $(CROSS_CACHE)/gcc-aarch64/bin/aarch64-none-linux-gnu-gcc
 CXX_AARCH64 := $(CROSS_CACHE)/gcc-aarch64/bin/aarch64-none-linux-gnu-g++
+MOLD_BIN    := $(CROSS_CACHE)/mold/bin/mold
 
 # Rockchip SDK paths (override as needed)
 RK_TTS_SDK_DIR ?= /home/leeyang/Rockchip_RKTTS_SDK_Release
@@ -107,7 +108,7 @@ CROSS_AARCH64_ENV := \
 	RK_ASR_SDK_DIR=$(RK_ASR_SDK_DIR) \
 	LIBCLANG_PATH=$(CROSS_CACHE)/llvm-14/lib \
 	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(GCC_AARCH64) \
-	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-Clink-arg=-Wl,--allow-multiple-definition \
+	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-Clink-arg=-fuse-ld=$(MOLD_BIN) -Clink-arg=-Wl,--allow-multiple-definition" \
 	BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu=--target=aarch64-unknown-linux-gnu \
 	BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_musl=--target=aarch64-unknown-linux-musl
 
@@ -171,7 +172,7 @@ help:
 	@echo "  download-talk-models       Download sherpa-onnx models into .models/ (auto OS)"
 	@echo "  download-talk-models-windows  Download models (PowerShell)"
 	@echo "  download-talk-models-unix     Download models (bash/curl)"
-	@echo "  prefetch-talk-aarch64      Download LLVM/sherpa-onnx for aarch64 cross"
+	@echo "  prefetch-talk-aarch64      Download LLVM/sherpa-onnx/mold for aarch64 cross"
 	@echo "  test-talk / check-talk / clippy-talk"
 	@echo "  talk-init                  Init \$$HERMES_HOME/hermes-talk (also run automatically by start-talk)"
 	@echo "  talk-run                   Start voice dialog (cargo run; dev)"
@@ -203,7 +204,8 @@ release:
 
 release-arm: release-arm64-musl
 
-release-arm64:
+release-arm64: $(MOLD_BIN)
+	$(CROSS_AARCH64_ENV) \
 	$(CROSS) build --release --target $(ARM64_TARGET) --bin $(BIN)
 	@echo "Built $(ARM64_RELEASE)"
 
@@ -325,10 +327,10 @@ release-talk-rockchip:
 	$(CARGO) build --release $(TALK_PKG_RK)
 	@echo "Built $(RELEASE_BIN) (features: $(TALK_FEATURES_RK))"
 
-release-talk-rockchip-arm64: $(GCC_AARCH64) $(TALK_RKAUDIO)/librktts_c_api.a $(TALK_RKAUDIO)/lib
+release-talk-rockchip-arm64: $(GCC_AARCH64) $(MOLD_BIN) $(TALK_RKAUDIO)/librktts_c_api.a $(TALK_RKAUDIO)/lib
 	SHERPA_ONNX_PACK=cpu \
 	$(CROSS_AARCH64_ENV) \
-	RUSTFLAGS="$(RK_LINK_FLAGS) -C link-arg=-static-libstdc++ -C link-arg=-static-libgcc" \
+	RUSTFLAGS="-C link-arg=-static-libstdc++ -C link-arg=-static-libgcc" \
 	$(CROSS) build --release --target $(ARM64_TARGET) $(TALK_PKG_RK)
 	patchelf --set-rpath '$$ORIGIN/lib' $(ARM64_RELEASE)
 	@echo "Built $(ARM64_RELEASE) (features: $(TALK_FEATURES_RK))"
@@ -362,6 +364,10 @@ $(GCC_AARCH64):
 		$(MAKE) prefetch-talk-aarch64; \
 	fi
 	@test -x '$(GCC_AARCH64)' || (echo "missing $(GCC_AARCH64); run: make prefetch-talk-aarch64" >&2; exit 1)
+
+$(MOLD_BIN):
+	@test -x '$@' || $(MAKE) prefetch-talk-aarch64
+	@test -x '$@' || (echo "missing $@; run: make prefetch-talk-aarch64" >&2; exit 1)
 
 prefetch-talk-aarch64:
 	@mkdir -p $(CROSS_CACHE)

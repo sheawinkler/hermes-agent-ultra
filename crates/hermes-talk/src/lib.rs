@@ -35,6 +35,8 @@ pub mod orchestrator;
 pub mod session;
 pub mod sherpa;
 pub mod speaker;
+#[cfg(all(feature = "rockchip", not(feature = "sherpa-asr-tts")))]
+mod stream_turn;
 pub mod tools;
 pub mod tts;
 pub mod vad;

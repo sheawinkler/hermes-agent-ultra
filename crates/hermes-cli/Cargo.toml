@@ -62,7 +62,7 @@ hermes-acp-server = { workspace = true }
 hermes-intelligence = { workspace = true }
 hermes-insights = { workspace = true }
 hermes-server-client = { workspace = true }
-hermes-talk = { workspace = true, optional = true }
+hermes-talk = { workspace = true, optional = true, default-features = false }
 hermes-media-workflows = { workspace = true }
 clap = { workspace = true }
 clap_complete = "4"

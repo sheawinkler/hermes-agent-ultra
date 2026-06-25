@@ -14,7 +14,7 @@ passthrough = [
     "RK_ASR_SDK_DIR",
     # cross also forwards host http(s)_proxy after passthrough; use a LAN-reachable
     # proxy on the host (not 127.0.0.1) before `cross build`, e.g.:
-    #   export https_proxy=http://192.168.31.90:7890
+    #   export https_proxy=http://192.168.31.200:7890
     "http_proxy",
     "https_proxy",
     "HTTP_PROXY",
@@ -22,6 +22,7 @@ passthrough = [
 ]
 
 # hermes-talk (cpal + sherpa-onnx) needs arm64 ALSA headers when cross-compiling.
+# mold: prefetched on host to .cross-cache/mold/ (make prefetch-talk-aarch64); workspace mount at link time.
 [target.aarch64-unknown-linux-gnu]
 pre-build = [
     "bash -ec 'export DEBIAN_FRONTEND=noninteractive; dpkg --add-architecture arm64; apt-get -o Acquire::http::Timeout=60 update -qq && apt-get install -y -qq --no-install-recommends libasound2-dev:arm64 xz-utils bzip2'",
