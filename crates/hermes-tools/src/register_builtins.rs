@@ -1169,6 +1169,7 @@ mod tests {
 
     #[test]
     fn builtin_registry_registers_terminal_tools_for_managed_modal_surface() {
+        let _global_env = hermes_config::managed_gateway::test_lock::lock();
         let _lock = lock_env();
         let home = tempfile::tempdir().expect("temp home");
         let hermes_home = tempfile::tempdir().expect("temp hermes home");

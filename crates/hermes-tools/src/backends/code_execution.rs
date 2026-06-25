@@ -155,6 +155,7 @@ impl CodeExecutionBackend for LocalCodeExecutionBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hermes_config::managed_gateway::test_lock;
 
     #[tokio::test]
     async fn missing_language_does_not_default_to_python() {
@@ -178,8 +179,9 @@ mod tests {
         assert!(err.to_string().contains("Python execution is disabled"));
     }
 
-    #[tokio::test]
-    async fn profile_home_mode_sets_home_for_shell_snippets() {
+    #[test]
+    fn profile_home_mode_sets_home_for_shell_snippets() {
+        let _global_env = test_lock::lock();
         let real = tempfile::tempdir().expect("real home");
         let hermes = tempfile::tempdir().expect("hermes home");
         let _home = EnvGuard::set("HOME", real.path().to_string_lossy().as_ref());
@@ -188,14 +190,20 @@ mod tests {
         let _mode = EnvGuard::set("TERMINAL_HOME_MODE", "profile");
         let backend = LocalCodeExecutionBackend::default();
 
-        let raw = backend
-            .execute(
-                "printf '%s|%s' \"$HOME\" \"$HERMES_REAL_HOME\"",
-                Some("bash"),
-                Some(5),
-            )
-            .await
-            .expect("bash should run");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let raw = runtime.block_on(async {
+            backend
+                .execute(
+                    "printf '%s|%s' \"$HOME\" \"$HERMES_REAL_HOME\"",
+                    Some("bash"),
+                    Some(5),
+                )
+                .await
+        });
+        let raw = raw.expect("bash should run");
         let payload: serde_json::Value = serde_json::from_str(&raw).expect("json payload");
         assert_eq!(
             payload["stdout"].as_str().unwrap(),

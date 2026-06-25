@@ -546,6 +546,7 @@ mod tests {
 
     #[test]
     fn status_reports_oauth_state_presence_without_secret_value() {
+        let _global_env = hermes_config::managed_gateway::test_lock::lock();
         let _lock = env_lock();
         let temp = tempdir().expect("tempdir");
         let _home = EnvGuard::set("HERMES_HOME", temp.path().to_string_lossy().as_ref());
