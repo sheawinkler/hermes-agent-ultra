@@ -323,6 +323,19 @@ pub struct GatewayApprovalRequest {
     pub allow_permanent: bool,
 }
 
+impl GatewayApprovalRequest {
+    /// Return a user-facing copy safe to emit over gateway/TUI/chat transports.
+    ///
+    /// The pending approval queue keeps the raw command for local resolution
+    /// state, but client-facing approval prompts are a hard secret-egress
+    /// boundary and must not echo credential-shaped command text.
+    pub fn redacted_for_display(&self) -> Self {
+        let mut request = self.clone();
+        request.command = redact_approval_command(&request.command);
+        request
+    }
+}
+
 #[derive(Debug)]
 pub struct GatewayApprovalEntry {
     request: GatewayApprovalRequest,
@@ -976,7 +989,7 @@ fn submit_gateway_approval_and_wait(
             .push_back(entry.clone());
     }
 
-    callback(request);
+    callback(request.redacted_for_display());
 
     if let Some(choice) = entry.wait(timeout) {
         GatewayApprovalWaitOutcome::Resolved(choice)
@@ -991,6 +1004,16 @@ fn submit_gateway_approval_and_wait(
         }
         GatewayApprovalWaitOutcome::TimedOut
     }
+}
+
+/// Redact credentials from a command before it is shown in approval prompts.
+///
+/// Tirith/security scanners may redact their findings, but approval prompts
+/// are built from the raw command string. This seam is intentionally
+/// unconditional so gateway/TUI/chat approval transports cannot leak secrets
+/// even if a broader user-facing redaction preference is disabled elsewhere.
+pub fn redact_approval_command(command: impl ToString) -> String {
+    hermes_intelligence::redact_sensitive_text(command)
 }
 
 /// Enable yolo approval bypass for a single session key.
@@ -1575,6 +1598,49 @@ mod tests {
 
     fn interactive_context(tirith_result: TirithResult) -> CommandGuardContext {
         CommandGuardContext::interactive_with_tirith(tirith_result)
+    }
+
+    #[test]
+    fn test_redact_approval_command_removes_credential_values() {
+        let fake_ghp = format!("ghp_{}", "X".repeat(36));
+        let raw = format!("curl -H 'Authorization: token {fake_ghp}' https://api.github.com/user");
+        let redacted = redact_approval_command(&raw);
+        assert!(!redacted.contains(&fake_ghp));
+        assert!(redacted.contains("curl"));
+        assert!(redacted.contains("github.com"));
+
+        let fake_openai = format!("sk-proj-{}", "X".repeat(40));
+        let raw = format!("OPENAI_API_KEY={fake_openai} python s.py");
+        let redacted = redact_approval_command(&raw);
+        assert!(!redacted.contains(&fake_openai));
+        assert!(redacted.contains("python s.py"));
+
+        let clean = "ls -la /tmp && echo hello";
+        assert_eq!(redact_approval_command(clean), clean);
+    }
+
+    #[test]
+    fn test_gateway_approval_request_display_copy_redacts_command_only() {
+        let fake_ghp = format!("ghp_{}", "X".repeat(36));
+        let raw_command =
+            format!("curl -H 'Authorization: token {fake_ghp}' https://api.github.com/user");
+        let request = GatewayApprovalRequest {
+            session_key: "display-redaction".to_string(),
+            command: raw_command.clone(),
+            description: "review command".to_string(),
+            pattern_key: "tirith:credential".to_string(),
+            pattern_keys: vec!["tirith:credential".to_string()],
+            allow_permanent: false,
+        };
+
+        let display = request.redacted_for_display();
+
+        assert_eq!(request.command, raw_command);
+        assert!(!display.command.contains(&fake_ghp));
+        assert!(display.command.contains("github.com"));
+        assert_eq!(display.description, request.description);
+        assert_eq!(display.pattern_keys, request.pattern_keys);
+        assert_eq!(display.allow_permanent, request.allow_permanent);
     }
 
     #[test]
@@ -2189,6 +2255,69 @@ mod tests {
         assert!(result.approved);
         assert!(result.user_approved);
         assert!(is_approved(session, "tirith:gateway_unique_e2e"));
+        unregister_gateway_notify(session);
+        reset_approval_state_unlocked();
+    }
+
+    #[test]
+    fn test_gateway_approval_notify_emits_redacted_command_but_queues_raw() {
+        let _guard = lock_test_state();
+        reset_approval_state_unlocked();
+        let session = "gateway-redacted-egress";
+        let fake_ghp = format!("ghp_{}", "X".repeat(36));
+        let raw_command =
+            format!("curl -H 'Authorization: token {fake_ghp}' https://api.github.com/user");
+        let (tx, rx) = std::sync::mpsc::channel();
+        register_gateway_notify(session, move |request| {
+            tx.send(request).expect("notify request should send");
+        });
+
+        let session_for_thread = session.to_string();
+        let command_for_thread = raw_command.clone();
+        let handle = std::thread::spawn(move || {
+            check_all_command_guards_with_context(
+                &command_for_thread,
+                "local",
+                CommandGuardContext {
+                    gateway: true,
+                    ask: true,
+                    session_key: Some(session_for_thread),
+                    gateway_approval_timeout: Duration::from_secs(5),
+                    tirith_result: Ok(Some(TirithResult::warn(
+                        "credential_redaction",
+                        "credential-shaped command",
+                    ))),
+                    ..CommandGuardContext::default()
+                },
+                None,
+            )
+            .expect("gateway guard should return")
+        });
+
+        let display_request = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("gateway notify should fire");
+        assert!(!display_request.command.contains(&fake_ghp));
+        assert!(display_request.command.contains("github.com"));
+        assert_eq!(display_request.pattern_key, "tirith:credential_redaction");
+
+        let queued_raw = {
+            let queues = GATEWAY_QUEUES.lock().expect("gateway queue lock poisoned");
+            queues
+                .get(session)
+                .and_then(|entries| entries.front())
+                .map(|entry| entry.request().command.clone())
+                .expect("raw approval should remain queued")
+        };
+        assert_eq!(queued_raw, raw_command);
+
+        assert_eq!(
+            resolve_gateway_approval(session, ApprovalChoice::Session, false),
+            1
+        );
+        let result = handle.join().expect("gateway guard thread should join");
+        assert!(result.approved);
+        assert!(result.user_approved);
         unregister_gateway_notify(session);
         reset_approval_state_unlocked();
     }
