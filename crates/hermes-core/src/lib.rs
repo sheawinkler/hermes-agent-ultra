@@ -15,7 +15,10 @@ pub mod types;
 pub mod version;
 
 // Re-export all error types
-pub use errors::{AgentError, ConfigError, GatewayError, ToolError};
+pub use errors::{
+    classify_send_error_text, AgentError, ConfigError, GatewayError, SendErrorKind, ToolError,
+    SEND_ERROR_KINDS,
+};
 
 // Re-export all core types
 pub use types::{

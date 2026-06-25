@@ -12,6 +12,7 @@
 
 use std::collections::HashMap;
 
+use hermes_core::errors::{GatewayError, SendErrorKind};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio::time::Instant;
@@ -602,6 +603,16 @@ impl StreamConsumer {
         self.already_sent = true;
     }
 
+    /// Record a failed edit from a typed send-failure category.
+    pub fn mark_edit_failed_by_kind(&mut self, kind: SendErrorKind) {
+        self.mark_edit_failed(matches!(kind, SendErrorKind::RateLimited));
+    }
+
+    /// Record a failed edit from the shared gateway error taxonomy.
+    pub fn mark_edit_failed_for_error(&mut self, error: &GatewayError) {
+        self.mark_edit_failed_by_kind(error.send_error_kind());
+    }
+
     // -- Segment management -------------------------------------------------
 
     /// Does the consumer need the caller to start a new message (i.e., there
@@ -853,6 +864,38 @@ mod tests {
         c.mark_edit_success("msg_1");
 
         c.mark_edit_failed(false);
+        assert!(!c.edit_supported());
+        assert!(c.fallback_final_send());
+        assert!(c.already_sent());
+    }
+
+    #[test]
+    fn consumer_rate_limited_error_uses_flood_backoff() {
+        let mut c = StreamConsumer::new("tg", "c1", StreamConfig::default());
+        c.on_delta("text");
+        c.mark_edit_success("msg_1");
+
+        c.mark_edit_failed_for_error(&GatewayError::SendFailed(
+            "Too Many Requests: retry after 3".into(),
+        ));
+
+        assert_eq!(c.flood_strikes(), 1);
+        assert_eq!(c.current_edit_interval_ms(), 600);
+        assert!(c.edit_supported());
+        assert!(!c.fallback_final_send());
+    }
+
+    #[test]
+    fn consumer_permanent_send_error_falls_back_immediately() {
+        let mut c = StreamConsumer::new("tg", "c1", StreamConfig::default());
+        c.on_delta("text");
+        c.mark_edit_success("msg_1");
+
+        c.mark_edit_failed_for_error(&GatewayError::SendFailed(
+            "Forbidden: bot was blocked by the user".into(),
+        ));
+
+        assert_eq!(c.flood_strikes(), 0);
         assert!(!c.edit_supported());
         assert!(c.fallback_final_send());
         assert!(c.already_sent());
