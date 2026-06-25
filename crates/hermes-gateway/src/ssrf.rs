@@ -67,7 +67,7 @@ fn global_allow_private_urls() -> bool {
 }
 
 #[cfg(test)]
-fn reset_allow_private_cache_for_tests() {
+pub(crate) fn reset_allow_private_cache_for_tests() {
     let mut guard = ALLOW_PRIVATE_URLS_CACHE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());

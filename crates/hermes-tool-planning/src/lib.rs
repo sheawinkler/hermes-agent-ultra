@@ -97,6 +97,60 @@ fn append_live_mcp_toolsets(requested: &mut Vec<String>, manager: &ToolsetManage
     }
 }
 
+fn candidate_toolset_tokens<'a>(canonical: &'a str, original: &'a str) -> Vec<&'a str> {
+    if canonical == original {
+        vec![canonical]
+    } else {
+        vec![canonical, original]
+    }
+}
+
+fn platform_bundle_non_core_tools(manager: &ToolsetManager, name: &str) -> Option<Vec<String>> {
+    let resolved = manager.resolve_toolset(name).ok()?;
+    if !name.starts_with("hermes-") {
+        return Some(resolved);
+    }
+
+    let core: HashSet<String> = manager
+        .resolve_toolset("hermes-cli")
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let mut delta: Vec<String> = resolved
+        .into_iter()
+        .filter(|tool| !core.contains(tool))
+        .collect();
+    delta.sort();
+    Some(delta)
+}
+
+fn apply_disabled_toolsets(
+    names: &mut HashSet<String>,
+    disabled_toolsets: &[String],
+    manager: &ToolsetManager,
+) {
+    for token in disabled_toolsets {
+        let original = token.trim();
+        if original.is_empty() {
+            continue;
+        }
+        let canonical = canonical_toolset_token(original);
+        let mut matched = false;
+        for candidate in candidate_toolset_tokens(&canonical, original) {
+            if let Some(to_remove) = platform_bundle_non_core_tools(manager, candidate) {
+                for name in to_remove {
+                    names.remove(&name);
+                }
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            tracing::warn!("Unknown disabled toolset/token '{}'", original);
+        }
+    }
+}
+
 fn coding_focus_toolsets(
     config: &GatewayConfig,
     platform: &str,
@@ -135,13 +189,8 @@ pub fn resolve_platform_tool_names(
             continue;
         }
         let canonical = canonical_toolset_token(original);
-        let candidates = if canonical == original {
-            vec![canonical.as_str()]
-        } else {
-            vec![canonical.as_str(), original]
-        };
         let mut matched = false;
-        for candidate in candidates {
+        for candidate in candidate_toolset_tokens(&canonical, original) {
             if let Ok(resolved) = manager.resolve_toolset(candidate) {
                 for name in resolved {
                     names.insert(name);
@@ -176,6 +225,7 @@ pub fn resolve_platform_tool_names(
             names.insert(trimmed.to_string());
         }
     }
+    apply_disabled_toolsets(&mut names, &config.agent.disabled_toolsets, &manager);
     for tool_name in &config.tools_config.disabled {
         let trimmed = tool_name.trim();
         if trimmed.is_empty() {
@@ -490,6 +540,41 @@ mod tests {
         let reg = registry_with_minimal_tools();
         let names = resolve_platform_tool_names(&cfg, "cli", &reg);
         assert!(!names.contains(&"terminal".to_string()));
+    }
+
+    #[test]
+    fn agent_disabled_toolsets_remove_regular_toolset_after_platform_resolution() {
+        let mut cfg = GatewayConfig::default();
+        cfg.platform_toolsets
+            .insert("cli".to_string(), vec!["hermes-cli".to_string()]);
+        cfg.agent.disabled_toolsets = vec!["browser".to_string()];
+        let reg = registry_with_minimal_tools();
+
+        let names = resolve_platform_tool_names(&cfg, "cli", &reg);
+
+        assert!(names.contains(&"terminal".to_string()));
+        assert!(names.contains(&"read_file".to_string()));
+        assert!(!names.contains(&"browser_navigate".to_string()));
+        assert!(!names.contains(&"browser_snapshot".to_string()));
+    }
+
+    #[test]
+    fn agent_disabled_platform_bundle_preserves_core_tools() {
+        let mut cfg = GatewayConfig::default();
+        cfg.platform_toolsets
+            .insert("discord".to_string(), vec!["hermes-discord".to_string()]);
+        cfg.agent.disabled_toolsets = vec!["hermes-discord".to_string()];
+        let reg = registry_with_minimal_tools();
+
+        let names = resolve_platform_tool_names(&cfg, "discord", &reg);
+
+        assert!(names.contains(&"terminal".to_string()));
+        assert!(names.contains(&"read_file".to_string()));
+        assert!(names.contains(&"web_search".to_string()));
+        assert!(
+            !names.is_empty(),
+            "disabling a platform bundle must not wipe shared core tools"
+        );
     }
 
     #[test]

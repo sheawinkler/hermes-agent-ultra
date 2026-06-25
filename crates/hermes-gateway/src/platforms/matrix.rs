@@ -50,7 +50,7 @@ use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 
 use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
-use crate::platforms::helpers::{media_category, mime_from_extension};
+use crate::platforms::helpers::{download_media_url, media_category, mime_from_extension};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -2517,33 +2517,7 @@ impl PlatformAdapter for MatrixAdapter {
         image_url: &str,
         caption: Option<&str>,
     ) -> Result<(), GatewayError> {
-        let downloaded = async {
-            let resp = self
-                .client
-                .get(image_url)
-                .send()
-                .await
-                .map_err(|e| format!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                return Err(format!("status {}", resp.status()));
-            }
-
-            let content_type = resp
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|h| h.to_str().ok())
-                .map(|s| s.to_string());
-            let file_bytes = resp
-                .bytes()
-                .await
-                .map_err(|e| format!("read body failed: {e}"))?
-                .to_vec();
-            if file_bytes.is_empty() {
-                return Err("empty body".to_string());
-            }
-            Ok((file_bytes, content_type))
-        }
-        .await;
+        let downloaded = download_media_url(&self.client, image_url).await;
 
         let (file_bytes, content_type) = match downloaded {
             Ok(result) => result,
