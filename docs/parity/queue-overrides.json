@@ -4568,6 +4568,11 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust /learn prompt now embeds the full hardline skill-authoring standards: <=60-char description count-and-trim, platforms gating, human-first author credit, Hermes wrapped-tool framing, and scripts/references/templates layout. Gateway tests assert the standards remain present."
+    },
+    "c080b2dc3ee6": {
+      "disposition": "ported",
+      "notes": "Rust approval gateway callbacks now emit GatewayApprovalRequest::redacted_for_display using redact_approval_command before user-facing TUI/chat transports, while the internal queue retains the raw command for resolution; hermes-tools approval tests cover credential redaction, command-structure preservation, and raw-queue/redacted-egress behavior.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [
