@@ -32,6 +32,7 @@ webhook = []
 [dependencies]
 hermes-core = { workspace = true }
 hermes-config = { workspace = true }
+hermes-intelligence = { workspace = true }
 hermes-tools = { workspace = true }
 hermes-cron = { workspace = true }
 tokio = { workspace = true }

@@ -1764,6 +1764,7 @@ dependencies = [
  "hermes-config",
  "hermes-core",
  "hermes-cron",
+ "hermes-intelligence",
  "hermes-tools",
  "hmac",
  "matrix-sdk-crypto",

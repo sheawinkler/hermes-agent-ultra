@@ -4374,6 +4374,7 @@ async fn pick_model_for_provider(
     let provider_model = format!("{}:{}", provider, filtered_models[pick.index].trim());
     let (guarded, note) =
         guard_provider_model_selection_for_config(&provider_model, &app.config).await?;
+    let warning = app.model_switch_preflight_warning(&guarded);
     app.switch_model(&guarded);
     let mut msg = format!("Model switched to: {}", guarded);
     if let Some(n) = note {
@@ -4382,6 +4383,10 @@ async fn pick_model_for_provider(
     }
     msg.push_str("\n");
     msg.push_str(&format_model_persistence_note(app));
+    if let Some(warning) = warning {
+        msg.push_str("\n");
+        msg.push_str(&warning);
+    }
     emit_command_output(app, msg);
     Ok(true)
 }
@@ -5070,6 +5075,7 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
                     )));
                 }
             }
+            let warning = app.model_switch_preflight_warning(&guarded);
             app.switch_model(&guarded);
             let mut msg = format!("Model switched to: {}", guarded);
             if let Some(n) = note {
@@ -5085,6 +5091,10 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
             }
             msg.push_str("\n");
             msg.push_str(&format_model_persistence_note(app));
+            if let Some(warning) = warning {
+                msg.push_str("\n");
+                msg.push_str(&warning);
+            }
             emit_command_output(app, msg);
         }
         ModelSwitchRequest::PickModelFromProvider(provider) => {
@@ -27665,7 +27675,7 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
             .model
             .clone()
             .or_else(|| self.config.model.clone())
-            .unwrap_or_else(|| "gpt-4o".to_string());
+            .unwrap_or_else(|| "dynamic".to_string());
 
         let provider = crate::app::build_provider(&self.config, &model);
         let mut agent_config = crate::app::build_agent_config(&self.config, &model);
@@ -27793,7 +27803,10 @@ pub async fn handle_cli_acp(
             let config = hermes_config::load_config(None)
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
 
-            let model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
+            let model = config
+                .model
+                .clone()
+                .unwrap_or_else(|| "dynamic".to_string());
             let max_turns = config.max_turns as usize;
 
             println!(
@@ -29955,7 +29968,7 @@ mod tests {
         let mut app = build_test_app_with_stream(tmp.path()).await;
         std::fs::write(
             app.state_root.join("config.yaml"),
-            "model:\n  provider: openai\n  default: gpt-4o\n  openai_runtime: codex_app_server\n",
+            "model:\n  provider: openai\n  default: dynamic\n  openai_runtime: codex_app_server\n",
         )
         .expect("write config");
 
@@ -31448,6 +31461,44 @@ install_command: "uv pip install -r requirements.txt"
         assert!(out.contains("models_sample: model-a, model-b"));
     }
 
+    #[tokio::test]
+    async fn model_switch_command_emits_preflight_warning_for_large_transcript() {
+        let _lock = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        let mut cfg = (*app.config).clone();
+        cfg.model = Some("anthropic:claude-sonnet-4-6".to_string());
+        cfg.llm_providers.insert(
+            "compact-provider".to_string(),
+            LlmProviderConfig {
+                models: vec!["deepseek-chat".to_string()],
+                discover_models: false,
+                ..LlmProviderConfig::default()
+            },
+        );
+        app.config = Arc::new(cfg);
+        app.current_model = "anthropic:claude-sonnet-4-6".to_string();
+        app.messages = vec![hermes_core::Message::user("abcd".repeat(90_000))];
+
+        handle_model_command(
+            &mut app,
+            &["deepseek-chat", "--provider", "compact-provider"],
+        )
+        .await
+        .expect("model switch");
+
+        let out = latest_ui_assistant_text(&app);
+        assert!(out.contains("Model switched to: compact-provider:deepseek-chat"));
+        assert!(out.contains("Context warning"));
+        assert!(out.contains("preflight compression"));
+        assert_eq!(
+            app.messages.len(),
+            1,
+            "warning must not append model context"
+        );
+    }
+
     #[test]
     fn parse_model_command_args_extracts_capability_flags() {
         let (positional, requirements, provider_override) = parse_model_command_args(&[
@@ -31469,9 +31520,9 @@ install_command: "uv pip install -r requirements.txt"
     #[test]
     fn parse_model_command_args_supports_boolean_capability_switches() {
         let (positional, requirements, provider_override) =
-            parse_model_command_args(&["openai:gpt-4o", "--tools", "--long-context"])
+            parse_model_command_args(&["nous:openai/gpt-5.5-pro", "--tools", "--long-context"])
                 .expect("parse");
-        assert_eq!(positional, vec!["openai:gpt-4o".to_string()]);
+        assert_eq!(positional, vec!["nous:openai/gpt-5.5-pro".to_string()]);
         assert!(requirements.require_tools);
         assert!(requirements.require_long_context);
         assert_eq!(
@@ -31484,9 +31535,9 @@ install_command: "uv pip install -r requirements.txt"
     #[test]
     fn parse_model_command_args_extracts_provider_override() {
         let (positional, _requirements, provider_override) =
-            parse_model_command_args(&["gpt-4o", "--provider", "openai"]).expect("parse");
-        assert_eq!(positional, vec!["gpt-4o".to_string()]);
-        assert_eq!(provider_override.as_deref(), Some("openai"));
+            parse_model_command_args(&["dynamic", "--provider", "nous"]).expect("parse");
+        assert_eq!(positional, vec!["dynamic".to_string()]);
+        assert_eq!(provider_override.as_deref(), Some("nous"));
     }
 
     #[test]
@@ -31630,18 +31681,18 @@ install_command: "uv pip install -r requirements.txt"
     #[test]
     fn parse_model_switch_request_accepts_direct_provider_model() {
         let providers = vec!["openai", "nous", "anthropic"];
-        let req = parse_model_switch_request(&["openai:gpt-4o"], &providers);
+        let req = parse_model_switch_request(&["nous:openai/gpt-5.5-pro"], &providers);
         assert_eq!(
             req,
-            ModelSwitchRequest::SetDirect("openai:gpt-4o".to_string())
+            ModelSwitchRequest::SetDirect("nous:openai/gpt-5.5-pro".to_string())
         );
     }
 
     #[test]
     fn parse_model_switch_request_keeps_bare_model_as_direct() {
         let providers = vec!["openai", "nous", "anthropic"];
-        let req = parse_model_switch_request(&["gpt-4o"], &providers);
-        assert_eq!(req, ModelSwitchRequest::SetDirect("gpt-4o".to_string()));
+        let req = parse_model_switch_request(&["dynamic"], &providers);
+        assert_eq!(req, ModelSwitchRequest::SetDirect("dynamic".to_string()));
     }
 
     #[test]

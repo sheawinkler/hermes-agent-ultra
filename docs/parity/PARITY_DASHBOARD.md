@@ -1,14 +1,14 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-25T05:38:58.962851+00:00`_
+_Generated from source artifacts: `2026-06-25T06:30:25.215222+00:00`_
 
 ## Snapshot
 
 - Upstream target: `upstream/main` @ `5ecf3bf0e0726b8b33682bb5c3aad9679b7b5be4`
 - Workstream snapshot generated: `2026-06-23T05:17:48-06:00`
 - Parity matrix generated: `2026-06-12T11:29:13.798398+00:00`
-- Queue snapshot generated: `2026-06-25T05:38:58.804651+00:00`
-- Proof snapshot generated: `2026-06-25T05:38:58.962851+00:00`
+- Queue snapshot generated: `2026-06-25T06:30:25.062192+00:00`
+- Proof snapshot generated: `2026-06-25T06:30:25.215222+00:00`
 
 ## Gate Status
 
@@ -18,8 +18,8 @@ _Generated from source artifacts: `2026-06-25T05:38:58.962851+00:00`_
 - SOTA harness matrix: **PASS**
 - Behavioral similarity diff: **PASS**
 - Deep problem-solving diff: **PASS**
-- Release gate failures: max_queue_pending_commits (actual=222.0, limit=0)
-- CI gate failures: max_commits_behind (actual=5880.0, limit=5500); max_upstream_patch_missing (actual=5657.0, limit=5000); max_queue_pending_commits (actual=222.0, limit=100)
+- Release gate failures: max_queue_pending_commits (actual=219.0, limit=0)
+- CI gate failures: max_commits_behind (actual=5880.0, limit=5500); max_upstream_patch_missing (actual=5657.0, limit=5000); max_queue_pending_commits (actual=219.0, limit=100)
 - CI gate warnings: none
 
 ## Test Coverage Audit
@@ -75,8 +75,8 @@ _Generated from source artifacts: `2026-06-25T05:38:58.962851+00:00`_
 | Metric | Value |
 | --- | ---: |
 | Total commits in queue | 6997 |
-| Pending | 222 |
-| Ported | 373 |
+| Pending | 219 |
+| Ported | 376 |
 | Superseded | 6326 |
 
 ## Tree/Patch Drift

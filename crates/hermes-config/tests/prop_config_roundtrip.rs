@@ -150,6 +150,7 @@ fn gateway_config(
 ) -> GatewayConfig {
     GatewayConfig {
         model: model.map(str::to_string),
+        model_switch: Default::default(),
         personality: personality.map(str::to_string),
         max_turns,
         system_prompt: None,

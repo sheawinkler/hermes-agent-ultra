@@ -19,10 +19,17 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use hermes_config::{normalize_service_tier, DisplayConfig, QuickCommandConfig};
+use hermes_config::{
+    load_user_config_file, normalize_service_tier, save_config_yaml, DisplayConfig,
+    QuickCommandConfig,
+};
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 use hermes_core::types::{Message, MessageRole};
+use hermes_intelligence::{
+    build_model_switch_preflight_warning as format_model_switch_preflight_warning,
+    estimate_messages_tokens_rough,
+};
 use hermes_tools::skill_commands::{
     build_skill_reload_system_note, installed_skill_slash_command_snapshot,
     render_skill_slash_command_snapshot, resolve_installed_skill_slash_command,
@@ -30,7 +37,7 @@ use hermes_tools::skill_commands::{
 };
 
 use crate::background::{BackgroundTaskManager, TaskStatus};
-use crate::commands::{handle_command, GatewayCommandResult};
+use crate::commands::{handle_command, GatewayCommandResult, ModelSwitchRequest, ModelSwitchScope};
 use crate::dm::{DmDecision, DmManager};
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::media::validate_media_delivery_path;
@@ -51,6 +58,22 @@ const DEFAULT_MESSAGE_DEDUP_CAPACITY: usize = 4096;
 /// Configuration for the Gateway orchestrator.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GatewayConfig {
+    /// Default model used when a gateway session has no explicit `/model` override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+
+    /// Persist plain `/model <name>` switches by default unless `--session` is used.
+    #[serde(default = "default_true")]
+    pub model_switch_persist_by_default: bool,
+
+    /// Optional config.yaml path for durable gateway `/model` writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_switch_config_path: Option<String>,
+
+    /// Warn when the current transcript is likely to preflight-compress after a switch.
+    #[serde(default = "default_true")]
+    pub model_switch_preflight_warning: bool,
+
     /// Enable SSRF protection on outbound URLs (default: true).
     #[serde(default = "default_true")]
     pub ssrf_protection: bool,
@@ -91,6 +114,10 @@ pub struct GatewayConfig {
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
+            model: None,
+            model_switch_persist_by_default: true,
+            model_switch_config_path: None,
+            model_switch_preflight_warning: true,
             ssrf_protection: true,
             media_cache_dir: None,
             media_cache_max_bytes: 0,
@@ -541,6 +568,8 @@ pub struct Gateway {
     streaming_handler_with_context: RwLock<Option<StreamingMessageHandlerWithContext>>,
     /// Runtime command state for each session.
     runtime_state: RwLock<HashMap<String, SessionRuntimeState>>,
+    /// Process-wide gateway default model updated by persistent `/model` switches.
+    default_model: RwLock<Option<String>>,
     tool_progress_modes: RwLock<BTreeMap<String, String>>,
     /// Basic usage counters for each session.
     usage_stats: RwLock<HashMap<String, UsageStats>>,
@@ -666,6 +695,7 @@ impl Gateway {
         config: GatewayConfig,
     ) -> Self {
         let stream_manager = Arc::new(StreamManager::new(config.streaming.clone()));
+        let default_model = config.model.clone();
 
         Self {
             adapters: RwLock::new(HashMap::new()),
@@ -678,6 +708,7 @@ impl Gateway {
             streaming_handler: RwLock::new(None),
             streaming_handler_with_context: RwLock::new(None),
             runtime_state: RwLock::new(HashMap::new()),
+            default_model: RwLock::new(default_model),
             tool_progress_modes: RwLock::new(BTreeMap::new()),
             usage_stats: RwLock::new(HashMap::new()),
             background_tasks: Arc::new(BackgroundTaskManager::new(8)),
@@ -1422,8 +1453,10 @@ impl Gateway {
                     GatewayCommandResult::SteerPrompt { prompt } => {
                         Some(format!("🧭 Steering instruction accepted: {prompt}"))
                     }
-                    GatewayCommandResult::SwitchModel { reply, .. }
-                    | GatewayCommandResult::SwitchFast { reply, .. }
+                    GatewayCommandResult::SwitchModel { request } => {
+                        Some(format!("🔀 Model switch alias parsed: {}", request.model))
+                    }
+                    GatewayCommandResult::SwitchFast { reply, .. }
                     | GatewayCommandResult::SwitchPersonality { reply, .. }
                     | GatewayCommandResult::SetTitle { reply, .. }
                     | GatewayCommandResult::SetHome { reply, .. } => Some(reply),
@@ -1611,6 +1644,135 @@ impl Gateway {
         .await
     }
 
+    fn estimate_gateway_messages_tokens(messages: &[Message]) -> u64 {
+        let values = messages
+            .iter()
+            .filter_map(|message| serde_json::to_value(message).ok())
+            .collect::<Vec<_>>();
+        estimate_messages_tokens_rough(&values)
+    }
+
+    async fn effective_session_model(&self, session_key: &str) -> Option<String> {
+        let state_model = self
+            .runtime_state
+            .read()
+            .await
+            .get(session_key)
+            .and_then(|state| state.model.clone());
+        if state_model.is_some() {
+            state_model
+        } else {
+            self.default_model.read().await.clone()
+        }
+    }
+
+    async fn build_model_switch_preflight_warning(
+        &self,
+        session_key: &str,
+        new_model: &str,
+    ) -> Option<String> {
+        if !self.config.model_switch_preflight_warning {
+            return None;
+        }
+
+        let messages = self.session_manager.get_messages(session_key).await;
+        let estimate = Self::estimate_gateway_messages_tokens(&messages);
+        let current_model = self.effective_session_model(session_key).await;
+        format_model_switch_preflight_warning(current_model.as_deref(), new_model, estimate)
+            .map(|warning| format!("⚠️ {warning}"))
+    }
+
+    fn persist_gateway_default_model_to_config(
+        &self,
+        model: &str,
+    ) -> Result<Option<PathBuf>, String> {
+        let Some(path) = self
+            .config
+            .model_switch_config_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        else {
+            return Ok(None);
+        };
+        let path = PathBuf::from(path);
+        let mut disk = load_user_config_file(&path)
+            .map_err(|err| format!("load {}: {err}", path.display()))?;
+        disk.model = Some(model.to_string());
+        save_config_yaml(&path, &disk).map_err(|err| format!("save {}: {err}", path.display()))?;
+        Ok(Some(path))
+    }
+
+    async fn apply_model_switch_command(
+        &self,
+        incoming: &IncomingMessage,
+        session_key: &str,
+        request: ModelSwitchRequest,
+    ) -> Result<(), GatewayError> {
+        let warning = self
+            .build_model_switch_preflight_warning(session_key, &request.model)
+            .await;
+        let persist = match request.scope {
+            ModelSwitchScope::Session => false,
+            ModelSwitchScope::Global => true,
+            ModelSwitchScope::Default => self.config.model_switch_persist_by_default,
+        };
+
+        {
+            let mut states = self.runtime_state.write().await;
+            let state = states.entry(session_key.to_string()).or_default();
+            state.model = Some(request.model.clone());
+            if let Some(provider) = request.provider.clone() {
+                state.provider = Some(provider);
+            } else if request.model.contains(':') {
+                state.provider = None;
+            }
+        }
+
+        let mut lines = vec![format!("🔀 Model switched to: {}", request.model)];
+        if let Some(provider) = request.provider.as_deref() {
+            lines.push(format!("Provider: {provider}"));
+        }
+
+        if persist {
+            *self.default_model.write().await = Some(request.model.clone());
+            match self.persist_gateway_default_model_to_config(&request.model) {
+                Ok(Some(path)) => lines.push(format!("Saved to {}.", path.display())),
+                Ok(None) => lines.push(
+                    "Saved as the gateway default for this process; no config path was configured."
+                        .to_string(),
+                ),
+                Err(err) => {
+                    warn!(error = %err, "Failed to persist gateway model switch");
+                    lines.push(format!(
+                        "⚠️ Config save failed: {err}. The switch remains active for this gateway process."
+                    ));
+                }
+            }
+        } else {
+            lines.push("Session only. Use `/model <name> --global` to persist.".to_string());
+        }
+
+        if request.force_refresh {
+            lines.push(
+                "Refresh flag accepted; this Rust gateway has no separate in-process model catalog cache to clear."
+                    .to_string(),
+            );
+        }
+        if let Some(warning) = warning {
+            lines.push(warning);
+        }
+
+        self.send_message(
+            &incoming.platform,
+            &incoming.chat_id,
+            &lines.join("\n"),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn apply_command_result(
         &self,
         incoming: &IncomingMessage,
@@ -1671,11 +1833,8 @@ impl Gateway {
                     .await?;
                 Ok(true)
             }
-            GatewayCommandResult::SwitchModel { model, reply } => {
-                let mut states = self.runtime_state.write().await;
-                states.entry(session_key.to_string()).or_default().model = Some(model);
-                drop(states);
-                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+            GatewayCommandResult::SwitchModel { request } => {
+                self.apply_model_switch_command(incoming, session_key, request)
                     .await?;
                 Ok(true)
             }
@@ -2528,6 +2687,7 @@ impl Gateway {
         session_key: &str,
         messages: Vec<Message>,
     ) -> Vec<Message> {
+        let default_model = self.default_model.read().await.clone();
         let (state, pending_system_notes) = {
             let mut states = self.runtime_state.write().await;
             let state = states.entry(session_key.to_string()).or_default();
@@ -2536,7 +2696,7 @@ impl Gateway {
         };
 
         let mut hints = Vec::new();
-        if let Some(model) = state.model {
+        if let Some(model) = state.model.or(default_model) {
             hints.push(format!("model={}", model));
         }
         if let Some(provider) = state.provider {
@@ -2577,6 +2737,7 @@ impl Gateway {
         incoming: &IncomingMessage,
         session_key: &str,
     ) -> GatewayRuntimeContext {
+        let default_model = self.default_model.read().await.clone();
         let state = self
             .runtime_state
             .read()
@@ -2592,7 +2753,7 @@ impl Gateway {
             chat_id: incoming.chat_id.clone(),
             thread_id: incoming.thread_id.clone(),
             user_id: incoming.user_id.clone(),
-            model: state.model,
+            model: state.model.or(default_model),
             provider: state.provider,
             profile: state.profile,
             branch: state.branch,
@@ -2773,6 +2934,7 @@ impl Gateway {
     }
 
     async fn build_status_text(&self, session_key: &str) -> String {
+        let default_model = self.default_model.read().await.clone();
         let state = self
             .runtime_state
             .read()
@@ -2803,7 +2965,10 @@ impl Gateway {
         format!(
             "🧭 Gateway status\n- title: {}\n- model: {}\n- provider: {}\n- profile: {}\n- branch: {}\n- personality: {}\n- service tier: {}\n- reasoning: {}\n- verbose: {}\n- tool progress: {}\n- busy input: {}\n- busy ack: {}\n- busy active: {}\n- busy queued: {}\n- yolo: {}\n- home: {}\n- messages in session: {}\n- running background tasks: {}\n- mcp generation: {}\n- input/output chars: {}/{}",
             title.unwrap_or_else(|| "(untitled)".to_string()),
-            state.model.unwrap_or_else(|| "default".to_string()),
+            state
+                .model
+                .or(default_model)
+                .unwrap_or_else(|| "default".to_string()),
             state.provider.unwrap_or_else(|| "default".to_string()),
             state.profile.unwrap_or_else(|| "default".to_string()),
             state.branch.unwrap_or_else(|| "main".to_string()),
@@ -3406,17 +3571,17 @@ impl Gateway {
 
     /// Resolve model routing candidate for a message (static heuristics only; no adaptive policy store).
     pub fn load_smart_model_routing(&self, text: &str) -> Option<String> {
-        Self::heuristic_model_hint(text)
+        Self::message_requests_smart_model_route(text)
+            .then(|| self.config.model.clone())
+            .flatten()
     }
 
-    fn heuristic_model_hint(text: &str) -> Option<String> {
-        if text.len() > 2000 || text.contains("analyze") || text.contains("refactor") {
-            Some("openai:gpt-4o".to_string())
-        } else if text.contains("quick") || text.contains("summary") {
-            Some("openai:gpt-4o-mini".to_string())
-        } else {
-            None
-        }
+    fn message_requests_smart_model_route(text: &str) -> bool {
+        text.len() > 2000
+            || text.contains("analyze")
+            || text.contains("refactor")
+            || text.contains("quick")
+            || text.contains("summary")
     }
 
     /// Authorize user based on DM manager and platform context.
@@ -3469,7 +3634,12 @@ impl Gateway {
         if has_model {
             return;
         }
-        if let Some(model) = Self::heuristic_model_hint(text) {
+        if Self::message_requests_smart_model_route(text) {
+            let model = self.default_model.read().await.clone();
+            let model = model.or_else(|| self.config.model.clone());
+            let Some(model) = model else {
+                return;
+            };
             let mut states = self.runtime_state.write().await;
             states.entry(session_key.to_string()).or_default().model = Some(model);
         }
@@ -5732,6 +5902,128 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gateway_model_switch_persists_default_and_applies_to_new_sessions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("config.yaml");
+        std::fs::write(
+            &config_path,
+            "model: nous:nousresearch/hermes-4-70b\nmodel_switch:\n  persist_switch_by_default: true\n",
+        )
+        .unwrap();
+
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        dm_manager.authorize_user("user2");
+        let cfg = GatewayConfig {
+            model: Some("nous:nousresearch/hermes-4-70b".to_string()),
+            model_switch_config_path: Some(config_path.to_string_lossy().to_string()),
+            ..GatewayConfig::default()
+        };
+        let gw = Gateway::new(session_mgr, dm_manager, cfg);
+        gw.register_adapter("test", adapter).await;
+        gw.set_message_handler_with_context(Arc::new(|_messages, ctx| {
+            Box::pin(async move { Ok(format!("ctx model={:?}", ctx.model)) })
+        }))
+        .await;
+
+        let switch = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/model openrouter:zai/glm-5.2".into(),
+            message_id: None,
+            thread_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&switch).await.is_ok());
+        let disk = hermes_config::load_user_config_file(&config_path).unwrap();
+        assert_eq!(disk.model.as_deref(), Some("openrouter:zai/glm-5.2"));
+
+        let new_session_message = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat2".into(),
+            user_id: "user2".into(),
+            text: "hello from a fresh gateway session".into(),
+            message_id: None,
+            thread_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&new_session_message).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        assert!(msgs.iter().any(|(_, text)| text.contains("Saved to")));
+        assert!(msgs
+            .iter()
+            .any(|(_, text)| text.contains("ctx model=Some(\"openrouter:zai/glm-5.2\")")));
+    }
+
+    #[tokio::test]
+    async fn gateway_model_switch_session_scope_does_not_persist_and_warns_on_large_context() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("config.yaml");
+        std::fs::write(
+            &config_path,
+            "model: nous:nousresearch/hermes-4-70b\nmodel_switch:\n  persist_switch_by_default: true\n",
+        )
+        .unwrap();
+
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let session_key = session_mgr.compose_session_key("test", "chat1", "user1");
+        session_mgr
+            .get_or_create_session("test", "chat1", "user1")
+            .await;
+        session_mgr
+            .add_message(&session_key, Message::user("large-context ".repeat(40_000)))
+            .await;
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let cfg = GatewayConfig {
+            model: Some("nous:nousresearch/hermes-4-70b".to_string()),
+            model_switch_config_path: Some(config_path.to_string_lossy().to_string()),
+            ..GatewayConfig::default()
+        };
+        let gw = Gateway::new(session_mgr, dm_manager, cfg);
+        gw.register_adapter("test", adapter).await;
+
+        let switch = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/model compact-runtime-model --global --session".into(),
+            message_id: None,
+            thread_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&switch).await.is_ok());
+
+        let disk = hermes_config::load_user_config_file(&config_path).unwrap();
+        assert_eq!(
+            disk.model.as_deref(),
+            Some("nous:nousresearch/hermes-4-70b")
+        );
+        let msgs = sent.lock().unwrap();
+        let reply = msgs
+            .iter()
+            .find_map(|(_, text)| {
+                text.contains("compact-runtime-model")
+                    .then_some(text.clone())
+            })
+            .expect("model switch reply should exist");
+        assert!(reply.contains("Session only"));
+        assert!(reply.contains("Context warning"));
+        assert!(reply.contains("preflight compression"));
+    }
+
+    #[tokio::test]
     async fn gateway_verbose_command_is_config_gated_and_cycles_tool_progress() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let adapter = Arc::new(TestAdapter {
@@ -6703,7 +6995,7 @@ mod tests {
 
         let setup_cmds = vec![
             "/provider openai",
-            "/model gpt-4o-mini",
+            "/model dynamic-structured-context-model",
             "/profile prod",
             "/branch feat-123",
         ];
@@ -6743,7 +7035,7 @@ mod tests {
                 }
             })
             .expect("context response should exist");
-        assert!(echoed.contains("Some(\"gpt-4o-mini\")"));
+        assert!(echoed.contains("Some(\"dynamic-structured-context-model\")"));
         assert!(echoed.contains("Some(\"openai\")"));
         assert!(echoed.contains("Some(\"prod\")"));
         assert!(echoed.contains("Some(\"feat-123\")"));

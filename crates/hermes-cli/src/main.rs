@@ -2983,6 +2983,14 @@ async fn run_gateway(
 
             // Build gateway runtime and context-aware message handler.
             let runtime_gateway_config = RuntimeGatewayConfig {
+                model: config.model.clone(),
+                model_switch_persist_by_default: config.model_switch.persist_switch_by_default,
+                model_switch_config_path: Some(
+                    hermes_state_root(&cli)
+                        .join("config.yaml")
+                        .to_string_lossy()
+                        .to_string(),
+                ),
                 streaming_enabled: config.streaming.enabled,
                 display: config.display.clone(),
                 service_tier: config.agent.normalized_service_tier(),
