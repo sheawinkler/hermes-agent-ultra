@@ -1,38 +1,32 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T04:12:55.364845+00:00`
+Generated: `2026-06-25T04:46:31.260695+00:00`
 
-- Range: `origin/main..upstream/main`; total commits tracked: `6978`.
+- Range: `main..upstream/main`; total commits tracked: `6995`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3118 |
+| #20 | GPAR-01 tests+CI parity | 3131 |
 | #21 | GPAR-02 skills parity | 130 |
 | #22 | GPAR-03 UX parity | 957 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 22 |
 | #25 | GPAR-06 packaging/docs/install parity | 145 |
-| #26 | GPAR-07 upstream queue backfill | 2118 |
+| #26 | GPAR-07 upstream queue backfill | 2122 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 234 |
-| ported | 359 |
-| superseded | 6309 |
+| pending | 233 |
+| ported | 365 |
+| superseded | 6321 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
 | `cfb55de5ea49` | #21 | Update Stripe Projects skill docs (#48673) |
-| `c7b7f92ec14a` | #20 | fix(openviking): sync structured turns with tool parts |
-| `d7cd0bc0863c` | #20 | fix(openviking): preserve structured sync attribution |
 | `9362ce2575e0` | #22 | feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899) |
-| `fcac0f94d484` | #23 | fix(openviking): guard empty tool_id in batch skip set; reuse env_var_enabled |
-| `27a6e188c4b4` | #23 | refactor(openviking): derive recall-tool name set from canonical schemas |
-| `2d4046c6de97` | #23 | refactor(openviking): reuse pre-scanned tool_input for pending tool calls |
-| `be2c2beb96e5` | #23 | refactor(openviking): name tool_status constants and alias sets |
 | `f9ffe0bc3f61` | #26 | fix(desktop): resume stored session id on notification click |
 | `069011dd0c8f` | #26 | test(desktop): cover runtime->stored notification id resolution |
 | `bce1e36b5769` | #20 | fix(discord): unwrap dict choices + soft-boundary truncate clarify buttons |
@@ -125,3 +119,9 @@ Generated: `2026-06-25T04:12:55.364845+00:00`
 | `2a4542333ee1` | #26 | fix(photon): classify Envoy overflow errors as retryable; add typing cooldown |
 | `9578e52795e3` | #26 | fix(photon): detect unexpected sidecar death and trigger reconnect |
 | `5e3e89cc05d3` | #23 | feat(hindsight): configurable embedded daemon health grace timeout (#50341) |
+| `6bbacc223899` | #26 | fix(desktop): make cold-start port-announcement deadline tolerant |
+| `c0409a87ff05` | #23 | feat(gateway): typed send-error classification (SendResult.error_kind) (#50342) |
+| `565b7c8d9d87` | #20 | fix(telegram): stop typing indicator lingering after final reply |
+| `b6d107240819` | #20 | fix(cli): branch new worktrees from the fresh remote tip, not stale local HEAD (#50355) |
+| `5b45fb269a06` | #20 | fix(security): sanitize kanban markdown html |
+| `f72690825e76` | #26 | fix(desktop/windows): stop in-app update from cascading into a backend restart loop (#50381) |

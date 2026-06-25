@@ -2,7 +2,7 @@
 //!
 //! Mirrors Python `plugins/memory/openviking/__init__.py` (HTTP subset).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -21,10 +21,21 @@ const DEFAULT_AGENT: &str = "hermes";
 const DEFAULT_MEMORY_SUBDIR: &str = "preferences";
 const DEFAULT_SESSION_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_RESOURCE_PREFIXES: &[&str] = &["http://", "https://", "git@", "ssh://", "git://"];
+const SYNC_TRACE_ENV: &str = "HERMES_OPENVIKING_SYNC_TRACE";
+const VIKING_SEARCH_TOOL: &str = "viking_search";
+const VIKING_READ_TOOL: &str = "viking_read";
+const VIKING_BROWSE_TOOL: &str = "viking_browse";
+const VIKING_REMEMBER_TOOL: &str = "viking_remember";
+const VIKING_ADD_RESOURCE_TOOL: &str = "viking_add_resource";
+const TOOL_STATUS_COMPLETED: &str = "completed";
+const TOOL_STATUS_ERROR: &str = "error";
+const TOOL_STATUS_PENDING: &str = "pending";
+const TOOL_STATUS_ERROR_ALIASES: &[&str] = &["error", "failed", "failure"];
+const TOOL_STATUS_COMPLETED_ALIASES: &[&str] = &["completed", "complete", "success", "succeeded"];
 
 fn search_schema() -> Value {
     json!({
-        "name": "viking_search",
+        "name": VIKING_SEARCH_TOOL,
         "description": "Semantic search over the OpenViking knowledge base.",
         "parameters": {
             "type": "object",
@@ -41,7 +52,7 @@ fn search_schema() -> Value {
 
 fn read_schema() -> Value {
     json!({
-        "name": "viking_read",
+        "name": VIKING_READ_TOOL,
         "description": "Read content at a viking:// URI (abstract|overview|full).",
         "parameters": {
             "type": "object",
@@ -56,7 +67,7 @@ fn read_schema() -> Value {
 
 fn browse_schema() -> Value {
     json!({
-        "name": "viking_browse",
+        "name": VIKING_BROWSE_TOOL,
         "description": "Browse OpenViking store (tree|list|stat).",
         "parameters": {
             "type": "object",
@@ -71,7 +82,7 @@ fn browse_schema() -> Value {
 
 fn remember_schema() -> Value {
     json!({
-        "name": "viking_remember",
+        "name": VIKING_REMEMBER_TOOL,
         "description": "Store a fact directly in the OpenViking memory tree.",
         "parameters": {
             "type": "object",
@@ -86,7 +97,7 @@ fn remember_schema() -> Value {
 
 fn add_resource_schema() -> Value {
     json!({
-        "name": "viking_add_resource",
+        "name": VIKING_ADD_RESOURCE_TOOL,
         "description": "Add a remote URL or local file/directory to the knowledge base.",
         "parameters": {
             "type": "object",
@@ -329,6 +340,496 @@ fn content_write_body(st: &VikingState, subdir: &str, content: &str) -> Value {
         "content": content,
         "mode": "create",
     })
+}
+
+fn openviking_sync_trace_enabled() -> bool {
+    std::env::var(SYNC_TRACE_ENV)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn preview_sync_value(value: impl AsRef<str>) -> String {
+    let mut text = value.as_ref().replace('\n', "\\n");
+    if text.len() > 160 {
+        text.truncate(160);
+        text.push_str("...");
+    }
+    text
+}
+
+fn is_openviking_recall_tool_name(tool_name: &str) -> bool {
+    matches!(
+        tool_name.trim().to_ascii_lowercase().as_str(),
+        VIKING_SEARCH_TOOL | VIKING_READ_TOOL | VIKING_BROWSE_TOOL
+    )
+}
+
+fn value_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    value.as_object().and_then(|object| object.get(key))
+}
+
+fn text_from_part(part: &Value) -> String {
+    match part {
+        Value::String(text) => text.clone(),
+        Value::Object(_) => {
+            let part_type = value_field(part, "type")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase();
+            if matches!(
+                part_type.as_str(),
+                "image" | "image_url" | "input_image" | "audio" | "input_audio"
+            ) {
+                return String::new();
+            }
+            if let Some(text) = [
+                "text",
+                "content",
+                "input_text",
+                "output_text",
+                "summary_text",
+            ]
+            .iter()
+            .find_map(|key| {
+                value_field(part, key)
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+            }) {
+                text
+            } else if part_type.is_empty() {
+                part.to_string()
+            } else {
+                String::new()
+            }
+        }
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+fn message_text_from_content(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .map(text_from_part)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Some(Value::Object(_)) => text_from_part(content.expect("object content present")),
+        Some(Value::Null) | None => String::new(),
+        Some(other) => other.to_string(),
+    }
+}
+
+fn message_text(message: &Value) -> String {
+    message_text_from_content(value_field(message, "content"))
+}
+
+fn message_matches_text(message: &Value, expected: &str) -> bool {
+    !expected.trim().is_empty() && message_text(message).trim() == expected.trim()
+}
+
+fn extract_current_turn_messages(
+    messages: &[Value],
+    user_content: &str,
+    assistant_content: &str,
+) -> Vec<Value> {
+    if messages.is_empty() {
+        return Vec::new();
+    }
+
+    let mut end_idx = None;
+    if !assistant_content.trim().is_empty() {
+        for (idx, message) in messages.iter().enumerate().rev() {
+            if message.get("role").and_then(Value::as_str) == Some("assistant")
+                && message_matches_text(message, assistant_content)
+            {
+                end_idx = Some(idx);
+                break;
+            }
+        }
+    }
+    if end_idx.is_none() {
+        for (idx, message) in messages.iter().enumerate().rev() {
+            if message.get("role").and_then(Value::as_str) == Some("assistant") {
+                end_idx = Some(idx);
+                break;
+            }
+        }
+    }
+    let mut end_idx = end_idx.unwrap_or_else(|| messages.len().saturating_sub(1));
+    while end_idx + 1 < messages.len()
+        && messages[end_idx + 1].get("role").and_then(Value::as_str) == Some("tool")
+    {
+        end_idx += 1;
+    }
+
+    let mut start_idx = None;
+    if !user_content.trim().is_empty() {
+        for idx in (0..=end_idx).rev() {
+            let message = &messages[idx];
+            if message.get("role").and_then(Value::as_str) == Some("user")
+                && message_matches_text(message, user_content)
+            {
+                start_idx = Some(idx);
+                break;
+            }
+        }
+    }
+    if start_idx.is_none() {
+        for idx in (0..=end_idx).rev() {
+            if messages[idx].get("role").and_then(Value::as_str) == Some("user") {
+                start_idx = Some(idx);
+                break;
+            }
+        }
+    }
+    let Some(start_idx) = start_idx else {
+        return Vec::new();
+    };
+    messages[start_idx..=end_idx].to_vec()
+}
+
+fn tool_call_id(tool_call: &Value) -> String {
+    tool_call
+        .get("id")
+        .or_else(|| tool_call.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn tool_call_name(tool_call: &Value) -> String {
+    tool_call
+        .get("function")
+        .and_then(|function| function.get("name"))
+        .or_else(|| tool_call.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn tool_call_input(tool_call: &Value) -> Value {
+    let raw_args = tool_call
+        .get("function")
+        .and_then(|function| function.get("arguments"))
+        .or_else(|| tool_call.get("arguments"))
+        .or_else(|| tool_call.get("args"));
+    match raw_args {
+        Some(Value::Object(_)) => raw_args.cloned().unwrap_or_else(|| json!({})),
+        Some(Value::String(raw)) => {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                json!({})
+            } else {
+                match serde_json::from_str::<Value>(raw) {
+                    Ok(Value::Object(map)) => Value::Object(map),
+                    Ok(parsed) => json!({"value": parsed}),
+                    Err(_) => json!({"value": raw}),
+                }
+            }
+        }
+        Some(Value::Null) | None => json!({}),
+        Some(other) => json!({"value": other}),
+    }
+}
+
+fn tool_result_status(message: &Value) -> &'static str {
+    let raw_status = message
+        .get("status")
+        .or_else(|| message.get("tool_status"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if TOOL_STATUS_ERROR_ALIASES.contains(&raw_status.as_str()) {
+        return TOOL_STATUS_ERROR;
+    }
+    if TOOL_STATUS_COMPLETED_ALIASES.contains(&raw_status.as_str()) {
+        return TOOL_STATUS_COMPLETED;
+    }
+
+    let text = message_text(message);
+    if !text.trim().is_empty() {
+        if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
+            let exit_code = parsed.get("exit_code").and_then(Value::as_i64);
+            if parsed
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || parsed
+                    .get("success")
+                    .and_then(Value::as_bool)
+                    .is_some_and(|success| !success)
+                || parsed.get("error").is_some_and(|error| !error.is_null())
+                || exit_code.is_some_and(|code| code != 0)
+            {
+                return TOOL_STATUS_ERROR;
+            }
+        }
+    }
+    TOOL_STATUS_COMPLETED
+}
+
+fn payload_message(role: &str, parts: Vec<Value>, assistant_peer_id: Option<&str>) -> Value {
+    let mut payload = json!({"role": role, "parts": parts});
+    if role == "assistant" {
+        if let Some(peer_id) = assistant_peer_id {
+            if !peer_id.trim().is_empty() {
+                payload["peer_id"] = json!(peer_id);
+            }
+        }
+    }
+    payload
+}
+
+fn messages_to_openviking_batch(messages: &[Value], assistant_peer_id: Option<&str>) -> Vec<Value> {
+    let mut tool_calls_by_id: HashMap<String, (String, Value)> = HashMap::new();
+    let mut completed_tool_ids: HashSet<String> = HashSet::new();
+    let mut skipped_tool_ids: HashSet<String> = HashSet::new();
+
+    for message in messages {
+        match message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+        {
+            "tool" => {
+                let tool_id = message
+                    .get("tool_call_id")
+                    .or_else(|| message.get("id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                if !tool_id.is_empty() {
+                    completed_tool_ids.insert(tool_id.clone());
+                    if message
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(is_openviking_recall_tool_name)
+                    {
+                        skipped_tool_ids.insert(tool_id);
+                    }
+                }
+            }
+            "assistant" => {
+                for tool_call in message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if !tool_call.is_object() {
+                        continue;
+                    }
+                    let tool_id = tool_call_id(tool_call);
+                    let tool_name = tool_call_name(tool_call);
+                    if !tool_id.is_empty() {
+                        tool_calls_by_id.insert(
+                            tool_id.clone(),
+                            (tool_name.clone(), tool_call_input(tool_call)),
+                        );
+                        if is_openviking_recall_tool_name(&tool_name) {
+                            skipped_tool_ids.insert(tool_id);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut payload_messages = Vec::new();
+    let mut pending_tool_parts = Vec::new();
+    let flush_tool_parts = |payload_messages: &mut Vec<Value>,
+                            pending_tool_parts: &mut Vec<Value>| {
+        if !pending_tool_parts.is_empty() {
+            payload_messages.push(payload_message(
+                "assistant",
+                std::mem::take(pending_tool_parts),
+                assistant_peer_id,
+            ));
+        }
+    };
+
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if matches!(role, "system" | "developer") {
+            continue;
+        }
+
+        if role == "tool" {
+            let tool_id = message
+                .get("tool_call_id")
+                .or_else(|| message.get("id"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let prior_call = tool_calls_by_id.get(&tool_id);
+            let tool_name = message
+                .get("name")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+                .or_else(|| prior_call.map(|(name, _)| name.clone()))
+                .unwrap_or_default();
+            if skipped_tool_ids.contains(&tool_id) || is_openviking_recall_tool_name(&tool_name) {
+                continue;
+            }
+            let tool_input = prior_call
+                .map(|(_, input)| input.clone())
+                .unwrap_or_else(|| json!({}));
+            pending_tool_parts.push(json!({
+                "type": "tool",
+                "tool_id": tool_id,
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "tool_output": message_text(message),
+                "tool_status": tool_result_status(message),
+            }));
+            continue;
+        }
+
+        if !matches!(role, "user" | "assistant") {
+            continue;
+        }
+
+        flush_tool_parts(&mut payload_messages, &mut pending_tool_parts);
+        let mut parts = Vec::new();
+        let text = message_text(message);
+        if !text.is_empty() {
+            parts.push(json!({"type": "text", "text": text}));
+        }
+
+        if role == "assistant" {
+            for tool_call in message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if !tool_call.is_object() {
+                    continue;
+                }
+                let tool_id = tool_call_id(tool_call);
+                let tool_name = tool_call_name(tool_call);
+                if skipped_tool_ids.contains(&tool_id) || is_openviking_recall_tool_name(&tool_name)
+                {
+                    continue;
+                }
+                if completed_tool_ids.contains(&tool_id) {
+                    continue;
+                }
+                let tool_input = tool_calls_by_id
+                    .get(&tool_id)
+                    .map(|(_, input)| input.clone())
+                    .unwrap_or_else(|| tool_call_input(tool_call));
+                parts.push(json!({
+                    "type": "tool",
+                    "tool_id": tool_id,
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "tool_status": TOOL_STATUS_PENDING,
+                }));
+            }
+        }
+
+        if !parts.is_empty() {
+            payload_messages.push(payload_message(role, parts, assistant_peer_id));
+        }
+    }
+    flush_tool_parts(&mut payload_messages, &mut pending_tool_parts);
+    payload_messages
+}
+
+fn fallback_turn_batch(
+    user_content: &str,
+    assistant_content: &str,
+    assistant_peer_id: &str,
+) -> Vec<Value> {
+    let mut messages = Vec::new();
+    if !user_content.trim().is_empty() {
+        messages.push(payload_message(
+            "user",
+            vec![json!({"type": "text", "text": user_content.chars().take(4000).collect::<String>()})],
+            None,
+        ));
+    }
+    if !messages.is_empty() {
+        messages.push(payload_message(
+            "assistant",
+            vec![json!({"type": "text", "text": assistant_content.chars().take(4000).collect::<String>()})],
+            Some(assistant_peer_id),
+        ));
+    }
+    messages
+}
+
+fn post_openviking_batch(st: &VikingState, batch_messages: &[Value]) -> Result<(), String> {
+    if batch_messages.is_empty() {
+        return Ok(());
+    }
+    let url = format!(
+        "{}/api/v1/sessions/{}/messages/batch",
+        st.endpoint, st.session_id
+    );
+    let resp = st
+        .client
+        .post(&url)
+        .headers(viking_headers(st))
+        .json(&json!({"messages": batch_messages}))
+        .send()
+        .map_err(|e| format!("OpenViking structured sync failed: {e}"))?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("OpenViking structured sync HTTP {}", resp.status()))
+    }
+}
+
+fn post_openviking_text_turn(
+    st: &VikingState,
+    user_content: &str,
+    assistant_content: &str,
+) -> Result<(), String> {
+    let url = format!("{}/api/v1/sessions/{}/messages", st.endpoint, st.session_id);
+    let user_status = st
+        .client
+        .post(&url)
+        .headers(viking_headers(st))
+        .json(&json!({"role": "user", "content": user_content.chars().take(4000).collect::<String>()}))
+        .send()
+        .map_err(|e| format!("OpenViking text user sync failed: {e}"))?
+        .status();
+    if !user_status.is_success() {
+        return Err(format!("OpenViking text user sync HTTP {user_status}"));
+    }
+
+    let assistant_status = st
+        .client
+        .post(&url)
+        .headers(viking_headers(st))
+        .json(&json!({"role": "assistant", "content": assistant_content.chars().take(4000).collect::<String>()}))
+        .send()
+        .map_err(|e| format!("OpenViking text assistant sync failed: {e}"))?
+        .status();
+    if assistant_status.is_success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "OpenViking text assistant sync HTTP {assistant_status}"
+        ))
+    }
 }
 
 fn is_remote_resource_source(value: &str) -> bool {
@@ -831,6 +1332,19 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
     }
 
     fn sync_turn(&self, user_content: &str, assistant_content: &str, session_id: &str) {
+        self.sync_turn_with_messages(user_content, assistant_content, session_id, &[]);
+    }
+
+    fn sync_turn_with_messages(
+        &self,
+        user_content: &str,
+        assistant_content: &str,
+        session_id: &str,
+        messages: &[Value],
+    ) {
+        if user_content.trim().is_empty() {
+            return;
+        }
         let (sid, stc) = {
             let mut lock = self.state.lock().unwrap();
             let st = match lock.as_mut() {
@@ -850,26 +1364,62 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
             stc.session_id = sid.clone();
             (sid, stc)
         };
-        let u = user_content.chars().take(4000).collect::<String>();
-        let a = assistant_content.chars().take(4000).collect::<String>();
-        let h = viking_headers(&stc);
-        self.spawn_session_writer(sid, move || {
-            let url = format!(
-                "{}/api/v1/sessions/{}/messages",
-                stc.endpoint, stc.session_id
+
+        let mut turn_messages = if messages.is_empty() {
+            Vec::new()
+        } else {
+            extract_current_turn_messages(messages, user_content, assistant_content)
+        };
+        if !turn_messages.is_empty() {
+            for message in &mut turn_messages {
+                if message.get("role").and_then(Value::as_str) == Some("user") {
+                    if let Some(object) = message.as_object_mut() {
+                        object.insert(
+                            "content".to_string(),
+                            Value::String(user_content.to_string()),
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+
+        let mut batch_messages = messages_to_openviking_batch(&turn_messages, Some(&stc.agent));
+        if batch_messages.is_empty() {
+            batch_messages = fallback_turn_batch(user_content, assistant_content, &stc.agent);
+        }
+        if batch_messages.is_empty() {
+            return;
+        }
+
+        if openviking_sync_trace_enabled() {
+            tracing::info!(
+                "OpenViking sync_turn trace: session_arg={:?} cached_session={:?} messages_present={} message_count={} turn_message_count={} batch_message_count={} user_len={} assistant_len={} user_preview={:?} assistant_preview={:?}",
+                session_id,
+                stc.session_id,
+                !messages.is_empty(),
+                messages.len(),
+                turn_messages.len(),
+                batch_messages.len(),
+                user_content.len(),
+                assistant_content.len(),
+                preview_sync_value(user_content),
+                preview_sync_value(assistant_content),
             );
-            let _ = stc
-                .client
-                .post(&url)
-                .headers(h.clone())
-                .json(&json!({"role": "user", "content": u}))
-                .send();
-            let _ = stc
-                .client
-                .post(&url)
-                .headers(h)
-                .json(&json!({"role": "assistant", "content": a}))
-                .send();
+        }
+
+        let u = user_content.to_string();
+        let a = assistant_content.to_string();
+        self.spawn_session_writer(sid, move || {
+            if let Err(batch_error) = post_openviking_batch(&stc, &batch_messages) {
+                tracing::warn!(
+                    "OpenViking structured sync failed; falling back to text sync: {}",
+                    batch_error
+                );
+                if let Err(text_error) = post_openviking_text_turn(&stc, &u, &a) {
+                    tracing::warn!("OpenViking text sync fallback failed: {}", text_error);
+                }
+            }
         });
     }
 
@@ -1301,6 +1851,349 @@ mod tests {
         assert_eq!(memory_subdir_for_category("unknown"), "preferences");
         assert_eq!(memory_subdir_for_target("memory"), "patterns");
         assert_eq!(memory_subdir_for_target("user"), "preferences");
+    }
+
+    #[test]
+    fn extract_current_turn_anchors_on_latest_matching_user_and_assistant() {
+        let messages = vec![
+            json!({"role": "user", "content": "Please inspect the repository for assemble hooks."}),
+            json!({"role": "assistant", "content": "Earlier answer."}),
+            json!({"role": "user", "content": "Please inspect the repository for assemble hooks."}),
+            json!({
+                "role": "assistant",
+                "content": "I will search the codebase.",
+                "tool_calls": [{
+                    "id": "call_rg_1",
+                    "type": "function",
+                    "function": {
+                        "name": "shell_command",
+                        "arguments": serde_json::to_string(&json!({"command": "rg assemble"})).unwrap(),
+                    },
+                }],
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_rg_1",
+                "name": "shell_command",
+                "content": "agent/context_engine.py: no preassemble hook",
+            }),
+            json!({"role": "assistant", "content": "The current main does not expose assemble."}),
+        ];
+
+        let turn = extract_current_turn_messages(
+            &messages,
+            "Please inspect the repository for assemble hooks.",
+            "The current main does not expose assemble.",
+        );
+
+        assert_eq!(turn, messages[2..].to_vec());
+    }
+
+    #[test]
+    fn extract_current_turn_includes_trailing_tool_result_after_empty_assistant() {
+        let messages = vec![
+            json!({"role": "user", "content": "Run the check."}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_check",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal",
+                        "arguments": serde_json::to_string(&json!({"cmd": "cargo test"})).unwrap(),
+                    },
+                }],
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_check",
+                "name": "terminal",
+                "content": "test result: ok",
+            }),
+        ];
+
+        let turn = extract_current_turn_messages(&messages, "Run the check.", "");
+
+        assert_eq!(turn, messages);
+    }
+
+    #[test]
+    fn messages_to_openviking_batch_coalesces_tool_results() {
+        let turn = vec![
+            json!({"role": "user", "content": "Please inspect the repository for assemble hooks."}),
+            json!({
+                "role": "assistant",
+                "content": "I will search the codebase.",
+                "tool_calls": [{
+                    "id": "call_rg_1",
+                    "type": "function",
+                    "function": {
+                        "name": "shell_command",
+                        "arguments": serde_json::to_string(&json!({"command": "rg assemble"})).unwrap(),
+                    },
+                }],
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_rg_1",
+                "name": "shell_command",
+                "content": "agent/context_engine.py: no preassemble hook",
+            }),
+            json!({"role": "assistant", "content": "The current main does not expose assemble."}),
+        ];
+
+        let batch = messages_to_openviking_batch(&turn, None);
+
+        let roles = batch
+            .iter()
+            .filter_map(|message| message.get("role").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(roles, vec!["user", "assistant", "assistant", "assistant"]);
+        assert_eq!(
+            batch[2]["parts"],
+            json!([{
+                "type": "tool",
+                "tool_id": "call_rg_1",
+                "tool_name": "shell_command",
+                "tool_input": {"command": "rg assemble"},
+                "tool_output": "agent/context_engine.py: no preassemble hook",
+                "tool_status": "completed",
+            }])
+        );
+    }
+
+    #[test]
+    fn messages_to_openviking_batch_marks_json_tool_error_results() {
+        let turn = vec![
+            json!({"role": "user", "content": "Check the file."}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_read_1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": serde_json::to_string(&json!({"path": "missing.md"})).unwrap(),
+                    },
+                }],
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_read_1",
+                "name": "read_file",
+                "content": serde_json::to_string(&json!({"error": "File not found", "exit_code": 1})).unwrap(),
+            }),
+        ];
+
+        let batch = messages_to_openviking_batch(&turn, None);
+
+        assert_eq!(batch[1]["role"], "assistant");
+        assert_eq!(batch[1]["parts"][0]["tool_status"], TOOL_STATUS_ERROR);
+        assert_eq!(
+            batch[1]["parts"][0]["tool_input"],
+            json!({"path": "missing.md"})
+        );
+    }
+
+    #[test]
+    fn messages_to_openviking_batch_keeps_pending_tool_call_without_result() {
+        let turn = vec![
+            json!({"role": "user", "content": "Start a long running check."}),
+            json!({
+                "role": "assistant",
+                "content": "Starting it now.",
+                "tool_calls": [{
+                    "id": "call_long_1",
+                    "type": "function",
+                    "function": {
+                        "name": "long_check",
+                        "arguments": serde_json::to_string(&json!({"target": "repo"})).unwrap(),
+                    },
+                }],
+            }),
+        ];
+
+        let batch = messages_to_openviking_batch(&turn, None);
+
+        assert_eq!(
+            batch[1]["parts"],
+            json!([
+                {"type": "text", "text": "Starting it now."},
+                {
+                    "type": "tool",
+                    "tool_id": "call_long_1",
+                    "tool_name": "long_check",
+                    "tool_input": {"target": "repo"},
+                    "tool_status": "pending",
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn messages_to_openviking_batch_skips_recall_results_without_reingesting_echoes() {
+        let turn = vec![
+            json!({"role": "user", "content": "What did we decide about context assembly?"}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_recall_1",
+                        "type": "function",
+                        "function": {
+                            "name": VIKING_SEARCH_TOOL,
+                            "arguments": serde_json::to_string(&json!({"query": "context assembly decision"})).unwrap(),
+                        },
+                    },
+                    {
+                        "id": "call_shell_1",
+                        "type": "function",
+                        "function": {
+                            "name": "shell_command",
+                            "arguments": serde_json::to_string(&json!({"command": "rg preassemble"})).unwrap(),
+                        },
+                    },
+                ],
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_recall_1",
+                "name": VIKING_SEARCH_TOOL,
+                "content": {"results": [{"uri": "viking://user/hermes/memories/context", "abstract": "Old OpenViking memory content"}]},
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_shell_1",
+                "name": "shell_command",
+                "content": "plugins/memory/openviking/__init__.py",
+            }),
+            json!({"role": "assistant", "content": "We decided to keep sync_turn scoped to ingestion."}),
+        ];
+
+        let batch = messages_to_openviking_batch(&turn, None);
+        let batch_text = serde_json::to_string(&batch).unwrap();
+
+        assert!(!batch_text.contains(VIKING_SEARCH_TOOL));
+        assert!(!batch_text.contains("Old OpenViking memory content"));
+        assert!(batch_text.contains("shell_command"));
+        assert!(batch_text.contains("plugins/memory/openviking/__init__.py"));
+    }
+
+    #[test]
+    fn empty_recall_tool_id_does_not_skip_other_empty_id_tool_results() {
+        let turn = vec![
+            json!({"role": "user", "content": "Run tools."}),
+            json!({
+                "role": "tool",
+                "tool_call_id": "",
+                "name": VIKING_SEARCH_TOOL,
+                "content": "recalled old memory",
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "",
+                "name": "shell_command",
+                "content": "fresh shell output",
+            }),
+        ];
+
+        let batch = messages_to_openviking_batch(&turn, None);
+        let batch_text = serde_json::to_string(&batch).unwrap();
+
+        assert!(!batch_text.contains("recalled old memory"));
+        assert!(batch_text.contains("fresh shell output"));
+    }
+
+    #[test]
+    fn messages_to_openviking_batch_preserves_responses_text_parts_and_peer_id() {
+        let turn = vec![
+            json!({"role": "user", "content": [{"type": "input_text", "text": "hello"}]}),
+            json!({"role": "assistant", "content": [{"type": "output_text", "text": "answer"}]}),
+        ];
+
+        let batch = messages_to_openviking_batch(&turn, Some("hermes"));
+
+        assert_eq!(
+            batch,
+            vec![
+                json!({"role": "user", "parts": [{"type": "text", "text": "hello"}]}),
+                json!({"role": "assistant", "parts": [{"type": "text", "text": "answer"}], "peer_id": "hermes"}),
+            ]
+        );
+    }
+
+    #[test]
+    fn fallback_turn_batch_preserves_empty_assistant_turn() {
+        let batch = fallback_turn_batch("hello", "", "hermes");
+
+        assert_eq!(
+            batch,
+            vec![
+                json!({"role": "user", "parts": [{"type": "text", "text": "hello"}]}),
+                json!({"role": "assistant", "parts": [{"type": "text", "text": ""}], "peer_id": "hermes"}),
+            ]
+        );
+    }
+
+    #[test]
+    fn rust_flattened_tool_calls_reuse_cached_top_level_arguments() {
+        let turn = vec![
+            json!({"role": "user", "content": "Run it."}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_terminal",
+                    "name": "terminal",
+                    "arguments": serde_json::to_string(&json!({"cmd": "pwd"})).unwrap(),
+                }],
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_terminal",
+                "name": "terminal",
+                "content": "/repo",
+            }),
+        ];
+
+        let batch = messages_to_openviking_batch(&turn, None);
+
+        assert_eq!(batch[1]["parts"][0]["tool_name"], "terminal");
+        assert_eq!(batch[1]["parts"][0]["tool_input"], json!({"cmd": "pwd"}));
+        assert_eq!(batch[1]["parts"][0]["tool_status"], TOOL_STATUS_COMPLETED);
+    }
+
+    #[test]
+    fn object_tool_outputs_are_preserved_as_json_text() {
+        let turn = vec![
+            json!({"role": "user", "content": "Inspect structured output."}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_structured",
+                    "name": "structured_tool",
+                    "arguments": "{}",
+                }],
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_structured",
+                "name": "structured_tool",
+                "content": {"answer": "kept", "success": true},
+            }),
+        ];
+
+        let batch = messages_to_openviking_batch(&turn, None);
+
+        assert_eq!(
+            batch[1]["parts"][0]["tool_output"],
+            json!({"answer": "kept", "success": true}).to_string()
+        );
+        assert_eq!(batch[1]["parts"][0]["tool_status"], TOOL_STATUS_COMPLETED);
     }
 
     #[test]

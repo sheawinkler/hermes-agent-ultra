@@ -2350,13 +2350,13 @@ impl AgentLoop {
         String::new()
     }
 
-    fn memory_sync(&self, user: &str, assistant: &str, session_id: &str) {
+    fn memory_sync(&self, user: &str, assistant: &str, session_id: &str, messages: &[Message]) {
         if self.config.skip_memory {
             return;
         }
         if let Some(ref mm) = self.memory_manager {
             if let Ok(mm) = mm.lock() {
-                mm.sync_all(user, assistant, session_id);
+                mm.sync_all_with_messages(user, assistant, session_id, messages);
                 if !user.trim().is_empty() {
                     mm.queue_prefetch_all(user, session_id);
                 }
@@ -5417,7 +5417,7 @@ impl AgentLoop {
             if total_turns % self.config.memory_flush_interval == 0 && total_turns > 0 {
                 let msgs = ctx.get_messages();
                 let (u, a) = extract_last_user_assistant(msgs);
-                self.memory_sync(&u, &a, session_id);
+                self.memory_sync(&u, &a, session_id, msgs);
             }
 
             // --- Pre-LLM hook ---
@@ -5956,8 +5956,9 @@ impl AgentLoop {
                     );
                 }
                 // Final memory sync
-                let (u, a) = extract_last_user_assistant(ctx.get_messages());
-                self.memory_sync(&u, &a, session_id);
+                let msgs = ctx.get_messages();
+                let (u, a) = extract_last_user_assistant(msgs);
+                self.memory_sync(&u, &a, session_id, msgs);
                 self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
                 self.memory_on_session_end(ctx.get_messages());
                 replay.record(
@@ -6756,8 +6757,9 @@ impl AgentLoop {
             }
 
             if total_turns % self.config.memory_flush_interval == 0 && total_turns > 0 {
-                let (u, a) = extract_last_user_assistant(ctx.get_messages());
-                self.memory_sync(&u, &a, session_id);
+                let msgs = ctx.get_messages();
+                let (u, a) = extract_last_user_assistant(msgs);
+                self.memory_sync(&u, &a, session_id, msgs);
             }
 
             // Pre-LLM hook
@@ -7372,8 +7374,9 @@ impl AgentLoop {
                         &format!("Objective runtime ledger append skipped: {}", err),
                     );
                 }
-                let (u, a) = extract_last_user_assistant(ctx.get_messages());
-                self.memory_sync(&u, &a, session_id);
+                let msgs = ctx.get_messages();
+                let (u, a) = extract_last_user_assistant(msgs);
+                self.memory_sync(&u, &a, session_id, msgs);
                 self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
                 self.memory_on_session_end(ctx.get_messages());
                 replay.record(

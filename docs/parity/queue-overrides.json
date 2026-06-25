@@ -4288,6 +4288,36 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust/setup/install: hermes-agent now exposes DEFAULT_AGENT_IDENTITY-backed SOUL.md seeding, ignores exact legacy comment-only templates at prompt load, upgrades those templates during setup, preserves customized SOUL.md files, respects explicit/HERMES_HOME resolution, and install.sh seeds the real default persona instead of an empty scaffold."
+    },
+    "c7b7f92ec14a5c43deef844804f0bf6a7f2d992d": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust OpenViking memory plugin: sync_turn now receives canonical structured messages through MemoryManager, extracts the current turn, writes /messages/batch parts for user/assistant/tool results, preserves tool inputs/outputs/status, skips OpenViking recall echoes, and falls back to prior text sync on batch failure. Focused Rust tests cover tool result coalescing, pending tool calls, JSON error status, recall skip, response text parts, and Rust-flattened tool_call arguments."
+    },
+    "d7cd0bc0863cda1a203f00422b1441ca2d9890ed": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust OpenViking memory plugin: structured sync preserves assistant attribution via peer_id on assistant/tool-part batch messages, supports response-style text parts, replaces the first synced user message with the already-sanitized user content, and receives redacted canonical transcript values from MemoryManager."
+    },
+    "fcac0f94d4844f904a6eaa8a2b667299408b9f92": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust OpenViking memory plugin: recall-tool skip tracking only records non-empty tool ids, so an empty OpenViking recall result cannot poison the skip set for unrelated empty-id tool results. The sync trace env toggle uses the canonical truthy set {1,true,yes,on}. Regression test covers empty-id recall plus non-recall tool result preservation."
+    },
+    "27a6e188c4b4bc66f52b321f055fe18aa866b545": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust OpenViking memory plugin: OpenViking tool schema names are centralized as Rust constants and the recall-tool classifier derives from the same search/read/browse constants, keeping write tools intentionally ingestible while preventing schema-name drift."
+    },
+    "2d4046c6de975eff194d6ebdfa4180e5ed86c422": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust OpenViking memory plugin: structured batch conversion pre-scans assistant tool calls once, caches parsed tool input by non-empty id, and reuses that cached input for completed and pending tool parts with a fallback parse for uncached/empty-id calls."
+    },
+    "be2c2beb96e578542b24bdb275071044a853ebbd": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust OpenViking memory plugin: canonical OpenViking tool_status values and inbound alias sets are named constants; conversion emits completed/error/pending consistently and tests cover JSON error result mapping."
     }
   },
   "subject_patterns": [
