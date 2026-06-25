@@ -57,6 +57,137 @@ pub enum ToolError {
     SchemaViolation(String),
 }
 
+/// Platform-neutral category for gateway send failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SendErrorKind {
+    /// Content exceeded a platform message-size cap.
+    TooLong,
+    /// Markup/entities could not be parsed by the platform.
+    BadFormat,
+    /// The bot is blocked, kicked, unauthenticated, or lacks post rights.
+    Forbidden,
+    /// The target chat, thread, topic, or message no longer exists.
+    NotFound,
+    /// Platform flood control or rate limiting throttled the send.
+    RateLimited,
+    /// Connection-level failure that is safe to retry.
+    Transient,
+    /// No known provider error shape matched.
+    Unknown,
+}
+
+impl SendErrorKind {
+    pub const ALL: [Self; 7] = [
+        Self::TooLong,
+        Self::BadFormat,
+        Self::Forbidden,
+        Self::NotFound,
+        Self::RateLimited,
+        Self::Transient,
+        Self::Unknown,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TooLong => "too_long",
+            Self::BadFormat => "bad_format",
+            Self::Forbidden => "forbidden",
+            Self::NotFound => "not_found",
+            Self::RateLimited => "rate_limited",
+            Self::Transient => "transient",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl std::fmt::Display for SendErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+pub const SEND_ERROR_KINDS: &[SendErrorKind] = &SendErrorKind::ALL;
+
+/// Classify a provider send failure without tying consumers to raw text shapes.
+pub fn classify_send_error_text(error_text: &str) -> SendErrorKind {
+    let blob = error_text.to_lowercase();
+    if blob.trim().is_empty() {
+        return SendErrorKind::Unknown;
+    }
+
+    if blob.contains("message_too_long")
+        || blob.contains("too long")
+        || blob.contains("message is too long")
+    {
+        return SendErrorKind::TooLong;
+    }
+
+    if blob.contains("can't parse entities")
+        || blob.contains("cant parse entities")
+        || blob.contains("can't find end")
+        || blob.contains("unsupported start tag")
+        || (blob.contains("entity") && blob.contains("parse"))
+        || (blob.contains("bad request") && blob.contains("entit"))
+    {
+        return SendErrorKind::BadFormat;
+    }
+
+    if blob.contains("forbidden")
+        || blob.contains("bot was blocked")
+        || blob.contains("blocked by the user")
+        || blob.contains("user is deactivated")
+        || blob.contains("not enough rights")
+        || blob.contains("have no rights")
+        || blob.contains("not a member")
+    {
+        return SendErrorKind::Forbidden;
+    }
+
+    if blob.contains("chat not found")
+        || blob.contains("message to edit not found")
+        || blob.contains("message to reply not found")
+        || blob.contains("thread not found")
+        || blob.contains("topic_deleted")
+        || blob.contains("message_id_invalid")
+    {
+        return SendErrorKind::NotFound;
+    }
+
+    if blob.contains("flood")
+        || blob.contains("too many requests")
+        || blob.contains("retry after")
+        || blob.contains("rate limit")
+    {
+        return SendErrorKind::RateLimited;
+    }
+
+    if blob.contains("timeout")
+        || blob.contains("timed out")
+        || blob.contains("connection reset")
+        || blob.contains("connection aborted")
+        || blob.contains("connection refused")
+        || blob.contains("connection closed")
+        || blob.contains("broken pipe")
+        || blob.contains("temporarily unavailable")
+        || blob.contains("dns")
+        || blob.contains("tls")
+        || blob.contains("ssl")
+        || blob.contains("econnreset")
+        || blob.contains("econnrefused")
+        || blob.contains("connecttimeout")
+        || blob.contains("network")
+        || blob.contains("transport")
+        || blob.contains("http 502")
+        || blob.contains("http 503")
+        || blob.contains("http 504")
+    {
+        return SendErrorKind::Transient;
+    }
+
+    SendErrorKind::Unknown
+}
+
 /// Error type for gateway / platform communication failures.
 #[derive(Debug, thiserror::Error)]
 pub enum GatewayError {
@@ -77,6 +208,29 @@ pub enum GatewayError {
 
     #[error("Session expired: {0}")]
     SessionExpired(String),
+}
+
+impl GatewayError {
+    pub fn send_error_kind(&self) -> SendErrorKind {
+        match self {
+            GatewayError::RateLimited { .. } => SendErrorKind::RateLimited,
+            GatewayError::Auth(message) => match classify_send_error_text(message) {
+                SendErrorKind::Unknown => SendErrorKind::Forbidden,
+                kind => kind,
+            },
+            GatewayError::ConnectionFailed(message) => match classify_send_error_text(message) {
+                SendErrorKind::Unknown => SendErrorKind::Transient,
+                kind => kind,
+            },
+            GatewayError::SendFailed(message)
+            | GatewayError::Platform(message)
+            | GatewayError::SessionExpired(message) => classify_send_error_text(message),
+        }
+    }
+
+    pub fn is_send_error_kind(&self, kind: SendErrorKind) -> bool {
+        self.send_error_kind() == kind
+    }
 }
 
 /// Error type for configuration parsing and validation.
@@ -177,6 +331,77 @@ mod tests {
             retry_after_secs: Some(42),
         };
         assert_eq!(err.to_string(), "Rate limited (retry after 42s)");
+    }
+
+    #[test]
+    fn send_error_kind_names_match_wire_contract() {
+        let names: Vec<_> = SEND_ERROR_KINDS.iter().map(|kind| kind.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "too_long",
+                "bad_format",
+                "forbidden",
+                "not_found",
+                "rate_limited",
+                "transient",
+                "unknown",
+            ]
+        );
+        assert_eq!(
+            serde_json::to_string(&SendErrorKind::TooLong).unwrap(),
+            "\"too_long\""
+        );
+    }
+
+    #[test]
+    fn classify_send_error_text_covers_provider_shapes() {
+        let cases = [
+            ("Bad Request: message_too_long", SendErrorKind::TooLong),
+            (
+                "Bad Request: can't parse entities: Can't find end of the entity",
+                SendErrorKind::BadFormat,
+            ),
+            (
+                "Forbidden: bot was blocked by the user",
+                SendErrorKind::Forbidden,
+            ),
+            ("Bad Request: chat not found", SendErrorKind::NotFound),
+            (
+                "Too Many Requests: retry after 12",
+                SendErrorKind::RateLimited,
+            ),
+            (
+                "request failed: connection reset by peer",
+                SendErrorKind::Transient,
+            ),
+            ("provider said no", SendErrorKind::Unknown),
+        ];
+
+        for (text, expected) in cases {
+            assert_eq!(classify_send_error_text(text), expected, "{text}");
+        }
+    }
+
+    #[test]
+    fn gateway_error_exposes_send_error_kind() {
+        assert_eq!(
+            GatewayError::RateLimited {
+                retry_after_secs: Some(5)
+            }
+            .send_error_kind(),
+            SendErrorKind::RateLimited
+        );
+        assert_eq!(
+            GatewayError::Auth("bad token".into()).send_error_kind(),
+            SendErrorKind::Forbidden
+        );
+        assert_eq!(
+            GatewayError::ConnectionFailed("dial failed".into()).send_error_kind(),
+            SendErrorKind::Transient
+        );
+        assert!(GatewayError::SendFailed("message_id_invalid".into())
+            .is_send_error_kind(SendErrorKind::NotFound));
     }
 
     #[test]

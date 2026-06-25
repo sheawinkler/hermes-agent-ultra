@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T09:41:00.732386+00:00`
+Generated: `2026-06-25T09:53:46.748993+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7011`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-25T09:41:00.732386+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 206 |
-| ported | 391 |
+| pending | 205 |
+| ported | 392 |
 | superseded | 6338 |
 
 ## First 100 Pending Commits
@@ -104,7 +104,6 @@ Generated: `2026-06-25T09:41:00.732386+00:00`
 | `9578e52795e3` | #26 | fix(photon): detect unexpected sidecar death and trigger reconnect |
 | `5e3e89cc05d3` | #23 | feat(hindsight): configurable embedded daemon health grace timeout (#50341) |
 | `6bbacc223899` | #26 | fix(desktop): make cold-start port-announcement deadline tolerant |
-| `c0409a87ff05` | #23 | feat(gateway): typed send-error classification (SendResult.error_kind) (#50342) |
 | `b6d107240819` | #20 | fix(cli): branch new worktrees from the fresh remote tip, not stale local HEAD (#50355) |
 | `5b45fb269a06` | #20 | fix(security): sanitize kanban markdown html |
 | `f72690825e76` | #26 | fix(desktop/windows): stop in-app update from cascading into a backend restart loop (#50381) |
@@ -125,3 +124,4 @@ Generated: `2026-06-25T09:41:00.732386+00:00`
 | `95d53c3bcb06` | #20 | feat(cli): /reasoning full — show complete thinking, not 10-line clamp (#50499) |
 | `b9b4756ab480` | #22 | fix dashboard chat session titles |
 | `a61baa961572` | #26 | feat(desktop): PR-style file diffs in chat |
+| `c6fbd5a10494` | #26 | style(desktop): lead --dt-font-mono with bundled JetBrains Mono |

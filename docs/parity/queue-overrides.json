@@ -4474,6 +4474,11 @@
       "owner": "rust-runtime",
       "notes": "Rust Telegram send paths now surface Bot API parameters.retry_after as typed GatewayError::RateLimited for JSON and multipart sends, preserving server-requested flood-control delay instead of flattening it into a generic SendFailed string. Focused tests cover retry_after parsing and typed error mapping."
     },
+    "c0409a87ff05": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust core now exposes the platform-neutral SendErrorKind taxonomy, classify_send_error_text, and GatewayError::send_error_kind for deterministic send-failure branching. StreamConsumer can consume typed GatewayError/SendErrorKind values so rate-limited edit failures keep adaptive flood backoff while permanent send failures fall back immediately, with focused hermes-core and hermes-gateway tests."
+    },
     "4314d451ca96": {
       "disposition": "ported",
       "owner": "rust-runtime",
