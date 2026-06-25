@@ -4528,6 +4528,11 @@
       "disposition": "superseded",
       "notes": "Upstream malformed int/float env crash class is Python ValueError-specific. Rust numeric env reads in the corresponding config/gateway/agent/tool surfaces are fail-soft through parse().ok(), if-let Ok(...), or unwrap_or(default), so malformed values do not panic during adapter/agent init.",
       "owner": "rust-runtime"
+    },
+    "b6e2a54a94f5": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust MCP refresh parity now diffs reload snapshots against the advertised tool schema surface, so restricted/custom platform toolsets do not report hidden MCP handlers as added. ACP prompt execution no longer appends all live mcp-* schemas after planner filtering; explicit MCP server aliases still resolve through the shared platform planner. Python in-place tools/valid_tool_names race and post-build memory/context reinjection issues are superseded by Rust AgentLoop construction plus advertised-tool-name guards."
     }
   },
   "subject_patterns": [

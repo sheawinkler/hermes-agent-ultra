@@ -27711,25 +27711,11 @@ struct CliAcpPromptExecutor {
 
 impl CliAcpPromptExecutor {
     fn current_tool_schemas(&self) -> Vec<hermes_core::ToolSchema> {
-        let mut schemas = hermes_tool_planning::resolve_platform_tool_schemas(
+        hermes_tool_planning::resolve_platform_tool_schemas(
             self.config.as_ref(),
             "cli",
             &self.tool_registry,
-        );
-        let mut seen: HashSet<String> = schemas.iter().map(|schema| schema.name.clone()).collect();
-        let mcp_tool_names: HashSet<String> = self
-            .tool_registry
-            .list_tools()
-            .into_iter()
-            .filter(|entry| entry.toolset.starts_with("mcp-"))
-            .map(|entry| entry.name)
-            .collect();
-        for schema in self.tool_registry.get_definitions() {
-            if mcp_tool_names.contains(&schema.name) && seen.insert(schema.name.clone()) {
-                schemas.push(schema);
-            }
-        }
-        schemas
+        )
     }
 }
 
@@ -28972,7 +28958,7 @@ mod tests {
     }
 
     #[test]
-    fn acp_prompt_executor_resolves_tool_schemas_from_current_registry() {
+    fn acp_prompt_executor_respects_mcp_toolset_gate() {
         let mut config = GatewayConfig::default();
         config
             .platform_toolsets
@@ -29028,6 +29014,43 @@ mod tests {
             "mcp",
             None,
         );
+
+        assert!(!executor
+            .current_tool_schemas()
+            .iter()
+            .any(|schema| schema.name == "mcp_srv_ping"));
+    }
+
+    #[test]
+    fn acp_prompt_executor_allows_explicit_mcp_toolset_alias() {
+        let mut config = GatewayConfig::default();
+        config
+            .platform_toolsets
+            .insert("cli".to_string(), vec!["srv".to_string()]);
+        let tool_registry = Arc::new(hermes_tools::ToolRegistry::new());
+        let executor = CliAcpPromptExecutor {
+            config: Arc::new(config),
+            tool_registry: Arc::clone(&tool_registry),
+            interrupts: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let schema = hermes_core::tool_schema(
+            "mcp_srv_ping",
+            "MCP ping",
+            hermes_core::JsonSchema::new("object"),
+        );
+        tool_registry.register(
+            "mcp_srv_ping",
+            "mcp-srv",
+            schema.clone(),
+            Arc::new(CliNoopTool { schema }),
+            Arc::new(|| true),
+            Vec::new(),
+            true,
+            "MCP ping",
+            "mcp",
+            None,
+        );
+        tool_registry.register_toolset_alias("srv", "mcp-srv");
 
         assert!(executor
             .current_tool_schemas()
