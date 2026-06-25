@@ -1,25 +1,25 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T01:37:54.055598+00:00`
+Generated: `2026-06-25T02:06:15.775590+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `6974`.
+- Range: `main..upstream/main`; total commits tracked: `6978`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3115 |
+| #20 | GPAR-01 tests+CI parity | 3118 |
 | #21 | GPAR-02 skills parity | 130 |
 | #22 | GPAR-03 UX parity | 957 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 22 |
-| #25 | GPAR-06 packaging/docs/install parity | 144 |
+| #25 | GPAR-06 packaging/docs/install parity | 145 |
 | #26 | GPAR-07 upstream queue backfill | 2118 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
 | pending | 241 |
-| ported | 353 |
-| superseded | 6304 |
+| ported | 354 |
+| superseded | 6307 |
 
 ## First 100 Pending Commits
 
@@ -27,7 +27,6 @@ Generated: `2026-06-25T01:37:54.055598+00:00`
 | --- | ---: | --- |
 | `5ffbfed193ad` | #20 | feat(mcp-catalog): add official Unreal Engine 5.8 MCP server |
 | `73cd8622f9fc` | #22 | feat(billing): /billing terminal billing — interactive TUI + CLI client (#45449) |
-| `49596b70cb2d` | #20 | fix(gateway): resume follows the compression tip so post-compression replies render |
 | `36851fa576eb` | #20 | fix(docker): support WebUI installs from read-only sources (#48541) |
 | `cfb55de5ea49` | #21 | Update Stripe Projects skill docs (#48673) |
 | `c02192ff6ace` | #20 | feat(image-gen): add image-to-image / editing to image_generate (#48705) |
@@ -38,7 +37,6 @@ Generated: `2026-06-25T01:37:54.055598+00:00`
 | `27a6e188c4b4` | #23 | refactor(openviking): derive recall-tool name set from canonical schemas |
 | `2d4046c6de97` | #23 | refactor(openviking): reuse pre-scanned tool_input for pending tool calls |
 | `be2c2beb96e5` | #23 | refactor(openviking): name tool_status constants and alias sets |
-| `1699525638ed` | #20 | fix(tui): route pending-input commands via command.dispatch (#48848) |
 | `f9ffe0bc3f61` | #26 | fix(desktop): resume stored session id on notification click |
 | `069011dd0c8f` | #26 | test(desktop): cover runtime->stored notification id resolution |
 | `bce1e36b5769` | #20 | fix(discord): unwrap dict choices + soft-boundary truncate clarify buttons |
@@ -125,3 +123,5 @@ Generated: `2026-06-25T01:37:54.055598+00:00`
 | `ea056b05598c` | #20 | fix(telegram): avoid rich messages for CJK text |
 | `d0de4601d204` | #20 | fix(tui): /compress shows a before/after summary (#46686) |
 | `7bc6f1806284` | #23 | fix(hindsight): skip local_embedded daemon when running as root |
+| `93ea9b04aff2` | #20 | fix(gateway): cap inbound media download size to prevent memory exhaustion |
+| `6183e8ce1b5e` | #20 | fix(telegram): make Bot API 10.1 rich messages opt-in (default off) |

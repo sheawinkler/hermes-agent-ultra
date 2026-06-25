@@ -1304,7 +1304,46 @@ fn load_resume_payload(
             }
         }
     }
+    payload = follow_resume_compression_tip(payload)?;
     Ok(payload)
+}
+
+fn follow_resume_compression_tip(
+    payload: ResumeSessionPayload,
+) -> Result<ResumeSessionPayload, AgentError> {
+    let Some(source_sessions_dir) = payload.source_path.parent() else {
+        return Ok(payload);
+    };
+    let Some(state_root) = source_sessions_dir.parent() else {
+        return Ok(payload);
+    };
+    let persistence = SessionPersistence::new(state_root);
+    let tip = match persistence.resolve_resume_session_id(&payload.session_id) {
+        Ok(tip) => tip,
+        Err(err) => {
+            tracing::debug!(
+                "resume compression-tip resolution skipped for {}: {}",
+                payload.session_id,
+                err
+            );
+            return Ok(payload);
+        }
+    };
+    if tip.trim().is_empty() || tip == payload.session_id {
+        return Ok(payload);
+    }
+    match resolve_resume_session_file(source_sessions_dir, Some(&tip)) {
+        Ok((resolved_id, source_path)) => parse_resume_payload_file(resolved_id, source_path),
+        Err(err) => {
+            tracing::debug!(
+                "resume compression tip {} resolved from {} but snapshot lookup failed: {}",
+                tip,
+                payload.session_id,
+                err
+            );
+            Ok(payload)
+        }
+    }
 }
 
 fn parse_resume_payload_file(
@@ -18982,6 +19021,80 @@ max_turns: 50
             payload.messages[2].role,
             hermes_core::MessageRole::Assistant
         ));
+    }
+
+    #[test]
+    fn load_resume_payload_follows_compression_tip_snapshot() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let state_root = hermes_state_root(&cli);
+        let sessions_dir = state_root.join("sessions");
+        std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+        std::fs::write(
+            sessions_dir.join("root.json"),
+            r#"{
+  "session_info": {"session_id":"root","model":"nous:openai/gpt-5.5"},
+  "messages":[{"role":"User","content":"pre-compression turn"}]
+}"#,
+        )
+        .expect("write root session");
+        std::fs::write(
+            sessions_dir.join("cont.json"),
+            r#"{
+  "session_info": {"session_id":"cont","model":"nous:openai/gpt-5.5"},
+  "messages":[{"role":"Assistant","content":"post-compression reply"}]
+}"#,
+        )
+        .expect("write continuation session");
+
+        let persistence = SessionPersistence::new(&state_root);
+        persistence
+            .persist_session(
+                "root",
+                &[hermes_core::Message::user("pre-compression turn")],
+                Some("nous:openai/gpt-5.5"),
+                Some("cli"),
+                None,
+                None,
+            )
+            .unwrap();
+        persistence
+            .persist_session(
+                "cont",
+                &[hermes_core::Message::assistant("post-compression reply")],
+                Some("nous:openai/gpt-5.5"),
+                Some("cli"),
+                None,
+                None,
+            )
+            .unwrap();
+        let base = chrono::Utc::now() - chrono::Duration::hours(1);
+        let root_created = base.to_rfc3339();
+        let root_ended = (base + chrono::Duration::seconds(10)).to_rfc3339();
+        let cont_created = (base + chrono::Duration::seconds(20)).to_rfc3339();
+        assert!(persistence
+            .update_session_lineage(
+                "root",
+                None,
+                Some("compression"),
+                Some(&root_created),
+                Some(&root_ended),
+            )
+            .expect("mark root compressed"));
+        assert!(persistence
+            .update_session_lineage("cont", Some("root"), None, Some(&cont_created), None,)
+            .expect("link continuation"));
+
+        let payload = load_resume_payload(&cli, Some("root")).expect("load payload");
+
+        assert_eq!(payload.resolved_id, "cont");
+        assert_eq!(payload.session_id, "cont");
+        assert_eq!(payload.source_path, sessions_dir.join("cont.json"));
+        assert_eq!(payload.messages.len(), 1);
+        assert_eq!(
+            payload.messages[0].content.as_deref(),
+            Some("post-compression reply")
+        );
     }
 
     #[test]
