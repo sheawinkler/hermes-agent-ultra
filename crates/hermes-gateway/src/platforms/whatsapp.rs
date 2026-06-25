@@ -249,12 +249,7 @@ impl WhatsAppAdapter {
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
         let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
-        let body = serde_json::json!({
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "text",
-            "text": { "body": text }
-        });
+        let body = build_text_body(to, text);
 
         let resp = self
             .client
@@ -462,15 +457,7 @@ impl WhatsAppAdapter {
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
         let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
-        let body = serde_json::json!({
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "reaction",
-            "reaction": {
-                "message_id": message_id,
-                "emoji": emoji
-            }
-        });
+        let body = build_reaction_body(to, message_id, emoji);
 
         let resp = self
             .client
@@ -543,7 +530,41 @@ fn build_link_media_body(
 
     serde_json::json!({
         "messaging_product": "whatsapp",
-        "to": to,
+        "to": normalize_cloud_recipient(to),
+        "type": media_type,
+        media_type: media_obj
+    })
+}
+
+fn build_text_body(to: &str, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "messaging_product": "whatsapp",
+        "to": normalize_cloud_recipient(to),
+        "type": "text",
+        "text": { "body": text }
+    })
+}
+
+fn build_reaction_body(to: &str, message_id: &str, emoji: &str) -> serde_json::Value {
+    serde_json::json!({
+        "messaging_product": "whatsapp",
+        "to": normalize_cloud_recipient(to),
+        "type": "reaction",
+        "reaction": {
+            "message_id": message_id,
+            "emoji": emoji
+        }
+    })
+}
+
+fn build_uploaded_media_body(
+    to: &str,
+    media_type: &str,
+    media_obj: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "messaging_product": "whatsapp",
+        "to": normalize_cloud_recipient(to),
         "type": media_type,
         media_type: media_obj
     })
@@ -574,7 +595,7 @@ mod tests {
     #[test]
     fn build_link_media_body_with_caption() {
         let body = build_link_media_body(
-            "15551234567",
+            "+1 (555) 123-4567",
             "image",
             "https://example.com/preview.png",
             Some("Status update"),
@@ -599,6 +620,58 @@ mod tests {
         assert_eq!(body["type"], "image");
         assert_eq!(body["image"]["link"], "https://example.com/preview.png");
         assert!(body["image"]["caption"].is_null());
+    }
+
+    #[test]
+    fn outbound_payload_builders_normalize_cloud_recipients() {
+        let text = build_text_body("+1 555 123 4567", "hello");
+        assert_eq!(text["to"], "15551234567");
+        assert_eq!(text["text"]["body"], "hello");
+
+        let reaction = build_reaction_body("15551234567:7@s.whatsapp.net", "wamid.1", "👍");
+        assert_eq!(reaction["to"], "15551234567");
+        assert_eq!(reaction["reaction"]["message_id"], "wamid.1");
+
+        let uploaded = build_uploaded_media_body(
+            "+1 (555) 123-4567",
+            "document",
+            serde_json::json!({"id": "media-1"}),
+        );
+        assert_eq!(uploaded["to"], "15551234567");
+        assert_eq!(uploaded["document"]["id"], "media-1");
+    }
+
+    #[test]
+    fn normalize_cloud_recipient_accepts_phone_like_values() {
+        assert_eq!(
+            normalize_cloud_recipient(" +1 (555) 123-4567 "),
+            "15551234567"
+        );
+        assert_eq!(normalize_cloud_recipient("1555.123.4567"), "15551234567");
+    }
+
+    #[test]
+    fn normalize_cloud_recipient_converts_user_jids_to_cloud_phone() {
+        assert_eq!(
+            normalize_cloud_recipient("15551234567:11@s.whatsapp.net"),
+            "15551234567"
+        );
+        assert_eq!(
+            normalize_cloud_recipient("+15551234567@s.whatsapp.net"),
+            "15551234567"
+        );
+    }
+
+    #[test]
+    fn normalize_cloud_recipient_preserves_non_cloud_group_targets() {
+        assert_eq!(
+            normalize_cloud_recipient("120363001234567890@g.us"),
+            "120363001234567890@g.us"
+        );
+        assert_eq!(
+            normalize_cloud_recipient("status@broadcast"),
+            "status@broadcast"
+        );
     }
 
     #[test]
@@ -795,12 +868,7 @@ impl PlatformAdapter for WhatsAppAdapter {
             media_obj["filename"] = serde_json::Value::String(file_name.to_string());
         }
 
-        let body = serde_json::json!({
-            "messaging_product": "whatsapp",
-            "to": chat_id,
-            "type": media_type,
-            media_type: media_obj
-        });
+        let body = build_uploaded_media_body(chat_id, media_type, media_obj);
 
         let resp = self
             .client
@@ -886,6 +954,54 @@ fn normalize_whatsapp_id(value: &str) -> String {
         .trim_end_matches("@s.whatsapp.net")
         .trim_end_matches("@lid")
         .to_ascii_lowercase()
+}
+
+fn normalize_cloud_recipient(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if lower == "status@broadcast" || lower.ends_with("@g.us") || lower.ends_with("@newsletter") {
+        return trimmed.to_string();
+    }
+
+    if lower.ends_with("@s.whatsapp.net") || lower.ends_with("@lid") {
+        let local = trimmed
+            .split('@')
+            .next()
+            .unwrap_or(trimmed)
+            .split(':')
+            .next()
+            .unwrap_or(trimmed);
+        let digits = digits_only(local);
+        return if digits.is_empty() {
+            local.trim_start_matches('+').to_string()
+        } else {
+            digits
+        };
+    }
+
+    if trimmed.contains('@') {
+        return trimmed.to_string();
+    }
+
+    let phone_like = trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_digit() || matches!(ch, '+' | ' ' | '-' | '(' | ')' | '.'));
+    if phone_like {
+        let digits = digits_only(trimmed);
+        if !digits.is_empty() {
+            return digits;
+        }
+    }
+
+    trimmed.to_string()
+}
+
+fn digits_only(value: &str) -> String {
+    value.chars().filter(|ch| ch.is_ascii_digit()).collect()
 }
 
 fn contains_normalized_whatsapp_id(list: &[String], candidate: &str) -> bool {

@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T07:40:42.585742+00:00`
+Generated: `2026-06-25T08:21:54.340532+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `6997`.
 
@@ -17,9 +17,9 @@ Generated: `2026-06-25T07:40:42.585742+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 213 |
-| ported | 382 |
-| superseded | 6326 |
+| pending | 207 |
+| ported | 385 |
+| superseded | 6329 |
 
 ## First 100 Pending Commits
 
@@ -108,10 +108,7 @@ Generated: `2026-06-25T07:40:42.585742+00:00`
 | `b6d107240819` | #20 | fix(cli): branch new worktrees from the fresh remote tip, not stale local HEAD (#50355) |
 | `5b45fb269a06` | #20 | fix(security): sanitize kanban markdown html |
 | `f72690825e76` | #26 | fix(desktop/windows): stop in-app update from cascading into a backend restart loop (#50381) |
-| `a4b1554c7349` | #20 | fix(whatsapp): normalize bare phone targets to JIDs before bridge send |
 | `99f3072aa06a` | #20 | fix(model-switch): a failed in-place swap must be a no-op, not a dead session (#50375) |
-| `b7f6cb9c8ba3` | #20 | fix(email): resolve IMAP/SMTP host from config and validate before connecting |
-| `f79e0a7060d0` | #20 | fix(email): mark missing-config as non-retryable + reject blank env vars (#40715) |
 | `745c4db235bd` | #26 | feat(desktop/windows): show update-in-progress feedback before the desktop exits (#50419) (#50448) |
 | `7785655b4ece` | #26 | fix(desktop): keep the floating composer in-bounds so it can't be lost off-screen |
 | `37c37c9dc511` | #26 | fix(antigravity): register google-antigravity ProviderProfile + AUTHOR_MAP |
@@ -120,8 +117,11 @@ Generated: `2026-06-25T07:40:42.585742+00:00`
 | `13ce8119067e` | #26 | fix: show desktop approval fallback (#46548) |
 | `e5e25836350a` | #26 | fix(desktop): relaunch on Linux after in-app update instead of hanging (#45205) |
 | `84e1d31e5442` | #22 | refactor(kanban): fold worker/orchestrator skills into injected guidance (#50473) |
-| `77fdbbfe81d8` | #20 | fix(whatsapp): validate bridge PID identity before killing stale pidfile entry |
-| `069ab40c5f3f` | #20 | fix(whatsapp): only kill LISTENers when freeing the bridge port, never clients |
-| `615a8e651606` | #20 | fix(whatsapp): add missing re import + fix test import path after adapter relocation |
 | `b6d2ac176e27` | #23 | feat(mem0): add self-hosted support via MEM0_HOST / host config |
 | `452a725ae19f` | #23 | fix(mem0): address PR review — restore docstrings, keep api_key required |
+| `0a7ae28ebc1a` | #26 | fix(compressor): remove logging.basicConfig from library class __init__ |
+| `7130d60861a9` | #22 | feat(providers): remove google-gemini-cli + google-antigravity OAuth providers (#50492) |
+| `0768ed3b33e4` | #26 | docs(agents): fix stale platform adapter path in token-lock note |
+| `95d53c3bcb06` | #20 | feat(cli): /reasoning full — show complete thinking, not 10-line clamp (#50499) |
+| `4314d451ca96` | #20 | fix(gateway): accept any inbound file type across all messaging platforms |
+| `b5bd66eac9b1` | #20 | fix(telegram): observed/replied group docs of any type are cached too |

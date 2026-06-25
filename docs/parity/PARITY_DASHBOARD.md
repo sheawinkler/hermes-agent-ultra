@@ -7,7 +7,7 @@ _Generated from source artifacts: `2026-06-25T07:40:42.894185+00:00`_
 - Upstream target: `upstream/main` @ `5ecf3bf0e0726b8b33682bb5c3aad9679b7b5be4`
 - Workstream snapshot generated: `2026-06-23T05:17:48-06:00`
 - Parity matrix generated: `2026-06-12T11:29:13.798398+00:00`
-- Queue snapshot generated: `2026-06-25T07:40:42.585742+00:00`
+- Queue snapshot generated: `2026-06-25T08:21:54.340532+00:00`
 - Proof snapshot generated: `2026-06-25T07:40:42.894185+00:00`
 
 ## Gate Status
@@ -75,9 +75,9 @@ _Generated from source artifacts: `2026-06-25T07:40:42.894185+00:00`_
 | Metric | Value |
 | --- | ---: |
 | Total commits in queue | 6997 |
-| Pending | 213 |
-| Ported | 382 |
-| Superseded | 6326 |
+| Pending | 207 |
+| Ported | 385 |
+| Superseded | 6329 |
 
 ## Tree/Patch Drift
 
