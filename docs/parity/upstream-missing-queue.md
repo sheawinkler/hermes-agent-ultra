@@ -1,8 +1,8 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T15:56:30.884476+00:00`
+Generated: `2026-06-25T17:46:51.495581+00:00`
 
-- Range: `origin/main..upstream/main`; total commits tracked: `7012`.
+- Range: `origin/main..upstream/main`; total commits tracked: `7013`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
@@ -11,15 +11,15 @@ Generated: `2026-06-25T15:56:30.884476+00:00`
 | #22 | GPAR-03 UX parity | 957 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 22 |
-| #25 | GPAR-06 packaging/docs/install parity | 145 |
+| #25 | GPAR-06 packaging/docs/install parity | 146 |
 | #26 | GPAR-07 upstream queue backfill | 2130 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 179 |
-| ported | 414 |
-| superseded | 6343 |
+| pending | 171 |
+| ported | 419 |
+| superseded | 6347 |
 
 ## First 100 Pending Commits
 
@@ -36,8 +36,6 @@ Generated: `2026-06-25T15:56:30.884476+00:00`
 | `d91b8d8368bb` | #26 | test(desktop): make keyVar a typed EnvVarInfo factory |
 | `b936f92b25b4` | #26 | fix(desktop): render send/prefill directive notices (/goal, /undo) (#49073) |
 | `db744e7d1e58` | #21 | feat(simplify-code): add risk-tiered application, Chesterton's Fence, slop + silent failure detection |
-| `6c44471bfdb8` | #23 | fix(hindsight): lazy-install cloud client dependency |
-| `13d4b5fe2f45` | #23 | fix(hindsight): align client version to 0.6.1 across all sources |
 | `9026a8c78974` | #22 | feat(gateway): add Raft bundled platform plugin with activity hooks |
 | `7d86178cf51a` | #26 | fix(raft): set stdin=DEVNULL on bridge subprocess |
 | `6308d3416ab9` | #26 | fix(desktop): rename "Restart messaging" -> "Restart gateway" |
@@ -91,11 +89,9 @@ Generated: `2026-06-25T15:56:30.884476+00:00`
 | `7f43378931f3` | #26 | test(desktop): cover renameSessionPreferringRpc routing |
 | `ed81f0b633c7` | #26 | fix(desktop): log session.title RPC failure before REST fallback |
 | `65a477f12e35` | #26 | feat(desktop): add Update now button to About panel (#50186) |
-| `7bc6f1806284` | #23 | fix(hindsight): skip local_embedded daemon when running as root |
 | `587b5b9ac223` | #23 | fix(backup): capture memory-provider state stored outside HERMES_HOME (#50325) |
 | `2a4542333ee1` | #26 | fix(photon): classify Envoy overflow errors as retryable; add typing cooldown |
 | `9578e52795e3` | #26 | fix(photon): detect unexpected sidecar death and trigger reconnect |
-| `5e3e89cc05d3` | #23 | feat(hindsight): configurable embedded daemon health grace timeout (#50341) |
 | `6bbacc223899` | #26 | fix(desktop): make cold-start port-announcement deadline tolerant |
 | `f72690825e76` | #26 | fix(desktop/windows): stop in-app update from cascading into a backend restart loop (#50381) |
 | `745c4db235bd` | #26 | feat(desktop/windows): show update-in-progress feedback before the desktop exits (#50419) (#50448) |
@@ -106,8 +102,6 @@ Generated: `2026-06-25T15:56:30.884476+00:00`
 | `13ce8119067e` | #26 | fix: show desktop approval fallback (#46548) |
 | `e5e25836350a` | #26 | fix(desktop): relaunch on Linux after in-app update instead of hanging (#45205) |
 | `84e1d31e5442` | #22 | refactor(kanban): fold worker/orchestrator skills into injected guidance (#50473) |
-| `b6d2ac176e27` | #23 | feat(mem0): add self-hosted support via MEM0_HOST / host config |
-| `452a725ae19f` | #23 | fix(mem0): address PR review — restore docstrings, keep api_key required |
 | `0a7ae28ebc1a` | #26 | fix(compressor): remove logging.basicConfig from library class __init__ |
 | `7130d60861a9` | #22 | feat(providers): remove google-gemini-cli + google-antigravity OAuth providers (#50492) |
 | `0768ed3b33e4` | #26 | docs(agents): fix stale platform adapter path in token-lock note |
@@ -118,10 +112,16 @@ Generated: `2026-06-25T15:56:30.884476+00:00`
 | `64a507da44d2` | #20 | feat(relay): handle passthrough_forward over the WS (Phase 5 §5.1, gateway half) (#50702) |
 | `61c266b0dc75` | #26 | style(desktop): soften dark-mode syntax highlighting |
 | `8845f3316c26` | #20 | fix(security): restrict dashboard plugin backend import to bundled plugins (#43719) |
-| `2e779d11a03d` | #23 | feat(mem0): v3 API, OSS mode, update/delete tools, telemetry & review fixes (#15624) |
 | `d4fa2db1c5df` | #26 | fix(desktop): show all of a provider's models when searching the composer picker |
 | `17dfc6bec4a8` | #26 | fix(desktop): set AppUserModelID on Windows so notifications fire (#50808) |
 | `f2e37549c673` | #20 | feat(computer_use): cross-platform cua-driver (macOS/Windows/Linux) |
 | `e3505c7f73a4` | #26 | fix(computer_use): reconcile Linux gate with stale "gated off" comments |
-| `70e7132e2ff7` | #20 | fix(openviking): gate memory writes and add viking_forget |
-| `c7e0501e9b58` | #23 | fix(openviking): drain memory mirror workers on shutdown |
+| `027cb649ef80` | #20 | fix(memory): fail closed on unclear write results |
+| `79f270f54962` | #26 | fix(desktop): portal floating composer to body so it can't be clipped off-screen |
+| `aff5ae692fb2` | #26 | fix(desktop): move composer out of contain wrapper instead of portaling |
+| `ea5fa505d974` | #26 | fix(desktop): clamp floating composer to the thread area, not the whole window |
+| `de7ad8b78eae` | #26 | fix(desktop): guarantee out-of-bounds composer is reclamped on load |
+| `ff08e60c63ad` | #21 | feat(skills): add cloudflare-temporary-deploy optional skill (#50849) |
+| `0223ea5f590a` | #26 | feat(computer-use): surface macOS permission preflight in the desktop |
+| `2dfcead68367` | #26 | feat(computer-use): make the preflight cross-platform (win/linux) |
+| `a6b670d4a251` | #26 | fix(desktop): avoid stack overflow on embedded image replay |

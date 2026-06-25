@@ -26,12 +26,20 @@ const VIKING_SEARCH_TOOL: &str = "viking_search";
 const VIKING_READ_TOOL: &str = "viking_read";
 const VIKING_BROWSE_TOOL: &str = "viking_browse";
 const VIKING_REMEMBER_TOOL: &str = "viking_remember";
+const VIKING_FORGET_TOOL: &str = "viking_forget";
 const VIKING_ADD_RESOURCE_TOOL: &str = "viking_add_resource";
 const TOOL_STATUS_COMPLETED: &str = "completed";
 const TOOL_STATUS_ERROR: &str = "error";
 const TOOL_STATUS_PENDING: &str = "pending";
 const TOOL_STATUS_ERROR_ALIASES: &[&str] = &["error", "failed", "failure"];
 const TOOL_STATUS_COMPLETED_ALIASES: &[&str] = &["completed", "complete", "success", "succeeded"];
+const DERIVED_MEMORY_FILENAMES: &[&str] = &[
+    ".abstract.md",
+    ".overview.md",
+    ".read.md",
+    ".full.md",
+    ".relations.json",
+];
 
 fn search_schema() -> Value {
     json!({
@@ -91,6 +99,20 @@ fn remember_schema() -> Value {
                 "category": {"type": "string"}
             },
             "required": ["content"]
+        }
+    })
+}
+
+fn forget_schema() -> Value {
+    json!({
+        "name": VIKING_FORGET_TOOL,
+        "description": "Delete one OpenViking memory file by exact viking:// URI. Rejects resources, directories, summaries, broad deletes, and non-memory URIs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "uri": {"type": "string", "description": "Exact viking:// user memory file URI ending in .md."}
+            },
+            "required": ["uri"]
         }
     })
 }
@@ -322,6 +344,55 @@ fn memory_subdir_for_target(target: &str) -> &'static str {
         "user" | "preferences" => "preferences",
         _ => DEFAULT_MEMORY_SUBDIR,
     }
+}
+
+fn memory_segment_index(parts: &[&str]) -> Option<usize> {
+    if parts.len() >= 2 && parts[0] == "user" && parts[1] == "memories" {
+        return Some(1);
+    }
+    if parts.len() >= 3 && parts[0] == "user" && parts[2] == "memories" {
+        return Some(2);
+    }
+    if parts.len() >= 4 && parts[0] == "user" && parts[1] == "peers" && parts[3] == "memories" {
+        return Some(3);
+    }
+    if parts.len() >= 5 && parts[0] == "user" && parts[2] == "peers" && parts[4] == "memories" {
+        return Some(4);
+    }
+    None
+}
+
+fn validate_forget_memory_uri(raw_uri: Option<&str>) -> Result<String, String> {
+    let uri = raw_uri.unwrap_or("").trim();
+    if uri.is_empty() {
+        return Err("uri is required".to_string());
+    }
+    if !uri.starts_with("viking://") {
+        return Err("viking_forget only accepts viking:// memory file URIs".to_string());
+    }
+    if uri.contains('?') || uri.contains('#') {
+        return Err("viking_forget requires an exact URI without query or fragment".to_string());
+    }
+    if uri.ends_with('/') || !uri.ends_with(".md") {
+        return Err("viking_forget only deletes concrete .md memory files".to_string());
+    }
+
+    let parts = uri["viking://".len()..]
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let memories_idx = memory_segment_index(&parts)
+        .ok_or_else(|| "viking_forget only deletes user memory file URIs".to_string())?;
+    if parts.len() < memories_idx + 2 {
+        return Err("viking_forget only deletes user memory file URIs".to_string());
+    }
+
+    let filename = uri.rsplit('/').next().unwrap_or("");
+    if DERIVED_MEMORY_FILENAMES.contains(&filename) {
+        return Err("viking_forget cannot delete generated memory summary files".to_string());
+    }
+
+    Ok(uri.to_string())
 }
 
 fn build_memory_uri(user: &str, _agent: &str, subdir: &str) -> String {
@@ -1296,7 +1367,7 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         format!(
             "# OpenViking Knowledge Base\n\
              Active. Endpoint: {}.\n\
-             Use viking_search, viking_read, viking_browse, viking_remember, viking_add_resource.",
+             Use viking_search, viking_read, viking_browse, viking_remember, viking_forget, viking_add_resource.",
             ep
         )
     }
@@ -1501,6 +1572,7 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
             read_schema(),
             browse_schema(),
             remember_schema(),
+            forget_schema(),
             add_resource_schema(),
         ]
     }
@@ -1598,6 +1670,44 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
                 match st.client.post(&url).headers(h).json(&body).send() {
                     Ok(r) if r.status().is_success() => {
                         json!({"status": "stored", "uri": uri}).to_string()
+                    }
+                    Ok(r) => json!({"error": format!("HTTP {}", r.status())}).to_string(),
+                    Err(e) => json!({"error": e.to_string()}).to_string(),
+                }
+            }
+            "viking_forget" => {
+                let uri = match validate_forget_memory_uri(args.get("uri").and_then(Value::as_str))
+                {
+                    Ok(uri) => uri,
+                    Err(e) => return json!({"error": e}).to_string(),
+                };
+                let url = format!("{}/api/v1/fs", st.endpoint);
+                match st
+                    .client
+                    .delete(&url)
+                    .headers(h)
+                    .query(&[("uri", uri.as_str()), ("recursive", "false")])
+                    .send()
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        let result = resp.json::<Value>().unwrap_or(json!({}));
+                        let mut payload = json!({"status": "deleted", "uri": uri});
+                        if let Some(obj) = result.get("result").and_then(Value::as_object) {
+                            for key in [
+                                "estimated_deleted_count",
+                                "memory_cleanup",
+                                "semantic_root_uri",
+                                "semantic_status",
+                            ] {
+                                if let Some(value) = obj.get(key) {
+                                    payload[key] = value.clone();
+                                }
+                            }
+                            if let Some(result_uri) = obj.get("uri").and_then(Value::as_str) {
+                                payload["uri"] = json!(result_uri);
+                            }
+                        }
+                        payload.to_string()
                     }
                     Ok(r) => json!({"error": format!("HTTP {}", r.status())}).to_string(),
                     Err(e) => json!({"error": e.to_string()}).to_string(),
@@ -1726,6 +1836,10 @@ impl OpenVikingPrefetch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::time::Duration as StdDuration;
 
     struct EnvGuard {
         key: &'static str,
@@ -1851,6 +1965,118 @@ mod tests {
         assert_eq!(memory_subdir_for_category("unknown"), "preferences");
         assert_eq!(memory_subdir_for_target("memory"), "patterns");
         assert_eq!(memory_subdir_for_target("user"), "preferences");
+    }
+
+    #[test]
+    fn tool_schemas_include_narrow_forget_tool() {
+        let plugin = OpenVikingMemoryPlugin::new();
+
+        let names = plugin
+            .get_tool_schemas()
+            .into_iter()
+            .filter_map(|schema| {
+                schema
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+
+        assert!(names.iter().any(|name| name == VIKING_FORGET_TOOL));
+    }
+
+    #[test]
+    fn validate_forget_memory_uri_accepts_exact_user_memory_files() {
+        assert_eq!(
+            validate_forget_memory_uri(Some(
+                "viking://user/peers/hermes/memories/preferences/mem_abc123.md"
+            ))
+            .expect("valid"),
+            "viking://user/peers/hermes/memories/preferences/mem_abc123.md"
+        );
+        assert_eq!(
+            validate_forget_memory_uri(Some("viking://user/default/memories/profile.md"))
+                .expect("valid"),
+            "viking://user/default/memories/profile.md"
+        );
+    }
+
+    #[test]
+    fn validate_forget_memory_uri_rejects_broad_or_non_memory_targets() {
+        for uri in [
+            "",
+            "viking:/user/memories/preferences/mem_abc123.md",
+            "viking://resources/project/doc.md",
+            "viking://resources/project/memories/mem_abc123.md",
+            "viking://agent/hermes/memories/preferences/mem_abc123.md",
+            "viking://user/skills/example/SKILL.md",
+            "viking://user/sessions/session-1/messages.jsonl",
+            "viking://user/memories/preferences/",
+            "viking://user/memories/preferences/.overview.md",
+            "viking://user/memories/preferences/.abstract.md",
+            "viking://user/memories/preferences/mem_abc123.md?recursive=true",
+        ] {
+            assert!(
+                validate_forget_memory_uri(Some(uri)).is_err(),
+                "{uri} should be rejected"
+            );
+        }
+    }
+
+    fn one_shot_openviking_server(body: &'static str) -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            stream
+                .set_read_timeout(Some(StdDuration::from_secs(2)))
+                .expect("timeout");
+            let mut buf = [0u8; 8192];
+            let n = stream.read(&mut buf).expect("read");
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            tx.send(request).expect("send request");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).expect("write");
+        });
+        (format!("http://{addr}"), rx)
+    }
+
+    #[test]
+    fn handle_tool_call_forget_deletes_exact_memory_file_uri() {
+        let uri = "viking://user/peers/hermes/memories/preferences/mem_abc123.md";
+        let body = r#"{"status":"ok","result":{"uri":"viking://user/peers/hermes/memories/preferences/mem_abc123.md","estimated_deleted_count":1}}"#;
+        let (endpoint, rx) = one_shot_openviking_server(body);
+        let plugin = OpenVikingMemoryPlugin::new();
+        *plugin.state.lock().unwrap() = Some(VikingState {
+            client: Client::new(),
+            endpoint,
+            api_key: "test-key".to_string(),
+            account: "acct".to_string(),
+            user: "usr".to_string(),
+            agent: "hermes".to_string(),
+            session_id: "sid".to_string(),
+            turn_count: 0,
+        });
+
+        let result: Value = serde_json::from_str(
+            &plugin.handle_tool_call(VIKING_FORGET_TOOL, &json!({"uri": uri})),
+        )
+        .expect("json");
+
+        assert_eq!(result["status"], "deleted");
+        assert_eq!(result["uri"], uri);
+        assert_eq!(result["estimated_deleted_count"], 1);
+        let request = rx.recv_timeout(StdDuration::from_secs(2)).expect("request");
+        assert!(request.starts_with("DELETE /api/v1/fs?"));
+        assert!(request.contains("recursive=false"));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer test-key"));
     }
 
     #[test]

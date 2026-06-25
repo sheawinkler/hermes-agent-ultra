@@ -4623,6 +4623,51 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream fixes Python CLI --worktree branching from stale local HEAD. The Rust CLI in this repository has no --worktree/git-worktree creation path (rg across crates finds only TERMINAL_CWD consumption and docs/tests), so there is no Rust runtime worktree-base resolver to patch. Existing Rust terminal/file tools consume an already-materialized TERMINAL_CWD and do not create branches."
+    },
+    "6c44471bfdb8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream lazy-installs the Python hindsight-client dependency for the embedded Python plugin. The Rust runtime has no Python Hindsight dependency or lazy install path; crates/hermes-agent/src/memory_plugins/hindsight.rs uses native reqwest HTTP clients and config-backed cloud/local_external modes."
+    },
+    "13d4b5fe2f45": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream aligns the Python hindsight-client package version. Rust Hindsight does not import or pin hindsight-client; native HTTP request code implements retain/recall/reflect behavior directly, so there is no Rust dependency version to align."
+    },
+    "7bc6f1806284": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream skips the local_embedded Hindsight daemon when running as root. Rust Hindsight does not launch an embedded daemon and normalizes legacy local/local_embedded modes to local_external HTTP, so the root daemon guard is not applicable."
+    },
+    "5e3e89cc05d3": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream adds an embedded-daemon health grace timeout for Python Hindsight. Rust Hindsight has no embedded daemon health loop; it uses bounded reqwest clients and already supports HINDSIGHT_TIMEOUT plus config timeout aliases for HTTP operations."
+    },
+    "70e7132e2ff7": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust OpenViking and memory fan-out: AgentLoop only calls MemoryManager.on_memory_write for successful non-error memory tool results, OpenViking on_memory_write remains add-only for native memory mirroring, and viking_forget is now a first-class tool that deletes only exact user memory .md viking:// URIs while rejecting resources, directories, generated summaries, broad deletes, query/fragment URIs, and non-memory targets. Focused Rust tests cover schemas, URI validation, DELETE /api/v1/fs request shape, and auth headers."
+    },
+    "c7e0501e9b58": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Already ported in Rust OpenViking: shutdown enumerates all tracked session writer queues and drains each with the configured session drain timeout before clearing provider state. Existing focused tests cover writer draining and stale writer behavior; the current OpenViking test filter passes 30 tests."
+    },
+    "b6d2ac176e27": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Mem0: MEM0_HOST is accepted as a self-hosted/OSS endpoint alias for base_url, host-only config activates the provider without a cloud API key, auth headers are omitted when api_key is empty, the system prompt identifies OSS/self-hosted mode, and config schema exposes MEM0_HOST. Focused Rust tests cover host activation and request headers."
+    },
+    "452a725ae19f": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Mem0 with mode-aware schema semantics: api_key remains required for platform mode but is optional for oss/self-hosted mode, preserving the reviewed either/or auth contract while keeping the owner-only mem0.json config path. Focused Rust tests cover OSS schema required=false behavior."
+    },
+    "2e779d11a03d": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported the first-class Rust runtime surface for Mem0 v3/self-hosted management: schemas now expose mem0_list, mem0_add, mem0_update, and mem0_delete; legacy mem0_profile/mem0_conclude calls remain accepted; search/list include IDs for management; update/delete validate exact memory IDs and issue PATCH/DELETE requests with fallback endpoint shapes; self-hosted host/base_url mode is supported without empty auth headers. Python OSS setup subprocess and local vector-store provisioning are intentionally not copied into the Rust runtime."
     }
   },
   "subject_patterns": [

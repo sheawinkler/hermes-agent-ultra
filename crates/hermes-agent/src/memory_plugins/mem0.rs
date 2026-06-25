@@ -1,12 +1,13 @@
 //! Mem0 memory provider plugin.
 //!
-//! Implements `MemoryProviderPlugin` for Mem0 Platform — server-side LLM fact
+//! Implements `MemoryProviderPlugin` for Mem0 — server-side LLM fact
 //! extraction, semantic search with reranking, and automatic deduplication.
 //!
 //! Mirrors the Python `plugins/memory/mem0/__init__.py`.
 //!
 //! Configuration:
-//!   - `MEM0_API_KEY` (required)
+//!   - `MEM0_API_KEY` (required for cloud, optional for self-hosted)
+//!   - `MEM0_HOST` / `MEM0_BASE_URL` (self-hosted Mem0 URL or API base URL)
 //!   - `MEM0_USER_ID` (default: "hermes-user")
 //!   - `MEM0_AGENT_ID` (default: "hermes")
 //!   - `$HERMES_HOME/mem0.json` overrides
@@ -28,11 +29,18 @@ const BREAKER_COOLDOWN_SECS: u64 = 120;
 // Tool schemas
 // ---------------------------------------------------------------------------
 
-fn profile_schema() -> Value {
+fn list_schema() -> Value {
     json!({
-        "name": "mem0_profile",
-        "description": "Retrieve all stored memories about the user — preferences, facts, project context. Fast, no reranking.",
-        "parameters": {"type": "object", "properties": {}, "required": []}
+        "name": "mem0_list",
+        "description": "List all stored memories about the user. Use at conversation start for a full overview.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer", "description": "Page number (default: 1)."},
+                "page_size": {"type": "integer", "description": "Results per page (default: 100, max: 200)."}
+            },
+            "required": []
+        }
     })
 }
 
@@ -52,16 +60,45 @@ fn search_schema() -> Value {
     })
 }
 
-fn conclude_schema() -> Value {
+fn add_schema() -> Value {
     json!({
-        "name": "mem0_conclude",
+        "name": "mem0_add",
         "description": "Store a durable fact about the user. Use for explicit preferences, corrections, or decisions.",
         "parameters": {
             "type": "object",
             "properties": {
-                "conclusion": {"type": "string", "description": "The fact to store."}
+                "content": {"type": "string", "description": "The fact to store."}
             },
-            "required": ["conclusion"]
+            "required": ["content"]
+        }
+    })
+}
+
+fn update_schema() -> Value {
+    json!({
+        "name": "mem0_update",
+        "description": "Update an existing memory by ID.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string", "description": "Memory ID to update."},
+                "text": {"type": "string", "description": "New memory text."}
+            },
+            "required": ["memory_id", "text"]
+        }
+    })
+}
+
+fn delete_schema() -> Value {
+    json!({
+        "name": "mem0_delete",
+        "description": "Delete an existing memory by ID.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string", "description": "Memory ID to delete."}
+            },
+            "required": ["memory_id"]
         }
     })
 }
@@ -72,6 +109,7 @@ fn conclude_schema() -> Value {
 
 #[derive(Debug, Clone)]
 struct Mem0Config {
+    mode: String,
     api_key: String,
     user_id: String,
     agent_id: String,
@@ -89,17 +127,31 @@ impl Mem0Config {
         config_io::default_hermes_home().join("mem0.json")
     }
 
-    fn configured_api_key_at(path: &std::path::Path) -> bool {
-        config_io::json_file_has_nonempty_string(path, &["api_key"])
+    fn configured_at(path: &std::path::Path) -> bool {
+        config_io::json_file_has_nonempty_string(path, &["api_key", "host", "base_url"])
     }
 
     fn load(hermes_home: &str) -> Self {
+        let env_host = std::env::var("MEM0_HOST").unwrap_or_default();
+        let env_base_url = std::env::var("MEM0_BASE_URL").unwrap_or_default();
         let mut config = Self {
+            mode: std::env::var("MEM0_MODE").unwrap_or_else(|_| {
+                if env_host.trim().is_empty() {
+                    "platform".into()
+                } else {
+                    "oss".into()
+                }
+            }),
             api_key: std::env::var("MEM0_API_KEY").unwrap_or_default(),
             user_id: std::env::var("MEM0_USER_ID").unwrap_or_else(|_| "hermes-user".into()),
             agent_id: std::env::var("MEM0_AGENT_ID").unwrap_or_else(|_| "hermes".into()),
-            base_url: std::env::var("MEM0_BASE_URL")
-                .unwrap_or_else(|_| "https://api.mem0.ai/v1".into()),
+            base_url: if !env_base_url.trim().is_empty() {
+                env_base_url
+            } else if !env_host.trim().is_empty() {
+                env_host
+            } else {
+                "https://api.mem0.ai/v1".into()
+            },
             api_timeout_secs: 10.0,
             rerank: true,
         };
@@ -118,7 +170,16 @@ impl Mem0Config {
                 if let Some(aid) = raw.get("agent_id").and_then(|v| v.as_str()) {
                     config.agent_id = aid.to_string();
                 }
-                if let Some(base_url) = raw.get("base_url").and_then(|v| v.as_str()) {
+                if let Some(mode) = raw.get("mode").and_then(|v| v.as_str()) {
+                    if !mode.trim().is_empty() {
+                        config.mode = mode.to_string();
+                    }
+                }
+                if let Some(base_url) = raw
+                    .get("base_url")
+                    .or_else(|| raw.get("host"))
+                    .and_then(|v| v.as_str())
+                {
                     if !base_url.is_empty() {
                         config.base_url = base_url.to_string();
                     }
@@ -136,9 +197,28 @@ impl Mem0Config {
             }
         }
 
+        config.mode = normalize_mem0_mode(&config.mode);
         config.base_url = config.base_url.trim_end_matches('/').to_string();
         config
     }
+}
+
+fn normalize_mem0_mode(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "oss" | "self-hosted" | "self_hosted" | "local" => "oss".to_string(),
+        _ => "platform".to_string(),
+    }
+}
+
+fn validate_mem0_memory_id(raw: &str) -> Result<String, String> {
+    let id = raw.trim();
+    if id.is_empty() {
+        return Err("Missing required parameter: memory_id".to_string());
+    }
+    if id.contains('/') || id.contains('?') || id.contains('#') {
+        return Err("memory_id must be an exact Mem0 memory ID, not a path or URL".to_string());
+    }
+    Ok(id.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -240,9 +320,12 @@ impl Mem0MemoryPlugin {
         let url = Self::build_url(config, path);
         let mut req = client
             .request(method.clone(), &url)
-            .header("Authorization", format!("Bearer {}", config.api_key))
-            .header("X-API-Key", &config.api_key)
             .header("Content-Type", "application/json");
+        if !config.api_key.trim().is_empty() {
+            req = req
+                .header("Authorization", format!("Bearer {}", config.api_key))
+                .header("X-API-Key", &config.api_key);
+        }
         if let Some(items) = query {
             req = req.query(items);
         }
@@ -310,10 +393,12 @@ impl Mem0MemoryPlugin {
         Err(last_error)
     }
 
-    fn list_memories(config: &Mem0Config) -> Result<Vec<Value>, String> {
+    fn list_memories(config: &Mem0Config, page: u64, page_size: u64) -> Result<Vec<Value>, String> {
         let query = vec![
             ("user_id", config.user_id.clone()),
             ("agent_id", config.agent_id.clone()),
+            ("page", page.max(1).to_string()),
+            ("page_size", page_size.clamp(1, 200).to_string()),
         ];
         let mut last_error = String::new();
         for path in ["memories", "memory"] {
@@ -359,6 +444,50 @@ impl Mem0MemoryPlugin {
         }
         Err(last_error)
     }
+
+    fn update_memory(config: &Mem0Config, memory_id: &str, text: &str) -> Result<Value, String> {
+        let memory_id = validate_mem0_memory_id(memory_id)?;
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("Missing required parameter: text".to_string());
+        }
+        let payload = json!({
+            "memory_id": memory_id,
+            "text": text,
+            "memory": text,
+        });
+        let mut last_error = String::new();
+        for (method, path) in [
+            (Method::PATCH, format!("memories/{memory_id}")),
+            (Method::PUT, format!("memories/{memory_id}")),
+            (Method::POST, "memories/update".to_string()),
+            (Method::PATCH, format!("memory/{memory_id}")),
+            (Method::PUT, format!("memory/{memory_id}")),
+        ] {
+            match Self::send_json(config, method, &path, Some(&payload), None) {
+                Ok(v) => return Ok(v),
+                Err(e) => last_error = e,
+            }
+        }
+        Err(last_error)
+    }
+
+    fn delete_memory(config: &Mem0Config, memory_id: &str) -> Result<Value, String> {
+        let memory_id = validate_mem0_memory_id(memory_id)?;
+        let payload = json!({"memory_id": memory_id});
+        let mut last_error = String::new();
+        for (method, path, body) in [
+            (Method::DELETE, format!("memories/{memory_id}"), None),
+            (Method::DELETE, format!("memory/{memory_id}"), None),
+            (Method::POST, "memories/delete".to_string(), Some(&payload)),
+        ] {
+            match Self::send_json(config, method, &path, body, None) {
+                Ok(v) => return Ok(v),
+                Err(e) => last_error = e,
+            }
+        }
+        Err(last_error)
+    }
 }
 
 impl MemoryProviderPlugin for Mem0MemoryPlugin {
@@ -371,7 +500,11 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
             .unwrap_or_default()
             .trim()
             .is_empty()
-            || Mem0Config::configured_api_key_at(&Mem0Config::default_config_path())
+            || !std::env::var("MEM0_HOST")
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            || Mem0Config::configured_at(&Mem0Config::default_config_path())
     }
 
     fn initialize(&self, session_id: &str, hermes_home: &str) {
@@ -382,16 +515,23 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
 
     fn system_prompt_block(&self) -> String {
         let config = self.config.lock().unwrap();
-        let user_id = config
+        let (user_id, mode_label) = config
             .as_ref()
-            .map(|c| c.user_id.as_str())
-            .unwrap_or("hermes-user");
+            .map(|c| {
+                let mode_label = if c.mode == "oss" {
+                    format!("OSS/self-hosted at {}", c.base_url)
+                } else {
+                    "platform".to_string()
+                };
+                (c.user_id.as_str(), mode_label)
+            })
+            .unwrap_or(("hermes-user", "platform".to_string()));
         format!(
             "# Mem0 Memory\n\
-             Active. User: {}.\n\
-             Use mem0_search to find memories, mem0_conclude to store facts, \
-             mem0_profile for a full overview.",
-            user_id
+             Active. Mode: {}. User: {}.\n\
+             Use mem0_search to find memories, mem0_add to store facts, \
+             mem0_list for a full overview, and mem0_update/mem0_delete to manage by ID.",
+            mode_label, user_id
         )
     }
 
@@ -484,7 +624,13 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
     }
 
     fn get_tool_schemas(&self) -> Vec<Value> {
-        vec![profile_schema(), search_schema(), conclude_schema()]
+        vec![
+            list_schema(),
+            search_schema(),
+            add_schema(),
+            update_schema(),
+            delete_schema(),
+        ]
     }
 
     fn handle_tool_call(&self, tool_name: &str, args: &Value) -> String {
@@ -496,22 +642,46 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
         }
 
         match tool_name {
-            "mem0_profile" => {
+            "mem0_list" | "mem0_profile" => {
+                let page = args
+                    .get("page")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(1)
+                    .max(1);
+                let page_size = args
+                    .get("page_size")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(100)
+                    .clamp(1, 200);
                 let config = match self.config_snapshot() {
                     Ok(c) => c,
                     Err(e) => return json!({"error": e}).to_string(),
                 };
-                match Self::list_memories(&config) {
+                match Self::list_memories(&config, page, page_size) {
                     Ok(memories) => {
                         self.record_success();
-                        let lines: Vec<String> = memories
+                        let items: Vec<Value> = memories
                             .iter()
-                            .filter_map(Self::extract_memory_text)
+                            .filter_map(|item| {
+                                let memory = Self::extract_memory_text(item)?;
+                                Some(json!({
+                                    "id": item.get("id").cloned().unwrap_or(Value::Null),
+                                    "memory": memory,
+                                }))
+                            })
                             .collect();
-                        if lines.is_empty() {
+                        if items.is_empty() {
                             return json!({"result": "No memories stored yet."}).to_string();
                         }
-                        json!({"result": lines.join("\n"), "count": lines.len()}).to_string()
+                        if tool_name == "mem0_profile" {
+                            let lines = items
+                                .iter()
+                                .filter_map(|item| item.get("memory").and_then(Value::as_str))
+                                .collect::<Vec<_>>();
+                            return json!({"result": lines.join("\n"), "count": lines.len()})
+                                .to_string();
+                        }
+                        json!({"results": items, "count": items.len(), "page": page, "page_size": page_size}).to_string()
                     }
                     Err(e) => {
                         self.record_failure();
@@ -527,12 +697,12 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
                 let rerank = args
                     .get("rerank")
                     .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                    .unwrap_or_else(|| self.config_snapshot().map(|c| c.rerank).unwrap_or(false));
                 let top_k = args
                     .get("top_k")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(10)
-                    .min(50);
+                    .clamp(1, 50);
                 let config = match self.config_snapshot() {
                     Ok(c) => c,
                     Err(e) => return json!({"error": e}).to_string(),
@@ -567,19 +737,20 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
                     }
                 }
             }
-            "mem0_conclude" => {
-                let conclusion = args
-                    .get("conclusion")
+            "mem0_add" | "mem0_conclude" => {
+                let content = args
+                    .get("content")
+                    .or_else(|| args.get("conclusion"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                if conclusion.is_empty() {
-                    return json!({"error": "Missing required parameter: conclusion"}).to_string();
+                if content.is_empty() {
+                    return json!({"error": "Missing required parameter: content"}).to_string();
                 }
                 let config = match self.config_snapshot() {
                     Ok(c) => c,
                     Err(e) => return json!({"error": e}).to_string(),
                 };
-                let messages = vec![json!({"role":"user","content": conclusion})];
+                let messages = vec![json!({"role":"user","content": content})];
                 match Self::add_messages(&config, messages, Some(false)) {
                     Ok(()) => {
                         self.record_success();
@@ -591,6 +762,37 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
                     }
                 }
             }
+            "mem0_update" => {
+                let memory_id = args.get("memory_id").and_then(Value::as_str).unwrap_or("");
+                let text = args.get("text").and_then(Value::as_str).unwrap_or("");
+                let config = match self.config_snapshot() {
+                    Ok(c) => c,
+                    Err(e) => return json!({"error": e}).to_string(),
+                };
+                match Self::update_memory(&config, memory_id, text) {
+                    Ok(v) => {
+                        self.record_success();
+                        json!({"result": "Memory updated.", "memory_id": memory_id, "response": v})
+                            .to_string()
+                    }
+                    Err(e) => json!({"error": format!("Update failed: {e}")}).to_string(),
+                }
+            }
+            "mem0_delete" => {
+                let memory_id = args.get("memory_id").and_then(Value::as_str).unwrap_or("");
+                let config = match self.config_snapshot() {
+                    Ok(c) => c,
+                    Err(e) => return json!({"error": e}).to_string(),
+                };
+                match Self::delete_memory(&config, memory_id) {
+                    Ok(v) => {
+                        self.record_success();
+                        json!({"result": "Memory deleted.", "memory_id": memory_id, "response": v})
+                            .to_string()
+                    }
+                    Err(e) => json!({"error": format!("Delete failed: {e}")}).to_string(),
+                }
+            }
             _ => json!({"error": format!("Unknown tool: {}", tool_name)}).to_string(),
         }
     }
@@ -600,8 +802,15 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
     }
 
     fn get_config_schema(&self) -> Option<Value> {
+        let mode = std::env::var("MEM0_MODE")
+            .ok()
+            .map(|value| normalize_mem0_mode(&value))
+            .unwrap_or_else(|| "platform".to_string());
+        let api_key_required = mode != "oss";
         Some(json!([
-            {"key": "api_key", "description": "Mem0 Platform API key", "secret": true, "required": true, "env_var": "MEM0_API_KEY", "url": "https://app.mem0.ai"},
+            {"key": "mode", "description": "Mem0 mode", "default": "platform", "choices": ["platform", "oss"], "env_var": "MEM0_MODE"},
+            {"key": "api_key", "description": "Mem0 API key", "secret": true, "required": api_key_required, "env_var": "MEM0_API_KEY", "url": "https://app.mem0.ai"},
+            {"key": "host", "description": "Self-hosted Mem0 URL (alias for base_url)", "default": "", "env_var": "MEM0_HOST"},
             {"key": "user_id", "description": "User identifier", "default": "hermes-user"},
             {"key": "agent_id", "description": "Agent identifier", "default": "hermes"},
             {"key": "base_url", "description": "Mem0 API base URL", "default": "https://api.mem0.ai/v1", "env_var": "MEM0_BASE_URL"},
@@ -618,6 +827,10 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::time::Duration as StdDuration;
 
     struct EnvGuard {
         key: &'static str,
@@ -657,7 +870,20 @@ mod tests {
     fn test_mem0_tool_schemas() {
         let plugin = Mem0MemoryPlugin::new();
         let schemas = plugin.get_tool_schemas();
-        assert_eq!(schemas.len(), 3);
+        let names = schemas
+            .iter()
+            .filter_map(|schema| schema.get("name").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "mem0_list",
+                "mem0_search",
+                "mem0_add",
+                "mem0_update",
+                "mem0_delete"
+            ]
+        );
     }
 
     #[test]
@@ -704,6 +930,107 @@ mod tests {
             .expect("write config");
 
         assert!(Mem0MemoryPlugin::new().is_available());
+    }
+
+    #[test]
+    fn test_mem0_host_env_activates_provider_and_sets_base_url() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _api = EnvGuard::remove("MEM0_API_KEY");
+        let _base = EnvGuard::remove("MEM0_BASE_URL");
+        let _host = EnvGuard::set("MEM0_HOST", "http://127.0.0.1:24220/");
+
+        assert!(Mem0MemoryPlugin::new().is_available());
+        let cfg = Mem0Config::load(tmp.path().to_str().expect("utf8"));
+        assert_eq!(cfg.mode, "oss");
+        assert_eq!(cfg.base_url, "http://127.0.0.1:24220");
+    }
+
+    #[test]
+    fn test_mem0_config_schema_marks_api_key_optional_in_oss_mode() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let _mode = EnvGuard::set("MEM0_MODE", "oss");
+
+        let schema = Mem0MemoryPlugin::new().get_config_schema().expect("schema");
+        let api_key = schema
+            .as_array()
+            .expect("array")
+            .iter()
+            .find(|item| item.get("key").and_then(Value::as_str) == Some("api_key"))
+            .expect("api key field");
+        assert_eq!(api_key.get("required"), Some(&Value::Bool(false)));
+    }
+
+    #[test]
+    fn test_validate_mem0_memory_id_rejects_paths() {
+        assert_eq!(
+            validate_mem0_memory_id(" mem-123 ").expect("valid"),
+            "mem-123"
+        );
+        assert!(validate_mem0_memory_id("mem/123").is_err());
+        assert!(validate_mem0_memory_id("mem-123?delete=true").is_err());
+    }
+
+    fn one_shot_json_server(body: &'static str) -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            stream
+                .set_read_timeout(Some(StdDuration::from_secs(2)))
+                .expect("timeout");
+            let mut buf = [0u8; 8192];
+            let n = stream.read(&mut buf).expect("read");
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            tx.send(request).expect("send request");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).expect("write");
+        });
+        (format!("http://{addr}"), rx)
+    }
+
+    fn test_config_for_base_url(base_url: String) -> Mem0Config {
+        Mem0Config {
+            mode: "oss".to_string(),
+            api_key: String::new(),
+            user_id: "u1".to_string(),
+            agent_id: "a1".to_string(),
+            base_url,
+            api_timeout_secs: 5.0,
+            rerank: true,
+        }
+    }
+
+    #[test]
+    fn test_mem0_update_uses_patch_memory_endpoint_without_empty_auth() {
+        let (base_url, rx) = one_shot_json_server(r#"{"status":"ok"}"#);
+        let cfg = test_config_for_base_url(base_url);
+
+        let result = Mem0MemoryPlugin::update_memory(&cfg, "mem-1", "new text").expect("update");
+
+        assert_eq!(result["status"], "ok");
+        let request = rx.recv_timeout(StdDuration::from_secs(2)).expect("request");
+        assert!(request.starts_with("PATCH /memories/mem-1 HTTP/1.1"));
+        assert!(!request.contains("Authorization: Bearer"));
+        assert!(request.contains("\"text\":\"new text\""));
+    }
+
+    #[test]
+    fn test_mem0_delete_uses_delete_memory_endpoint() {
+        let (base_url, rx) = one_shot_json_server(r#"{"status":"ok"}"#);
+        let cfg = test_config_for_base_url(base_url);
+
+        let result = Mem0MemoryPlugin::delete_memory(&cfg, "mem-2").expect("delete");
+
+        assert_eq!(result["status"], "ok");
+        let request = rx.recv_timeout(StdDuration::from_secs(2)).expect("request");
+        assert!(request.starts_with("DELETE /memories/mem-2 HTTP/1.1"));
     }
 
     #[test]
