@@ -2,6 +2,18 @@ fn main() {
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let feature_enabled = std::env::var("CARGO_FEATURE_ROCKCHIP").is_ok();
 
+    let ep_features = [
+        std::env::var("CARGO_FEATURE_SHERPA_CUDA").is_ok(),
+        std::env::var("CARGO_FEATURE_SHERPA_DIRECTML").is_ok(),
+        std::env::var("CARGO_FEATURE_SHERPA_COREML").is_ok(),
+    ]
+    .into_iter()
+    .filter(|on| *on)
+    .count();
+    if ep_features > 1 {
+        panic!("Enable at most one of: sherpa-cuda, sherpa-directml, sherpa-coreml");
+    }
+
     if feature_enabled && target_arch == "aarch64" {
         link_tts_sdk();
         link_asr_sdk();

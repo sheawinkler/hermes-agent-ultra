@@ -37,6 +37,7 @@ impl StreamingDenoiser {
             } else {
                 Default::default()
             },
+            provider: Some(cfg.provider.clone()),
             ..Default::default()
         };
 

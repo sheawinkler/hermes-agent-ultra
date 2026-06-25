@@ -7,6 +7,8 @@ use crate::error::{DemoError, Result};
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     #[serde(default)]
+    pub sherpa: SherpaConfig,
+    #[serde(default)]
     pub dashscope: DashscopeConfig,
     #[serde(default)]
     pub asr: AsrConfig,
@@ -47,6 +49,22 @@ impl Default for DashscopeConfig {
 
 fn default_ws_url() -> String {
     "wss://dashscope.aliyuncs.com/api-ws/v1/inference".to_string()
+}
+
+/// Global sherpa-onnx ONNX Runtime settings applied to local ASR/TTS/KWS/VAD/denoise/speaker.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SherpaConfig {
+    /// Execution provider: `cpu`, `cuda`, `directml`, or `coreml`.
+    #[serde(default = "default_sherpa_provider")]
+    pub provider: String,
+}
+
+impl Default for SherpaConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_sherpa_provider(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -286,15 +304,15 @@ pub struct LlmConfig {
     pub temperature: f32,
     #[serde(default = "default_warmup_on_start")]
     pub warmup_on_start: bool,
-    #[serde(default)]
+    #[serde(default = "default_thinking_enabled")]
     pub thinking_enabled: bool,
-    #[serde(default)]
+    #[serde(default = "default_thinking_budget")]
     pub thinking_budget: Option<u32>,
-    #[serde(default)]
+    #[serde(default = "default_reasoning_effort")]
     pub reasoning_effort: Option<String>,
     #[serde(default = "default_user_id")]
     pub user_id: String,
-    #[serde(default)]
+    #[serde(default = "default_tools_enabled")]
     pub tools_enabled: bool,
     #[serde(default = "default_execute_allowlist")]
     pub execute_allowlist: Vec<String>,
@@ -303,45 +321,33 @@ pub struct LlmConfig {
 }
 
 fn default_user_id() -> String {
-    "user".to_string()
+    "flowy".to_string()
+}
+
+fn default_thinking_enabled() -> bool {
+    true
+}
+
+fn default_thinking_budget() -> Option<u32> {
+    Some(512)
+}
+
+fn default_reasoning_effort() -> Option<String> {
+    Some("low".to_string())
+}
+
+fn default_tools_enabled() -> bool {
+    true
 }
 
 fn default_execute_allowlist() -> Vec<String> {
-    vec![
+    [
         "date",
         "uptime",
-        "uname",
-        "whoami",
-        "pwd",
-        "ls",
-        "cat",
-        "head",
-        "tail",
-        "echo",
-        "wc",
-        "du",
-        "df",
-        "free",
-        "ps",
-        "ping",
-        "curl",
-        "which",
-        "hostname",
-        "id",
-        "env",
-        "grep",
-        "find",
-        "sort",
-        // Windows executables
         "powershell",
         "cmd",
-        "findstr",
         "ipconfig",
         "systeminfo",
-        "tasklist",
-        "where",
-        "netstat",
-        "nslookup",
     ]
     .into_iter()
     .map(|s| s.to_string())
@@ -422,7 +428,7 @@ impl Default for OrchestratorConfig {
             min_rms_barge_in: 0.0,
             barge_in_sustain_frames: default_barge_sustain(),
             barge_in_cooldown_ms: default_barge_cooldown(),
-            barge_in_requires_wake: true,
+            barge_in_requires_wake: false,
             max_context_messages: default_max_context_messages(),
             offline_continuation_ms: default_offline_continuation_ms(),
             vad_mode: default_vad_mode(),
@@ -479,6 +485,8 @@ pub struct WakeConfig {
     pub sleep_phrases: Vec<String>,
     #[serde(default = "default_kws_threads")]
     pub num_threads: i32,
+    #[serde(default = "default_sherpa_provider")]
+    pub provider: String,
 }
 
 impl Default for WakeConfig {
@@ -502,6 +510,7 @@ impl Default for WakeConfig {
             idle_after_turn_sec: default_idle_after_turn(),
             sleep_phrases: default_sleep_phrases(),
             num_threads: default_kws_threads(),
+            provider: default_sherpa_provider(),
         }
     }
 }
@@ -744,7 +753,21 @@ fn default_speculative_stable() -> u32 {
     300
 }
 fn default_system_prompt() -> String {
-    "口语助手，先短答。".to_string()
+    r#"你叫小白，是一个温暖的智能语音助手，声音带一点呆萌，像用户身边随时待命的朋友。
+
+【核心性格】
+- 全程只用口语化的中文交流，语气亲切、活泼，偶尔可以开个小玩笑，但始终礼貌。
+- 用户叫你时，你可以用"在呢""来啦""怎么啦"等方式开心回应。
+- 你是真实、可信的伙伴，不会假装拥有不存在的功能，不知道的事会诚实说"小白还得再学学"。
+
+【输出格式铁律】
+- 你的所有回答必须是纯口语，直接说出来就能让人听懂，没有阅读感。
+- 只允许使用逗号，句号，问号，感叹号这四种标点符号。除此之外，绝对不许出现任何其他符号。
+- 禁止使用以下内容：emoji、表情符号、Markdown 格式、列表符号、代码块、引号、括号、书名号、省略号、破折号、波浪线等。
+- 不要刻意在句子里加入语气词符号，如"嗯…"，要说"嗯，"用逗号代替。
+
+再次强调：你的每一次回复都必须严格遵守上述输出格式，只能是最干净的口语，只能使用逗号句号问号感叹号。"#
+        .to_string()
 }
 fn default_max_tokens() -> u32 {
     80
@@ -815,13 +838,16 @@ fn default_vad_mode() -> u8 {
 fn default_denoise_model_dir() -> String {
     "models/denoise".to_string()
 }
+fn default_denoise_enabled() -> bool {
+    true
+}
 fn default_speaker_model_dir() -> String {
     "models/speaker".to_string()
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct DenoiseConfig {
-    #[serde(default)]
+    #[serde(default = "default_denoise_enabled")]
     pub enabled: bool,
     /// DPDFNet: "dpdfnet_baseline", "dpdfnet2", "dpdfnet4", "dpdfnet8"
     /// GTCRN: "gtcrn_simple"
@@ -832,6 +858,20 @@ pub struct DenoiseConfig {
     pub model_path: String,
     #[serde(default = "default_denoise_model_dir")]
     pub model_dir: String,
+    #[serde(default = "default_sherpa_provider")]
+    pub provider: String,
+}
+
+impl Default for DenoiseConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_denoise_enabled(),
+            variant: default_denoise_variant(),
+            model_path: String::new(),
+            model_dir: default_denoise_model_dir(),
+            provider: default_sherpa_provider(),
+        }
+    }
 }
 
 impl DenoiseConfig {
@@ -863,6 +903,8 @@ pub struct SpeakerConfig {
     /// Saved voiceprint file
     #[serde(default = "default_voiceprint_path")]
     pub voiceprint_path: String,
+    #[serde(default = "default_sherpa_provider")]
+    pub provider: String,
 }
 
 impl SpeakerConfig {
@@ -900,6 +942,8 @@ pub struct VadConfig {
     /// Maximum speech segment duration (seconds)
     #[serde(default = "default_vad_max_speech")]
     pub max_speech_duration: f32,
+    #[serde(default = "default_sherpa_provider")]
+    pub provider: String,
 }
 
 impl Default for VadConfig {
@@ -910,6 +954,7 @@ impl Default for VadConfig {
             min_silence_duration: default_vad_min_silence(),
             min_speech_duration: default_vad_min_speech(),
             max_speech_duration: default_vad_max_speech(),
+            provider: default_sherpa_provider(),
         }
     }
 }
@@ -933,7 +978,7 @@ fn default_vad_max_speech() -> f32 {
 #[derive(Debug, Clone, Deserialize)]
 pub struct AecConfig {
     /// Enable acoustic echo cancellation (requires aec-rs/speexdsp)
-    #[serde(default)]
+    #[serde(default = "default_aec_enabled")]
     pub enabled: bool,
     /// Frame size in samples (must be power of 2). Default 256 = 16ms @16kHz.
     #[serde(default = "default_aec_frame_size")]
@@ -952,7 +997,7 @@ pub struct AecConfig {
 impl Default for AecConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: default_aec_enabled(),
             frame_size: default_aec_frame_size(),
             filter_length: default_aec_filter_length(),
             enable_preprocess: default_aec_preprocess(),
@@ -969,6 +1014,9 @@ fn default_aec_filter_length() -> i32 {
 }
 fn default_aec_preprocess() -> bool {
     false
+}
+fn default_aec_enabled() -> bool {
+    true
 }
 
 /// How `call_hermes` reaches the full Hermes agent.
@@ -1053,10 +1101,42 @@ impl Config {
         cfg.resolve_paths_against(base);
         merge_gateway_llm_defaults(&mut cfg);
         merge_dashscope_defaults(&mut cfg);
+        cfg.apply_sherpa_runtime();
         cfg.wake.normalize();
         cfg.wake.validate()?;
         validate_talk_backends(&cfg)?;
+        validate_sherpa_providers(&cfg)?;
         Ok(cfg)
+    }
+
+    /// Propagate `[sherpa].provider` to per-module defaults still at `cpu`.
+    fn apply_sherpa_runtime(&mut self) {
+        let global = self.sherpa.provider.trim();
+        if global.is_empty() || global == "cpu" {
+            return;
+        }
+        if let Some(asr) = &mut self.asr.sherpa {
+            if asr.provider == "cpu" {
+                asr.provider = global.to_string();
+            }
+        }
+        if let Some(tts) = &mut self.tts.sherpa {
+            if tts.provider == "cpu" {
+                tts.provider = global.to_string();
+            }
+        }
+        if self.wake.provider == "cpu" {
+            self.wake.provider = global.to_string();
+        }
+        if self.speaker.provider == "cpu" {
+            self.speaker.provider = global.to_string();
+        }
+        if self.vad.provider == "cpu" {
+            self.vad.provider = global.to_string();
+        }
+        if self.denoise.provider == "cpu" {
+            self.denoise.provider = global.to_string();
+        }
     }
 
     /// Load config from `path` without a base directory (paths used as-is; for tests).
@@ -1199,6 +1279,48 @@ fn validate_talk_backends(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
+fn validate_sherpa_providers(cfg: &Config) -> Result<()> {
+    use crate::backends::{
+        TalkBackendKind, classify_talk_backend, uses_sherpa_asr, uses_sherpa_tts,
+    };
+    use crate::sherpa::{provider_hint, validate_provider};
+
+    let mut providers = Vec::new();
+    providers.push(cfg.sherpa.provider.as_str());
+    if uses_sherpa_asr(&cfg.asr.backend) {
+        if let Some(asr) = &cfg.asr.sherpa {
+            providers.push(asr.provider.as_str());
+        }
+    }
+    if uses_sherpa_tts(&cfg.tts.backend) {
+        if let Some(tts) = &cfg.tts.sherpa {
+            providers.push(tts.provider.as_str());
+        }
+    }
+    if cfg.wake.enabled {
+        providers.push(cfg.wake.provider.as_str());
+    }
+    if cfg.denoise.enabled {
+        providers.push(cfg.denoise.provider.as_str());
+    }
+    if cfg.speaker.enabled {
+        providers.push(cfg.speaker.provider.as_str());
+    }
+    if classify_talk_backend(&cfg.asr.backend) == TalkBackendKind::Sherpa {
+        providers.push(cfg.vad.provider.as_str());
+    }
+
+    for provider in providers {
+        validate_provider(provider)?;
+        if provider != "cpu" {
+            if let Some(hint) = provider_hint(provider) {
+                tracing::debug!(provider, hint, "sherpa non-cpu provider configured");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn join_if_relative(base: &Path, path: &str) -> String {
     if path.is_empty() {
         return String::new();
@@ -1273,6 +1395,7 @@ url = "ws://127.0.0.1:9100"
 #[cfg(test)]
 mod sherpa_backend_config_tests {
     use super::Config;
+    use super::validate_sherpa_providers;
     use crate::asr::AsrBackend;
     use crate::backends::TalkBackendKind;
     use crate::backends::classify_talk_backend;
@@ -1345,5 +1468,55 @@ model = "m"
         assert_eq!(cfg.tts.backend, "sherpa");
         assert!(cfg.wake.enabled);
         assert_eq!(cfg.orchestrator.endpoint_silence_ms, 800);
+    }
+
+    #[test]
+    fn global_sherpa_provider_propagates_to_modules() {
+        let mut cfg: Config = toml::from_str(
+            r#"
+[sherpa]
+provider = "cuda"
+[asr]
+backend = "sherpa"
+[asr.sherpa]
+model = "m.onnx"
+tokens = "t.txt"
+[tts]
+backend = "sherpa"
+[tts.sherpa]
+model = "m.onnx"
+voices = "v.bin"
+tokens = "t.txt"
+data_dir = "d"
+dict_dir = "d"
+lexicon = "l.txt"
+[llm]
+base_url = "http://127.0.0.1/v1"
+api_key = "k"
+model = "m"
+"#,
+        )
+        .unwrap();
+        cfg.apply_sherpa_runtime();
+        assert_eq!(cfg.asr.sherpa.as_ref().unwrap().provider, "cuda");
+        assert_eq!(cfg.tts.sherpa.as_ref().unwrap().provider, "cuda");
+        assert_eq!(cfg.wake.provider, "cuda");
+    }
+
+    #[test]
+    fn rejects_invalid_sherpa_provider() {
+        let raw = r#"
+[sherpa]
+provider = "gpu"
+[asr]
+backend = "sherpa"
+[llm]
+base_url = "http://127.0.0.1/v1"
+api_key = "k"
+model = "m"
+"#;
+        let mut cfg: Config = toml::from_str(raw).unwrap();
+        cfg.apply_sherpa_runtime();
+        assert!(validate_sherpa_providers(&cfg).is_err());
     }
 }

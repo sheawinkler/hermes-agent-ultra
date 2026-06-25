@@ -34,7 +34,7 @@ impl SpeakerVerifier {
             model: Some(model_path.clone()),
             num_threads: 1,
             debug: false,
-            provider: Some("cpu".to_string()),
+            provider: Some(cfg.provider.clone()),
         };
         let extractor = SpeakerEmbeddingExtractor::create(&config)?;
 
@@ -128,7 +128,7 @@ pub fn enroll_voiceprint(
         model: Some(model_path.clone()),
         num_threads: 1,
         debug: false,
-        provider: Some("cpu".to_string()),
+        provider: Some(cfg.provider.clone()),
     };
     let extractor = SpeakerEmbeddingExtractor::create(&config)
         .ok_or_else(|| "failed to create SpeakerEmbeddingExtractor".to_string())?;

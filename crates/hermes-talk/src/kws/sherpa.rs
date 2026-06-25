@@ -33,7 +33,7 @@ pub fn start_wake_detector(cfg: &WakeConfig, sample_rate: u32) -> Result<WakeDet
     kws_cfg.model_config.transducer.decoder = Some(cfg.decoder.clone());
     kws_cfg.model_config.transducer.joiner = Some(cfg.joiner.clone());
     kws_cfg.model_config.tokens = Some(cfg.tokens.clone());
-    kws_cfg.model_config.provider = Some("cpu".to_string());
+    kws_cfg.model_config.provider = Some(cfg.provider.clone());
     kws_cfg.model_config.num_threads = cfg.num_threads;
     kws_cfg.keywords_buf = Some(keywords_buf);
     kws_cfg.keywords_score = cfg.boost_score;

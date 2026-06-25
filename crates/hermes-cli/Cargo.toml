@@ -14,6 +14,9 @@ otlp = ["hermes-telemetry/otlp"]
 swarms = ["hermes-intelligence/swarms"]
 talk = ["dep:hermes-talk"]
 talk-rockchip = ["talk", "hermes-talk/rockchip"]
+talk-cuda = ["talk", "hermes-talk/sherpa-cuda"]
+talk-directml = ["talk", "hermes-talk/sherpa-directml"]
+talk-coreml = ["talk", "hermes-talk/sherpa-coreml"]
 
 [[bin]]
 name = "hermes"

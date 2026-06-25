@@ -130,7 +130,7 @@ indicatif = "0.18"
 
 # hermes-talk (voice dialog)
 cpal = "0.15"
-sherpa-onnx = "1.13"
+sherpa-onnx = { path = "crates/sherpa-onnx", default-features = false, features = ["static"] }
 aec-rs = "1.0"
 webrtc-vad = "0.4"
 pinyin = "0.11"

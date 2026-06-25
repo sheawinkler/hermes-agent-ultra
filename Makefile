@@ -43,8 +43,14 @@ DEBUG_BIN   := $(TARGET)/debug/$(BIN)$(EXE_EXT)
 # hermes talk (optional voice dialog)
 TALK_FEATURES     := talk
 TALK_FEATURES_RK  := talk-rockchip
+TALK_FEATURES_CUDA := talk-cuda
+TALK_FEATURES_DML  := talk-directml
+TALK_FEATURES_COREML := talk-coreml
 TALK_PKG          := -p $(BIN_CRATE) --features $(TALK_FEATURES) --bin $(BIN)
 TALK_PKG_RK       := -p $(BIN_CRATE) --features $(TALK_FEATURES_RK) --bin $(BIN)
+TALK_PKG_CUDA     := -p $(BIN_CRATE) --features $(TALK_FEATURES_CUDA) --bin $(BIN)
+TALK_PKG_DML      := -p $(BIN_CRATE) --features $(TALK_FEATURES_DML) --bin $(BIN)
+TALK_PKG_COREML   := -p $(BIN_CRATE) --features $(TALK_FEATURES_COREML) --bin $(BIN)
 TALK_CRATE        := crates/hermes-talk
 TALK_RKAUDIO      := $(TALK_CRATE)/rkaudio
 TALK_RUN          = $(CARGO) run $(TALK_PKG) -- talk
@@ -227,6 +233,22 @@ build-talk:
 release-talk: ensure-talk-models
 	$(CARGO) build --release $(TALK_PKG)
 	@echo "Built $(RELEASE_BIN) (features: $(TALK_FEATURES))"
+
+fetch-talk-sherpa-cuda:
+	bash $(TALK_SCRIPTS)/fetch_sherpa_runtime.sh cuda
+
+fetch-talk-sherpa-coreml:
+	bash $(TALK_SCRIPTS)/fetch_sherpa_runtime.sh coreml
+
+release-talk-cuda: ensure-talk-models fetch-talk-sherpa-cuda
+	@test -n "$$SHERPA_ONNX_LIB_DIR" || (echo "Set SHERPA_ONNX_LIB_DIR from fetch-talk-sherpa-cuda output" >&2; exit 1)
+	$(CARGO) build --release $(TALK_PKG_CUDA)
+	@echo "Built $(RELEASE_BIN) (features: $(TALK_FEATURES_CUDA))"
+
+release-talk-coreml: ensure-talk-models fetch-talk-sherpa-coreml
+	@test -n "$$SHERPA_ONNX_LIB_DIR" || (echo "Set SHERPA_ONNX_LIB_DIR from fetch-talk-sherpa-coreml output" >&2; exit 1)
+	$(CARGO) build --release $(TALK_PKG_COREML)
+	@echo "Built $(RELEASE_BIN) (features: $(TALK_FEATURES_COREML))"
 
 ensure-talk-models: ensure-talk-models-$(HOST_OS)
 

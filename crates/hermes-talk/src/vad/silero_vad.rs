@@ -24,6 +24,7 @@ impl SileroVad {
         max_speech_duration: f32,
         barge_in_sustain: u32,
         chunk_ms: u32,
+        provider: &str,
     ) -> Option<Self> {
         let silero = SileroVadModelConfig {
             model: Some(model_path.to_string()),
@@ -37,6 +38,7 @@ impl SileroVad {
             silero_vad: silero,
             sample_rate,
             num_threads: 1,
+            provider: Some(provider.to_string()),
             ..Default::default()
         };
         let inner = VoiceActivityDetector::create(&cfg, 60.0)?;

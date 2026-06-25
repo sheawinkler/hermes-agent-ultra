@@ -9,6 +9,9 @@ description = "Real-time voice dialog engine (ASR + LLM + TTS) for Hermes"
 [features]
 default = []
 rockchip = []
+sherpa-cuda = ["sherpa-onnx/cuda"]
+sherpa-directml = ["sherpa-onnx/directml"]
+sherpa-coreml = ["sherpa-onnx/coreml"]
 
 [dependencies]
 hermes-config = { workspace = true }
@@ -21,8 +24,9 @@ futures-util = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+regex = { workspace = true }
 pinyin = { workspace = true }
-sherpa-onnx = { workspace = true }
+sherpa-onnx = { workspace = true, default-features = false, features = ["static"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }

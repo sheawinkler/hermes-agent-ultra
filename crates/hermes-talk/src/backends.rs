@@ -40,3 +40,11 @@ pub fn uses_cloud_asr(backend: &str) -> bool {
 pub fn uses_cloud_tts(backend: &str) -> bool {
     classify_talk_backend(backend) == TalkBackendKind::Cloud
 }
+
+pub fn uses_sherpa_asr(backend: &str) -> bool {
+    classify_talk_backend(backend) == TalkBackendKind::Sherpa
+}
+
+pub fn uses_sherpa_tts(backend: &str) -> bool {
+    classify_talk_backend(backend) == TalkBackendKind::Sherpa
+}

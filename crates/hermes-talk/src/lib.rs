@@ -32,6 +32,7 @@ pub mod kws;
 pub mod llm;
 pub mod orchestrator;
 pub mod session;
+pub mod sherpa;
 pub mod speaker;
 pub mod tools;
 pub mod tts;

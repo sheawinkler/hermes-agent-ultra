@@ -3325,6 +3325,7 @@ dependencies = [
  "hermes-config",
  "hermes-core",
  "pinyin",
+ "regex",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -6953,8 +6954,6 @@ dependencies = [
 [[package]]
 name = "sherpa-onnx"
 version = "1.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98baa63be165cc1bccd418c210269c68bcdd0c279195ecce0140645bc6e520f4"
 dependencies = [
  "serde",
  "serde_json",
@@ -6964,8 +6963,6 @@ dependencies = [
 [[package]]
 name = "sherpa-onnx-sys"
 version = "1.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21ac2c3342f826069bbf0be3578f9601f3802a1bff50bbced8230a15ec9eed8f"
 dependencies = [
  "bzip2",
  "tar",
