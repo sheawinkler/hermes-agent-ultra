@@ -73,6 +73,9 @@ pub struct SendMessageOptions {
     /// True for final user-visible replies where a platform may choose a
     /// conservative delivery fallback if a requested thread root is broken.
     pub notify: bool,
+    /// True for lifecycle/status sends that should not become conversational
+    /// history boundaries on platforms that backfill channel context.
+    pub non_conversational: bool,
 }
 
 impl SendMessageOptions {
@@ -81,6 +84,7 @@ impl SendMessageOptions {
             thread_id: thread_id.map(ToOwned::to_owned),
             explicit_chat_id: false,
             notify: false,
+            non_conversational: false,
         }
     }
 
@@ -89,6 +93,7 @@ impl SendMessageOptions {
             thread_id: thread_id.map(ToOwned::to_owned),
             explicit_chat_id: true,
             notify: false,
+            non_conversational: false,
         }
     }
 
@@ -97,6 +102,16 @@ impl SendMessageOptions {
             thread_id: thread_id.map(ToOwned::to_owned),
             explicit_chat_id: false,
             notify: true,
+            non_conversational: false,
+        }
+    }
+
+    pub fn non_conversational_threaded(thread_id: Option<&str>) -> Self {
+        Self {
+            thread_id: thread_id.map(ToOwned::to_owned),
+            explicit_chat_id: false,
+            notify: false,
+            non_conversational: true,
         }
     }
 }

@@ -1,8 +1,8 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T06:30:25.062192+00:00`
+Generated: `2026-06-25T07:03:00.694496+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `6997`.
+- Range: `origin/main..upstream/main`; total commits tracked: `6997`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
@@ -17,8 +17,8 @@ Generated: `2026-06-25T06:30:25.062192+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 219 |
-| ported | 376 |
+| pending | 216 |
+| ported | 379 |
 | superseded | 6326 |
 
 ## First 100 Pending Commits
@@ -29,14 +29,12 @@ Generated: `2026-06-25T06:30:25.062192+00:00`
 | `9362ce2575e0` | #22 | feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899) |
 | `f9ffe0bc3f61` | #26 | fix(desktop): resume stored session id on notification click |
 | `069011dd0c8f` | #26 | test(desktop): cover runtime->stored notification id resolution |
-| `bce1e36b5769` | #20 | fix(discord): unwrap dict choices + soft-boundary truncate clarify buttons |
 | `92451151c642` | #22 | Revert "feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899)" |
 | `9a2f2756f7e6` | #26 | fix(desktop): allow selecting slash output and shell logs in thread (#49063) |
 | `6cb04be779de` | #26 | feat(desktop): Keys tab groups by backend provider identity |
 | `ee0de638d719` | #26 | feat(desktop): add API-keys search; keep provider lists priority-sorted |
 | `d91b8d8368bb` | #26 | test(desktop): make keyVar a typed EnvVarInfo factory |
 | `b936f92b25b4` | #26 | fix(desktop): render send/prefill directive notices (/goal, /undo) (#49073) |
-| `caaa916289f2` | #20 | fix(gateway): don't let delayed Discord status messages partition history backfill |
 | `db744e7d1e58` | #21 | feat(simplify-code): add risk-tiered application, Chesterton's Fence, slop + silent failure detection |
 | `6c44471bfdb8` | #23 | fix(hindsight): lazy-install cloud client dependency |
 | `13d4b5fe2f45` | #23 | fix(hindsight): align client version to 0.6.1 across all sources |
@@ -49,7 +47,6 @@ Generated: `2026-06-25T06:30:25.062192+00:00`
 | `929dbf777801` | #26 | fix(desktop): make rendered logs selectable so they can be copied |
 | `b6e2a54a94f5` | #20 | fix(mcp): address adversarial review round 1 (cache parity, gates, races) |
 | `f06508836dd4` | #26 | docs(security): enumerate cron job scripts in §2.3 credential scoping |
-| `ba49fb51a585` | #20 | fix(discord): hydrate channel context when replying to a message (#49212) |
 | `40722058e532` | #20 | fix(mcp): keep short-TTL HTTP sessions alive with configurable ping keepalive |
 | `2bd1977d8fad` | #26 | chore: release v0.17.0 (2026.6.19) |
 | `866f1d65c4aa` | #26 | chore(desktop): sync package.json version fallback to 0.17.0 (#49236) |
@@ -125,3 +122,6 @@ Generated: `2026-06-25T06:30:25.062192+00:00`
 | `bef1d3e4ff6a` | #26 | fix(desktop): filter undefined entries in AttachmentList to prevent refText crash on session switch (#49624) |
 | `13ce8119067e` | #26 | fix: show desktop approval fallback (#46548) |
 | `e5e25836350a` | #26 | fix(desktop): relaunch on Linux after in-app update instead of hanging (#45205) |
+| `84e1d31e5442` | #22 | refactor(kanban): fold worker/orchestrator skills into injected guidance (#50473) |
+| `77fdbbfe81d8` | #20 | fix(whatsapp): validate bridge PID identity before killing stale pidfile entry |
+| `069ab40c5f3f` | #20 | fix(whatsapp): only kill LISTENers when freeing the bridge port, never clients |
