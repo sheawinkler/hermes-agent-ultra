@@ -1725,6 +1725,30 @@ pub fn plan_discord_command_sync(
         ..DiscordCommandSyncSummary::default()
     };
 
+    let desired_keys = desired
+        .iter()
+        .filter_map(command_key)
+        .collect::<BTreeSet<_>>();
+    let obsolete_keys = existing_by_key
+        .keys()
+        .filter(|key| !desired_keys.contains(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    // Discord rejects upserts that would briefly exceed the 100-command cap,
+    // so remove obsolete commands before creating replacement commands.
+    for key in obsolete_keys {
+        if let Some(existing_payload) = existing_by_key.remove(&key) {
+            let name = command_key(existing_payload)
+                .map(|(name, _)| name)
+                .unwrap_or_else(|| key.0.clone());
+            summary.deleted += 1;
+            summary
+                .mutations
+                .push(DiscordCommandSyncMutation::Delete { name });
+        }
+    }
+
     for desired_payload in desired {
         let Some((name, command_type)) = command_key(desired_payload) else {
             continue;
@@ -1765,12 +1789,6 @@ pub fn plan_discord_command_sync(
         }
     }
 
-    for ((name, _), _) in existing_by_key {
-        summary.deleted += 1;
-        summary
-            .mutations
-            .push(DiscordCommandSyncMutation::Delete { name });
-    }
     summary
 }
 
@@ -5091,6 +5109,33 @@ mod tests {
         assert_eq!(summary.recreated, 2);
         assert_eq!(summary.created, 1);
         assert_eq!(summary.deleted, 1);
+        assert_eq!(
+            summary.mutations.first(),
+            Some(&DiscordCommandSyncMutation::Delete {
+                name: "old-command".into()
+            })
+        );
+        let delete_index = summary
+            .mutations
+            .iter()
+            .position(|mutation| {
+                mutation
+                    == &DiscordCommandSyncMutation::Delete {
+                        name: "old-command".into(),
+                    }
+            })
+            .expect("obsolete command delete mutation");
+        let create_index = summary
+            .mutations
+            .iter()
+            .position(|mutation| {
+                mutation
+                    == &DiscordCommandSyncMutation::Create {
+                        name: "metricas".into(),
+                    }
+            })
+            .expect("new command create mutation");
+        assert!(delete_index < create_index);
         assert!(summary
             .mutations
             .contains(&DiscordCommandSyncMutation::Update {

@@ -4588,6 +4588,21 @@
       "disposition": "ported",
       "notes": "Rust Telegram adapter now owns TelegramTopicBindingStore state, exposes bind/read/prune helpers, and prunes the stale (chat_id, message_thread_id) binding when Bot API reports thread/message_thread not found before retrying JSON or multipart sends without thread context. hermes-gateway Telegram tests cover store removal and thread-fallback pruning.",
       "owner": "rust-runtime"
+    },
+    "e9b86f352fc7": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust Discord command diff planner now deletes obsolete application commands before create/update/recreate mutations, preserving the upstream fix for Discord 100-command cap; the focused command-sync test asserts delete-before-create ordering."
+    },
+    "4b7f3826c2ce": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust Telegram adapter constructs Bot API clients through the shared reqwest platform_http_client_builder, including fallback-IP resolution and proxy branches, and the shared platform HTTP pool tests assert the CLOSE_WAIT-safe keepalive expiry below 5s with bounded idle connections."
+    },
+    "807bdc17f62b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream fixes Python discord.py auto-create-thread duplicate MESSAGE_CREATE dispatch. The Rust Discord adapter has no live inbound auto-create-thread dispatcher calling create_thread from message handling; duplicate suppression is centralized in Gateway::should_suppress_duplicate before session dispatch, so the Python thread-starter preseed path is absent."
     }
   },
   "subject_patterns": [
