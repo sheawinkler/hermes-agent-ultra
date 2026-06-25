@@ -720,6 +720,12 @@ impl TelegramTopicBindingStore {
             .retain(|_, binding| binding.session_id != session_id);
     }
 
+    pub fn remove(&mut self, chat_id: &str, thread_id: &str) -> bool {
+        self.bindings
+            .remove(&(chat_id.to_string(), thread_id.to_string()))
+            .is_some()
+    }
+
     pub fn list_for_chat(&self, chat_id: &str) -> Vec<TelegramTopicBinding> {
         let mut rows = self
             .bindings
@@ -793,6 +799,8 @@ pub struct TelegramAdapter {
     approval_counter: AtomicU64,
     /// Latched off after the rich endpoint is proven unavailable.
     rich_send_disabled: Mutex<bool>,
+    /// DM topic bindings used to recover Telegram clients that strip topic ids.
+    topic_bindings: Mutex<TelegramTopicBindingStore>,
 }
 
 #[derive(Clone, Copy)]
@@ -845,12 +853,48 @@ impl TelegramAdapter {
             approval_state: Mutex::new(HashMap::new()),
             approval_counter: AtomicU64::new(1),
             rich_send_disabled: Mutex::new(false),
+            topic_bindings: Mutex::new(TelegramTopicBindingStore::default()),
         })
     }
 
     /// Get a reference to the configuration.
     pub fn config(&self) -> &TelegramConfig {
         &self.config
+    }
+
+    pub fn bind_dm_topic(
+        &self,
+        chat_id: impl Into<String>,
+        thread_id: impl Into<String>,
+        session_id: impl Into<String>,
+        user_id: impl Into<String>,
+        title: Option<String>,
+        operator_declared: bool,
+    ) {
+        if let Ok(mut store) = self.topic_bindings.lock() {
+            store.bind(
+                chat_id,
+                thread_id,
+                session_id,
+                user_id,
+                title,
+                operator_declared,
+            );
+        }
+    }
+
+    pub fn dm_topic_binding(&self, chat_id: &str, thread_id: &str) -> Option<TelegramTopicBinding> {
+        self.topic_bindings
+            .lock()
+            .ok()
+            .and_then(|store| store.get(chat_id, thread_id).cloned())
+    }
+
+    pub fn prune_stale_dm_topic_binding(&self, chat_id: &str, thread_id: &str) -> bool {
+        self.topic_bindings
+            .lock()
+            .map(|mut store| store.remove(chat_id, thread_id))
+            .unwrap_or(false)
     }
 
     fn split_gateway_chat_thread(chat_id: &str) -> (&str, Option<i64>) {
@@ -1889,6 +1933,7 @@ impl TelegramAdapter {
         match self.post_json(&url, &body).await {
             Ok(resp) if resp.ok => Ok(resp),
             Ok(resp) => {
+                let stale_topic_target = Self::thread_fallback_target_from_body(&body);
                 let description = resp
                     .description
                     .as_deref()
@@ -1897,6 +1942,7 @@ impl TelegramAdapter {
                 if Self::thread_or_reply_missing(&description)
                     && Self::strip_thread_fields_for_fallback(&mut body)
                 {
+                    self.prune_stale_dm_topic_binding_target(stale_topic_target);
                     let retry = self.post_json(&url, &body).await?;
                     if retry.ok {
                         return Ok(retry);
@@ -1909,7 +1955,9 @@ impl TelegramAdapter {
                 Err(Self::telegram_response_error(method, &resp))
             }
             Err(err) if Self::gateway_error_thread_or_reply_missing(&err) => {
+                let stale_topic_target = Self::thread_fallback_target_from_body(&body);
                 if Self::strip_thread_fields_for_fallback(&mut body) {
+                    self.prune_stale_dm_topic_binding_target(stale_topic_target);
                     self.post_json(&url, &body).await
                 } else {
                     Err(err)
@@ -1927,6 +1975,35 @@ impl TelegramAdapter {
         let removed_reply = obj.remove("reply_to_message_id").is_some();
         let removed_reply_parameters = obj.remove("reply_parameters").is_some();
         removed_thread || removed_reply || removed_reply_parameters
+    }
+
+    fn thread_fallback_target_from_body(body: &serde_json::Value) -> Option<(String, String)> {
+        let obj = body.as_object()?;
+        let chat_id = Self::telegram_id_value_to_string(obj.get("chat_id")?)?;
+        let thread_id = Self::telegram_id_value_to_string(obj.get("message_thread_id")?)?;
+        Some((chat_id, thread_id))
+    }
+
+    fn telegram_id_value_to_string(value: &serde_json::Value) -> Option<String> {
+        value
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| value.as_i64().map(|id| id.to_string()))
+    }
+
+    fn prune_stale_dm_topic_binding_target(&self, target: Option<(String, String)>) {
+        let Some((chat_id, thread_id)) = target else {
+            return;
+        };
+        if self.prune_stale_dm_topic_binding(&chat_id, &thread_id) {
+            info!(
+                chat_id = %chat_id,
+                thread_id = %thread_id,
+                "Pruned stale Telegram DM topic binding after Bot API reported the thread missing"
+            );
+        }
     }
 
     fn gateway_error_thread_or_reply_missing(err: &GatewayError) -> bool {
@@ -2134,6 +2211,12 @@ impl TelegramAdapter {
                 if Self::gateway_error_thread_or_reply_missing(&err)
                     && request.has_thread_context() =>
             {
+                if let Some(thread_id) = request.message_thread_id {
+                    self.prune_stale_dm_topic_binding_target(Some((
+                        request.chat_id.to_string(),
+                        thread_id.to_string(),
+                    )));
+                }
                 self.send_multipart_once(request.without_thread_context())
                     .await
             }
@@ -3602,6 +3685,9 @@ mod tests {
         );
         store.remove_session("session-b");
         assert!(store.get("208214988", "222").is_none());
+        assert!(store.remove("208214988", "111"));
+        assert!(store.get("208214988", "111").is_none());
+        assert!(!store.remove("208214988", "missing"));
         store.disable("208214988", "user1");
         assert!(!store.is_enabled("208214988", "user1"));
     }
@@ -3632,6 +3718,8 @@ mod tests {
 
         let mut adapter = test_adapter(test_config());
         adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+        adapter.bind_dm_topic("123", "999", "session-dead-topic", "user1", None, false);
+        assert!(adapter.dm_topic_binding("123", "999").is_some());
 
         let ids = adapter
             .send_text_with_keyboard(
@@ -3651,6 +3739,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ids, vec![77]);
+        assert!(adapter.dm_topic_binding("123", "999").is_none());
         let requests = server.received_requests().await.expect("requests");
         assert_eq!(requests.len(), 2);
         let first: Value = requests[0].body_json().expect("json");

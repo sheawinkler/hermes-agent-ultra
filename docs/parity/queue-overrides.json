@@ -4583,6 +4583,11 @@
       "disposition": "ported",
       "notes": "Rust Slack voice-clip routing reports audio MIME from the selected cached extension via the Slack extension-to-audio-MIME map, so rerouted clips cached as .wav/.mp3/.ogg/etc expose coherent audio/* media types; hermes-gateway Slack-feature tests cover ext-matched reported MIME.",
       "owner": "rust-runtime"
+    },
+    "142a5751a2b3": {
+      "disposition": "ported",
+      "notes": "Rust Telegram adapter now owns TelegramTopicBindingStore state, exposes bind/read/prune helpers, and prunes the stale (chat_id, message_thread_id) binding when Bot API reports thread/message_thread not found before retrying JSON or multipart sends without thread context. hermes-gateway Telegram tests cover store removal and thread-fallback pruning.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [
