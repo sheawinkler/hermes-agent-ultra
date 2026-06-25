@@ -333,6 +333,10 @@ pub struct App {
     pub quorum_armed_once: bool,
     /// Animated companion pet settings.
     pub pet_settings: PetSettings,
+
+    /// Test-only hook for proving model-switch rollback on rebuild failure.
+    #[cfg(test)]
+    fail_model_rebuild_for: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -404,6 +408,8 @@ impl Clone for App {
             pending_system_notes: self.pending_system_notes.clone(),
             quorum_armed_once: self.quorum_armed_once,
             pet_settings: self.pet_settings.clone(),
+            #[cfg(test)]
+            fail_model_rebuild_for: self.fail_model_rebuild_for.clone(),
         }
     }
 }
@@ -2172,6 +2178,8 @@ impl App {
             pending_system_notes: Vec::new(),
             quorum_armed_once: false,
             pet_settings: load_pet_settings(),
+            #[cfg(test)]
+            fail_model_rebuild_for: None,
         };
         app.ensure_session_stub_snapshot();
         Ok(app)
@@ -2678,11 +2686,30 @@ impl App {
 
     /// Switch the active model, rebuilding the provider and agent loop.
     pub fn switch_model(&mut self, provider_model: &str) {
-        self.current_model = provider_model.to_string();
+        if let Err(err) = self.try_switch_model(provider_model) {
+            tracing::warn!(
+                model = provider_model,
+                error = %err,
+                "Model switch failed; keeping previous model"
+            );
+        }
+    }
+
+    /// Switch the active model transactionally.
+    ///
+    /// The new provider/agent is built before mutating `current_model`, runtime
+    /// env, or session persistence so a failed rebuild is a no-op for the
+    /// current conversation.
+    pub fn try_switch_model(&mut self, provider_model: &str) -> Result<(), AgentError> {
+        let next_model = provider_model.trim();
+        if next_model.is_empty() {
+            return Err(AgentError::Config("model cannot be empty".to_string()));
+        }
+
+        let next_agent = self.build_agent_for_model(next_model)?;
+        self.current_model = next_model.to_string();
         sync_runtime_model_env(&self.config, &self.current_model);
-
-        self.rebuild_agent_for_active_session();
-
+        self.agent = next_agent;
         match SessionPersistence::new(&self.state_root)
             .update_session_model(&self.session_id, &self.current_model)
         {
@@ -2696,6 +2723,12 @@ impl App {
         }
 
         tracing::info!("Switched model to: {}", provider_model);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn force_model_rebuild_failure_for_test(&mut self, provider_model: &str) {
+        self.fail_model_rebuild_for = Some(provider_model.to_string());
     }
 
     /// Warn before a user-initiated model switch if the current transcript is
@@ -2711,22 +2744,56 @@ impl App {
     }
 
     fn rebuild_agent_for_active_session(&mut self) {
-        let provider = build_provider(&self.config, &self.current_model);
-        let mut agent_config = build_agent_config(&self.config, &self.current_model);
-        agent_config.session_id = Some(self.session_id.clone());
-        let agent_tool_registry = Arc::new(bridge_tool_registry(&self.tool_registry));
+        match self.build_agent_for_model(&self.current_model) {
+            Ok(agent) => {
+                self.agent = agent;
+            }
+            Err(err) => {
+                tracing::warn!(
+                    model = %self.current_model,
+                    error = %err,
+                    "Agent rebuild failed; keeping previous agent"
+                );
+            }
+        }
+    }
 
-        let agent_inner = hermes_agent::attach_discovered_memory(AgentLoop::new(
-            agent_config,
-            agent_tool_registry,
-            provider,
-        ))
-        .with_callbacks(Self::stream_callbacks(self.stream_handle_shared.clone()));
-        let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
-            &agent_inner,
-            self.state_root.clone(),
-        ));
-        self.agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
+    fn build_agent_for_model(&self, provider_model: &str) -> Result<Arc<AgentLoop>, AgentError> {
+        #[cfg(test)]
+        if self
+            .fail_model_rebuild_for
+            .as_deref()
+            .is_some_and(|model| model == provider_model)
+        {
+            return Err(AgentError::Config(format!(
+                "test forced rebuild failure for {provider_model}"
+            )));
+        }
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let provider = build_provider(&self.config, provider_model);
+            let mut agent_config = build_agent_config(&self.config, provider_model);
+            agent_config.session_id = Some(self.session_id.clone());
+            let agent_tool_registry = Arc::new(bridge_tool_registry(&self.tool_registry));
+
+            let agent_inner = hermes_agent::attach_discovered_memory(AgentLoop::new(
+                agent_config,
+                agent_tool_registry,
+                provider,
+            ))
+            .with_callbacks(Self::stream_callbacks(self.stream_handle_shared.clone()));
+            let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
+                &agent_inner,
+                self.state_root.clone(),
+            ));
+            Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator))
+        }));
+
+        result.map_err(|_| {
+            AgentError::Config(format!(
+                "model switch rebuild panicked for {provider_model}"
+            ))
+        })
     }
 
     pub fn refresh_agent_tool_snapshot(&mut self) -> AgentToolSnapshotRefresh {
@@ -4157,6 +4224,7 @@ mod tests {
             pending_system_notes: Vec::new(),
             quorum_armed_once: false,
             pet_settings: PetSettings::default(),
+            fail_model_rebuild_for: None,
         }
     }
 
@@ -4263,6 +4331,80 @@ mod tests {
         assert_eq!(
             app.agent.config.session_id.as_deref(),
             Some(app.session_id.as_str())
+        );
+
+        for (key, value) in saved_env {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
+    fn try_switch_model_failure_is_noop_for_session_state() {
+        let _guard = env_test_lock();
+        let env_keys = [
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "HERMES_TUI_PROVIDER",
+        ];
+        let saved_env: Vec<(&str, Option<String>)> = env_keys
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());
+        let persistence = SessionPersistence::new(tmp.path());
+        persistence
+            .persist_session(
+                &app.session_id,
+                &[hermes_core::Message::user("hello")],
+                Some(&app.current_model),
+                Some("cli"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        let old_model = "anthropic:claude-sonnet-4-6";
+        app.try_switch_model(old_model).expect("baseline switch");
+        let old_agent_model = app.agent.config.model.clone();
+        assert_eq!(
+            persistence.get_session_model(&app.session_id).unwrap(),
+            Some(old_model.to_string())
+        );
+        assert_eq!(
+            std::env::var("HERMES_MODEL").ok().as_deref(),
+            Some(old_model)
+        );
+
+        let broken_model = "openrouter:zai/glm-5.2";
+        app.force_model_rebuild_failure_for_test(broken_model);
+        let err = app
+            .try_switch_model(broken_model)
+            .expect_err("forced rebuild failure");
+
+        assert!(err.to_string().contains("test forced rebuild failure"));
+        assert_eq!(app.current_model, old_model);
+        assert_eq!(app.agent.config.model, old_agent_model);
+        assert_eq!(
+            persistence.get_session_model(&app.session_id).unwrap(),
+            Some(old_model.to_string())
+        );
+        assert_eq!(
+            std::env::var("HERMES_MODEL").ok().as_deref(),
+            Some(old_model)
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_MODEL").ok().as_deref(),
+            Some(old_model)
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_PROVIDER").ok().as_deref(),
+            Some("anthropic")
         );
 
         for (key, value) in saved_env {

@@ -4802,7 +4802,17 @@ async fn process_modal_confirm(state: &mut TuiState, app: &mut App) -> Result<()
         PickerKind::ModelForProvider { provider } => {
             let provider_model = format!("{provider}:{}", item.value.trim());
             let warning = app.model_switch_preflight_warning(&provider_model);
-            app.switch_model(&provider_model);
+            if let Err(err) = app.try_switch_model(&provider_model) {
+                let previous = app.current_model.clone();
+                let notice = format!(
+                    "Model switch to {} failed ({}); staying on {}.",
+                    provider_model, err, previous
+                );
+                app.push_ui_assistant(notice.clone());
+                state.close_modal();
+                state.status_message = notice;
+                return Ok(());
+            }
             let mut notice = format!("Model switched to: {}", provider_model);
             if let Some(warning) = warning.as_deref() {
                 notice.push('\n');

@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T09:53:46.748993+00:00`
+Generated: `2026-06-25T10:11:20.158160+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7011`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-25T09:53:46.748993+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 205 |
-| ported | 392 |
+| pending | 204 |
+| ported | 393 |
 | superseded | 6338 |
 
 ## First 100 Pending Commits
@@ -107,7 +107,6 @@ Generated: `2026-06-25T09:53:46.748993+00:00`
 | `b6d107240819` | #20 | fix(cli): branch new worktrees from the fresh remote tip, not stale local HEAD (#50355) |
 | `5b45fb269a06` | #20 | fix(security): sanitize kanban markdown html |
 | `f72690825e76` | #26 | fix(desktop/windows): stop in-app update from cascading into a backend restart loop (#50381) |
-| `99f3072aa06a` | #20 | fix(model-switch): a failed in-place swap must be a no-op, not a dead session (#50375) |
 | `745c4db235bd` | #26 | feat(desktop/windows): show update-in-progress feedback before the desktop exits (#50419) (#50448) |
 | `7785655b4ece` | #26 | fix(desktop): keep the floating composer in-bounds so it can't be lost off-screen |
 | `37c37c9dc511` | #26 | fix(antigravity): register google-antigravity ProviderProfile + AUTHOR_MAP |
@@ -125,3 +124,4 @@ Generated: `2026-06-25T09:53:46.748993+00:00`
 | `b9b4756ab480` | #22 | fix dashboard chat session titles |
 | `a61baa961572` | #26 | feat(desktop): PR-style file diffs in chat |
 | `c6fbd5a10494` | #26 | style(desktop): lead --dt-font-mono with bundled JetBrains Mono |
+| `ac128af1cec3` | #26 | feat(desktop): syntax-highlight inline diffs via Shiki |
