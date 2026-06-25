@@ -4315,6 +4315,23 @@ fn format_model_persistence_note(app: &App) -> String {
     note
 }
 
+fn try_switch_model_or_emit_failure(app: &mut App, provider_model: &str) -> bool {
+    let previous_model = app.current_model.clone();
+    match app.try_switch_model(provider_model) {
+        Ok(()) => true,
+        Err(err) => {
+            emit_command_output(
+                app,
+                format!(
+                    "Model switch to {} failed ({}); staying on {}.",
+                    provider_model, err, previous_model
+                ),
+            );
+            false
+        }
+    }
+}
+
 async fn pick_model_for_provider(
     app: &mut App,
     provider: &str,
@@ -4375,7 +4392,9 @@ async fn pick_model_for_provider(
     let (guarded, note) =
         guard_provider_model_selection_for_config(&provider_model, &app.config).await?;
     let warning = app.model_switch_preflight_warning(&guarded);
-    app.switch_model(&guarded);
+    if !try_switch_model_or_emit_failure(app, &guarded) {
+        return Ok(false);
+    }
     let mut msg = format!("Model switched to: {}", guarded);
     if let Some(n) = note {
         msg.push_str("\n");
@@ -5076,7 +5095,9 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
                 }
             }
             let warning = app.model_switch_preflight_warning(&guarded);
-            app.switch_model(&guarded);
+            if !try_switch_model_or_emit_failure(app, &guarded) {
+                return Ok(CommandResult::Handled);
+            }
             let mut msg = format!("Model switched to: {}", guarded);
             if let Some(n) = note {
                 msg.push_str("\n");
@@ -31527,6 +31548,41 @@ install_command: "uv pip install -r requirements.txt"
             1,
             "warning must not append model context"
         );
+    }
+
+    #[tokio::test]
+    async fn model_switch_command_failure_does_not_commit_or_claim_success() {
+        let _lock = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        let mut cfg = (*app.config).clone();
+        cfg.model = Some("anthropic:claude-sonnet-4-6".to_string());
+        cfg.llm_providers.insert(
+            "compact-provider".to_string(),
+            LlmProviderConfig {
+                models: vec!["deepseek-chat".to_string()],
+                discover_models: false,
+                ..LlmProviderConfig::default()
+            },
+        );
+        app.config = Arc::new(cfg);
+        app.try_switch_model("anthropic:claude-sonnet-4-6")
+            .expect("baseline switch");
+        app.force_model_rebuild_failure_for_test("compact-provider:deepseek-chat");
+
+        handle_model_command(
+            &mut app,
+            &["deepseek-chat", "--provider", "compact-provider"],
+        )
+        .await
+        .expect("model switch failure should be reported, not thrown");
+
+        let out = latest_ui_assistant_text(&app);
+        assert!(out.contains("Model switch to compact-provider:deepseek-chat failed"));
+        assert!(out.contains("staying on anthropic:claude-sonnet-4-6"));
+        assert!(!out.contains("Model switched to: compact-provider:deepseek-chat"));
+        assert_eq!(app.current_model, "anthropic:claude-sonnet-4-6");
     }
 
     #[test]

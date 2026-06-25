@@ -4474,6 +4474,11 @@
       "owner": "rust-runtime",
       "notes": "Rust Telegram send paths now surface Bot API parameters.retry_after as typed GatewayError::RateLimited for JSON and multipart sends, preserving server-requested flood-control delay instead of flattening it into a generic SendFailed string. Focused tests cover retry_after parsing and typed error mapping."
     },
+    "99f3072aa06a": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust CLI model switching is now transactional: App::try_switch_model builds the replacement provider/agent before mutating current_model, runtime env, or session DB state, while user-facing /model and TUI picker paths abort with a failure notice instead of claiming success. Focused app and command tests force a rebuild failure and verify the old model, env, agent config, and session model remain intact."
+    },
     "c0409a87ff05": {
       "disposition": "ported",
       "owner": "rust-runtime",
