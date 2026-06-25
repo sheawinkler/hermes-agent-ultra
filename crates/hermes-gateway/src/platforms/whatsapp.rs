@@ -900,6 +900,11 @@ impl PlatformAdapter for WhatsAppAdapter {
     fn is_running(&self) -> bool {
         self.base.is_running()
     }
+
+    fn splits_long_messages(&self) -> bool {
+        true
+    }
+
     fn platform_name(&self) -> &str {
         "whatsapp"
     }

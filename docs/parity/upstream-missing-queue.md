@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T14:46:38.745838+00:00`
+Generated: `2026-06-25T15:09:17.893661+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7012`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-25T14:46:38.745838+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 183 |
-| ported | 411 |
+| pending | 181 |
+| ported | 413 |
 | superseded | 6342 |
 
 ## First 100 Pending Commits
@@ -121,7 +121,7 @@ Generated: `2026-06-25T14:46:38.745838+00:00`
 | `61c266b0dc75` | #26 | style(desktop): soften dark-mode syntax highlighting |
 | `8845f3316c26` | #20 | fix(security): restrict dashboard plugin backend import to bundled plugins (#43719) |
 | `2e779d11a03d` | #23 | feat(mem0): v3 API, OSS mode, update/delete tools, telemetry & review fixes (#15624) |
-| `86e4521cb1d9` | #23 | fix(delivery): make cron output truncation configurable + adapter-aware |
-| `e9cd8c5bf3ea` | #23 | fix(delivery): drop env-var knob, flag all chunking adapters |
 | `d4fa2db1c5df` | #26 | fix(desktop): show all of a provider's models when searching the composer picker |
 | `17dfc6bec4a8` | #26 | fix(desktop): set AppUserModelID on Windows so notifications fire (#50808) |
+| `f2e37549c673` | #20 | feat(computer_use): cross-platform cua-driver (macOS/Windows/Linux) |
+| `e3505c7f73a4` | #26 | fix(computer_use): reconcile Linux gate with stale "gated off" comments |

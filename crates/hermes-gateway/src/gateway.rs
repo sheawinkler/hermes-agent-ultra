@@ -38,6 +38,7 @@ use hermes_tools::skill_commands::{
 
 use crate::background::{BackgroundTaskManager, TaskStatus};
 use crate::commands::{handle_command, GatewayCommandResult, ModelSwitchRequest, ModelSwitchScope};
+use crate::delivery::prepare_platform_message_for_adapter;
 use crate::dm::{DmDecision, DmManager};
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::media::validate_media_delivery_path;
@@ -3302,14 +3303,44 @@ impl Gateway {
         parse_mode: Option<ParseMode>,
         thread_id: Option<&str>,
     ) -> Result<(), GatewayError> {
-        self.send_message_with_options(
-            platform,
-            chat_id,
-            text,
-            parse_mode,
-            SendMessageOptions::explicit_threaded(thread_id),
+        self.send_message_explicit_with_audit_label(
+            platform, chat_id, text, parse_mode, thread_id, None,
         )
         .await
+    }
+
+    pub async fn send_message_explicit_with_audit_label(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        thread_id: Option<&str>,
+        audit_label: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let mut options = SendMessageOptions::explicit_threaded(thread_id);
+        if let Some(label) = audit_label {
+            options = options.with_delivery_audit_label(label.to_string());
+        }
+        self.send_message_with_options(platform, chat_id, text, parse_mode, options)
+            .await
+    }
+
+    async fn send_adapter_text_with_options(
+        adapter: &Arc<dyn PlatformAdapter>,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        let prepared = prepare_platform_message_for_adapter(
+            adapter.as_ref(),
+            text,
+            options.delivery_audit_label.as_deref(),
+        )?;
+        adapter
+            .send_message_with_options(chat_id, prepared.as_ref(), parse_mode, options)
+            .await
     }
 
     async fn send_message_with_options(
@@ -3327,19 +3358,26 @@ impl Gateway {
         let (cleaned, images) = extract_inline_images(&without_media);
         if images.is_empty() && media_files.is_empty() {
             if without_media == text {
-                return adapter
-                    .send_message_with_options(chat_id, text, parse_mode, options)
-                    .await;
-            }
-            return adapter
-                .send_message_with_options(chat_id, &cleaned, parse_mode, options)
+                return Self::send_adapter_text_with_options(
+                    &adapter, chat_id, text, parse_mode, options,
+                )
                 .await;
+            }
+            return Self::send_adapter_text_with_options(
+                &adapter, chat_id, &cleaned, parse_mode, options,
+            )
+            .await;
         }
 
         if !cleaned.is_empty() {
-            adapter
-                .send_message_with_options(chat_id, &cleaned, parse_mode.clone(), options.clone())
-                .await?;
+            Self::send_adapter_text_with_options(
+                &adapter,
+                chat_id,
+                &cleaned,
+                parse_mode.clone(),
+                options.clone(),
+            )
+            .await?;
         }
 
         for image in images {
@@ -3359,14 +3397,14 @@ impl Gateway {
                     Some(caption) if !caption.is_empty() => format!("{caption}\n{}", image.url),
                     _ => image.url.clone(),
                 };
-                adapter
-                    .send_message_with_options(
-                        chat_id,
-                        &fallback,
-                        Some(ParseMode::Plain),
-                        options.clone(),
-                    )
-                    .await?;
+                Self::send_adapter_text_with_options(
+                    &adapter,
+                    chat_id,
+                    &fallback,
+                    Some(ParseMode::Plain),
+                    options.clone(),
+                )
+                .await?;
             }
         }
 
@@ -3379,14 +3417,14 @@ impl Gateway {
                     as_voice = media.as_voice,
                     "refusing to deliver unsafe MEDIA marker path"
                 );
-                adapter
-                    .send_message_with_options(
-                        chat_id,
-                        "[media attachment blocked: unsafe local file path]",
-                        Some(ParseMode::Plain),
-                        options.clone(),
-                    )
-                    .await?;
+                Self::send_adapter_text_with_options(
+                    &adapter,
+                    chat_id,
+                    "[media attachment blocked: unsafe local file path]",
+                    Some(ParseMode::Plain),
+                    options.clone(),
+                )
+                .await?;
                 continue;
             };
             let Some(validated_path) = validated_path.to_str() else {
@@ -3397,14 +3435,14 @@ impl Gateway {
                     as_voice = media.as_voice,
                     "refusing to deliver non-UTF-8 MEDIA marker path"
                 );
-                adapter
-                    .send_message_with_options(
-                        chat_id,
-                        "[media attachment blocked: non-UTF-8 local file path]",
-                        Some(ParseMode::Plain),
-                        options.clone(),
-                    )
-                    .await?;
+                Self::send_adapter_text_with_options(
+                    &adapter,
+                    chat_id,
+                    "[media attachment blocked: non-UTF-8 local file path]",
+                    Some(ParseMode::Plain),
+                    options.clone(),
+                )
+                .await?;
                 continue;
             };
 
@@ -3420,14 +3458,14 @@ impl Gateway {
                     error = %err,
                     "native media file send failed; falling back to plain file marker"
                 );
-                adapter
-                    .send_message_with_options(
-                        chat_id,
-                        &format!("[media attachment] {validated_path}"),
-                        Some(ParseMode::Plain),
-                        options.clone(),
-                    )
-                    .await?;
+                Self::send_adapter_text_with_options(
+                    &adapter,
+                    chat_id,
+                    &format!("[media attachment] {validated_path}"),
+                    Some(ParseMode::Plain),
+                    options.clone(),
+                )
+                .await?;
             }
         }
 
@@ -4490,6 +4528,53 @@ mod tests {
             "[image] https://cdn.example.com/x.png | caption=diagram"
         );
         assert_eq!(sent[2].1, "[image] https://fal.media/abc");
+    }
+
+    #[tokio::test]
+    async fn gateway_explicit_send_truncates_long_non_chunking_output_with_audit_label() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _home_guard = HermesHomeEnvGuard::set(tmp.path());
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let gw = Gateway::with_defaults(session_mgr, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+        let full_output = "x".repeat(crate::delivery::MAX_PLATFORM_OUTPUT + 1200);
+
+        gw.send_message_explicit_with_audit_label(
+            "test",
+            "chat1",
+            &full_output,
+            None,
+            None,
+            Some("cron/job 42"),
+        )
+        .await
+        .expect("send should succeed");
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, "chat1");
+        assert!(sent[0].1.chars().count() <= crate::delivery::MAX_PLATFORM_OUTPUT);
+        assert!(sent[0].1.contains("truncated, full output saved to"));
+        assert_ne!(sent[0].1, full_output);
+        drop(sent);
+
+        let saved: Vec<_> = std::fs::read_dir(tmp.path().join("cron").join("output"))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(saved.len(), 1);
+        assert!(saved[0]
+            .file_name()
+            .to_string_lossy()
+            .starts_with("cron_job_42_"));
+        assert_eq!(
+            std::fs::read_to_string(saved[0].path()).unwrap(),
+            full_output
+        );
     }
 
     #[tokio::test]

@@ -4,16 +4,132 @@
 //! for specifying where messages should be routed, and a `DeliveryRouter`
 //! that holds registered adapters and dispatches messages accordingly.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::RwLock;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::media::validate_media_delivery_path;
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{PlatformAdapter, SendMessageOptions};
+
+/// Cap before gateway-level truncation for adapters that cannot split long text.
+pub(crate) const MAX_PLATFORM_OUTPUT: usize = 4000;
+static AUDIT_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn prepare_platform_message_for_adapter<'a>(
+    adapter: &dyn PlatformAdapter,
+    message: &'a str,
+    audit_label: Option<&str>,
+) -> Result<Cow<'a, str>, GatewayError> {
+    prepare_platform_message_for_adapter_at(
+        adapter,
+        message,
+        audit_label,
+        &hermes_config::hermes_home(),
+    )
+}
+
+fn prepare_platform_message_for_adapter_at<'a>(
+    adapter: &dyn PlatformAdapter,
+    message: &'a str,
+    audit_label: Option<&str>,
+    hermes_home: &Path,
+) -> Result<Cow<'a, str>, GatewayError> {
+    if message.chars().count() <= MAX_PLATFORM_OUTPUT {
+        return Ok(Cow::Borrowed(message));
+    }
+
+    let label = sanitized_audit_label(audit_label, adapter.platform_name());
+    if adapter.splits_long_messages() {
+        match save_full_platform_output_at(message, &label, hermes_home) {
+            Ok(saved_path) => info!(
+                platform = adapter.platform_name(),
+                path = %saved_path.display(),
+                chars = message.chars().count(),
+                "Preserved long platform output for chunking adapter"
+            ),
+            Err(err) => warn!(
+                platform = adapter.platform_name(),
+                error = %err,
+                chars = message.chars().count(),
+                "Failed to save long platform output audit copy; delivering full content"
+            ),
+        }
+        return Ok(Cow::Borrowed(message));
+    }
+
+    let saved_path = save_full_platform_output_at(message, &label, hermes_home).map_err(|err| {
+        GatewayError::SendFailed(format!(
+            "Failed to save full platform output before truncation: {err}"
+        ))
+    })?;
+    let footer = format!(
+        "\n\n... [truncated, full output saved to {}]",
+        saved_path.display()
+    );
+    let visible = MAX_PLATFORM_OUTPUT.saturating_sub(footer.chars().count());
+    let mut truncated = message.chars().take(visible).collect::<String>();
+    truncated.push_str(&footer);
+    info!(
+        platform = adapter.platform_name(),
+        path = %saved_path.display(),
+        original_chars = message.chars().count(),
+        delivered_chars = truncated.chars().count(),
+        "Truncated long platform output for non-chunking adapter"
+    );
+    Ok(Cow::Owned(truncated))
+}
+
+fn save_full_platform_output_at(
+    content: &str,
+    label: &str,
+    hermes_home: &Path,
+) -> std::io::Result<PathBuf> {
+    let output_dir = hermes_home.join("cron").join("output");
+    std::fs::create_dir_all(&output_dir)?;
+    let now_millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let sequence = AUDIT_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = output_dir.join(format!(
+        "{}_{}_{}_{}.txt",
+        label,
+        now_millis,
+        std::process::id(),
+        sequence
+    ));
+    std::fs::write(&path, content)?;
+    Ok(path)
+}
+
+fn sanitized_audit_label(label: Option<&str>, fallback: &str) -> String {
+    let raw = label
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback);
+    let mut sanitized = String::with_capacity(raw.len().min(64));
+    for ch in raw.chars().take(64) {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            sanitized.push(ch);
+        } else if !sanitized.ends_with('_') {
+            sanitized.push('_');
+        }
+    }
+    let trimmed = sanitized.trim_matches('_');
+    if trimmed.is_empty() {
+        "platform-output".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // DeliveryItem
@@ -357,6 +473,7 @@ impl DeliveryRouter {
                     explicit_chat_id: target.is_explicit,
                     notify: false,
                     non_conversational: false,
+                    delivery_audit_label: None,
                 },
             )
             .await
@@ -394,8 +511,13 @@ impl DeliveryRouter {
                         "Adapter is not running, attempting delivery anyway"
                     );
                 }
+                let message = prepare_platform_message_for_adapter(
+                    adapter.as_ref(),
+                    message,
+                    options.delivery_audit_label.as_deref(),
+                )?;
                 adapter
-                    .send_message_with_options(chat_id, message, None, options)
+                    .send_message_with_options(chat_id, message.as_ref(), None, options)
                     .await
             }
             None => {
@@ -470,6 +592,7 @@ impl DeliveryRouter {
                             explicit_chat_id: target.is_explicit,
                             notify: false,
                             non_conversational: false,
+                            delivery_audit_label: None,
                         },
                     )
                     .await
@@ -508,6 +631,7 @@ mod tests {
 
     struct MessageRecordingAdapter {
         messages: Arc<Mutex<Vec<RecordedMessage>>>,
+        splits_long_messages: bool,
     }
 
     #[async_trait]
@@ -620,9 +744,82 @@ mod tests {
             true
         }
 
+        fn splits_long_messages(&self) -> bool {
+            self.splits_long_messages
+        }
+
         fn platform_name(&self) -> &str {
             "ntfy"
         }
+    }
+
+    #[test]
+    fn prepare_platform_message_truncates_and_saves_for_non_chunking_adapter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let adapter = MessageRecordingAdapter {
+            messages,
+            splits_long_messages: false,
+        };
+        let content = "x".repeat(MAX_PLATFORM_OUTPUT + 1200);
+
+        let prepared = prepare_platform_message_for_adapter_at(
+            &adapter,
+            &content,
+            Some("job/unsafe label"),
+            tmp.path(),
+        )
+        .expect("prepare");
+
+        assert!(prepared.chars().count() <= MAX_PLATFORM_OUTPUT);
+        assert!(prepared.contains("truncated, full output saved to"));
+        assert_ne!(prepared.as_ref(), content);
+        let saved: Vec<_> = std::fs::read_dir(tmp.path().join("cron").join("output"))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(saved.len(), 1);
+        assert!(saved[0]
+            .file_name()
+            .to_string_lossy()
+            .starts_with("job_unsafe_label_"));
+        assert_eq!(std::fs::read_to_string(saved[0].path()).unwrap(), content);
+    }
+
+    #[test]
+    fn prepare_platform_message_preserves_and_saves_for_chunking_adapter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let adapter = MessageRecordingAdapter {
+            messages,
+            splits_long_messages: true,
+        };
+        let content = "x".repeat(MAX_PLATFORM_OUTPUT + 1200);
+
+        let prepared =
+            prepare_platform_message_for_adapter_at(&adapter, &content, Some("job2"), tmp.path())
+                .expect("prepare");
+
+        assert_eq!(prepared.as_ref(), content);
+        let saved: Vec<_> = std::fs::read_dir(tmp.path().join("cron").join("output"))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(saved.len(), 1);
+        assert!(saved[0].file_name().to_string_lossy().starts_with("job2_"));
+        assert_eq!(std::fs::read_to_string(saved[0].path()).unwrap(), content);
+    }
+
+    #[test]
+    fn save_full_platform_output_uses_unique_paths_for_same_label() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let first = save_full_platform_output_at("first", "same-job", tmp.path()).unwrap();
+        let second = save_full_platform_output_at("second", "same-job", tmp.path()).unwrap();
+
+        assert_ne!(first, second);
+        assert_eq!(std::fs::read_to_string(first).unwrap(), "first");
+        assert_eq!(std::fs::read_to_string(second).unwrap(), "second");
     }
 
     #[test]
@@ -723,6 +920,7 @@ mod tests {
                 "ntfy",
                 Arc::new(MessageRecordingAdapter {
                     messages: messages.clone(),
+                    splits_long_messages: false,
                 }),
             )
             .await;

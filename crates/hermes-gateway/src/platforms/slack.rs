@@ -1531,6 +1531,10 @@ impl PlatformAdapter for SlackAdapter {
         self.base.is_running()
     }
 
+    fn splits_long_messages(&self) -> bool {
+        true
+    }
+
     fn platform_name(&self) -> &str {
         "slack"
     }

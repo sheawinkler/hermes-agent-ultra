@@ -3,7 +3,22 @@ use std::fs;
 
 #[test]
 fn e2e_cli_model_command_prints_current_model() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("config.yaml"),
+        r#"
+model: local-test:deterministic
+llm_providers:
+  local-test:
+    base_url: http://127.0.0.1:9/v1
+    discover_models: false
+    models:
+      deterministic: {}
+"#,
+    )
+    .expect("write config");
     let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
+    cmd.env("HERMES_HOME", dir.path());
     cmd.arg("model");
     cmd.assert().success();
 }

@@ -76,6 +76,8 @@ pub struct SendMessageOptions {
     /// True for lifecycle/status sends that should not become conversational
     /// history boundaries on platforms that backfill channel context.
     pub non_conversational: bool,
+    /// Stable label used when saving full long-form output before truncation.
+    pub delivery_audit_label: Option<String>,
 }
 
 impl SendMessageOptions {
@@ -85,6 +87,7 @@ impl SendMessageOptions {
             explicit_chat_id: false,
             notify: false,
             non_conversational: false,
+            delivery_audit_label: None,
         }
     }
 
@@ -94,6 +97,7 @@ impl SendMessageOptions {
             explicit_chat_id: true,
             notify: false,
             non_conversational: false,
+            delivery_audit_label: None,
         }
     }
 
@@ -103,6 +107,7 @@ impl SendMessageOptions {
             explicit_chat_id: false,
             notify: true,
             non_conversational: false,
+            delivery_audit_label: None,
         }
     }
 
@@ -112,7 +117,13 @@ impl SendMessageOptions {
             explicit_chat_id: false,
             notify: false,
             non_conversational: true,
+            delivery_audit_label: None,
         }
+    }
+
+    pub fn with_delivery_audit_label(mut self, label: impl Into<String>) -> Self {
+        self.delivery_audit_label = Some(label.into());
+        self
     }
 }
 
@@ -258,6 +269,15 @@ pub trait PlatformAdapter: Send + Sync {
 
     /// Check whether the adapter is currently running.
     fn is_running(&self) -> bool;
+
+    /// Whether this adapter splits long outgoing text into multiple messages.
+    ///
+    /// The gateway uses this to preserve full long-form cron/tool output for
+    /// adapters that chunk natively, while retaining truncation and audit-file
+    /// fallback for adapters with single-message limits.
+    fn splits_long_messages(&self) -> bool {
+        false
+    }
 
     /// Return the name of this platform (e.g. "telegram", "discord").
     fn platform_name(&self) -> &str;
