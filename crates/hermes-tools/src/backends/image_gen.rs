@@ -1444,6 +1444,7 @@ mod fal_managed_tests {
     /// Hermetic env scope: HERMES_HOME → tempdir + flag/token cleared.
     struct EnvScope {
         _tmp: tempfile::TempDir,
+        home: PathBuf,
         original: Vec<(&'static str, Option<String>)>,
         _g: std::sync::MutexGuard<'static, ()>,
     }
@@ -1452,8 +1453,10 @@ mod fal_managed_tests {
         fn new() -> Self {
             let g = test_lock::lock();
             let tmp = tempfile::tempdir().unwrap();
+            let home = tmp.path().to_path_buf();
             let keys = [
                 "HERMES_HOME",
+                "HOME",
                 "FAL_KEY",
                 "FAL_IMAGE_MODEL",
                 "HERMES_FAL_IMAGE_MODEL",
@@ -1479,12 +1482,18 @@ mod fal_managed_tests {
             for k in &keys {
                 std::env::remove_var(k);
             }
-            std::env::set_var("HERMES_HOME", tmp.path());
+            std::env::set_var("HERMES_HOME", &home);
+            std::env::set_var("HOME", &home);
             Self {
                 _tmp: tmp,
+                home,
                 original,
                 _g: g,
             }
+        }
+
+        fn auth_path(&self) -> PathBuf {
+            self.home.join("auth.json")
         }
     }
 
@@ -1722,9 +1731,11 @@ mod fal_managed_tests {
 
     #[test]
     fn codex_image_auth_reads_hermes_auth_store() {
-        let _g = EnvScope::new();
+        let g = EnvScope::new();
+        let auth_path = g.auth_path();
+        std::env::set_var("HERMES_AUTH_FILE", &auth_path);
         std::fs::write(
-            hermes_config::paths::auth_json_path(),
+            &auth_path,
             r#"{
               "active_provider": "openai-codex",
               "providers": {
