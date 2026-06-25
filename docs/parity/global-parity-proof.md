@@ -1,6 +1,6 @@
 # Global Parity Proof
 
-Generated: `2026-06-25T17:46:51.629782+00:00`
+Generated: `2026-06-25T18:58:02.699515+00:00`
 
 ## Gate Status
 
@@ -93,13 +93,13 @@ Generated: `2026-06-25T17:46:51.629782+00:00`
 
 ## Queue Summary
 
-- Upstream missing commits tracked: `7013`.
+- Upstream missing commits tracked: `7021`.
 - By target ticket:
-  - `#20`: `3140`
+  - `#20`: `3146`
   - `#21`: `130`
   - `#22`: `957`
   - `#23`: `488`
   - `#24`: `22`
   - `#25`: `146`
-  - `#26`: `2130`
+  - `#26`: `2132`
 

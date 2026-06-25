@@ -2401,6 +2401,17 @@ impl AgentLoop {
         Some((action, target, content))
     }
 
+    fn memory_tool_result_succeeded(content: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<Value>(content) else {
+            return false;
+        };
+        let Some(object) = value.as_object() else {
+            return false;
+        };
+        object.get("success").and_then(Value::as_bool) == Some(true)
+            && object.get("staged").and_then(Value::as_bool) != Some(true)
+    }
+
     fn notify_memory_writes(&self, tool_calls: &[ToolCall], results: &[ToolResult]) {
         if self.config.skip_memory {
             return;
@@ -2413,6 +2424,9 @@ impl AgentLoop {
         };
         for result in results {
             if result.is_error {
+                continue;
+            }
+            if !Self::memory_tool_result_succeeded(&result.content) {
                 continue;
             }
             let Some(tc) = tool_calls.iter().find(|tc| tc.id == result.tool_call_id) else {
@@ -15354,6 +15368,25 @@ mod tests {
         assert_eq!(event.0, "remove");
         assert_eq!(event.1, "memory");
         assert_eq!(event.2, "obsolete fact");
+    }
+
+    #[test]
+    fn memory_tool_result_succeeded_fails_closed_on_unclear_shapes() {
+        assert!(AgentLoop::memory_tool_result_succeeded(
+            r#"{"success":true,"message":"Entry added."}"#
+        ));
+        for content in [
+            r#"{"success":false,"message":"failed"}"#,
+            r#"{"success":true,"staged":true}"#,
+            r#"{"message":"Entry added."}"#,
+            "not json",
+            "[]",
+        ] {
+            assert!(
+                !AgentLoop::memory_tool_result_succeeded(content),
+                "{content} should not be mirrored"
+            );
+        }
     }
 
     #[test]

@@ -114,6 +114,13 @@ pub trait MemoryProviderPlugin: Send + Sync {
         let _ = (action, target, content);
     }
 
+    /// Extra provider state stored outside HERMES_HOME that should travel with
+    /// `hermes backup`. This must be config/env-only: no initialization and no
+    /// network calls.
+    fn backup_paths(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
     // -- Extended lifecycle (Python-equivalent) --
 
     /// Check if the provider is available and configured.

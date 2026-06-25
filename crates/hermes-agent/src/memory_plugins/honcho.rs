@@ -602,6 +602,12 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         "honcho"
     }
 
+    fn backup_paths(&self) -> Vec<std::path::PathBuf> {
+        dirs::home_dir()
+            .map(|home| vec![home.join(".honcho")])
+            .unwrap_or_default()
+    }
+
     fn is_available(&self) -> bool {
         let hermes_home = config_io::default_hermes_home();
         let config = HonchoConfig::from_config_file(&hermes_home.to_string_lossy());

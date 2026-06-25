@@ -352,6 +352,12 @@ impl MemoryProviderPlugin for HindsightPlugin {
         "hindsight"
     }
 
+    fn backup_paths(&self) -> Vec<std::path::PathBuf> {
+        dirs::home_dir()
+            .map(|home| vec![home.join(".hindsight")])
+            .unwrap_or_default()
+    }
+
     fn is_available(&self) -> bool {
         let api_key = std::env::var("HINDSIGHT_API_KEY").unwrap_or_default();
         let api_url = std::env::var("HINDSIGHT_API_URL").unwrap_or_default();
