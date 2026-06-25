@@ -507,6 +507,8 @@ impl MediaCache {
                 return Ok(None);
             }
             "image"
+        } else if mime.starts_with("audio/") {
+            "audio"
         } else if mime.starts_with("video/") {
             "video"
         } else if document_mime_supported(&mime)
@@ -883,6 +885,12 @@ fn mime_from_extension(ext: &str) -> Option<&'static str> {
         ".jpg" | ".jpeg" => Some("image/jpeg"),
         ".gif" => Some("image/gif"),
         ".webp" => Some("image/webp"),
+        ".mp3" | ".mpeg" | ".mpga" => Some("audio/mpeg"),
+        ".m4a" => Some("audio/mp4"),
+        ".wav" => Some("audio/wav"),
+        ".ogg" | ".oga" => Some("audio/ogg"),
+        ".aac" => Some("audio/aac"),
+        ".flac" => Some("audio/flac"),
         ".mp4" | ".m4v" => Some("video/mp4"),
         ".mov" => Some("video/quicktime"),
         _ => mime_for_extension(&normalized),
@@ -1007,6 +1015,28 @@ mod tests {
             .expect("pdf");
         assert_eq!(doc.kind, "document");
         assert!(doc.context_note().contains("report.pdf"));
+
+        let audio = cache
+            .cache_media_bytes(
+                b"mp4-aac-bytes",
+                Some("audio_message.mp4"),
+                Some("audio/mp4"),
+                None,
+            )
+            .await
+            .unwrap()
+            .expect("audio/mp4");
+        assert_eq!(audio.kind, "audio");
+        assert_eq!(audio.media_type, "audio/mp4");
+        assert!(audio.path.starts_with(dir.path().join("audio")));
+
+        let m4a = cache
+            .cache_media_bytes(b"m4a-bytes", Some("clip.m4a"), None, None)
+            .await
+            .unwrap()
+            .expect("m4a extension");
+        assert_eq!(m4a.kind, "audio");
+        assert_eq!(m4a.media_type, "audio/mp4");
 
         let invalid = cache
             .cache_media_bytes(b"<html>", Some("bad.png"), Some("image/png"), None)
