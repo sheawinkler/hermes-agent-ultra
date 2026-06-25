@@ -2984,6 +2984,11 @@
       "notes": "Rust OpenViking save_config writes openviking.json through shared owner-only atomic config IO with 0600 permissions and regression coverage.",
       "owner": "rust-runtime"
     },
+    "b0e47a98f9ed": {
+      "disposition": "ported",
+      "notes": "Ported in Rust: hermes-config now honors HERMES_MANAGED_DIR and production /etc/hermes managed scope. Managed .env wins over shell/user/project dotenv, managed config overlays the effective GatewayConfig per leaf after env overrides, managed keys are mirrored back to env for downstream runtime readers, and Chronos standalone config reads use the same raw managed overlay without persisting managed values to user config.",
+      "owner": "rust-runtime"
+    },
     "b10f17bf1e93": {
       "disposition": "ported",
       "notes": "Imported ntfy as a platform plugin under plugins/platforms/ntfy with standalone send, env enablement, identity hardening, and local plugin regression tests."

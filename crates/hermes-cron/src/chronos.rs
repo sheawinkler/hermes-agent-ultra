@@ -116,8 +116,7 @@ impl ChronosConfig {
 }
 
 fn load_config_yaml() -> Option<Value> {
-    let bytes = std::fs::read(hermes_config::config_path()).ok()?;
-    serde_yaml::from_slice::<Value>(&bytes).ok()
+    hermes_config::load_effective_config_yaml_value(&hermes_config::config_path())
 }
 
 fn yaml_string(root: &Option<Value>, path: &[&str]) -> Option<String> {
@@ -467,6 +466,49 @@ mod tests {
     use super::*;
     use jsonwebtoken::{encode, EncodingKey, Header};
     use serde_json::json;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        fn new(vars: &[&'static str]) -> Self {
+            let saved = vars
+                .iter()
+                .map(|name| (*name, std::env::var(name).ok()))
+                .collect();
+            for name in vars {
+                // SAFETY: tests serialize env mutation with ENV_LOCK.
+                unsafe { std::env::remove_var(name) };
+            }
+            Self { saved }
+        }
+
+        fn set(&self, name: &str, value: impl AsRef<std::ffi::OsStr>) {
+            // SAFETY: tests serialize env mutation with ENV_LOCK.
+            unsafe { std::env::set_var(name, value) };
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in self.saved.drain(..).rev() {
+                match value {
+                    Some(value) => {
+                        // SAFETY: tests serialize env mutation with ENV_LOCK.
+                        unsafe { std::env::set_var(name, value) };
+                    }
+                    None => {
+                        // SAFETY: tests serialize env mutation with ENV_LOCK.
+                        unsafe { std::env::remove_var(name) };
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn config_reads_upstream_chronos_yaml_shape() {
@@ -495,6 +537,55 @@ mod tests {
             ),
             42
         );
+    }
+
+    #[test]
+    fn config_load_honors_managed_scope_overlay() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let env = EnvGuard::new(&[
+            "HERMES_HOME",
+            "HERMES_MANAGED_DIR",
+            "HERMES_CRON_PROVIDER",
+            "HERMES_CHRONOS_PORTAL_URL",
+            "HERMES_CHRONOS_CALLBACK_URL",
+            "HERMES_CHRONOS_EXPECTED_AUDIENCE",
+            "HERMES_CHRONOS_NAS_JWKS_URL",
+            "HERMES_CHRONOS_TOKEN_LEEWAY_SECONDS",
+            "HERMES_CHRONOS_REQUEST_TIMEOUT_SECONDS",
+        ]);
+        let home = tempfile::tempdir().unwrap();
+        let managed = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join("config.yaml"),
+            r#"
+cron:
+  provider: user
+  chronos:
+    portal_url: https://user.example
+    callback_url: https://agent.example/callback
+    request_timeout_seconds: 23
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            managed.path().join("config.yaml"),
+            r#"
+cron:
+  provider: chronos
+  chronos:
+    portal_url: https://managed.example
+"#,
+        )
+        .unwrap();
+        env.set("HERMES_HOME", home.path());
+        env.set("HERMES_MANAGED_DIR", managed.path());
+
+        let config = ChronosConfig::load();
+
+        assert_eq!(config.provider, "chronos");
+        assert_eq!(config.portal_url, "https://managed.example");
+        assert_eq!(config.callback_url, "https://agent.example/callback");
+        assert_eq!(config.request_timeout_seconds, 23);
     }
 
     #[tokio::test]
