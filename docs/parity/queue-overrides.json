@@ -3946,6 +3946,91 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust: display.busy_input_mode accepts interrupt/queue/steer, display.busy_ack_enabled suppresses automatic busy acknowledgements, env/config-set bridges cover HERMES_GATEWAY_BUSY_INPUT_MODE and HERMES_GATEWAY_BUSY_ACK_ENABLED, and gateway tests cover steer fallback/attachment and quiet queueing."
+    },
+    "2dace37f6b55": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking now has first-class openviking.json activation, hermes memory setup openviking, none/user/root credential modes, tenant defaults, owner-only config writes, health-gated initialization, and provider tests for setup/config behavior."
+    },
+    "b0e25c9cb295": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking save_config writes openviking.json through shared owner-only atomic config IO with 0600 permissions and regression coverage."
+    },
+    "70f53f36cb1c": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust CLI exposes hermes memory setup openviking as the manual setup path, normalizing endpoint values and writing an owner-only openviking.json that activates on later sessions."
+    },
+    "94523764fca8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking setup chooses and normalizes the credential mode before prompting for the corresponding none/user/root API key path, with CLI unit coverage for each setup shape."
+    },
+    "2b972472cee8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking setup validates manual endpoint, credential mode, API key presence, root tenant account/user requirements, agent defaults, and local no-key mode before persisting config."
+    },
+    "3c76dac4fdbf": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking config persistence fails closed through owner-only atomic config IO instead of silently ignoring chmod failures; setup tests assert final 0600 mode."
+    },
+    "2c2ca0443bba": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking setup/config activation covers the improved setup UX in the Rust CLI and provider runtime without Python startup hooks."
+    },
+    "315fdae5f8ad": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking does not autostart openviking-server from the agent runtime; local setup can use no-key config, while runtime initialization is health-gated and fail-closed."
+    },
+    "166d2457b292": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking avoids the unhealthy-local-autostart class entirely: initialization checks /health and disables the provider for the session when health is not successful."
+    },
+    "813a4e3838f6": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking implements on_session_switch, clears stale prefetch, rotates session id, resets dirty turn state for the new session, and tests the lifecycle hook."
+    },
+    "a30b40c73ab6": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking sync_turn captures the target session id before spawning the writer and on_session_end drains tracked writers before commit, preventing session-boundary races."
+    },
+    "eddbf291a415": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking session switch rotates in-memory state immediately, clears stale prefetch, and defers old-session drain/commit so late writes do not target the new session."
+    },
+    "91e9459e1006": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking tracks all background writers per session id in an inflight writer map and drains every writer for that session before commit."
+    },
+    "00c045b43f30": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking commit paths are hardened with bounded writer drains, skipped commits when writers outlive the drain budget, dirty-state preservation on skipped/failed end commits, and tests."
+    },
+    "3ac6551ba3d3": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking treats same-session switches as prefetch invalidation only and ignores empty new session ids, preventing rewound/no-op switches from corrupting session state."
+    },
+    "c835448908e7": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking does not block command/session-switch callers on old-session writer drains; old commits run through a deferred finalizer and non-blocking switch coverage asserts prompt return."
+    },
+    "5494c1e9b660": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Rust OpenViking uses repo-native openviking.json with shared atomic owner-only config IO instead of mutating ovcli profiles; dead Python ovcli constants are not part of the Rust runtime."
     }
   },
   "subject_patterns": [
