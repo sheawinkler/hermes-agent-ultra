@@ -16,6 +16,7 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use hermes_core::Message;
 use regex::Regex;
 use serde_json::Value;
 
@@ -49,6 +50,21 @@ pub trait MemoryProviderPlugin: Send + Sync {
     /// Persist a completed turn to the backend.
     fn sync_turn(&self, user_content: &str, assistant_content: &str, session_id: &str) {
         let _ = (user_content, assistant_content, session_id);
+    }
+
+    /// Persist a completed turn with the canonical transcript when available.
+    ///
+    /// Providers that do not need structured tool/message attribution can keep
+    /// the text-only implementation through this default bridge.
+    fn sync_turn_with_messages(
+        &self,
+        user_content: &str,
+        assistant_content: &str,
+        session_id: &str,
+        messages: &[Value],
+    ) {
+        let _ = messages;
+        self.sync_turn(user_content, assistant_content, session_id);
     }
 
     /// Return tool schemas this provider exposes (OpenAI function calling format).
@@ -461,15 +477,37 @@ impl MemoryManager {
 
     /// Sync a completed turn to all providers.
     pub fn sync_all(&self, user_content: &str, assistant_content: &str, session_id: &str) {
+        self.sync_all_with_messages(user_content, assistant_content, session_id, &[]);
+    }
+
+    /// Sync a completed turn to all providers, preserving canonical structured
+    /// messages for providers that can ingest tool calls/results natively.
+    pub fn sync_all_with_messages(
+        &self,
+        user_content: &str,
+        assistant_content: &str,
+        session_id: &str,
+        messages: &[Message],
+    ) {
         let Some(clean_user_content) = extract_user_instruction_from_skill_message(user_content)
         else {
             return;
         };
         let user_content = redact_memory_text(clean_user_content.as_ref());
         let assistant_content = redact_memory_text(assistant_content);
+        let messages = messages
+            .iter()
+            .filter_map(|message| serde_json::to_value(message).ok())
+            .map(|message| redact_memory_value(&message))
+            .collect::<Vec<_>>();
 
         for provider in &self.providers {
-            provider.sync_turn(&user_content, &assistant_content, session_id);
+            provider.sync_turn_with_messages(
+                &user_content,
+                &assistant_content,
+                session_id,
+                &messages,
+            );
         }
     }
 
@@ -1054,6 +1092,7 @@ mod tests {
         queued: Arc<std::sync::Mutex<Vec<String>>>,
         synced: Arc<std::sync::Mutex<Vec<String>>>,
         synced_assistant: Arc<std::sync::Mutex<Vec<String>>>,
+        structured_messages: Arc<std::sync::Mutex<Vec<Vec<Value>>>>,
         memory_writes: Arc<std::sync::Mutex<Vec<String>>>,
         tool_args: Arc<std::sync::Mutex<Vec<Value>>>,
         turn_messages: Arc<std::sync::Mutex<Vec<String>>>,
@@ -1086,6 +1125,20 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(assistant_content.to_string());
+        }
+
+        fn sync_turn_with_messages(
+            &self,
+            user_content: &str,
+            assistant_content: &str,
+            session_id: &str,
+            messages: &[Value],
+        ) {
+            self.sync_turn(user_content, assistant_content, session_id);
+            self.structured_messages
+                .lock()
+                .unwrap()
+                .push(messages.to_vec());
         }
 
         fn get_tool_schemas(&self) -> Vec<Value> {
@@ -1333,6 +1386,44 @@ mod tests {
         assert_eq!(synced_assistant.len(), 1);
         assert_fake_secret_redacted(&synced[0]);
         assert_fake_secret_redacted(&synced_assistant[0]);
+    }
+
+    #[test]
+    fn test_sync_all_with_messages_forwards_redacted_structured_transcript() {
+        let provider = Arc::new(RecordingProvider::new());
+        let structured_messages = provider.structured_messages.clone();
+        let mut mm = MemoryManager::new();
+        mm.add_provider(provider);
+        let tool_call = hermes_core::ToolCall {
+            id: "call_terminal".to_string(),
+            function: hermes_core::FunctionCall {
+                name: "terminal".to_string(),
+                arguments: serde_json::to_string(&serde_json::json!({
+                    "cmd": format!("echo {FAKE_SECRET}")
+                }))
+                .unwrap(),
+            },
+            extra_content: None,
+        };
+
+        mm.sync_all_with_messages(
+            &format!("user pasted api_key={FAKE_SECRET}"),
+            "assistant used a tool",
+            "session",
+            &[
+                Message::user(format!("user pasted api_key={FAKE_SECRET}")),
+                Message::assistant_with_tool_calls(
+                    Some("assistant used a tool".to_string()),
+                    vec![tool_call],
+                ),
+            ],
+        );
+
+        let captured = structured_messages.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let rendered = serde_json::to_string(&captured[0]).unwrap();
+        assert_fake_secret_redacted(&rendered);
+        assert!(rendered.contains("call_terminal"));
     }
 
     #[test]
