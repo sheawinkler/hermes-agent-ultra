@@ -434,7 +434,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/redraw", "Force a local repaint pulse in the TUI"),
     (
         "/reasoning",
-        "Reasoning controls (display + effort: status/on/off/set <low|medium|high|xhigh>)",
+        "Reasoning controls (display + effort: status/on/off/full/clamp/set <level>)",
     ),
     (
         "/raw",
@@ -12944,8 +12944,18 @@ fn reasoning_display_flag() -> &'static std::sync::atomic::AtomicBool {
     &SHOW_REASONING
 }
 
+fn reasoning_full_flag() -> &'static std::sync::atomic::AtomicBool {
+    static FULL_REASONING: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    &FULL_REASONING
+}
+
 fn set_reasoning_display(enabled: bool) {
     reasoning_display_flag().store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn set_reasoning_full(enabled: bool) {
+    reasoning_full_flag().store(enabled, std::sync::atomic::Ordering::Relaxed);
 }
 
 fn toggle_reasoning_display() -> bool {
@@ -12955,6 +12965,10 @@ fn toggle_reasoning_display() -> bool {
 
 fn reasoning_display_enabled() -> bool {
     reasoning_display_flag().load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn reasoning_full_enabled() -> bool {
+    reasoning_full_flag().load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn parse_reasoning_effort(raw: &str) -> Result<Option<&'static str>, AgentError> {
@@ -13136,11 +13150,16 @@ fn handle_reasoning_command(app: &mut App, args: &[&str]) -> Result<CommandResul
             emit_command_output(
                 app,
                 format!(
-                    "Reasoning status\n- display: {}\n- effort: {}\n- provider: {}",
+                    "Reasoning status\n- display: {}\n- mode: {}\n- effort: {}\n- provider: {}",
                     if reasoning_display_enabled() {
                         "ON"
                     } else {
                         "OFF"
+                    },
+                    if reasoning_full_enabled() {
+                        "full"
+                    } else {
+                        "clamp"
                     },
                     effort,
                     provider
@@ -13170,6 +13189,20 @@ fn handle_reasoning_command(app: &mut App, args: &[&str]) -> Result<CommandResul
             emit_command_output(
                 app,
                 "Reasoning display: OFF — model reasoning will be hidden.",
+            );
+        }
+        "full" => {
+            set_reasoning_full(true);
+            emit_command_output(
+                app,
+                "Reasoning mode: full — live thinking previews keep complete text.",
+            );
+        }
+        "clamp" => {
+            set_reasoning_full(false);
+            emit_command_output(
+                app,
+                "Reasoning mode: clamp — live thinking previews use compact caps.",
             );
         }
         "set" | "level" | "effort" => {
@@ -13203,8 +13236,9 @@ fn handle_reasoning_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                 app,
                 "Reasoning controls:\n\
                  - /reasoning                 Toggle reasoning display\n\
-                 - /reasoning status          Show display + effort state\n\
+                 - /reasoning status          Show display + mode + effort state\n\
                  - /reasoning on|off          Explicitly show/hide reasoning\n\
+                 - /reasoning full|clamp      Keep full thinking previews or compact them\n\
                  - /reasoning set <level>     Set provider reasoning effort\n\
                  Levels: minimal, low, medium, high, xhigh, auto",
             );
@@ -28112,6 +28146,21 @@ mod tests {
         }
     }
 
+    struct ReasoningFullResetGuard;
+
+    impl ReasoningFullResetGuard {
+        fn new() -> Self {
+            set_reasoning_full(false);
+            Self
+        }
+    }
+
+    impl Drop for ReasoningFullResetGuard {
+        fn drop(&mut self) {
+            set_reasoning_full(false);
+        }
+    }
+
     async fn build_test_app_with_stream(home: &Path) -> App {
         let config_dir = home.join("config");
         std::fs::create_dir_all(&config_dir).expect("create config dir");
@@ -28383,6 +28432,41 @@ mod tests {
             latest_ui_assistant_text(&app),
             hermes_core::version::version_label()
         );
+    }
+
+    #[tokio::test]
+    async fn reasoning_full_and_clamp_commands_update_mode_and_status() {
+        let _guard = env_test_lock();
+        let _reasoning_guard = ReasoningFullResetGuard::new();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_slash_command(&mut app, "/reasoning", &["full"])
+            .await
+            .expect("reasoning full command");
+        assert_eq!(result, CommandResult::Handled);
+        assert!(reasoning_full_enabled());
+        assert!(latest_ui_assistant_text(&app).contains("Reasoning mode: full"));
+
+        handle_slash_command(&mut app, "/reasoning", &["status"])
+            .await
+            .expect("reasoning status command");
+        let status = latest_ui_assistant_text(&app);
+        assert!(status.contains("- display: OFF"));
+        assert!(status.contains("- mode: full"));
+        assert!(status.contains("- effort: auto"));
+
+        handle_slash_command(&mut app, "/reasoning", &["help"])
+            .await
+            .expect("reasoning help command");
+        assert!(latest_ui_assistant_text(&app).contains("/reasoning full|clamp"));
+
+        handle_slash_command(&mut app, "/reasoning", &["clamp"])
+            .await
+            .expect("reasoning clamp command");
+        assert!(!reasoning_full_enabled());
+        assert!(latest_ui_assistant_text(&app).contains("Reasoning mode: clamp"));
     }
 
     #[tokio::test]

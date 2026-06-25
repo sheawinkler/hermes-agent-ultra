@@ -4484,6 +4484,11 @@
       "owner": "rust-runtime",
       "notes": "Rust core now exposes the platform-neutral SendErrorKind taxonomy, classify_send_error_text, and GatewayError::send_error_kind for deterministic send-failure branching. StreamConsumer can consume typed GatewayError/SendErrorKind values so rate-limited edit failures keep adaptive flood backoff while permanent send failures fall back immediately, with focused hermes-core and hermes-gateway tests."
     },
+    "95d53c3bcb06": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust CLI /reasoning now exposes full|clamp runtime modes, status/help report the active mode, and the TUI live-thinking preview keeps complete text in full mode while retaining compact caps in clamp mode. Focused command and TUI tests cover mode switching, status/help output, and cap bypass behavior; detailed transcript rendering already preserves stored reasoning_content line-for-line."
+    },
     "4314d451ca96": {
       "disposition": "ported",
       "owner": "rust-runtime",

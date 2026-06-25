@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T10:11:20.158160+00:00`
+Generated: `2026-06-25T10:29:48.601584+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7011`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-25T10:11:20.158160+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 204 |
-| ported | 393 |
+| pending | 203 |
+| ported | 394 |
 | superseded | 6338 |
 
 ## First 100 Pending Commits
@@ -120,8 +120,8 @@ Generated: `2026-06-25T10:11:20.158160+00:00`
 | `0a7ae28ebc1a` | #26 | fix(compressor): remove logging.basicConfig from library class __init__ |
 | `7130d60861a9` | #22 | feat(providers): remove google-gemini-cli + google-antigravity OAuth providers (#50492) |
 | `0768ed3b33e4` | #26 | docs(agents): fix stale platform adapter path in token-lock note |
-| `95d53c3bcb06` | #20 | feat(cli): /reasoning full — show complete thinking, not 10-line clamp (#50499) |
 | `b9b4756ab480` | #22 | fix dashboard chat session titles |
 | `a61baa961572` | #26 | feat(desktop): PR-style file diffs in chat |
 | `c6fbd5a10494` | #26 | style(desktop): lead --dt-font-mono with bundled JetBrains Mono |
 | `ac128af1cec3` | #26 | feat(desktop): syntax-highlight inline diffs via Shiki |
+| `64a507da44d2` | #20 | feat(relay): handle passthrough_forward over the WS (Phase 5 §5.1, gateway half) (#50702) |
