@@ -4723,6 +4723,101 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Superseded by Rust WhatsApp architecture: the repo has no scripts/whatsapp-bridge source tree or npm-installing bridge adapter path to mirror into HERMES_HOME; Rust WhatsApp runtime is the Cloud API adapter plus configurable bridge_url QR helper."
+    },
+    "9026a8c78974": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust platform policy: upstream added a Python Raft bundled platform plugin and tests, but Hermes Ultra does not advertise or register a Rust Raft platform adapter. The Rust gateway owns first-class native adapters under crates/hermes-gateway/src/platforms and does not import Python plugins/platforms at runtime."
+    },
+    "7d86178cf51a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by absent Rust Raft subprocess path: upstream sets stdin=DEVNULL on a Python Raft bridge subprocess, but Hermes Ultra has no Raft bridge adapter or Python subprocess launcher in the Rust gateway runtime."
+    },
+    "a7983d5ad768": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust dashboard/session architecture: upstream hides Python sidecar sessions in dashboard history, while Hermes Ultra has no Python run_agent/tui_gateway sidecar session source in the Rust runtime; gateway session sources are typed in crates/hermes-gateway/src/session_control.rs."
+    },
+    "5600105478ff": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust-native gateway adapters: upstream moved Python Slack/DingTalk/WhatsApp/Matrix/Feishu/Telegram/WeCom/email/SMS adapters into bundled plugin directories, but Hermes Ultra already implements these as first-class Rust modules under crates/hermes-gateway/src/platforms with feature gates and no Python plugin import path."
+    },
+    "2a4542333ee1": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by absent Rust Photon adapter: upstream modifies the Python Photon plugin sidecar retry/cooldown behavior. Hermes Ultra does not register a Photon platform module; CLI parsing of arbitrary --platform values is not an advertised Photon runtime surface."
+    },
+    "9578e52795e3": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by absent Rust Photon sidecar: upstream detects Python Photon sidecar death and reconnects. Hermes Ultra has no Photon sidecar process or platform adapter in crates/hermes-gateway/src/platforms."
+    },
+    "64a507da44d2": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as a first-class Rust relay protocol contract: crates/hermes-gateway/src/relay.rs decodes passthrough_forward frames, preserves bodyB64 byte parity, carries ordered headers and bufferId, and tolerates malformed base64 without killing the caller. The experimental relay adapter remains unregistered by Rust platform policy."
+    },
+    "45bc4fb37fa8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as Rust relay management-plane contracts: hermes_gateway::relay maps ws/wss relay URLs to /relay/policy, projects requireAddress/freeResponseScopes/allowOtherBots with connector camelCase serialization, and keeps the relay adapter unregistered unless explicitly scoped later."
+    },
+    "221cd60242ae": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Already ported in Rust provider controls: ollama-cloud is a known provider and the /reasoning set path applies provider extra_body reasoning effort configuration generically, with tests covering reasoning.effort normalization and clearing without introducing legacy model defaults."
+    },
+    "02050859f316": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Already ported by Rust session-resume parity work: SessionPersistence resolves compression continuation tips and ACP/session handlers preserve the active session id across load/resume rather than replacing it with a stale compressed parent."
+    },
+    "40fddc9e4c45": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as Rust relay protocol primitives: hermes_gateway::relay exposes going_idle and inbound_ack frame builders with bufferId validation and tests. The actual relay transport remains intentionally unregistered in Rust until the experimental relay adapter is scoped."
+    },
+    "6e88f7b6f7b9": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as Rust wake-url contract surface: hermes_gateway::relay resolves wake URL precedence from env/config sources, trims trailing slashes, and tests absent/env/config behavior for the connector wake primitive while keeping relay inactive by default."
+    },
+    "06cbc3bae985": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by absent Rust Photon sidecar/runtime: upstream recovers degraded Python Photon streams and sidecar state, but Hermes Ultra has no Photon adapter or sidecar process to patch."
+    },
+    "0952acbf4de8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by absent Rust Photon sidecar: upstream labels Photon CatchUpEvents failures in JavaScript sidecar code that is not present or invoked by Hermes Ultra's Rust gateway."
+    },
+    "7f1c278db817": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by absent Rust Photon sidecar: upstream intercepts console.log in the Photon JavaScript sidecar, but Hermes Ultra does not ship or execute that sidecar."
+    },
+    "d539cd9004a1": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported/proven in Rust config persistence: save_config_yaml and atomic_yaml_write write UTF-8 bytes through Rust String serialization, and a focused test now round-trips emoji/personality/system_prompt text while preserving valid UTF-8 and omitting home_dir."
+    },
+    "c39b2b50eeb8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust-only process startup: upstream hardens Python entrypoints against cwd packages named utils/proxy/ui shadowing imports. Hermes Ultra has no Python gateway/acp entrypoint import path, and scripts/check-rust-runtime-no-python.sh verifies no Rust runtime Python execution path."
+    },
+    "0d4cecb35270": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust cron architecture: upstream renames Python plugins/cron to plugins/cron_providers to avoid provider package shadowing. Hermes Ultra cron is crates/hermes-cron plus Rust gateway/api-server integrations and has no Python plugins/cron import path."
+    },
+    "7ff48a6291f5": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Discord component authorization: discord_component_allows_with_pairing now allows explicitly approved PairingManager users after allowlist/role checks fail, while denied/unpaired users remain fail-closed. Focused Rust tests cover approved, denied, and unpaired component subjects."
     }
   },
   "subject_patterns": [

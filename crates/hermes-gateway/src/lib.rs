@@ -26,6 +26,7 @@ pub mod media;
 pub mod mirror;
 pub mod pairing;
 pub mod platforms;
+pub mod relay;
 pub mod session;
 pub mod session_control;
 pub mod ssrf;
@@ -75,6 +76,11 @@ pub use delivery::{
 pub use dm::{DmDecision, DmManager};
 pub use mirror::MirrorManager;
 pub use pairing::{PairingManager, PairingState};
+pub use relay::{
+    relay_going_idle_frame, relay_inbound_ack_frame, relay_passthrough_forward_from_frame,
+    relay_policy_url, relay_relevance_policy, relay_wake_url_from_sources, RelayPassthroughForward,
+    RelayRelevancePolicy,
+};
 pub use sticker_cache::{StickerCache, StickerMeta};
 
 // Re-export adapter base

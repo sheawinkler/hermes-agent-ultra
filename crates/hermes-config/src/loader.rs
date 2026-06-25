@@ -2998,6 +2998,37 @@ mod tests {
     }
 
     #[test]
+    fn save_config_yaml_preserves_utf8_personality_and_prompt() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let mut config = GatewayConfig {
+            personality: Some("mentor 🧠".to_string()),
+            system_prompt: Some(
+                "Answer with precision; preserve emoji like 🚀 and café.".to_string(),
+            ),
+            ..GatewayConfig::default()
+        };
+        config.home_dir = Some("/tmp/should-not-persist".to_string());
+
+        save_config_yaml(&path, &config).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let text = std::str::from_utf8(&bytes).expect("config.yaml must be valid UTF-8");
+        assert!(text.contains("mentor 🧠"));
+        assert!(text.contains("🚀"));
+        assert!(text.contains("café"));
+        assert!(!text.contains("should-not-persist"));
+
+        let loaded = load_from_yaml(&path).unwrap();
+        assert_eq!(loaded.personality.as_deref(), Some("mentor 🧠"));
+        assert_eq!(
+            loaded.system_prompt.as_deref(),
+            Some("Answer with precision; preserve emoji like 🚀 and café.")
+        );
+    }
+
+    #[test]
     fn load_from_yaml_expands_env_refs_but_user_config_load_preserves_templates() {
         use tempfile::tempdir;
 
