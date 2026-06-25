@@ -114,6 +114,17 @@ pub enum CliCommand {
         action: Option<String>,
     },
 
+    /// Nous Portal billing overview and explicit-confirmation billing actions.
+    Billing {
+        /// Billing action and arguments. Use `hermes billing help`.
+        #[arg(
+            value_name = "ARGS",
+            trailing_var_arg = true,
+            allow_hyphen_values = true
+        )]
+        args: Vec<String>,
+    },
+
     /// Check dependencies and configuration health.
     Doctor {
         /// Run deeper diagnostics (gateway/runtime/memory endpoints).
@@ -1399,6 +1410,28 @@ mod tests {
                 assert_eq!(value.as_deref(), Some("gpt-4o"));
             }
             _ => panic!("Expected Config command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_billing_trailing_args() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "billing",
+            "charge",
+            "50",
+            "--confirm",
+            "--idempotency-key=key-1",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::Billing { args }) => {
+                assert_eq!(
+                    args,
+                    vec!["charge", "50", "--confirm", "--idempotency-key=key-1"]
+                );
+            }
+            _ => panic!("Expected Billing command"),
         }
     }
 

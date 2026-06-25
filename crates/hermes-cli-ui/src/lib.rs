@@ -180,7 +180,7 @@ pub fn canonical_command(cmd: &str) -> &str {
         "/summary" => "/recap",
         "/whoami" => "/profile",
         "/v" => "/version",
-        "/billing" | "/credits" => "/usage",
+        "/credits" => "/usage",
         "/session" => "/sessions",
         "/switch" => "/sessions",
         "/sb" => "/statusbar",

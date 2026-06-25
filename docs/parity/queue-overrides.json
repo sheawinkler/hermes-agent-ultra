@@ -4264,6 +4264,10 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported as a Rust-native MCP profile instead of a Python optional-mcps manifest: hermes mcp unreal-engine now writes the official Unreal Engine local HTTP endpoint to mcp_servers.json and config.yaml, keeps parallel tool calls disabled for Epic editor-thread execution, exposes status/remove actions, and has focused Rust tests for setup/remove synchronization."
+    },
+    "73cd8622f9fcd5e368060d1a1678e08bd3d0a794": {
+      "disposition": "ported",
+      "notes": "Ported as a Rust-native terminal billing surface: `hermes billing` and `/billing` now render Nous billing state fail-open from the auth store and billing API, support scoped `billing:manage` device-code step-up, explicit-confirmation charge and auto-reload actions with idempotency-key handling and typed error mapping, charge status polling, deterministic portal URL normalization, decimal-string money formatting, and focused Rust tests for state parsing, scope detection, client contracts, CLI parsing, slash behavior, auth isolation, and confirmation gating."
     }
   },
   "subject_patterns": [

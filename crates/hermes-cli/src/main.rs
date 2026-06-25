@@ -561,6 +561,7 @@ async fn main() {
             }
         }
         CliCommand::Portal { action } => run_portal(cli, action).await,
+        CliCommand::Billing { args } => run_billing(args).await,
         CliCommand::Doctor {
             deep,
             self_heal,
@@ -8538,6 +8539,12 @@ async fn run_portal(cli: Cli, action: Option<String>) -> Result<(), AgentError> 
             .await
         }
     }
+}
+
+async fn run_billing(args: Vec<String>) -> Result<(), AgentError> {
+    let output = hermes_cli::billing::handle_billing_args(&args).await?;
+    println!("{output}");
+    Ok(())
 }
 
 async fn run_auth(
