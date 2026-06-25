@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T02:33:07.046683+00:00`
+Generated: `2026-06-25T02:46:52.230351+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `6978`.
 
@@ -17,15 +17,14 @@ Generated: `2026-06-25T02:33:07.046683+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 240 |
-| ported | 355 |
+| pending | 239 |
+| ported | 356 |
 | superseded | 6307 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `5ffbfed193ad` | #20 | feat(mcp-catalog): add official Unreal Engine 5.8 MCP server |
 | `73cd8622f9fc` | #22 | feat(billing): /billing terminal billing — interactive TUI + CLI client (#45449) |
 | `36851fa576eb` | #20 | fix(docker): support WebUI installs from read-only sources (#48541) |
 | `cfb55de5ea49` | #21 | Update Stripe Projects skill docs (#48673) |
@@ -125,3 +124,4 @@ Generated: `2026-06-25T02:33:07.046683+00:00`
 | `93ea9b04aff2` | #20 | fix(gateway): cap inbound media download size to prevent memory exhaustion |
 | `6183e8ce1b5e` | #20 | fix(telegram): make Bot API 10.1 rich messages opt-in (default off) |
 | `587b5b9ac223` | #23 | fix(backup): capture memory-provider state stored outside HERMES_HOME (#50325) |
+| `2a4542333ee1` | #26 | fix(photon): classify Envoy overflow errors as retryable; add typing cooldown |

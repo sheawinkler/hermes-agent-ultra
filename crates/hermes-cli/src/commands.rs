@@ -475,6 +475,8 @@ const SKILLS_HUB_LOCK_VERSION: u32 = 1;
 const SENTRUX_MCP_SERVER_NAME: &str = "sentrux";
 const SENTRUX_MCP_COMMAND: &str = "sentrux";
 const SENTRUX_MCP_ARG: &str = "--mcp";
+const UNREAL_MCP_SERVER_NAME: &str = "unreal-engine";
+const UNREAL_MCP_URL: &str = "http://127.0.0.1:8000/mcp";
 const SKILL_BOOTSTRAP_ALLOWED_EXECUTABLES: &[&str] = &[
     "bash", "sh", "python", "python3", "pip", "pip3", "pipx", "uv", "uvx", "node", "npm", "npx",
     "pnpm", "yarn", "bun", "cargo", "rustup", "go", "make", "cmake", "git", "brew", "apt",
@@ -25469,6 +25471,39 @@ pub async fn handle_cli_mcp(
                 SENTRUX_MCP_SERVER_NAME
             );
         }
+        "unreal-engine" | "setup-unreal" | "unreal-setup" => {
+            upsert_unreal_mcp_profile(&config_dir)?;
+            println!(
+                "Configured MCP server '{}' in:\n  - {}\n  - {}",
+                UNREAL_MCP_SERVER_NAME,
+                mcp_config_path.display(),
+                config_dir.join("config.yaml").display()
+            );
+            println!(
+                "Before connecting: open Unreal Editor 5.8+, enable Epic's Unreal MCP plugin, and start its local server at {}.",
+                UNREAL_MCP_URL
+            );
+            println!(
+                "Runtime hint: use `/mcp` in-session to confirm, and `hermes mcp test {}` after the editor server is running.",
+                UNREAL_MCP_SERVER_NAME
+            );
+        }
+        "unreal-engine-status" => {
+            let (from_json, from_yaml) = unreal_mcp_status(&config_dir);
+            println!(
+                "Unreal Engine MCP status:\n  - url: {}\n  - in_mcp_servers.json: {}\n  - in_config.yaml: {}\n  - parallel_tool_calls: off",
+                UNREAL_MCP_URL,
+                yes_no(from_json),
+                yes_no(from_yaml)
+            );
+        }
+        "unreal-engine-remove" => {
+            remove_unreal_mcp_profile(&config_dir)?;
+            println!(
+                "Removed '{}' MCP profile from JSON + YAML config surfaces.",
+                UNREAL_MCP_SERVER_NAME
+            );
+        }
         "list" => {
             let Some(config) = load_mcp_config_if_exists(&mcp_config_path)? else {
                 println!("No MCP servers configured ({})", mcp_config_path.display());
@@ -25795,7 +25830,7 @@ pub async fn handle_cli_mcp(
         other => {
             println!("MCP action '{}' is not recognized.", other);
             println!(
-                "Available actions: list, add, remove, serve, test, configure, login, sentrux, sentrux-status, sentrux-remove"
+                "Available actions: list, add, remove, serve, test, configure, login, sentrux, sentrux-status, sentrux-remove, unreal-engine, unreal-engine-status, unreal-engine-remove"
             );
         }
     }
@@ -25823,6 +25858,14 @@ fn sentrux_entry() -> serde_json::Value {
         "args": [SENTRUX_MCP_ARG],
         "enabled": true,
         "supports_parallel_tool_calls": true
+    })
+}
+
+fn unreal_mcp_entry() -> serde_json::Value {
+    serde_json::json!({
+        "url": UNREAL_MCP_URL,
+        "enabled": true,
+        "supports_parallel_tool_calls": false
     })
 }
 
@@ -25878,6 +25921,32 @@ fn upsert_sentrux_mcp_profile(config_dir: &Path) -> Result<bool, hermes_core::Ag
     Ok(command_on_path(SENTRUX_MCP_COMMAND))
 }
 
+fn upsert_unreal_mcp_profile(config_dir: &Path) -> Result<(), hermes_core::AgentError> {
+    let mcp_config_path = config_dir.join("mcp_servers.json");
+    let mut servers: serde_json::Value = if mcp_config_path.exists() {
+        let content = std::fs::read_to_string(&mcp_config_path)
+            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    if let Some(obj) = servers.as_object_mut() {
+        obj.insert(UNREAL_MCP_SERVER_NAME.to_string(), unreal_mcp_entry());
+    }
+    let json = serde_json::to_string_pretty(&servers)
+        .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
+    std::fs::write(&mcp_config_path, json)
+        .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+    update_yaml_mcp_server(
+        config_dir,
+        UNREAL_MCP_SERVER_NAME,
+        None,
+        Some(UNREAL_MCP_URL.to_string()),
+        false,
+        false,
+    )
+}
+
 fn remove_sentrux_mcp_profile(config_dir: &Path) -> Result<(), hermes_core::AgentError> {
     let mcp_config_path = config_dir.join("mcp_servers.json");
     if mcp_config_path.exists() {
@@ -25896,6 +25965,24 @@ fn remove_sentrux_mcp_profile(config_dir: &Path) -> Result<(), hermes_core::Agen
     update_yaml_mcp_server(config_dir, SENTRUX_MCP_SERVER_NAME, None, None, false, true)
 }
 
+fn remove_unreal_mcp_profile(config_dir: &Path) -> Result<(), hermes_core::AgentError> {
+    let mcp_config_path = config_dir.join("mcp_servers.json");
+    if mcp_config_path.exists() {
+        let content = std::fs::read_to_string(&mcp_config_path)
+            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+        let mut servers: serde_json::Value =
+            serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
+        if let Some(obj) = servers.as_object_mut() {
+            obj.remove(UNREAL_MCP_SERVER_NAME);
+        }
+        let json = serde_json::to_string_pretty(&servers)
+            .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
+        std::fs::write(&mcp_config_path, json)
+            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+    }
+    update_yaml_mcp_server(config_dir, UNREAL_MCP_SERVER_NAME, None, None, false, true)
+}
+
 fn sentrux_mcp_status(config_dir: &Path) -> (bool, bool, bool) {
     let mcp_config_path = config_dir.join("mcp_servers.json");
     let from_json = std::fs::read_to_string(&mcp_config_path)
@@ -25912,6 +25999,24 @@ fn sentrux_mcp_status(config_dir: &Path) -> (bool, bool, bool) {
         })
         .unwrap_or(false);
     (command_on_path(SENTRUX_MCP_COMMAND), from_json, from_yaml)
+}
+
+fn unreal_mcp_status(config_dir: &Path) -> (bool, bool) {
+    let mcp_config_path = config_dir.join("mcp_servers.json");
+    let from_json = std::fs::read_to_string(&mcp_config_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.get(UNREAL_MCP_SERVER_NAME).cloned())
+        .is_some();
+    let from_yaml = hermes_config::load_user_config_file(&config_dir.join("config.yaml"))
+        .ok()
+        .map(|cfg| {
+            cfg.mcp_servers
+                .iter()
+                .any(|entry| entry.name == UNREAL_MCP_SERVER_NAME)
+        })
+        .unwrap_or(false);
+    (from_json, from_yaml)
 }
 
 const CLI_SESSIONS_ACTIONS: &str =
@@ -30794,6 +30899,76 @@ mod tests {
                 .iter()
                 .all(|entry| entry.name != SENTRUX_MCP_SERVER_NAME),
             "config.yaml mcp_servers should remove sentrux"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_unreal_engine_setup_syncs_json_and_yaml() {
+        let tmp = tempdir().expect("tempdir");
+        let config_dir = tmp.path().join("hermes-home");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+
+        upsert_unreal_mcp_profile(&config_dir).expect("unreal setup helper");
+
+        let mcp_json = config_dir.join("mcp_servers.json");
+        assert!(mcp_json.exists(), "mcp_servers.json should be created");
+        let json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&mcp_json).expect("read mcp_servers.json"),
+        )
+        .expect("parse mcp json");
+        let unreal = json
+            .get(UNREAL_MCP_SERVER_NAME)
+            .expect("unreal entry should exist");
+        assert_eq!(
+            unreal.get("url").and_then(|v| v.as_str()),
+            Some(UNREAL_MCP_URL)
+        );
+        assert_eq!(
+            unreal
+                .get("supports_parallel_tool_calls")
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
+
+        let cfg = hermes_config::load_user_config_file(&config_dir.join("config.yaml"))
+            .expect("load config.yaml");
+        assert!(
+            cfg.mcp_servers
+                .iter()
+                .any(|entry| entry.name == UNREAL_MCP_SERVER_NAME
+                    && entry.url.as_deref() == Some(UNREAL_MCP_URL)
+                    && !entry.supports_parallel_tool_calls),
+            "config.yaml mcp_servers should include the Unreal HTTP profile"
+        );
+
+        assert_eq!(unreal_mcp_status(&config_dir), (true, true));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_unreal_engine_remove_syncs_json_and_yaml() {
+        let tmp = tempdir().expect("tempdir");
+        let config_dir = tmp.path().join("hermes-home");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+
+        upsert_unreal_mcp_profile(&config_dir).expect("unreal setup helper");
+        remove_unreal_mcp_profile(&config_dir).expect("unreal remove helper");
+
+        let json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(config_dir.join("mcp_servers.json")).expect("read mcp json"),
+        )
+        .expect("parse mcp json");
+        assert!(
+            json.get(UNREAL_MCP_SERVER_NAME).is_none(),
+            "mcp_servers.json should remove unreal-engine"
+        );
+
+        let cfg = hermes_config::load_user_config_file(&config_dir.join("config.yaml"))
+            .expect("load config.yaml");
+        assert!(
+            cfg.mcp_servers
+                .iter()
+                .all(|entry| entry.name != UNREAL_MCP_SERVER_NAME),
+            "config.yaml mcp_servers should remove unreal-engine"
         );
     }
 
