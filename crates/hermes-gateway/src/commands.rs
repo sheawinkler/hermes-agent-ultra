@@ -20,6 +20,8 @@ pub enum GatewayCommandResult {
     QueuePrompt { prompt: String },
     /// Steer the currently active session without starting a new turn.
     SteerPrompt { prompt: String },
+    /// Forward a synthesized prompt into the normal agent loop.
+    ForwardPrompt { prompt: String },
     /// Show usage statistics.
     ShowUsage(String),
     /// Compress the conversation context.
@@ -218,6 +220,12 @@ pub fn all_commands() -> Vec<CommandInfo> {
             aliases: &[],
             description: "Side conversation without context",
             usage: "/btw <prompt>",
+        },
+        CommandInfo {
+            name: "/learn",
+            aliases: &[],
+            description: "Turn a user-provided lesson into durable Hermes learning work",
+            usage: "/learn <lesson or behavior to learn>",
         },
         CommandInfo {
             name: "/reasoning",
@@ -546,6 +554,55 @@ isolated by thread ID. The root DM remains a normal Hermes chat."
         .to_string()
 }
 
+const LEARN_AUTHORING_STANDARDS: &str = r###"Follow the Hermes skill-authoring standards exactly. These are the same HARDLINE rules a maintainer enforces in review:
+
+Frontmatter:
+- name: lowercase-hyphenated, <=64 chars, no spaces.
+- description: ONE sentence, <=60 characters, ends with a period. State the capability, not the implementation. No marketing words (powerful, comprehensive, seamless, advanced, robust). Do NOT repeat the skill name. If the description contains a colon, wrap the whole value in double quotes. This is not cosmetic: the system-prompt skill index truncates the description to 60 chars, so COUNT the characters and trim before saving.
+- version: 0.1.0
+- author: the human you are authoring this for, first; "Hermes Agent" second. Never credit only the tool.
+- platforms: declare [macos], [linux], and/or [windows] if the skill uses OS-bound primitives. Prefer fixing it cross-platform first; gate only when the dependency is genuinely platform-bound.
+- metadata.hermes.tags: a few Capitalized, Relevant, Tags.
+
+Body section order (omit a section only if it genuinely has no content):
+1. "# <Human Title>" then a 2-3 sentence intro: what it does, what it does NOT do, and the key dependency stance.
+2. "## When to Use" - concrete trigger phrases.
+3. "## Prerequisites" - exact env vars, install steps, credentials.
+4. "## How to Run" - the canonical invocation, framed through Hermes tools.
+5. "## Quick Reference" - a flat command/endpoint list.
+6. "## Procedure" - numbered steps with copy-paste-exact commands.
+7. "## Pitfalls" - known limits and things that look broken but are not.
+8. "## Verification" - one command/check that proves the skill worked.
+
+Hermes-tool framing:
+- Reference Hermes tools by name: `terminal`, `read_file`, `write_file`, `search_files`, `patch`, `web_extract`, `web_search`, `vision_analyze`, `browser_navigate`, `delegate_task`, `image_generate`, `text_to_speech`, `cronjob`, `memory`, `skill_view`, `execute_code`.
+- Do NOT name shell utilities the agent already has wrapped: say `read_file` not cat/head/tail, `search_files` not grep/rg/find/ls, `patch` not sed/awk, `web_extract` not curl-to-scrape, `write_file` not echo>file or heredocs.
+- Third-party CLIs are fine inside scripts, but prose still frames them as "invoke through the `terminal` tool".
+
+Quality bar:
+- Prefer exact commands, endpoint URLs, function signatures, and config keys that appear verbatim in the source. Never invent flags, paths, or APIs.
+- Keep it tight and scannable. Do not re-paste source docs.
+- Do not write a router/index/hub skill that only points at other skills.
+- Larger scripts/parsers belong in `scripts/`, references go in `references/`, and templates go in `templates/`."###;
+
+fn build_learn_prompt(lesson: &str) -> String {
+    let lesson = lesson.trim();
+    let source = if lesson.is_empty() {
+        "the workflow we just went through in this conversation"
+    } else {
+        lesson
+    };
+    format!(
+        "[/learn] The user wants you to learn a reusable skill from the source(s) they described and save it.\n\n\
+What to learn from:\n{source}\n\n\
+Do this:\n\
+1. Gather the material. Resolve whatever the user named using existing tools: `read_file`/`search_files` for local files or directories, `web_extract` for URLs, the current conversation history if they referred to something you just did, and the pasted text as-is. If scope is ambiguous, make a reasonable choice and note it; do not stall.\n\
+2. Author one SKILL.md and save it with `skill_manage` (action=\"create\"). Pick a sensible category. If the procedure needs a non-trivial script, add it under the skill's `scripts/` with `skill_manage` write_file and reference it by relative path.\n\n\
+{LEARN_AUTHORING_STANDARDS}\n\n\
+When done, tell the user the skill name, its category, and a one-line summary of what it captured."
+    )
+}
+
 /// Parse and dispatch a gateway slash command.
 pub fn handle_command(input: &str) -> GatewayCommandResult {
     let trimmed = input.trim();
@@ -686,6 +743,17 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
             } else {
                 GatewayCommandResult::BtwTask {
                     prompt: args.clone(),
+                }
+            }
+        }
+        "/learn" => {
+            if args.is_empty() {
+                GatewayCommandResult::Reply(
+                    "Usage: /learn <lesson or behavior to learn>".to_string(),
+                )
+            } else {
+                GatewayCommandResult::ForwardPrompt {
+                    prompt: build_learn_prompt(&args),
                 }
             }
         }
@@ -1052,6 +1120,49 @@ mod tests {
     }
 
     #[test]
+    fn learn_command_forwards_structured_learning_prompt() {
+        match handle_command("/learn prefer targeted tests before full cargo test") {
+            GatewayCommandResult::ForwardPrompt { prompt } => {
+                assert!(prompt.contains("[/learn]"));
+                assert!(prompt.contains("learn a reusable skill"));
+                assert!(prompt.contains("prefer targeted tests before full cargo test"));
+                assert!(prompt.contains("skill_manage"));
+            }
+            other => panic!("Expected ForwardPrompt, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn learn_prompt_embeds_full_skill_authoring_standards() {
+        let GatewayCommandResult::ForwardPrompt { prompt } =
+            handle_command("/learn package an ffmpeg workflow")
+        else {
+            panic!("Expected ForwardPrompt");
+        };
+        let lower = prompt.to_ascii_lowercase();
+        assert!(lower.contains("<=60"));
+        assert!(lower.contains("count the characters"));
+        assert!(lower.contains("platforms"));
+        assert!(lower.contains("author"));
+        for tool in ["read_file", "search_files", "patch", "write_file"] {
+            assert!(prompt.contains(tool), "{tool}");
+        }
+        assert!(prompt.contains("scripts/"));
+        assert!(prompt.contains("references/"));
+        assert!(prompt.contains("templates/"));
+    }
+
+    #[test]
+    fn learn_command_requires_lesson_text_and_is_registered() {
+        match handle_command("/learn") {
+            GatewayCommandResult::Reply(msg) => assert!(msg.contains("Usage: /learn")),
+            other => panic!("Expected usage reply, got {:?}", other),
+        }
+        assert!(is_registered_command_name("/learn"));
+        assert!(should_bypass_active_session(Some("/learn")));
+    }
+
+    #[test]
     fn test_case_insensitive() {
         match handle_command("/NEW") {
             GatewayCommandResult::ResetSession(_) => {}
@@ -1092,6 +1203,7 @@ mod tests {
             "tasks",
             "background",
             "steer",
+            "learn",
             "start",
             "help",
             "commands",

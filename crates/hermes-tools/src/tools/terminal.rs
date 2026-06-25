@@ -5,6 +5,7 @@ use indexmap::IndexMap;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use hermes_core::{
@@ -122,6 +123,18 @@ fn long_lived_foreground_error(command: &str) -> Option<String> {
     long_lived.then(|| {
         "This foreground command appears to start a long-lived server/watch process. Run it with background=true, then verify readiness with logs or a health check.".to_string()
     })
+}
+
+fn terminal_verification_recording_enabled() -> bool {
+    !cfg!(test)
+        || std::env::var("HERMES_RECORD_VERIFICATION_EVIDENCE_IN_TESTS")
+            .ok()
+            .is_some_and(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +272,24 @@ impl ToolHandler for TerminalHandler {
             )
             .await
         {
-            Ok(output) => Ok(format_command_output(&output)),
+            Ok(output) => {
+                let rendered = format_command_output(&output);
+                if !background && terminal_verification_recording_enabled() {
+                    let session_id = params
+                        .get("session_id")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string)
+                        .or_else(|| std::env::var("HERMES_SESSION_KEY").ok());
+                    let _ = crate::verification_evidence::record_terminal_result(
+                        command,
+                        workdir.map(Path::new),
+                        session_id.as_deref(),
+                        output.exit_code,
+                        &rendered,
+                    );
+                }
+                Ok(rendered)
+            }
             Err(e) => Err(ToolError::ExecutionFailed(e.to_string())),
         }
     }
@@ -939,6 +969,46 @@ mod tests {
         let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
         let result = block_on(handler.execute(json!({"command": "echo hello"}))).unwrap();
         assert!(result.contains("echo hello"));
+    }
+
+    #[test]
+    fn terminal_handler_records_verification_evidence_when_enabled_in_tests() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(
+            repo.join("Cargo.toml"),
+            "[package]\nname='terminal-evidence'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        let _home = EnvGuard::set("HERMES_HOME", home.to_str().unwrap());
+        let _recording = EnvGuard::set("HERMES_RECORD_VERIFICATION_EVIDENCE_IN_TESTS", "1");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let rendered = block_on(handler.execute(json!({
+            "command": "cargo test -p hermes-tools",
+            "workdir": repo,
+            "session_id": "terminal-sid"
+        })))
+        .unwrap();
+
+        assert!(rendered.contains("cargo test -p hermes-tools"));
+        let status = crate::verification_evidence::verification_status(
+            Some("terminal-sid"),
+            Some(&tmp.path().join("repo")),
+        );
+        assert_eq!(status.status, "passed");
+        let evidence = status.evidence.expect("recorded evidence");
+        assert_eq!(evidence.canonical_command, "cargo test -p hermes-tools");
+        assert_eq!(evidence.scope, "full");
+        assert!(evidence
+            .output_preview
+            .contains("output of: cargo test -p hermes-tools"));
     }
 
     #[test]

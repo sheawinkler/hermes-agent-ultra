@@ -25,6 +25,7 @@ pub mod memory_manager;
 pub mod memory_plugins;
 pub mod model_normalize;
 pub mod oauth;
+pub mod oneshot;
 pub mod plugins;
 pub mod provider;
 pub mod provider_profiles;
@@ -65,6 +66,11 @@ pub use auxiliary_builder::{
     AuxiliaryWiringSummary,
 };
 pub use bedrock::BedrockProvider;
+pub use hermes_intelligence::auxiliary::AuxiliaryConfig;
+pub use oneshot::{
+    render_template as render_oneshot_template, run_oneshot_with_client, strip_wrapping_code_fence,
+    truncate_template_text, OneShotError, OneShotRequest,
+};
 pub use provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
 pub use providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,

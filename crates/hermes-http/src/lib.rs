@@ -37,7 +37,11 @@ use hermes_agent::providers_extra::{
 };
 use hermes_agent::session_persistence::SessionPersistence;
 use hermes_agent::smart_model_routing::ApiMode;
-use hermes_agent::{leading_system_prompt_for_persist, AgentConfig, AgentLoop};
+use hermes_agent::{
+    build_auxiliary_client_with_main_runtime, leading_system_prompt_for_persist,
+    run_oneshot_with_client, AgentConfig, AgentLoop, AuxiliaryConfig, AuxiliaryMainRuntime,
+    OneShotError, OneShotRequest,
+};
 use hermes_config::GatewayConfig;
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
@@ -46,7 +50,7 @@ use hermes_gateway::gateway::{GatewayConfig as RuntimeGatewayConfig, IncomingMes
 use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 pub const HTTP_PLATFORM: &str = "http";
 const SESSION_KEY_HEADER: &str = "x-hermes-session-key";
@@ -174,7 +178,7 @@ impl HttpServerState {
                 Box::pin(async move {
                     hermes_telemetry::record_llm_request();
                     let effective_model = resolve_model_for_gateway(
-                        config.model.as_deref().unwrap_or("gpt-4o"),
+                        config.model.as_deref().unwrap_or("dynamic"),
                         &ctx,
                     );
                     let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
@@ -214,7 +218,7 @@ impl HttpServerState {
                 Box::pin(async move {
                     hermes_telemetry::record_llm_request();
                     let effective_model = resolve_model_for_gateway(
-                        config.model.as_deref().unwrap_or("gpt-4o"),
+                        config.model.as_deref().unwrap_or("dynamic"),
                         &ctx,
                     );
                     let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
@@ -367,6 +371,35 @@ pub struct CommandResponse {
     pub output: String,
 }
 
+fn default_rpc_params() -> Value {
+    Value::Object(Map::new())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RpcRequest {
+    #[serde(default)]
+    pub id: Option<Value>,
+    pub method: String,
+    #[serde(default = "default_rpc_params")]
+    pub params: Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RpcErrorBody {
+    pub code: i64,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RpcResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<RpcErrorBody>,
+}
+
 fn max_request_body_bytes() -> usize {
     const DEFAULT: usize = 2 * 1024 * 1024;
     std::env::var("HERMES_HTTP_MAX_BODY_BYTES")
@@ -388,6 +421,7 @@ pub fn router(state: HttpServerState) -> Router {
         .route("/metrics", get(metrics_prometheus))
         .route("/v1/sessions/{session_id}/messages", post(send_message))
         .route("/v1/commands", post(exec_command))
+        .route("/v1/rpc", post(exec_rpc))
         .route("/v1/ws/{session_id}", get(ws_upgrade))
         .with_state(state)
         .layer(middleware::from_fn(move |req, next| {
@@ -466,11 +500,7 @@ async fn send_message(
 
     if req.model.is_some() || req.provider.is_some() {
         let full = resolve_model(
-            state
-                .config
-                .model
-                .as_deref()
-                .unwrap_or("openai:gpt-4o-mini"),
+            state.config.model.as_deref().unwrap_or("dynamic"),
             req.provider.as_deref(),
             req.model.as_deref(),
         );
@@ -598,6 +628,154 @@ async fn exec_command(
         accepted: true,
         output,
     }))
+}
+
+fn rpc_ok(id: Option<Value>, result: Value) -> Json<RpcResponse> {
+    Json(RpcResponse {
+        id,
+        result: Some(result),
+        error: None,
+    })
+}
+
+fn rpc_err(id: Option<Value>, code: i64, message: impl Into<String>) -> Json<RpcResponse> {
+    Json(RpcResponse {
+        id,
+        result: None,
+        error: Some(RpcErrorBody {
+            code,
+            message: message.into(),
+        }),
+    })
+}
+
+fn rpc_param_str(params: &Value, key: &str) -> Option<String> {
+    params
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn rpc_param_u32(params: &Value, key: &str, default: u32) -> u32 {
+    params
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
+
+fn rpc_param_f64(params: &Value, key: &str, default: Option<f64>) -> Option<f64> {
+    match params.get(key) {
+        Some(Value::Number(number)) => number.as_f64(),
+        Some(Value::String(raw)) => raw.trim().parse::<f64>().ok(),
+        Some(Value::Null) | None => default,
+        _ => default,
+    }
+}
+
+fn rpc_param_variables(params: &Value) -> Map<String, Value> {
+    params
+        .get("variables")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn main_runtime_from_model(model: Option<String>) -> Option<AuxiliaryMainRuntime> {
+    let model = model?;
+    let (provider, model_part) = model.split_once(':')?;
+    let provider = provider.trim();
+    let model_part = model_part.trim();
+    if provider.is_empty() || model_part.is_empty() {
+        return None;
+    }
+    Some(AuxiliaryMainRuntime::new(provider, model_part))
+}
+
+async fn exec_rpc(
+    State(state): State<HttpServerState>,
+    Json(req): Json<RpcRequest>,
+) -> Json<RpcResponse> {
+    hermes_telemetry::record_http_request();
+    let RpcRequest { id, method, params } = req;
+    let method = method.trim();
+    match method {
+        "project.facts" => {
+            let cwd = rpc_param_str(&params, "cwd").map(PathBuf::from);
+            let facts = hermes_agent::coding_context::project_facts_for(cwd.as_deref());
+            rpc_ok(id, serde_json::json!({ "facts": facts }))
+        }
+        "verification.status" => {
+            let cwd = rpc_param_str(&params, "cwd").map(PathBuf::from);
+            let session_id = rpc_param_str(&params, "session_id")
+                .or_else(|| rpc_param_str(&params, "session_key"));
+            let verification = hermes_tools::verification_evidence::verification_status(
+                session_id.as_deref(),
+                cwd.as_deref(),
+            );
+            rpc_ok(id, serde_json::json!({ "verification": verification }))
+        }
+        "llm.oneshot" => {
+            let template = rpc_param_str(&params, "template");
+            let instructions = rpc_param_str(&params, "instructions").unwrap_or_default();
+            let user_input = rpc_param_str(&params, "input")
+                .or_else(|| rpc_param_str(&params, "user_input"))
+                .unwrap_or_default();
+            if template.is_none() && instructions.trim().is_empty() && user_input.trim().is_empty()
+            {
+                return rpc_err(
+                    id,
+                    4030,
+                    "llm.oneshot requires a template or instructions/input",
+                );
+            }
+
+            let session_id = rpc_param_str(&params, "session_id")
+                .or_else(|| rpc_param_str(&params, "session_key"));
+            let user_id = http_user_id(rpc_param_str(&params, "user_id"));
+            let main_runtime = match session_id.as_deref() {
+                Some(session_id) => main_runtime_from_model(
+                    state
+                        .gateway
+                        .effective_model_for_session(HTTP_PLATFORM, session_id, &user_id)
+                        .await,
+                ),
+                None => main_runtime_from_model(state.config.model.clone()),
+            };
+            let (client, _summary) =
+                build_auxiliary_client_with_main_runtime(AuxiliaryConfig::default(), main_runtime);
+            let request = OneShotRequest {
+                instructions,
+                user_input,
+                template,
+                variables: rpc_param_variables(&params),
+                task: rpc_param_str(&params, "task").unwrap_or_else(|| "title".to_string()),
+                max_tokens: rpc_param_u32(&params, "max_tokens", 1024),
+                temperature: rpc_param_f64(&params, "temperature", Some(0.3)),
+                timeout_secs: params
+                    .get("timeout")
+                    .and_then(Value::as_u64)
+                    .filter(|value| *value > 0)
+                    .or(Some(60)),
+            };
+            match run_oneshot_with_client(&client, request).await {
+                Ok(text) => rpc_ok(id, serde_json::json!({ "text": text })),
+                Err(OneShotError::UnknownTemplate(template)) => {
+                    rpc_err(id, 4031, format!("unknown one-shot template: {template}"))
+                }
+                Err(OneShotError::EmptyPrompt) => rpc_err(
+                    id,
+                    4032,
+                    "llm.oneshot requires a template or instructions/input",
+                ),
+                Err(err) => rpc_err(id, 5030, format!("one-shot generation failed: {err}")),
+            }
+        }
+        _ => rpc_err(id, -32601, format!("unknown method: {method}")),
+    }
 }
 
 async fn ws_upgrade(
@@ -912,7 +1090,7 @@ fn build_agent_for_gateway_context(
     agent_tools: Arc<hermes_agent::agent_loop::ToolRegistry>,
 ) -> AgentLoop {
     let effective_model =
-        resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), ctx);
+        resolve_model_for_gateway(config.model.as_deref().unwrap_or("dynamic"), ctx);
     let provider = build_provider(config, &effective_model);
     let mut agent_config = build_agent_config(config, &effective_model);
     if let Some(personality) = ctx.personality.clone() {
@@ -998,7 +1176,7 @@ mod tests {
             },
         );
 
-        let agent_config = build_agent_config(&config, "openai:gpt-4o");
+        let agent_config = build_agent_config(&config, "openai:dynamic");
 
         assert_eq!(
             agent_config
@@ -1023,7 +1201,7 @@ mod tests {
             ..GatewayConfig::default()
         };
 
-        let agent_config = build_agent_config(&config, "openai:gpt-4o");
+        let agent_config = build_agent_config(&config, "openai:dynamic");
 
         assert_eq!(agent_config.prefill_messages.len(), 2);
         assert_eq!(

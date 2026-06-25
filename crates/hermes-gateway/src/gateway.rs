@@ -767,6 +767,20 @@ impl Gateway {
         self.session_manager.get_messages(&key).await.len()
     }
 
+    /// Effective model for a composed platform/chat/user session, including
+    /// per-session overrides and process-wide `/model --global` state.
+    pub async fn effective_model_for_session(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        user_id: &str,
+    ) -> Option<String> {
+        let key = self
+            .session_manager
+            .compose_session_key(platform, chat_id, user_id);
+        self.effective_session_model(&key).await
+    }
+
     async fn clear_session_boundary_security_state(&self, session_key: &str) {
         if session_key.is_empty() {
             return;
@@ -1601,6 +1615,9 @@ impl Gateway {
                 .await;
             }
         }
+        if let GatewayCommandResult::ForwardPrompt { prompt } = result {
+            return Ok(SlashCommandOutcome::ForwardToAgent { message: prompt });
+        }
         let handled = self
             .apply_command_result(incoming, session_key, result)
             .await?;
@@ -1969,6 +1986,7 @@ impl Gateway {
                 .await?;
                 Ok(true)
             }
+            GatewayCommandResult::ForwardPrompt { .. } => Ok(false),
             GatewayCommandResult::ShowUsage(_) => {
                 let text = self.build_usage_text(session_key).await;
                 self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
