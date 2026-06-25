@@ -10,16 +10,17 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
+use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
 use hermes_core::errors::GatewayError;
-use hermes_core::traits::{ParseMode, PlatformAdapter};
+use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 
 use crate::adapter::{describe_secret, AdapterProxyConfig, BasePlatformAdapter};
 
@@ -29,6 +30,7 @@ const MAX_MESSAGE_LENGTH: usize = 2000;
 /// Discord API base URL.
 const DISCORD_API_BASE: &str = "https://discord.com/api/v10";
 const DISCORD_APPLICATION_COMMAND_LIMIT: usize = 100;
+const DISCORD_NONCONVERSATIONAL_STATE_FILENAME: &str = "discord_nonconversational_messages.json";
 
 // ---------------------------------------------------------------------------
 // DiscordConfig
@@ -87,6 +89,13 @@ pub struct DiscordSendMetadata {
     /// Original Discord message ID to reply-reference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply_to_message_id: Option<String>,
+    /// Marks lifecycle/status sends that must not act as channel-history boundaries.
+    #[serde(default, skip_serializing_if = "bool_is_false")]
+    pub non_conversational: bool,
+}
+
+fn bool_is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl DiscordSendMetadata {
@@ -94,6 +103,7 @@ impl DiscordSendMetadata {
         Self {
             thread_id: Some(thread_id.into()),
             reply_to_message_id: None,
+            non_conversational: false,
         }
     }
 
@@ -101,6 +111,7 @@ impl DiscordSendMetadata {
         Self {
             thread_id: None,
             reply_to_message_id: Some(message_id.into()),
+            non_conversational: false,
         }
     }
 
@@ -111,7 +122,21 @@ impl DiscordSendMetadata {
         Self {
             thread_id: Some(thread_id.into()),
             reply_to_message_id: Some(message_id.into()),
+            non_conversational: false,
         }
+    }
+
+    pub fn non_conversational() -> Self {
+        Self {
+            thread_id: None,
+            reply_to_message_id: None,
+            non_conversational: true,
+        }
+    }
+
+    pub fn with_non_conversational(mut self, non_conversational: bool) -> Self {
+        self.non_conversational = non_conversational;
+        self
     }
 
     pub fn target_channel_id<'a>(&'a self, fallback_channel_id: &'a str) -> &'a str {
@@ -128,6 +153,10 @@ impl DiscordSendMetadata {
             .map(str::trim)
             .filter(|id| !id.is_empty())
     }
+
+    pub fn marks_non_conversational(&self) -> bool {
+        self.non_conversational
+    }
 }
 
 fn target_channel_id_for_metadata<'a>(
@@ -141,6 +170,23 @@ fn target_channel_id_for_metadata<'a>(
 
 fn reply_to_message_id_for_metadata(metadata: Option<&DiscordSendMetadata>) -> Option<&str> {
     metadata.and_then(DiscordSendMetadata::reply_to_message_id)
+}
+
+fn metadata_marks_non_conversational(metadata: Option<&DiscordSendMetadata>) -> bool {
+    metadata
+        .map(DiscordSendMetadata::marks_non_conversational)
+        .unwrap_or(false)
+}
+
+fn discord_metadata_from_send_options(options: &SendMessageOptions) -> Option<DiscordSendMetadata> {
+    if options.thread_id.is_none() && !options.non_conversational {
+        return None;
+    }
+    Some(DiscordSendMetadata {
+        thread_id: options.thread_id.clone(),
+        reply_to_message_id: None,
+        non_conversational: options.non_conversational,
+    })
 }
 
 /// Effective behavior for Discord reply references across split chunks.
@@ -347,6 +393,295 @@ impl DiscordBotMessagePolicy {
 
 fn discord_message_type_is_user_visible(message_type: u8) -> bool {
     matches!(message_type, 0 | 19)
+}
+
+pub fn discord_flatten_clarify_choice(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(raw) => {
+            let trimmed = raw.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        serde_json::Value::Object(map) => ["label", "description", "text", "title"]
+            .into_iter()
+            .filter_map(|key| map.get(key).and_then(serde_json::Value::as_str))
+            .map(str::trim)
+            .find(|value| !value.is_empty())
+            .map(ToOwned::to_owned),
+        serde_json::Value::Array(values) => {
+            let joined = values
+                .iter()
+                .filter_map(discord_flatten_clarify_choice)
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!joined.is_empty()).then_some(joined)
+        }
+        other => {
+            let rendered = other.to_string();
+            let trimmed = rendered.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+    }
+}
+
+pub fn discord_normalize_clarify_choices(
+    values: impl IntoIterator<Item = serde_json::Value>,
+) -> Vec<String> {
+    values
+        .into_iter()
+        .filter_map(|value| discord_flatten_clarify_choice(&value))
+        .collect()
+}
+
+pub fn discord_clarify_button_label(index: usize, choice: &str) -> String {
+    let prefix = format!("{}. ", index + 1);
+    let budget = 80usize.saturating_sub(prefix.chars().count()).max(1);
+    let choice_len = choice.chars().count();
+    let label_body = if choice_len <= budget {
+        choice.to_string()
+    } else {
+        let mut chars = choice
+            .chars()
+            .take(budget.saturating_sub(1))
+            .collect::<String>();
+        while chars.chars().last().is_some_and(char::is_whitespace) {
+            chars.pop();
+        }
+
+        let cut_at = {
+            let char_vec = chars.chars().collect::<Vec<_>>();
+            let trailing_half = budget / 2;
+            let space_cut = char_vec
+                .iter()
+                .rposition(|ch| *ch == ' ')
+                .filter(|pos| *pos >= trailing_half);
+            space_cut.or_else(|| {
+                char_vec
+                    .iter()
+                    .rposition(|ch| matches!(*ch, '-' | ',' | '.' | ')'))
+                    .filter(|pos| *pos >= trailing_half)
+                    .map(|pos| pos + 1)
+            })
+        };
+
+        if let Some(cut_at) = cut_at.filter(|pos| *pos > 0) {
+            chars = chars.chars().take(cut_at).collect();
+        }
+        while chars.chars().last().is_some_and(char::is_whitespace) {
+            chars.pop();
+        }
+        format!("{chars}…")
+    };
+    format!("{prefix}{label_body}")
+}
+
+fn discord_non_conversational_patterns() -> &'static [Regex] {
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        [
+            r"(?i)^\s*💾\s*Self-improvement review:\s+\S[\s\S]*$",
+            r#"(?i)^\s*💾\s+Skill\s+['"].+?['"]\s+(?:created|updated|improved|patched)\.?\s*$"#,
+            r"(?i)^\s*⏳\s+Working\s+—\s+\d+\s+min(?:\s|$)",
+            r"(?i)^\s*\[Background process\s+\S+\s+(?:finished with exit code|is still running~)[\s\S]*\]\s*$",
+            r"(?i)^\s*(?:✅|❌)\s+Hermes update\s+(?:finished|failed|timed out)[\s\S]*$",
+            r"(?i)^\s*♻️?\s+Gateway\s+(?:restarted successfully|online\b)[\s\S]*$",
+        ]
+        .into_iter()
+        .map(|pattern| Regex::new(pattern).expect("valid Discord non-conversational pattern"))
+        .collect()
+    })
+}
+
+pub fn discord_looks_like_non_conversational_history_message(content: &str) -> bool {
+    discord_non_conversational_patterns()
+        .iter()
+        .any(|pattern| pattern.is_match(content))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordHistoryMessage {
+    pub id: String,
+    pub author_name: Option<String>,
+    pub author_is_bot: bool,
+    pub author_is_self: bool,
+    pub message_type: u8,
+    pub content: String,
+    pub has_attachments: bool,
+}
+
+impl DiscordHistoryMessage {
+    pub fn new(
+        id: impl Into<String>,
+        author_name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            author_name: Some(author_name.into()),
+            author_is_bot: false,
+            author_is_self: false,
+            message_type: 0,
+            content: content.into(),
+            has_attachments: false,
+        }
+    }
+
+    pub fn self_message(id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            author_name: Some("Hermes".into()),
+            author_is_bot: true,
+            author_is_self: true,
+            message_type: 0,
+            content: content.into(),
+            has_attachments: false,
+        }
+    }
+
+    pub fn bot_message(
+        id: impl Into<String>,
+        author_name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            author_name: Some(author_name.into()),
+            author_is_bot: true,
+            author_is_self: false,
+            message_type: 0,
+            content: content.into(),
+            has_attachments: false,
+        }
+    }
+}
+
+fn discord_history_message_is_non_conversational(
+    message: &DiscordHistoryMessage,
+    non_conversational_ids: &BTreeSet<String>,
+) -> bool {
+    let id = message.id.trim();
+    (!id.is_empty() && non_conversational_ids.contains(id))
+        || discord_looks_like_non_conversational_history_message(&message.content)
+}
+
+fn discord_history_line(
+    message: &DiscordHistoryMessage,
+    include_other_bots: bool,
+    non_conversational_ids: &BTreeSet<String>,
+) -> Option<String> {
+    if !discord_message_type_is_user_visible(message.message_type)
+        || discord_history_message_is_non_conversational(message, non_conversational_ids)
+    {
+        return None;
+    }
+    if message.author_is_bot && !message.author_is_self && !include_other_bots {
+        return None;
+    }
+
+    let content = match message.content.trim() {
+        "" if message.has_attachments => "(attachment)".to_string(),
+        "" => return None,
+        text => text.to_string(),
+    };
+    let mut name = message
+        .author_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("unknown")
+        .to_string();
+    if message.author_is_bot {
+        name.push_str(" [bot]");
+    }
+    Some(format!("[{name}] {content}"))
+}
+
+pub fn discord_format_channel_context(
+    primary_newest_first: &[DiscordHistoryMessage],
+    reply_newest_first: &[DiscordHistoryMessage],
+    include_other_bots: bool,
+    reply_target_id: Option<&str>,
+    non_conversational_ids: &BTreeSet<String>,
+) -> String {
+    let mut collected = Vec::<(String, String)>::new();
+    let mut seen_ids = BTreeSet::<String>::new();
+
+    for message in primary_newest_first {
+        if discord_history_message_is_non_conversational(message, non_conversational_ids) {
+            continue;
+        }
+        if message.author_is_self {
+            break;
+        }
+        let Some(line) = discord_history_line(message, include_other_bots, non_conversational_ids)
+        else {
+            continue;
+        };
+        let id = message.id.trim().to_string();
+        if !id.is_empty() {
+            seen_ids.insert(id.clone());
+        }
+        collected.push((id, line));
+    }
+
+    let reply_target_id = reply_target_id.map(str::trim).filter(|id| !id.is_empty());
+    let mut reply_collected = Vec::<(String, String)>::new();
+    if reply_target_id.is_some_and(|target_id| !seen_ids.contains(target_id)) {
+        for message in reply_newest_first {
+            let id = message.id.trim().to_string();
+            if !id.is_empty() && seen_ids.contains(&id) {
+                continue;
+            }
+            let Some(line) =
+                discord_history_line(message, include_other_bots, non_conversational_ids)
+            else {
+                continue;
+            };
+            if !id.is_empty() {
+                seen_ids.insert(id.clone());
+            }
+            reply_collected.push((id, line));
+        }
+    }
+
+    let mut blocks = Vec::new();
+    if !reply_collected.is_empty() {
+        reply_collected.reverse();
+        blocks.push(format!(
+            "[Context around the replied-to message]\n{}",
+            reply_collected
+                .into_iter()
+                .map(|(_, line)| line)
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+    if !collected.is_empty() {
+        collected.reverse();
+        blocks.push(format!(
+            "[Recent channel messages]\n{}",
+            collected
+                .into_iter()
+                .map(|(_, line)| line)
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+    blocks.join("\n\n")
+}
+
+pub fn discord_should_fetch_channel_context(
+    require_mention: bool,
+    is_free_channel: bool,
+    in_bot_thread: bool,
+    context: &DiscordChannelContext,
+    auto_threaded_channel: bool,
+) -> bool {
+    if context.is_dm || auto_threaded_channel {
+        return false;
+    }
+    let has_mention_gap = require_mention && !is_free_channel && !in_bot_thread;
+    has_mention_gap || context.is_thread || context.is_reply
 }
 
 /// Parse Discord reaction lifecycle opt-in values. Default is enabled.
@@ -1656,6 +1991,109 @@ impl DiscordThreadParticipationTracker {
 pub type ThreadParticipationTracker = DiscordThreadParticipationTracker;
 
 // ---------------------------------------------------------------------------
+// Discord non-conversational message persistence
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct DiscordNonConversationalMessageTracker {
+    path: PathBuf,
+    ids: VecDeque<String>,
+    max_tracked: usize,
+}
+
+impl DiscordNonConversationalMessageTracker {
+    pub const DEFAULT_MAX_TRACKED: usize = 2000;
+
+    pub fn new(platform: &str) -> Self {
+        let platform = platform.trim();
+        let filename = if platform.is_empty() || platform.eq_ignore_ascii_case("discord") {
+            DISCORD_NONCONVERSATIONAL_STATE_FILENAME.to_string()
+        } else {
+            format!("{}_{}", platform, DISCORD_NONCONVERSATIONAL_STATE_FILENAME)
+        };
+        Self::from_path(
+            hermes_config::hermes_home().join("gateway").join(filename),
+            Self::DEFAULT_MAX_TRACKED,
+        )
+    }
+
+    pub fn from_path(path: impl Into<PathBuf>, max_tracked: usize) -> Self {
+        let path = path.into();
+        let mut tracker = Self {
+            path,
+            ids: VecDeque::new(),
+            max_tracked: max_tracked.max(1),
+        };
+        tracker.load();
+        tracker
+    }
+
+    pub fn contains(&self, message_id: &str) -> bool {
+        let message_id = message_id.trim();
+        !message_id.is_empty() && self.ids.iter().any(|existing| existing == message_id)
+    }
+
+    pub fn mark_many(
+        &mut self,
+        message_ids: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> std::io::Result<bool> {
+        let mut changed = false;
+        for message_id in message_ids {
+            let message_id = message_id.as_ref().trim();
+            if !message_id.is_empty() && !self.contains(message_id) {
+                self.ids.push_back(message_id.to_string());
+                changed = true;
+            }
+        }
+        if changed {
+            self.enforce_capacity();
+            self.save()?;
+        }
+        Ok(changed)
+    }
+
+    pub fn entries(&self) -> Vec<String> {
+        self.ids.iter().cloned().collect()
+    }
+
+    fn load(&mut self) {
+        let Ok(raw) = std::fs::read_to_string(&self.path) else {
+            return;
+        };
+        let Ok(values) = serde_json::from_str::<Vec<String>>(&raw) else {
+            return;
+        };
+        let mut seen = BTreeSet::new();
+        for value in values {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
+                self.ids.push_back(trimmed.to_string());
+            }
+        }
+        self.enforce_capacity();
+    }
+
+    fn enforce_capacity(&mut self) {
+        while self.ids.len() > self.max_tracked {
+            self.ids.pop_front();
+        }
+    }
+
+    fn save(&self) -> std::io::Result<()> {
+        if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
+        let values: Vec<&str> = self.ids.iter().map(String::as_str).collect();
+        let body = serde_json::to_string(&values).expect("discord status id list serializes");
+        std::fs::write(&self.path, body)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Discord Gateway opcodes & payload
 // ---------------------------------------------------------------------------
 
@@ -2291,6 +2729,7 @@ pub struct DiscordAdapter {
     client: Client,
     stop_signal: Arc<Notify>,
     thread_participation: Mutex<DiscordThreadParticipationTracker>,
+    non_conversational_messages: Mutex<DiscordNonConversationalMessageTracker>,
 }
 
 impl DiscordAdapter {
@@ -2308,6 +2747,9 @@ impl DiscordAdapter {
             client,
             stop_signal: Arc::new(Notify::new()),
             thread_participation: Mutex::new(DiscordThreadParticipationTracker::new("discord")),
+            non_conversational_messages: Mutex::new(DiscordNonConversationalMessageTracker::new(
+                "discord",
+            )),
         })
     }
 
@@ -2352,6 +2794,30 @@ impl DiscordAdapter {
             .lock()
             .map_err(|_| std::io::Error::other("discord thread tracker lock poisoned"))?
             .mark(thread_id)
+    }
+
+    pub fn non_conversational_message_contains(&self, message_id: &str) -> bool {
+        self.non_conversational_messages
+            .lock()
+            .map(|tracker| tracker.contains(message_id))
+            .unwrap_or(false)
+    }
+
+    fn mark_non_conversational_messages(
+        &self,
+        message_ids: impl IntoIterator<Item = impl AsRef<str>>,
+    ) {
+        match self.non_conversational_messages.lock() {
+            Ok(mut tracker) => {
+                if let Err(err) = tracker.mark_many(message_ids) {
+                    debug!(
+                        error = %err,
+                        "failed to persist Discord non-conversational message IDs"
+                    );
+                }
+            }
+            Err(_) => debug!("discord non-conversational tracker lock poisoned"),
+        }
     }
 
     /// Return the authorization header value.
@@ -2456,6 +2922,10 @@ impl DiscordAdapter {
             })?;
 
             message_ids.push(msg.id);
+        }
+
+        if metadata_marks_non_conversational(metadata) {
+            self.mark_non_conversational_messages(message_ids.iter().map(String::as_str));
         }
 
         Ok(message_ids)
@@ -2620,6 +3090,10 @@ impl DiscordAdapter {
             GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e))
         })?;
 
+        if metadata_marks_non_conversational(metadata) {
+            self.mark_non_conversational_messages([msg.id.as_str()]);
+        }
+
         Ok(msg.id)
     }
 
@@ -2692,6 +3166,10 @@ impl DiscordAdapter {
         let msg: DiscordMessage = resp.json().await.map_err(|e| {
             GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e))
         })?;
+
+        if metadata_marks_non_conversational(metadata) {
+            self.mark_non_conversational_messages([msg.id.as_str()]);
+        }
 
         Ok(msg.id)
     }
@@ -3424,6 +3902,32 @@ impl PlatformAdapter for DiscordAdapter {
         Ok(())
     }
 
+    async fn send_message_with_options(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        let metadata = discord_metadata_from_send_options(&options);
+        self.send_text_with_metadata(chat_id, text, metadata.as_ref())
+            .await?;
+        Ok(())
+    }
+
+    async fn send_or_update_status(
+        &self,
+        chat_id: &str,
+        _status_key: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
+        let metadata = DiscordSendMetadata::non_conversational();
+        self.send_text_with_metadata(chat_id, text, Some(&metadata))
+            .await?;
+        Ok(())
+    }
+
     async fn edit_message(
         &self,
         chat_id: &str,
@@ -3440,6 +3944,19 @@ impl PlatformAdapter for DiscordAdapter {
         caption: Option<&str>,
     ) -> Result<(), GatewayError> {
         self.upload_file(chat_id, file_path, caption).await?;
+        Ok(())
+    }
+
+    async fn send_file_with_options(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+        options: SendMessageOptions,
+    ) -> Result<(), GatewayError> {
+        let metadata = discord_metadata_from_send_options(&options);
+        self.upload_file_with_metadata(chat_id, file_path, caption, metadata.as_ref())
+            .await?;
         Ok(())
     }
 
@@ -3541,6 +4058,7 @@ mod tests {
         let metadata = DiscordSendMetadata::with_thread_id(" 987654321 ");
         assert_eq!(metadata.target_channel_id("123"), "987654321");
         assert_eq!(metadata.reply_to_message_id(), None);
+        assert!(!metadata.marks_non_conversational());
 
         let blank_metadata = DiscordSendMetadata::with_thread_id("   ");
         assert_eq!(blank_metadata.target_channel_id("123"), "123");
@@ -3553,6 +4071,79 @@ mod tests {
         let combined = DiscordSendMetadata::with_thread_and_reply("thread-1", "origin-2");
         assert_eq!(combined.target_channel_id("123"), "thread-1");
         assert_eq!(combined.reply_to_message_id(), Some("origin-2"));
+
+        let status_metadata =
+            DiscordSendMetadata::with_thread_id("thread-2").with_non_conversational(true);
+        assert_eq!(status_metadata.target_channel_id("123"), "thread-2");
+        assert!(metadata_marks_non_conversational(Some(&status_metadata)));
+    }
+
+    #[test]
+    fn send_options_map_to_discord_metadata_without_losing_thread_or_status_flags() {
+        let options = SendMessageOptions::non_conversational_threaded(Some(" thread-42 "));
+        let metadata = discord_metadata_from_send_options(&options).expect("metadata");
+        assert_eq!(metadata.target_channel_id("root"), "thread-42");
+        assert!(metadata.marks_non_conversational());
+
+        assert!(discord_metadata_from_send_options(&SendMessageOptions::default()).is_none());
+    }
+
+    #[test]
+    fn clarify_choice_normalization_unwraps_llm_dict_shapes_only() {
+        let choices = discord_normalize_clarify_choices([
+            serde_json::json!({"description": "Tight, well-illustrated"}),
+            serde_json::json!({"name": "raw-name", "description": "Prefer description"}),
+            serde_json::json!({"label": "Prefer label", "description": "description"}),
+            serde_json::json!({"text": "Use text key"}),
+            serde_json::json!({"title": "Use title key"}),
+            serde_json::json!({"name": "do-not-use-name"}),
+            serde_json::json!({"value": "do-not-use-value"}),
+            serde_json::json!(["nested", {"description": "dict"}]),
+            serde_json::json!(true),
+            serde_json::Value::Null,
+        ]);
+
+        assert_eq!(
+            choices,
+            vec![
+                "Tight, well-illustrated".to_string(),
+                "Prefer description".to_string(),
+                "Prefer label".to_string(),
+                "Use text key".to_string(),
+                "Use title key".to_string(),
+                "nested dict".to_string(),
+                "true".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn clarify_button_labels_fit_discord_cap_and_cut_at_boundaries() {
+        let wordy = "Tight, well-illustrated, covers all 3 audiences (patients, families, curious general readers)";
+        let label = discord_clarify_button_label(0, wordy);
+        assert!(label.starts_with("1. "));
+        assert!(label.ends_with('…'));
+        assert!(label.chars().count() <= 80);
+        assert!(!label.trim_end_matches('…').ends_with('('));
+
+        let no_space = format!(
+            "{}-{}-{}-{}",
+            "a".repeat(30),
+            "b".repeat(30),
+            "c".repeat(30),
+            "d".repeat(30)
+        );
+        let label = discord_clarify_button_label(0, &no_space);
+        assert!(label.ends_with('…'));
+        assert!(label.chars().count() <= 80);
+        let body = label
+            .strip_prefix("1. ")
+            .expect("prefix")
+            .trim_end_matches('…');
+        assert!(matches!(
+            body.chars().last(),
+            Some('-' | ',' | '.' | ')' | ' ')
+        ));
     }
 
     #[test]
@@ -4128,6 +4719,131 @@ mod tests {
     }
 
     #[test]
+    fn discord_channel_context_fetch_gate_includes_reply_hydration() {
+        let server = DiscordChannelContext::server("111");
+        assert!(discord_should_fetch_channel_context(
+            true, false, false, &server, false
+        ));
+        assert!(!discord_should_fetch_channel_context(
+            false, true, false, &server, false
+        ));
+        assert!(discord_should_fetch_channel_context(
+            false,
+            true,
+            false,
+            &DiscordChannelContext::thread("222", "111"),
+            false
+        ));
+
+        let mut reply = DiscordChannelContext::server("111");
+        reply.is_reply = true;
+        assert!(discord_should_fetch_channel_context(
+            false, true, false, &reply, false
+        ));
+        assert!(!discord_should_fetch_channel_context(
+            false, true, false, &reply, true
+        ));
+        assert!(!discord_should_fetch_channel_context(
+            true,
+            false,
+            false,
+            &DiscordChannelContext::dm("dm-1"),
+            false
+        ));
+    }
+
+    #[test]
+    fn discord_history_context_skips_status_messages_before_self_partition() {
+        let non_conversational_ids = BTreeSet::from(["9".to_string()]);
+        let primary = vec![
+            DiscordHistoryMessage::self_message(
+                "9",
+                "arbitrary lifecycle text from a metadata-marked send",
+            ),
+            DiscordHistoryMessage::self_message(
+                "8",
+                "[Background process bg-123 finished with exit code 0~ Here's the final output:\nok]",
+            ),
+            DiscordHistoryMessage::bot_message(
+                "7",
+                "Codex",
+                "♻ Gateway restarted successfully. Your session continues.",
+            ),
+            DiscordHistoryMessage::self_message(
+                "6",
+                "💾 Self-improvement review: Memory updated",
+            ),
+            DiscordHistoryMessage::new("5", "Alice", "question after reply"),
+            DiscordHistoryMessage::self_message(
+                "4",
+                "💾 Self-improvement review: Skill 'hermes-gateway-display-config' patched",
+            ),
+            DiscordHistoryMessage::bot_message("3", "Codex", "Codex final answer"),
+            DiscordHistoryMessage::new("2", "Alice", "prompt before reply"),
+            DiscordHistoryMessage::self_message("1", "our prior response"),
+        ];
+
+        let result =
+            discord_format_channel_context(&primary, &[], true, None, &non_conversational_ids);
+
+        assert_eq!(
+            result,
+            "[Recent channel messages]\n[Alice] prompt before reply\n[Codex [bot]] Codex final answer\n[Alice] question after reply"
+        );
+        assert!(discord_looks_like_non_conversational_history_message(
+            "💾 Self-improvement review: Memory updated"
+        ));
+        assert!(!discord_looks_like_non_conversational_history_message(
+            "Self-improvement review: this is a normal assistant heading"
+        ));
+    }
+
+    #[test]
+    fn discord_history_context_hydrates_reply_window_without_duplicates() {
+        let primary = vec![
+            DiscordHistoryMessage::new("6", "Alice", "latest note"),
+            DiscordHistoryMessage::self_message("5", "our prior response"),
+        ];
+        let reply_window = vec![
+            DiscordHistoryMessage::self_message("3", "the bot answer being replied to"),
+            DiscordHistoryMessage::new("2", "Carol", "older question"),
+            DiscordHistoryMessage::new("1", "Alice", "even older"),
+        ];
+        let result = discord_format_channel_context(
+            &primary,
+            &reply_window,
+            true,
+            Some("3"),
+            &BTreeSet::new(),
+        );
+
+        assert!(result.contains("[Context around the replied-to message]"));
+        assert!(result.contains("[Hermes [bot]] the bot answer being replied to"));
+        assert!(result.contains("[Carol] older question"));
+        assert!(result.contains("[Recent channel messages]"));
+        assert!(result.contains("[Alice] latest note"));
+        assert!(
+            result.find("[Context around the replied-to message]")
+                < result.find("[Recent channel messages]")
+        );
+
+        let primary_with_target = vec![
+            DiscordHistoryMessage::new("4", "Alice", "recent reply target"),
+            DiscordHistoryMessage::new("3", "Alice", "another recent"),
+            DiscordHistoryMessage::self_message("2", "our prior response"),
+        ];
+        let duplicate = discord_format_channel_context(
+            &primary_with_target,
+            &reply_window,
+            true,
+            Some("4"),
+            &BTreeSet::new(),
+        );
+        assert!(!duplicate.contains("[Context around the replied-to message]"));
+        assert_eq!(duplicate.matches("recent reply target").count(), 1);
+    }
+
+    #[test]
     fn discord_unauthorized_notify_soft_fail_falls_through() {
         assert!(!discord_notify_result_counts_delivered(Some(false)));
         assert!(discord_notify_result_counts_delivered(Some(true)));
@@ -4694,6 +5410,26 @@ mod tests {
         let mut tracker = DiscordThreadParticipationTracker::from_path(&missing_parent, 5);
         assert!(tracker.mark("111").unwrap());
         assert!(missing_parent.exists());
+    }
+
+    #[test]
+    fn discord_non_conversational_tracker_persists_and_keeps_newest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp
+            .path()
+            .join("gateway")
+            .join("discord_nonconversational_messages.json");
+        let mut tracker = DiscordNonConversationalMessageTracker::from_path(&path, 3);
+
+        assert!(tracker.mark_many(["1", "2", "2", "3"]).unwrap());
+        assert!(!tracker.mark_many(["2"]).unwrap());
+        assert!(tracker.mark_many(["4"]).unwrap());
+        assert_eq!(tracker.entries(), vec!["2", "3", "4"]);
+        assert!(tracker.contains("4"));
+        assert!(!tracker.contains("1"));
+
+        let reloaded = DiscordNonConversationalMessageTracker::from_path(&path, 3);
+        assert_eq!(reloaded.entries(), vec!["2", "3", "4"]);
     }
 
     #[test]

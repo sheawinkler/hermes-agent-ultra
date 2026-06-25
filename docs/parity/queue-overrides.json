@@ -3156,6 +3156,11 @@
       "disposition": "superseded",
       "notes": "Electron download self-heal is installer/desktop-only. Hermes Ultra's supported install and verification path is Rust/Cargo plus local parity gates."
     },
+    "ba49fb51a585": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Discord history primitives: reply messages now have a tested channel-context hydration gate and deterministic reply-anchored context formatting that merges reply-window and recent-window history chronologically without duplicate message IDs.",
+      "owner": "rust-runtime"
+    },
     "bb5cb3283898": {
       "disposition": "ported",
       "notes": "Ported in Rust Honcho setup/runtime: crates/hermes-cli/src/commands.rs and hermes_agent::memory_plugins::honcho own pinUserPeer identity mapping, legacy peerName behavior, runtimePeerPrefix, and userPeerAliases; Python Honcho CLI delta has no remaining runtime target.",
@@ -3190,6 +3195,11 @@
     "bcb024ad48bc": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "bce1e36b5769": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Discord adapter: clarify choices unwrap LLM dict/list shapes through label/description/text/title only, omit raw name/value fields, and render button labels under Discord's 80-char cap with U+2026 and word/soft-boundary truncation. Focused --features discord tests cover dict unwrapping and boundary truncation.",
+      "owner": "rust-runtime"
     },
     "bd12b3c2321b": {
       "disposition": "superseded",
@@ -3456,6 +3466,11 @@
     "ca8c78e588b7": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "caaa916289f2": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Discord runtime primitives: SendMessageOptions and DiscordSendMetadata carry non_conversational status intent, Discord sends persist marked message IDs in a bounded sidecar tracker, send_or_update_status marks status sends, and history formatting skips persisted/recognized lifecycle messages before self-message partitioning. Focused --features discord tests cover status-boundary skipping and tracker persistence.",
+      "owner": "rust-runtime"
     },
     "cadb74adad3c": {
       "disposition": "superseded",

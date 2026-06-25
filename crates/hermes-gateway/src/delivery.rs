@@ -356,6 +356,7 @@ impl DeliveryRouter {
                     thread_id: target.thread_id.clone(),
                     explicit_chat_id: target.is_explicit,
                     notify: false,
+                    non_conversational: false,
                 },
             )
             .await
@@ -468,6 +469,7 @@ impl DeliveryRouter {
                             thread_id: target.thread_id.clone(),
                             explicit_chat_id: target.is_explicit,
                             notify: false,
+                            non_conversational: false,
                         },
                     )
                     .await
