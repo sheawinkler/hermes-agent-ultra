@@ -10795,12 +10795,13 @@ async fn run_cron_gateway_delivery_loop(
         };
 
         if let Err(err) = gateway
-            .send_message_explicit(
+            .send_message_explicit_with_audit_label(
                 target.platform,
                 &target.chat_id,
                 &text,
                 None,
                 target.thread_id.as_deref(),
+                Some(&event.job_id),
             )
             .await
         {

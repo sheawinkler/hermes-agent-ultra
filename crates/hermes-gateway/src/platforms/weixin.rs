@@ -1437,6 +1437,10 @@ impl PlatformAdapter for WeChatAdapter {
         self.inner.base.is_running()
     }
 
+    fn splits_long_messages(&self) -> bool {
+        true
+    }
+
     fn platform_name(&self) -> &str {
         "weixin"
     }
