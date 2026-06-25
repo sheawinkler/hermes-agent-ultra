@@ -11,8 +11,12 @@ use crate::config::{
     DisplayConfig, GatewayConfig, LlmProviderConfig, ProxyConfig, TerminalBackendType,
     TerminalConfig, TerminalHomeMode, WebConfig,
 };
-use crate::merge::merge_configs;
+use crate::merge::{deep_merge, merge_configs};
 use crate::paths;
+
+const MANAGED_SCOPE_ENV: &str = "HERMES_MANAGED_DIR";
+#[cfg(not(test))]
+const DEFAULT_MANAGED_SCOPE_DIR: &str = "/etc/hermes";
 
 // ---------------------------------------------------------------------------
 // ConfigError conversion helpers
@@ -181,6 +185,14 @@ pub fn load_dotenv() {
         // Project env only fills gaps when user env exists; otherwise it can override.
         load_dotenv_file(&project_env, !env_file.exists());
     }
+
+    if let Some(managed_env) = managed_scope_dir()
+        .map(|dir| dir.join(".env"))
+        .filter(|path| path.exists())
+    {
+        // Administrator-pinned env always wins over shell/user/project dotenv.
+        load_dotenv_file(&managed_env, true);
+    }
 }
 
 fn load_dotenv_file(path: &Path, override_existing: bool) {
@@ -302,13 +314,132 @@ fn env_truthy(name: &str) -> bool {
     })
 }
 
+/// Return the active managed-scope directory, if configured.
+///
+/// Python Hermes treats `$HERMES_MANAGED_DIR` as an optional administrator
+/// overlay and falls back to `/etc/hermes` in production. Unit tests skip the
+/// default path so a developer machine's real managed install cannot leak into
+/// deterministic tests.
+pub fn managed_scope_dir() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os(MANAGED_SCOPE_ENV)
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty() && path.is_dir())
+    {
+        return Some(path);
+    }
+
+    #[cfg(not(test))]
+    {
+        let path = PathBuf::from(DEFAULT_MANAGED_SCOPE_DIR);
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+fn load_managed_config_yaml_value() -> Option<serde_yaml::Value> {
+    let path = managed_scope_dir()?.join("config.yaml");
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(err) => {
+            tracing::warn!("managed scope: failed to read {}: {err}", path.display());
+            return None;
+        }
+    };
+    if contents.trim().is_empty() {
+        return None;
+    }
+
+    let mut root: serde_yaml::Value = match serde_yaml::from_str(&contents) {
+        Ok(root) => root,
+        Err(err) => {
+            tracing::warn!("managed scope: failed to parse {}: {err}", path.display());
+            return None;
+        }
+    };
+    expand_env_vars_in_yaml(&mut root);
+    let serde_yaml::Value::Mapping(ref mut map) = root else {
+        tracing::warn!(
+            "managed scope: ignoring non-mapping config at {}",
+            path.display()
+        );
+        return None;
+    };
+    crate::python_yaml_compat::normalize_config_yaml_root(map);
+    mark_platform_enabled_explicit(&mut root, "slack");
+    mark_platform_enabled_explicit(&mut root, "ntfy");
+    Some(root)
+}
+
+fn load_managed_config_overlay_json() -> Option<serde_json::Value> {
+    let yaml = load_managed_config_yaml_value()?;
+    match serde_json::to_value(yaml) {
+        Ok(value) if value.is_object() => Some(value),
+        Ok(_) => None,
+        Err(err) => {
+            tracing::warn!("managed scope: failed to convert config overlay: {err}");
+            None
+        }
+    }
+}
+
+fn read_config_yaml_as_json(path: &Path) -> Option<serde_json::Value> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(_) => return None,
+    };
+    if contents.trim().is_empty() {
+        return Some(serde_json::json!({}));
+    }
+    match serde_yaml::from_str::<serde_json::Value>(&contents) {
+        Ok(value) if value.is_object() => Some(value),
+        Ok(_) => {
+            tracing::warn!("Ignoring non-mapping config at {}", path.display());
+            None
+        }
+        Err(err) => {
+            tracing::warn!("Failed to parse {}: {err}", path.display());
+            None
+        }
+    }
+}
+
+/// Load raw user config plus managed-scope overlay for standalone runtime readers.
+///
+/// This intentionally returns a raw value instead of [`GatewayConfig`] so
+/// narrow subsystems can keep reading upstream-compatible keys that the typed
+/// config model does not own, while still honoring administrator-pinned leaves.
+pub fn load_effective_config_yaml_value(path: &Path) -> Option<serde_json::Value> {
+    let ignore_user_config = env_truthy("HERMES_IGNORE_USER_CONFIG");
+    let mut base = if ignore_user_config {
+        None
+    } else {
+        read_config_yaml_as_json(path)
+    }
+    .unwrap_or_else(|| serde_json::json!({}));
+    let had_user = base.as_object().is_some_and(|obj| !obj.is_empty());
+
+    let managed = load_managed_config_overlay_json();
+    if let Some(overlay) = &managed {
+        deep_merge(&mut base, overlay);
+    }
+
+    if had_user || managed.is_some() {
+        Some(base)
+    } else {
+        None
+    }
+}
+
 // ---------------------------------------------------------------------------
 // load_config
 // ---------------------------------------------------------------------------
 
 /// Load the full configuration, applying the priority chain:
 ///
-///   env vars  >  .env  >  cli-config.yaml > config.yaml > gateway.json > defaults
+///   managed config/env > env vars > .env > cli-config.yaml > config.yaml > gateway.json > defaults
 ///
 /// If `home_dir` is provided it overrides the `HERMES_HOME` env var.
 pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError> {
@@ -372,6 +503,24 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
     normalize_platform_aliases(&mut config);
     normalize_provider_secrets(&mut config);
 
+    let managed_overlay = load_managed_config_overlay_json();
+    if let Some(overlay) = &managed_overlay {
+        let mut managed_config = config.clone();
+        if apply_managed_config_overlay(&mut managed_config, overlay) {
+            normalize_platform_aliases(&mut managed_config);
+            normalize_provider_secrets(&mut managed_config);
+            match validate_config(&managed_config) {
+                Ok(()) => {
+                    config = managed_config;
+                    bridge_managed_overlay_to_env(&config, overlay);
+                }
+                Err(err) => {
+                    tracing::warn!("managed scope: ignoring invalid config overlay: {err}");
+                }
+            }
+        }
+    }
+
     // Record the effective home dir
     config.home_dir = Some(effective_home);
 
@@ -379,6 +528,145 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
     validate_config(&config)?;
 
     Ok(config)
+}
+
+fn apply_managed_config_overlay(config: &mut GatewayConfig, overlay: &serde_json::Value) -> bool {
+    let original = config.clone();
+    let mut base = match serde_json::to_value(&*config) {
+        Ok(value) => value,
+        Err(err) => {
+            tracing::warn!("managed scope: failed to serialize base config: {err}");
+            return false;
+        }
+    };
+    deep_merge(&mut base, overlay);
+    match serde_json::from_value::<GatewayConfig>(base) {
+        Ok(mut merged) => {
+            merged.home_dir = original.home_dir;
+            *config = merged;
+            true
+        }
+        Err(err) => {
+            tracing::warn!("managed scope: failed to apply config overlay: {err}");
+            *config = original;
+            false
+        }
+    }
+}
+
+fn bridge_managed_overlay_to_env(config: &GatewayConfig, overlay: &serde_json::Value) {
+    if overlay.get("model").is_some() {
+        if let Some(model) = config.model.as_deref() {
+            set_env_override("HERMES_MODEL", model.to_string());
+        }
+    }
+    if overlay.get("personality").is_some() {
+        if let Some(personality) = config.personality.as_deref() {
+            set_env_override("HERMES_PERSONALITY", personality.to_string());
+        }
+    }
+    if overlay.get("max_turns").is_some() {
+        set_env_override("HERMES_MAX_TURNS", config.max_turns.to_string());
+    }
+    if overlay.get("system_prompt").is_some() {
+        if let Some(prompt) = config.system_prompt.as_deref() {
+            set_env_override("HERMES_SYSTEM_PROMPT", prompt.to_string());
+        }
+    }
+    if overlay.get("prefill_messages_file").is_some() {
+        if let Some(path) = config.prefill_messages_file.as_deref() {
+            set_env_override("HERMES_PREFILL_MESSAGES_FILE", path.to_string());
+        }
+    }
+    if let Some(kanban) = overlay.get("kanban").and_then(|value| value.as_object()) {
+        if kanban.contains_key("dispatch_in_gateway") {
+            set_env_override(
+                "HERMES_KANBAN_DISPATCH_IN_GATEWAY",
+                config.kanban.dispatch_in_gateway.to_string(),
+            );
+        }
+    }
+    if let Some(security) = overlay.get("security").and_then(|value| value.as_object()) {
+        if security.contains_key("allow_private_urls") {
+            set_env_override(
+                "HERMES_ALLOW_PRIVATE_URLS",
+                config.security.allow_private_urls.to_string(),
+            );
+        }
+    }
+    bridge_managed_section_to_env(
+        &config.terminal,
+        overlay.get("terminal"),
+        terminal_config_env_bridge_pairs(),
+    );
+    bridge_managed_section_to_env(
+        &config.web,
+        overlay.get("web"),
+        web_config_env_bridge_pairs(),
+    );
+    bridge_managed_section_to_env(
+        &config.display,
+        overlay.get("display"),
+        display_config_env_bridge_pairs(),
+    );
+}
+
+fn bridge_managed_section_to_env<T: serde::Serialize>(
+    config: &T,
+    overlay: Option<&serde_json::Value>,
+    pairs: &[(&str, &str)],
+) {
+    let Some(overlay_map) = overlay.and_then(|value| value.as_object()) else {
+        return;
+    };
+    let config_value = match serde_json::to_value(config) {
+        Ok(value) => value,
+        Err(err) => {
+            tracing::warn!("managed scope: failed to bridge config section to env: {err}");
+            return;
+        }
+    };
+    for (overlay_key, env_key) in pairs {
+        if !overlay_map.contains_key(*overlay_key) {
+            continue;
+        }
+        let config_key = match *overlay_key {
+            "env_type" => "backend",
+            "cwd" => "workdir",
+            key => key,
+        };
+        if let Some(value) = config_value
+            .get(config_key)
+            .and_then(json_value_to_env_string)
+        {
+            set_env_override(env_key, value);
+        }
+    }
+}
+
+fn json_value_to_env_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Array(values) => {
+            let joined = values
+                .iter()
+                .filter_map(json_value_to_env_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            (!joined.trim().is_empty()).then_some(joined)
+        }
+        _ => None,
+    }
+}
+
+fn set_env_override(name: &str, value: String) {
+    if value.trim().is_empty() {
+        return;
+    }
+    // SAFETY: configuration loading runs during CLI/gateway startup.
+    unsafe { std::env::set_var(name, value) };
 }
 
 // ---------------------------------------------------------------------------
@@ -2475,6 +2763,32 @@ mod tests {
         }
     }
 
+    fn remove_test_env(name: &str) {
+        // SAFETY: tests serialize env mutation with ENV_LOCK.
+        unsafe { std::env::remove_var(name) };
+    }
+
+    fn set_test_env(name: &str, value: impl AsRef<std::ffi::OsStr>) {
+        // SAFETY: tests serialize env mutation with ENV_LOCK.
+        unsafe { std::env::set_var(name, value) };
+    }
+
+    fn clear_managed_scope_test_env() {
+        for name in [
+            "HERMES_HOME",
+            "HERMES_MANAGED_DIR",
+            "HERMES_IGNORE_USER_CONFIG",
+            "HERMES_MODEL",
+            "HERMES_MAX_TURNS",
+            "HERMES_WEB_BACKEND",
+            "HERMES_WEB_SEARCH_BACKEND",
+            "HERMES_GATEWAY_BUSY_INPUT_MODE",
+            "HERMES_GATEWAY_BUSY_ACK_ENABLED",
+        ] {
+            remove_test_env(name);
+        }
+    }
+
     #[test]
     fn validate_valid_config() {
         let config = GatewayConfig::default();
@@ -3140,6 +3454,239 @@ terminal:
             "false"
         );
         clear_terminal_env_bridge_vars();
+    }
+
+    #[test]
+    fn managed_scope_dir_ignores_missing_override() {
+        use tempfile::tempdir;
+
+        let _global_guard = crate::managed_gateway::test_lock::lock();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_managed_scope_test_env();
+        let dir = tempdir().unwrap();
+        set_test_env("HERMES_MANAGED_DIR", dir.path().join("missing"));
+
+        assert!(managed_scope_dir().is_none());
+
+        clear_managed_scope_test_env();
+    }
+
+    #[test]
+    fn load_config_applies_managed_overlay_after_env_and_preserves_siblings() {
+        use tempfile::tempdir;
+
+        let _global_guard = crate::managed_gateway::test_lock::lock();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_managed_scope_test_env();
+        clear_web_env_bridge_vars();
+        clear_display_env_bridge_vars();
+        let home = tempdir().unwrap();
+        let managed = tempdir().unwrap();
+        std::fs::write(
+            home.path().join("config.yaml"),
+            r#"
+max_turns: 12
+display:
+  busy_input_mode: queue
+  busy_ack_enabled: false
+web:
+  backend: user-web
+  search_backend: user-search
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            managed.path().join("config.yaml"),
+            r#"
+display:
+  busy_input_mode: steer
+web:
+  backend: managed-web
+"#,
+        )
+        .unwrap();
+        set_test_env("HERMES_HOME", home.path());
+        set_test_env("HERMES_MANAGED_DIR", managed.path());
+        set_test_env("HERMES_WEB_BACKEND", "shell-web");
+        set_test_env("HERMES_GATEWAY_BUSY_INPUT_MODE", "interrupt");
+
+        let cfg = load_config(Some(home.path().to_string_lossy().as_ref())).unwrap();
+
+        assert_eq!(cfg.max_turns, 12);
+        assert_eq!(cfg.display.normalized_busy_input_mode(), "steer");
+        assert!(!cfg.display.busy_ack_enabled());
+        assert_eq!(cfg.web.backend, "managed-web");
+        assert_eq!(cfg.web.search_backend, "user-search");
+        assert_eq!(std::env::var("HERMES_WEB_BACKEND").unwrap(), "managed-web");
+        assert_eq!(
+            std::env::var("HERMES_GATEWAY_BUSY_INPUT_MODE").unwrap(),
+            "steer"
+        );
+
+        clear_managed_scope_test_env();
+        clear_web_env_bridge_vars();
+        clear_display_env_bridge_vars();
+    }
+
+    #[test]
+    fn load_dotenv_managed_env_overrides_user_dotenv_and_shell() {
+        use tempfile::tempdir;
+
+        let _global_guard = crate::managed_gateway::test_lock::lock();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_managed_scope_test_env();
+        let home = tempdir().unwrap();
+        let managed = tempdir().unwrap();
+        std::fs::write(home.path().join(".env"), "HERMES_MODEL=user/env\n").unwrap();
+        std::fs::write(managed.path().join(".env"), "HERMES_MODEL=managed/env\n").unwrap();
+        set_test_env("HERMES_HOME", home.path());
+        set_test_env("HERMES_MANAGED_DIR", managed.path());
+        set_test_env("HERMES_MODEL", "shell/env");
+
+        let cfg = load_config(Some(home.path().to_string_lossy().as_ref())).unwrap();
+
+        assert_eq!(cfg.model.as_deref(), Some("managed/env"));
+        assert_eq!(std::env::var("HERMES_MODEL").unwrap(), "managed/env");
+
+        clear_managed_scope_test_env();
+    }
+
+    #[test]
+    fn load_config_managed_overlay_normalizes_root_model_string() {
+        use tempfile::tempdir;
+
+        let _global_guard = crate::managed_gateway::test_lock::lock();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_managed_scope_test_env();
+        let home = tempdir().unwrap();
+        let managed = tempdir().unwrap();
+        std::fs::write(
+            home.path().join("config.yaml"),
+            "model: user/model\nfallback_models:\n  - user/fallback\n",
+        )
+        .unwrap();
+        std::fs::write(managed.path().join("config.yaml"), "model: managed/model\n").unwrap();
+        set_test_env("HERMES_HOME", home.path());
+        set_test_env("HERMES_MANAGED_DIR", managed.path());
+
+        let cfg = load_config(Some(home.path().to_string_lossy().as_ref())).unwrap();
+
+        assert_eq!(cfg.model.as_deref(), Some("managed/model"));
+        assert_eq!(cfg.fallback_models, vec!["user/fallback".to_string()]);
+
+        clear_managed_scope_test_env();
+    }
+
+    #[test]
+    fn load_config_managed_overlay_is_fail_open_on_malformed_yaml() {
+        use tempfile::tempdir;
+
+        let _global_guard = crate::managed_gateway::test_lock::lock();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_managed_scope_test_env();
+        let home = tempdir().unwrap();
+        let managed = tempdir().unwrap();
+        std::fs::write(home.path().join("config.yaml"), "max_turns: 17\n").unwrap();
+        std::fs::write(managed.path().join("config.yaml"), ":\n").unwrap();
+        set_test_env("HERMES_HOME", home.path());
+        set_test_env("HERMES_MANAGED_DIR", managed.path());
+
+        let cfg = load_config(Some(home.path().to_string_lossy().as_ref())).unwrap();
+
+        assert_eq!(cfg.max_turns, 17);
+
+        clear_managed_scope_test_env();
+    }
+
+    #[test]
+    fn load_config_managed_overlay_is_fail_open_on_invalid_values() {
+        use tempfile::tempdir;
+
+        let _global_guard = crate::managed_gateway::test_lock::lock();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_managed_scope_test_env();
+        let home = tempdir().unwrap();
+        let managed = tempdir().unwrap();
+        std::fs::write(home.path().join("config.yaml"), "max_turns: 17\n").unwrap();
+        std::fs::write(managed.path().join("config.yaml"), "max_turns: 0\n").unwrap();
+        set_test_env("HERMES_HOME", home.path());
+        set_test_env("HERMES_MANAGED_DIR", managed.path());
+
+        let cfg = load_config(Some(home.path().to_string_lossy().as_ref())).unwrap();
+
+        assert_eq!(cfg.max_turns, 17);
+
+        clear_managed_scope_test_env();
+    }
+
+    #[test]
+    fn load_config_ignore_user_config_still_honors_managed_scope() {
+        use tempfile::tempdir;
+
+        let _global_guard = crate::managed_gateway::test_lock::lock();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_managed_scope_test_env();
+        let home = tempdir().unwrap();
+        let managed = tempdir().unwrap();
+        std::fs::write(home.path().join("config.yaml"), "max_turns: 777\n").unwrap();
+        std::fs::write(managed.path().join("config.yaml"), "max_turns: 42\n").unwrap();
+        set_test_env("HERMES_HOME", home.path());
+        set_test_env("HERMES_MANAGED_DIR", managed.path());
+        set_test_env("HERMES_IGNORE_USER_CONFIG", "1");
+
+        let cfg = load_config(Some(home.path().to_string_lossy().as_ref())).unwrap();
+
+        assert_eq!(cfg.max_turns, 42);
+
+        clear_managed_scope_test_env();
+    }
+
+    #[test]
+    fn load_effective_config_yaml_value_applies_managed_raw_overlay() {
+        use tempfile::tempdir;
+
+        let _global_guard = crate::managed_gateway::test_lock::lock();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_managed_scope_test_env();
+        let home = tempdir().unwrap();
+        let managed = tempdir().unwrap();
+        std::fs::write(
+            home.path().join("config.yaml"),
+            r#"
+cron:
+  provider: user
+  chronos:
+    portal_url: https://user.example
+    callback_url: https://agent.example
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            managed.path().join("config.yaml"),
+            r#"
+cron:
+  provider: chronos
+  chronos:
+    portal_url: https://managed.example
+"#,
+        )
+        .unwrap();
+        set_test_env("HERMES_HOME", home.path());
+        set_test_env("HERMES_MANAGED_DIR", managed.path());
+
+        let root = load_effective_config_yaml_value(&home.path().join("config.yaml")).unwrap();
+
+        assert_eq!(root["cron"]["provider"], "chronos");
+        assert_eq!(
+            root["cron"]["chronos"]["portal_url"],
+            "https://managed.example"
+        );
+        assert_eq!(
+            root["cron"]["chronos"]["callback_url"],
+            "https://agent.example"
+        );
+
+        clear_managed_scope_test_env();
     }
 
     #[test]

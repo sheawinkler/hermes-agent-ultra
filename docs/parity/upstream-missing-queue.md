@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T11:29:12.057671+00:00`
+Generated: `2026-06-25T11:50:12.042888+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7011`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-25T11:29:12.057671+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 198 |
-| ported | 396 |
+| pending | 197 |
+| ported | 397 |
 | superseded | 6341 |
 
 ## First 100 Pending Commits
@@ -38,7 +38,6 @@ Generated: `2026-06-25T11:29:12.057671+00:00`
 | `db744e7d1e58` | #21 | feat(simplify-code): add risk-tiered application, Chesterton's Fence, slop + silent failure detection |
 | `6c44471bfdb8` | #23 | fix(hindsight): lazy-install cloud client dependency |
 | `13d4b5fe2f45` | #23 | fix(hindsight): align client version to 0.6.1 across all sources |
-| `b0e47a98f9ed` | #20 | fix(managed-scope): honor managed scope in all standalone config loaders |
 | `9026a8c78974` | #22 | feat(gateway): add Raft bundled platform plugin with activity hooks |
 | `7d86178cf51a` | #26 | fix(raft): set stdin=DEVNULL on bridge subprocess |
 | `6308d3416ab9` | #26 | fix(desktop): rename "Restart messaging" -> "Restart gateway" |
@@ -125,3 +124,4 @@ Generated: `2026-06-25T11:29:12.057671+00:00`
 | `2e779d11a03d` | #23 | feat(mem0): v3 API, OSS mode, update/delete tools, telemetry & review fixes (#15624) |
 | `86e4521cb1d9` | #23 | fix(delivery): make cron output truncation configurable + adapter-aware |
 | `e9cd8c5bf3ea` | #23 | fix(delivery): drop env-var knob, flag all chunking adapters |
+| `d4fa2db1c5df` | #26 | fix(desktop): show all of a provider's models when searching the composer picker |
