@@ -787,25 +787,32 @@ mod tests {
         assert!(!raw.contains("sk-"));
     }
 
-    #[tokio::test]
-    async fn repair_plan_flags_missing_auth_without_writing_snapshot_file() {
-        let _lock = env_lock().await;
+    #[test]
+    fn repair_plan_flags_missing_auth_without_writing_snapshot_file() {
+        let _global_env = hermes_config::managed_gateway::test_lock::lock();
         let home = tempdir().expect("home");
-        let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
-        let _provider = EnvGuard::set("HERMES_AUTH_DEFAULT_PROVIDER", "openrouter");
-        let _key = EnvGuard::remove("OPENROUTER_API_KEY");
-        let _legacy_key = EnvGuard::remove("HERMES_OPENAI_API_KEY");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let raw = runtime.block_on(async {
+            let _lock = env_lock().await;
+            let _home = EnvGuard::set("HERMES_HOME", home.path().to_string_lossy().as_ref());
+            let _provider = EnvGuard::set("HERMES_AUTH_DEFAULT_PROVIDER", "openrouter");
+            let _key = EnvGuard::remove("OPENROUTER_API_KEY");
+            let _legacy_key = EnvGuard::remove("HERMES_OPENAI_API_KEY");
 
-        let registry = ToolRegistry::new();
-        let handler = IntegrationsSnapshotHandler::new(Arc::new(registry));
-        let raw = handler
-            .execute(json!({
-                "action": "repair",
-                "probe_memory": false,
-                "include_plugins": false
-            }))
-            .await
-            .expect("execute");
+            let registry = ToolRegistry::new();
+            let handler = IntegrationsSnapshotHandler::new(Arc::new(registry));
+            handler
+                .execute(json!({
+                    "action": "repair",
+                    "probe_memory": false,
+                    "include_plugins": false
+                }))
+                .await
+        });
+        let raw = raw.expect("execute");
         let payload: Value = serde_json::from_str(&raw).expect("json");
 
         assert_eq!(payload["status"], "ok");
