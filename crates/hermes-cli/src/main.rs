@@ -525,6 +525,12 @@ async fn main() {
             platform,
             summary,
         } => run_tools(cli, action, name, platform, summary).await,
+        CliCommand::ComputerUse {
+            action,
+            json,
+            include,
+            skip,
+        } => run_computer_use(action, json, include, skip).await,
         CliCommand::Config { action, key, value } => run_config(cli, action, key, value).await,
         CliCommand::Gateway {
             action,
@@ -2016,6 +2022,165 @@ async fn run_tools(
         }
     }
     Ok(())
+}
+
+async fn run_computer_use(
+    action: Option<String>,
+    json_output: bool,
+    include: Vec<String>,
+    skip: Vec<String>,
+) -> Result<(), AgentError> {
+    let action = action.unwrap_or_else(|| "status".to_string());
+    let driver_cmd = hermes_tools::backends::computer_use::cua_driver_command_from_env();
+    match action.as_str() {
+        "status" => {
+            let available =
+                hermes_tools::backends::computer_use::CuaDriverBackend::command_available_from_env(
+                );
+            if json_output {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "driver_command": driver_cmd,
+                        "available": available,
+                    })
+                );
+            } else if available {
+                println!("cua-driver: available ({driver_cmd})");
+                println!("  doctor: hermes computer-use doctor");
+            } else {
+                println!("cua-driver: not installed or not on PATH (looked for {driver_cmd})");
+                println!("{}", computer_use_install_hint());
+            }
+            Ok(())
+        }
+        "doctor" => {
+            if !hermes_tools::backends::computer_use::CuaDriverBackend::command_available_from_env()
+            {
+                if json_output {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "ok": false,
+                            "error": "cua-driver unavailable",
+                            "driver_command": driver_cmd,
+                        })
+                    );
+                } else {
+                    println!("cua-driver: not installed or not on PATH (looked for {driver_cmd})");
+                    println!("{}", computer_use_install_hint());
+                }
+                return Ok(());
+            }
+            let backend = hermes_tools::backends::computer_use::CuaDriverBackend::from_env();
+            let mut args = serde_json::Map::new();
+            if !include.is_empty() {
+                args.insert("include".into(), serde_json::json!(include));
+            }
+            if !skip.is_empty() {
+                args.insert("skip".into(), serde_json::json!(skip));
+            }
+            let report =
+                hermes_tools::ComputerUseBackend::call_tool(&backend, "health_report", args.into())
+                    .await
+                    .map_err(|e| AgentError::ToolExecution(e.to_string()))?;
+            if json_output {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report)
+                        .map_err(|e| AgentError::Config(format!("serialize report: {e}")))?
+                );
+            } else {
+                println!("{}", render_computer_use_health_report(&report));
+            }
+            Ok(())
+        }
+        "manifest" => {
+            let (command, args) =
+                hermes_tools::backends::computer_use::resolve_mcp_invocation(&driver_cmd).await;
+            if json_output {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "driver_command": driver_cmd,
+                        "mcp_command": command,
+                        "mcp_args": args,
+                    })
+                );
+            } else {
+                println!("driver command: {driver_cmd}");
+                println!("MCP invocation: {} {}", command, args.join(" "));
+            }
+            Ok(())
+        }
+        "install-hint" | "install" => {
+            println!("{}", computer_use_install_hint());
+            Ok(())
+        }
+        other => Err(AgentError::Config(format!(
+            "Unknown computer-use action '{other}'. Use status, doctor, manifest, or install-hint."
+        ))),
+    }
+}
+
+fn computer_use_install_hint() -> &'static str {
+    if cfg!(windows) {
+        "Install cua-driver with:\n  irm https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.ps1 | iex\nThen run:\n  hermes computer-use doctor"
+    } else {
+        "Install cua-driver with:\n  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh)\"\nThen run:\n  hermes computer-use doctor"
+    }
+}
+
+fn render_computer_use_health_report(report: &serde_json::Value) -> String {
+    let structured = report
+        .get("structuredContent")
+        .or_else(|| report.get("structured_content"))
+        .unwrap_or(report);
+    let overall = structured
+        .get("overall")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let platform = structured
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown-platform");
+    let driver_version = structured
+        .get("driver_version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown-version");
+
+    let mut out = format!("cua-driver {driver_version} on {platform}: {overall}\n");
+    if let Some(checks) = structured.get("checks").and_then(|v| v.as_array()) {
+        for check in checks {
+            let name = check
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("check");
+            let status = check
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let message = check.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            out.push_str(&format!("  - {name}: {status}"));
+            if !message.is_empty() {
+                out.push_str(&format!(" - {message}"));
+            }
+            out.push('\n');
+            if let Some(hint) = check.get("hint").and_then(|v| v.as_str()) {
+                out.push_str(&format!("    hint: {hint}\n"));
+            }
+        }
+    } else if let Some(content) = report.get("content").and_then(|v| v.as_array()) {
+        for item in content {
+            if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                out.push_str(text);
+                if !text.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+    out.trim_end().to_string()
 }
 
 async fn run_tools_setup_wizard(cli: &Cli) -> Result<(), AgentError> {

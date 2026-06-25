@@ -4678,6 +4678,51 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust CLI backup/import and memory provider trait: MemoryProviderPlugin exposes config-only backup_paths, Honcho/Hindsight/OpenViking declare their home-scoped dotdirs, hermes backup archives existing regular external provider files under a reserved external/ archive prefix only when they live under HOME and outside HERMES_HOME, and hermes import safely restores hermes/ entries into HERMES_HOME while restoring external/ entries to HOME with traversal checks and 0600 tightening for credential-shaped files. Focused Rust tests cover prefix stripping, OpenViking external state round-trip, and traversal rejection."
+    },
+    "f2e37549c673": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: hermes-tools now exposes a first-class computer_use tool backed by cua-driver MCP over stdio, with manifest-based MCP invocation discovery, HERMES_CUA_DRIVER_CMD support, cross-platform action schema, type_text/hotkey/set_value/drag/capture/list/focus/doctor/raw-call routing, safety hardblocks, capture_after, explicit computer_use toolset, and CLI status/doctor/manifest/install-hint commands."
+    },
+    "e3505c7f73a4": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: computer_use is no longer macOS-gated or documented as macOS-only in the runtime surface; the Rust schema and CLI manage macOS/Windows/Linux through cua-driver MCP while keeping the desktop-mutating toolset explicit."
+    },
+    "0223ea5f590a": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported on the Rust CLI primary surface: hermes computer-use doctor calls cua-driver health_report and renders permission/preflight checks without requiring the absent Electron desktop panel."
+    },
+    "2dfcead68367": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported on the Rust CLI primary surface: the computer-use doctor path passes include/skip filters through to cua-driver health_report and is platform-neutral for macOS/Windows/Linux."
+    },
+    "8845f3316c26": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust architecture and tests: the Rust dashboard command only enables the api_server platform and does not auto-import plugin Python backend APIs; plugin discovery test fixtures with dashboard/manifest.json api.py prove discovery keeps user/project Python dashboard backends inert."
+    },
+    "c42d44cb2fc2": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by intentional Rust security posture: upstream restored Python user dashboard backend auto-import, but Hermes Ultra has no Python dashboard backend import path and keeps user/project dashboard API files inert."
+    },
+    "4c206b972d49": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust-native gateway adapters: the Python plugins/platforms sys.path insertion path does not exist, and external Python plugin command dispatch is disabled in CLI tests."
+    },
+    "79f297834a9b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust-native gateway adapters for Slack/Telegram/WhatsApp: there is no plugins/platforms Python sys.path mutation or cron namespace collision class in the Rust runtime."
+    },
+    "491579fa05ef": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust WhatsApp architecture: the repo has no scripts/whatsapp-bridge source tree or npm-installing bridge adapter path to mirror into HERMES_HOME; Rust WhatsApp runtime is the Cloud API adapter plus configurable bridge_url QR helper."
     }
   },
   "subject_patterns": [

@@ -1110,4 +1110,49 @@ dependencies:
         assert_eq!(discovered[0].manifest.name, "user_bundle");
         assert_eq!(discovered[0].source, PluginDiscoverySource::User);
     }
+
+    #[test]
+    fn test_dashboard_plugin_backend_files_are_not_imported_by_discovery() {
+        let home = tempfile::tempdir().unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let user_plugin = home.path().join("plugins").join("user_dashboard");
+        let project_plugin = cwd
+            .path()
+            .join(".hermes")
+            .join("plugins")
+            .join("project_dashboard");
+
+        for (plugin, name) in [
+            (&user_plugin, "user_dashboard"),
+            (&project_plugin, "project_dashboard"),
+        ] {
+            std::fs::create_dir_all(plugin.join("dashboard")).unwrap();
+            std::fs::write(
+                plugin.join("plugin.yaml"),
+                format!("name: {name}\nversion: \"0.1.0\"\ndescription: Dashboard plugin\n"),
+            )
+            .unwrap();
+            std::fs::write(
+                plugin.join("dashboard").join("manifest.json"),
+                r#"{"name":"dashboard-test","api":"api.py","entry":"dist/index.js"}"#,
+            )
+            .unwrap();
+            std::fs::write(
+                plugin.join("dashboard").join("api.py"),
+                "raise AssertionError('Rust discovery must not import Python dashboard APIs')\n",
+            )
+            .unwrap();
+        }
+
+        let discovered =
+            PluginManager::discover_plugins_with_options(home.path(), Some(cwd.path()), true);
+        assert_eq!(discovered.len(), 2);
+        assert!(discovered.iter().any(
+            |d| d.manifest.name == "user_dashboard" && d.source == PluginDiscoverySource::User
+        ));
+        assert!(discovered
+            .iter()
+            .any(|d| d.manifest.name == "project_dashboard"
+                && d.source == PluginDiscoverySource::Project));
+    }
 }
