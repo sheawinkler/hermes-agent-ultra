@@ -382,7 +382,7 @@ fn english_ordinal(n: u64) -> String {
 }
 
 fn expand_english_abbreviations(text: &str) -> String {
-    const ABBREVS: [(&str, &str); 19] = [
+    const ABBREVS: [(&str, &str); 20] = [
         ("mrs", "misess"),
         ("mr", "mister"),
         ("dr", "doctor"),
@@ -402,6 +402,7 @@ fn expand_english_abbreviations(text: &str) -> String {
         ("col", "colonel"),
         ("ft", "fort"),
         ("etc", "et cetera"),
+        ("btw", "by the way"),
     ];
     let mut out = text.to_string();
     for (abbr, expansion) in ABBREVS {
@@ -603,6 +604,25 @@ mod tests {
         let out = preprocess_tts_text("mr king, 5 years");
         assert!(out.contains("mister"));
         assert!(out.contains("five"));
+    }
+
+    #[test]
+    fn test_preprocess_zipvoice_main_example() {
+        let text = "我们是5年小米人,是吗? Yes I think so! \
+            mr king, 5 years, from 2019 to 2024.\
+            霍...啦啦啦超过90%的人...?!9204";
+        let out = preprocess_tts_text(text);
+        assert!(out.contains("五年"), "expected cn2an-style year: {out}");
+        assert!(
+            out.contains("Yes I think so"),
+            "expected english segment: {out}"
+        );
+        assert!(out.contains("mister"), "expected mr expansion: {out}");
+        assert!(out.contains("five"), "expected digit expansion: {out}");
+        assert!(
+            out.contains("百分之九十"),
+            "expected percent expansion: {out}"
+        );
     }
 
     #[test]
