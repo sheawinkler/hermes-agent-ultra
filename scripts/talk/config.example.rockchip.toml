@@ -95,7 +95,6 @@ min_final_chars = 3
 sentence_min_len = 12
 tts_first_chunk_chars = 6
 barge_in_enabled = true
-barge_in_requires_wake = false
 offline_continuation_ms = 800
 
 # ============================================================

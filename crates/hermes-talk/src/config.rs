@@ -428,7 +428,7 @@ impl Default for OrchestratorConfig {
             min_rms_barge_in: 0.0,
             barge_in_sustain_frames: default_barge_sustain(),
             barge_in_cooldown_ms: default_barge_cooldown(),
-            barge_in_requires_wake: false,
+            barge_in_requires_wake: default_true(),
             max_context_messages: default_max_context_messages(),
             offline_continuation_ms: default_offline_continuation_ms(),
             vad_mode: default_vad_mode(),

@@ -144,7 +144,6 @@ min_rms_trigger = 0.0
 min_rms_barge_in = 0.0
 barge_in_sustain_frames = 4
 barge_in_cooldown_ms = 1000
-barge_in_requires_wake = false
 max_context_messages = 20
 offline_continuation_ms = 800
 vad_mode = 3
