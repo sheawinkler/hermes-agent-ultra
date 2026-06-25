@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T18:58:02.554663+00:00`
+Generated: `2026-06-25T19:43:56.129312+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7021`.
 
@@ -17,9 +17,9 @@ Generated: `2026-06-25T18:58:02.554663+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 171 |
-| ported | 421 |
-| superseded | 6353 |
+| pending | 162 |
+| ported | 425 |
+| superseded | 6358 |
 
 ## First 100 Pending Commits
 
@@ -62,14 +62,11 @@ Generated: `2026-06-25T18:58:02.554663+00:00`
 | `75b36a138f43` | #22 | feat(pets): TUI pet pane, picker + gateway RPCs |
 | `86b990fe0fac` | #26 | feat(desktop): floating pet, pop-out overlay + Cmd+K picker |
 | `6fd839ac84d0` | #22 | docs(pets): feature guide, petdex skill + catalog |
-| `491579fa05ef` | #23 | fix(whatsapp): resolve bridge dir with HERMES_HOME mirror in Docker |
 | `37fa3c58b40e` | #21 | docs(kanban-worker): document kanban_complete artifacts deliverable param (#49854) |
 | `31bdb60013c9` | #22 | docs(skills): fix himalaya CLI arg order and download flag |
 | `2b08a4295a65` | #26 | docs(README.zh-CN): update Windows install from 'not supported' to native PowerShell |
 | `9e4348f28ac1` | #25 | docs(windows): document uv.exe AV false positive |
 | `f6275a59e790` | #26 | docs(contributing): add "search first" guidance to cut duplicate PRs |
-| `4c206b972d49` | #26 | fix(gateway): correct sys.path insertion in plugins to prevent cron namespace collision (#49410) |
-| `79f297834a9b` | #26 | fix(gateway): widen cron namespace-collision fix to all migrated adapters |
 | `46cc0345ae8a` | #21 | docs(skills): add hermes-agent verification rule |
 | `5eb158e3173d` | #21 | docs(hermes-agent skill): document project context files and their discovery rules |
 | `2609bcccca30` | #25 | feat(i18n): add complete Spanish translation |
@@ -110,18 +107,21 @@ Generated: `2026-06-25T18:58:02.554663+00:00`
 | `ac128af1cec3` | #26 | feat(desktop): syntax-highlight inline diffs via Shiki |
 | `64a507da44d2` | #20 | feat(relay): handle passthrough_forward over the WS (Phase 5 §5.1, gateway half) (#50702) |
 | `61c266b0dc75` | #26 | style(desktop): soften dark-mode syntax highlighting |
-| `8845f3316c26` | #20 | fix(security): restrict dashboard plugin backend import to bundled plugins (#43719) |
 | `d4fa2db1c5df` | #26 | fix(desktop): show all of a provider's models when searching the composer picker |
 | `17dfc6bec4a8` | #26 | fix(desktop): set AppUserModelID on Windows so notifications fire (#50808) |
-| `f2e37549c673` | #20 | feat(computer_use): cross-platform cua-driver (macOS/Windows/Linux) |
-| `e3505c7f73a4` | #26 | fix(computer_use): reconcile Linux gate with stale "gated off" comments |
 | `79f270f54962` | #26 | fix(desktop): portal floating composer to body so it can't be clipped off-screen |
 | `aff5ae692fb2` | #26 | fix(desktop): move composer out of contain wrapper instead of portaling |
 | `ea5fa505d974` | #26 | fix(desktop): clamp floating composer to the thread area, not the whole window |
 | `de7ad8b78eae` | #26 | fix(desktop): guarantee out-of-bounds composer is reclamped on load |
 | `ff08e60c63ad` | #21 | feat(skills): add cloudflare-temporary-deploy optional skill (#50849) |
-| `0223ea5f590a` | #26 | feat(computer-use): surface macOS permission preflight in the desktop |
-| `2dfcead68367` | #26 | feat(computer-use): make the preflight cross-platform (win/linux) |
 | `a6b670d4a251` | #26 | fix(desktop): avoid stack overflow on embedded image replay |
 | `3fffecbdafec` | #26 | feat(desktop): add timeline rail for long chat threads |
 | `ba9e3a491bfa` | #23 | feat(memory): Honcho OAuth connect — desktop and CLI flows + token refresh (#44335) |
+| `cb17a9efb2df` | #26 | fix(desktop): stop auto-opening tool previews |
+| `d0af7fc954fe` | #26 | feat(desktop): detect tool previews into composer status stack |
+| `48a8f8416937` | #26 | fix(desktop): toggle preview rail and open in browser |
+| `7daa6d83fcaa` | #26 | style(desktop): soften inline code and expanded tool chrome |
+| `45bc4fb37fa8` | #20 | feat(relay): declare relevance policy to the connector + document the management plane (#51248) |
+| `45540cfb5ef1` | #25 | ci: run only the lanes a PR affects (python/frontend/site) |
+| `2977e7454377` | #25 | ci: build Docker on main + release only, never on PRs |
+| `56b4ef74a631` | #25 | ci: make dependency installs resilient to transient flakes |

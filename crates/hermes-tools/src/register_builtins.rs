@@ -724,6 +724,18 @@ fn register_builtin_tools_with_data_dir(
         vec![],
     );
 
+    // -- Computer Use --------------------------------------------------------
+    reg_with_check(
+        registry,
+        "computer_use",
+        Arc::new(crate::tools::computer_use::ComputerUseHandler::new(
+            Arc::new(crate::backends::computer_use::CuaDriverBackend::from_env()),
+        )),
+        "🖱️",
+        vec!["HERMES_CUA_DRIVER_CMD".into()],
+        Arc::new(crate::backends::computer_use::CuaDriverBackend::command_available_from_env),
+    );
+
     // -- Credential files ----------------------------------------------------
     reg(
         registry,

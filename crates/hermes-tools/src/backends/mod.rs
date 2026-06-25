@@ -7,6 +7,7 @@
 pub mod browser;
 pub mod clarify;
 pub mod code_execution;
+pub mod computer_use;
 pub mod cronjob;
 pub mod delegation;
 pub mod file;

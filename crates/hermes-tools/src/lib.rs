@@ -58,6 +58,7 @@ pub use tools::browser::{
 };
 pub use tools::clarify::{ClarifyBackend, ClarifyHandler};
 pub use tools::code_execution::{CodeExecutionBackend, ExecuteCodeHandler};
+pub use tools::computer_use::{ComputerUseBackend, ComputerUseHandler};
 pub use tools::credential_files::CredentialFilesHandler;
 pub use tools::cronjob::{CronjobBackend, CronjobHandler};
 pub use tools::dashboard_control::DashboardControlHandler;
@@ -125,6 +126,7 @@ pub use backends::browser::{
 };
 pub use backends::clarify::SignalClarifyBackend;
 pub use backends::code_execution::LocalCodeExecutionBackend;
+pub use backends::computer_use::CuaDriverBackend;
 pub use backends::cronjob::SignalCronjobBackend;
 pub use backends::delegation::{RpcDelegationBackend, SignalDelegationBackend};
 pub use backends::file::{LocalPatchBackend, LocalSearchBackend};

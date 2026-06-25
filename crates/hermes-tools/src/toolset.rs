@@ -62,6 +62,8 @@ pub const TOOLSET_TODO: &[&str] = &["todo"];
 pub const TOOLSET_CLARIFY: &[&str] = &["clarify"];
 /// Code execution tools.
 pub const TOOLSET_CODE_EXECUTION: &[&str] = &["execute_code"];
+/// Cross-platform desktop automation through cua-driver.
+pub const TOOLSET_COMPUTER_USE: &[&str] = &["computer_use"];
 /// Task delegation tools.
 pub const TOOLSET_DELEGATION: &[&str] = &["delegate_task"];
 /// Cron job management tools.
@@ -273,6 +275,10 @@ impl ToolsetManager {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
+        ));
+        self.register(Toolset::new(
+            "computer_use",
+            TOOLSET_COMPUTER_USE.iter().map(|s| s.to_string()).collect(),
         ));
         self.register(Toolset::new(
             "delegation",
@@ -978,6 +984,19 @@ mod tests {
                 "preset {preset} should include homeassistant tools"
             );
         }
+    }
+
+    #[test]
+    fn test_computer_use_toolset_is_explicit_not_platform_default() {
+        let manager = ToolsetManager::new(empty_registry());
+        let tools = manager.resolve_toolset_unfiltered("computer_use").unwrap();
+        assert_eq!(tools, vec!["computer_use".to_string()]);
+
+        let cli_tools = manager.resolve_toolset_unfiltered("hermes-cli").unwrap();
+        assert!(
+            !cli_tools.contains(&"computer_use".to_string()),
+            "computer_use should remain explicit because it can mutate desktop state"
+        );
     }
 
     #[test]

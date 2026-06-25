@@ -44,6 +44,22 @@ pub enum CliCommand {
         summary: bool,
     },
 
+    /// Manage the Computer Use cua-driver backend.
+    #[command(name = "computer-use")]
+    ComputerUse {
+        /// Action: status, doctor, manifest, install-hint.
+        action: Option<String>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+        /// Run only named doctor checks. Repeat for multiple checks.
+        #[arg(long = "include")]
+        include: Vec<String>,
+        /// Skip named doctor checks. Repeat for multiple checks.
+        #[arg(long = "skip")]
+        skip: Vec<String>,
+    },
+
     /// Configuration management.
     ///
     /// Examples:
@@ -878,6 +894,35 @@ mod tests {
                 assert_eq!(provider_model.as_deref(), Some("openai:gpt-4o"));
             }
             _ => panic!("Expected Model command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_computer_use_doctor_options() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "computer-use",
+            "doctor",
+            "--json",
+            "--include",
+            "tcc_accessibility",
+            "--skip",
+            "screenshot_probe",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::ComputerUse {
+                action,
+                json,
+                include,
+                skip,
+            }) => {
+                assert_eq!(action.as_deref(), Some("doctor"));
+                assert!(json);
+                assert_eq!(include, vec!["tcc_accessibility".to_string()]);
+                assert_eq!(skip, vec!["screenshot_probe".to_string()]);
+            }
+            _ => panic!("Expected ComputerUse command"),
         }
     }
 
