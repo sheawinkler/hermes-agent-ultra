@@ -15004,10 +15004,23 @@ fn handle_memory_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
 
 fn handle_reload_command(app: &mut App, cmd: &str) -> Result<CommandResult, AgentError> {
     if cmd == "/reload-mcp" {
-        emit_command_output(
-            app,
-            "MCP reload requested. Restart session/gateway for full connector renegotiation.",
+        let refresh = app.refresh_agent_tool_snapshot();
+        let mut out = format!(
+            "MCP reload complete: refreshed agent tool snapshot ({} -> {} tools).",
+            refresh.before_count, refresh.after_count
         );
+        if refresh.changed() {
+            if !refresh.added.is_empty() {
+                let _ = write!(out, "\nAdded: {}", refresh.added.join(", "));
+            }
+            if !refresh.removed.is_empty() {
+                let _ = write!(out, "\nRemoved: {}", refresh.removed.join(", "));
+            }
+        } else {
+            out.push_str("\nNo tool changes detected.");
+        }
+        out.push_str("\nConnector renegotiation still requires a process restart.");
+        emit_command_output(app, out);
     } else if cmd == "/reload-skills" {
         let config = SkillCommandResolverConfig {
             enabled: app.config.skills.enabled.clone(),
@@ -28636,6 +28649,46 @@ mod tests {
         fn schema(&self) -> hermes_core::ToolSchema {
             self.schema.clone()
         }
+    }
+
+    fn register_cli_noop_tool(registry: &hermes_tools::ToolRegistry, name: &str) {
+        let schema =
+            hermes_core::tool_schema(name, "CLI noop", hermes_core::JsonSchema::new("object"));
+        registry.register(
+            name,
+            "mcp-test",
+            schema.clone(),
+            Arc::new(CliNoopTool { schema }),
+            Arc::new(|| true),
+            Vec::new(),
+            true,
+            "CLI noop",
+            "mcp",
+            None,
+        );
+    }
+
+    #[tokio::test]
+    async fn reload_mcp_refreshes_agent_snapshot_from_runtime_registry() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        assert!(app.agent.tool_registry.get("mcp_srv_ping").is_none());
+        register_cli_noop_tool(&app.tool_registry, "mcp_srv_ping");
+
+        let result = handle_reload_command(&mut app, "/reload-mcp").expect("reload mcp");
+
+        assert_eq!(result, CommandResult::Handled);
+        assert!(app.agent.tool_registry.get("mcp_srv_ping").is_some());
+        assert!(app
+            .tool_schemas
+            .iter()
+            .any(|schema| schema.name == "mcp_srv_ping"));
+        let out = latest_ui_assistant_text(&app);
+        assert!(out.contains("MCP reload complete"));
+        assert!(out.contains("Added: mcp_srv_ping"));
     }
 
     #[test]

@@ -83,6 +83,20 @@ fn platform_has_custom_toolsets(config: &GatewayConfig, key: &str) -> bool {
     }
 }
 
+fn append_live_mcp_toolsets(requested: &mut Vec<String>, manager: &ToolsetManager) {
+    let mut live_mcp: Vec<String> = manager
+        .list_toolsets()
+        .into_iter()
+        .filter(|name| name.starts_with("mcp-"))
+        .collect();
+    live_mcp.sort();
+    for name in live_mcp {
+        if !requested.contains(&name) {
+            requested.push(name);
+        }
+    }
+}
+
 fn coding_focus_toolsets(
     config: &GatewayConfig,
     platform: &str,
@@ -95,17 +109,7 @@ fn coding_focus_toolsets(
     coding_toolset_selection(Some(&key), None, Some(&config.agent.coding_context))?;
 
     let mut requested = vec!["coding".to_string()];
-    let mut live_mcp: Vec<String> = manager
-        .list_toolsets()
-        .into_iter()
-        .filter(|name| name.starts_with("mcp-"))
-        .collect();
-    live_mcp.sort();
-    for name in live_mcp {
-        if !requested.contains(&name) {
-            requested.push(name);
-        }
-    }
+    append_live_mcp_toolsets(&mut requested, manager);
     Some(requested)
 }
 
@@ -116,8 +120,13 @@ pub fn resolve_platform_tool_names(
     registry: &Arc<ToolRegistry>,
 ) -> Vec<String> {
     let manager = ToolsetManager::new(Arc::clone(registry));
-    let requested = coding_focus_toolsets(config, platform, &manager)
+    let key = normalize_platform_key(platform);
+    let has_custom_toolsets = platform_has_custom_toolsets(config, &key);
+    let mut requested = coding_focus_toolsets(config, platform, &manager)
         .unwrap_or_else(|| configured_platform_toolsets(config, platform));
+    if !has_custom_toolsets {
+        append_live_mcp_toolsets(&mut requested, &manager);
+    }
 
     let mut names: HashSet<String> = HashSet::new();
     for token in requested {
@@ -366,7 +375,7 @@ mod tests {
         let cfg = GatewayConfig::default();
         let reg = registry_with_minimal_tools();
         let names = resolve_platform_tool_names(&cfg, "discord", &reg);
-        assert!(names.contains(&"send_message".to_string()));
+        assert!(!names.contains(&"send_message".to_string()));
         assert!(names.contains(&"terminal".to_string()));
         assert!(names.contains(&"integrations_snapshot".to_string()));
         assert!(names.contains(&"objective_snapshot".to_string()));
@@ -484,6 +493,62 @@ mod tests {
     }
 
     #[test]
+    fn default_cli_toolset_keeps_live_mcp_tools() {
+        let cfg = GatewayConfig::default();
+        let reg = registry_with_minimal_tools();
+        let schema = tool_schema(
+            "mcp_lattice_search",
+            "ContextLattice search",
+            JsonSchema::new("object"),
+        );
+        reg.register(
+            "mcp_lattice_search",
+            "mcp-lattice",
+            schema.clone(),
+            Arc::new(NoopTool { schema }),
+            Arc::new(|| true),
+            Vec::new(),
+            true,
+            "ContextLattice search",
+            "x",
+            None,
+        );
+
+        let names = resolve_platform_tool_names(&cfg, "cli", &reg);
+        assert!(names.contains(&"terminal".to_string()));
+        assert!(names.contains(&"mcp_lattice_search".to_string()));
+    }
+
+    #[test]
+    fn custom_cli_toolset_does_not_auto_add_live_mcp_tools() {
+        let mut cfg = GatewayConfig::default();
+        cfg.platform_toolsets
+            .insert("cli".to_string(), vec!["web".to_string()]);
+        let reg = registry_with_minimal_tools();
+        let schema = tool_schema(
+            "mcp_lattice_search",
+            "ContextLattice search",
+            JsonSchema::new("object"),
+        );
+        reg.register(
+            "mcp_lattice_search",
+            "mcp-lattice",
+            schema.clone(),
+            Arc::new(NoopTool { schema }),
+            Arc::new(|| true),
+            Vec::new(),
+            true,
+            "ContextLattice search",
+            "x",
+            None,
+        );
+
+        let names = resolve_platform_tool_names(&cfg, "cli", &reg);
+        assert!(names.contains(&"web_search".to_string()));
+        assert!(!names.contains(&"mcp_lattice_search".to_string()));
+    }
+
+    #[test]
     fn coding_focus_collapses_default_cli_toolset_and_keeps_live_mcp() {
         let _lock = env_test_lock();
         let tmp = tempfile::tempdir().unwrap();
@@ -537,7 +602,8 @@ mod tests {
         let mut auto_cfg = GatewayConfig::default();
         auto_cfg.agent.coding_context = "auto".to_string();
         let auto_names = resolve_platform_tool_names(&auto_cfg, "cli", &reg);
-        assert!(auto_names.contains(&"send_message".to_string()));
+        assert!(auto_names.contains(&"terminal".to_string()));
+        assert!(!auto_names.contains(&"send_message".to_string()));
         assert!(auto_names.contains(&"image_generate".to_string()));
 
         let mut custom_focus = GatewayConfig::default();

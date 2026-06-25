@@ -1,8 +1,8 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T01:15:51.624357+00:00`
+Generated: `2026-06-25T01:37:54.055598+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `6972`.
+- Range: `main..upstream/main`; total commits tracked: `6974`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
@@ -12,20 +12,19 @@ Generated: `2026-06-25T01:15:51.624357+00:00`
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 22 |
 | #25 | GPAR-06 packaging/docs/install parity | 144 |
-| #26 | GPAR-07 upstream queue backfill | 2116 |
+| #26 | GPAR-07 upstream queue backfill | 2118 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
 | pending | 241 |
-| ported | 351 |
+| ported | 353 |
 | superseded | 6304 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `2f7c4858a764` | #20 | fix(tui): refresh tool snapshot when MCP discovery lands after agent build (#48403) |
 | `5ffbfed193ad` | #20 | feat(mcp-catalog): add official Unreal Engine 5.8 MCP server |
 | `73cd8622f9fc` | #22 | feat(billing): /billing terminal billing — interactive TUI + CLI client (#45449) |
 | `49596b70cb2d` | #20 | fix(gateway): resume follows the compression tip so post-compression replies render |
@@ -61,7 +60,6 @@ Generated: `2026-06-25T01:15:51.624357+00:00`
 | `553cf4f97757` | #26 | feat(desktop): restart the gateway from Cmd+K, with statusbar spinner feedback |
 | `a1639921ac44` | #26 | fix(desktop): offer a Restart gateway action on messaging save/toggle toasts |
 | `929dbf777801` | #26 | fix(desktop): make rendered logs selectable so they can be copied |
-| `93d6e730288e` | #20 | fix(mcp): expose late-connecting MCP tools to the agent (TUI/CLI/gateway) |
 | `b6e2a54a94f5` | #20 | fix(mcp): address adversarial review round 1 (cache parity, gates, races) |
 | `f06508836dd4` | #26 | docs(security): enumerate cron job scripts in §2.3 credential scoping |
 | `ba49fb51a585` | #20 | fix(discord): hydrate channel context when replying to a message (#49212) |
@@ -125,3 +123,5 @@ Generated: `2026-06-25T01:15:51.624357+00:00`
 | `a9669323922f` | #20 | fix(telegram): exempt tables from rich newline hard-breaks |
 | `65a477f12e35` | #26 | feat(desktop): add Update now button to About panel (#50186) |
 | `ea056b05598c` | #20 | fix(telegram): avoid rich messages for CJK text |
+| `d0de4601d204` | #20 | fix(tui): /compress shows a before/after summary (#46686) |
+| `7bc6f1806284` | #23 | fix(hindsight): skip local_embedded daemon when running as root |

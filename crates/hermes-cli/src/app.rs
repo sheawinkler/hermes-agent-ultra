@@ -4,6 +4,7 @@
 //! and conversation message history. It coordinates input handling,
 //! slash commands, and session management.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -331,6 +332,20 @@ pub struct App {
     pub quorum_armed_once: bool,
     /// Animated companion pet settings.
     pub pet_settings: PetSettings,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentToolSnapshotRefresh {
+    pub before_count: usize,
+    pub after_count: usize,
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+impl AgentToolSnapshotRefresh {
+    pub fn changed(&self) -> bool {
+        !self.added.is_empty() || !self.removed.is_empty()
+    }
 }
 
 impl std::fmt::Debug for App {
@@ -2701,6 +2716,26 @@ impl App {
         self.agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
     }
 
+    pub fn refresh_agent_tool_snapshot(&mut self) -> AgentToolSnapshotRefresh {
+        let before = sorted_tool_names(self.agent.tool_registry.names());
+        self.tool_schemas = hermes_tool_planning::resolve_platform_tool_schemas(
+            &self.config,
+            "cli",
+            &self.tool_registry,
+        );
+        self.rebuild_agent_for_active_session();
+        let after = sorted_tool_names(self.agent.tool_registry.names());
+        let before_set: BTreeSet<_> = before.iter().cloned().collect();
+        let after_set: BTreeSet<_> = after.iter().cloned().collect();
+
+        AgentToolSnapshotRefresh {
+            before_count: before.len(),
+            after_count: after.len(),
+            added: after_set.difference(&before_set).cloned().collect(),
+            removed: before_set.difference(&after_set).cloned().collect(),
+        }
+    }
+
     /// Switch the active personality.
     pub fn switch_personality(&mut self, name: &str) {
         self.current_personality = Some(name.to_string());
@@ -4110,6 +4145,72 @@ mod tests {
             quorum_armed_once: false,
             pet_settings: PetSettings::default(),
         }
+    }
+
+    #[test]
+    fn refresh_agent_tool_snapshot_adds_late_registered_tool() {
+        let mut app = build_minimal_test_app();
+
+        assert!(app.agent.tool_registry.get("mcp_srv_late").is_none());
+        assert!(!app
+            .tool_schemas
+            .iter()
+            .any(|schema| schema.name == "mcp_srv_late"));
+
+        register_test_tool(&app.tool_registry, "mcp_srv_late");
+        let refresh = app.refresh_agent_tool_snapshot();
+
+        assert_eq!(refresh.before_count, 0);
+        assert_eq!(refresh.after_count, 1);
+        assert_eq!(refresh.added, vec!["mcp_srv_late".to_string()]);
+        assert!(refresh.removed.is_empty());
+        assert!(app.agent.tool_registry.get("mcp_srv_late").is_some());
+        assert!(app
+            .tool_schemas
+            .iter()
+            .any(|schema| schema.name == "mcp_srv_late"));
+        assert_eq!(
+            app.agent.config.session_id.as_deref(),
+            Some(app.session_id.as_str())
+        );
+    }
+
+    #[test]
+    fn refresh_agent_tool_snapshot_detects_equal_size_replacement() {
+        let mut app = build_minimal_test_app();
+        register_test_tool(&app.tool_registry, "mcp_srv_old");
+        let first_refresh = app.refresh_agent_tool_snapshot();
+        assert_eq!(first_refresh.added, vec!["mcp_srv_old".to_string()]);
+        assert!(app.agent.tool_registry.get("mcp_srv_old").is_some());
+
+        assert!(app.tool_registry.deregister("mcp_srv_old"));
+        register_test_tool(&app.tool_registry, "mcp_srv_new");
+        let second_refresh = app.refresh_agent_tool_snapshot();
+
+        assert_eq!(second_refresh.before_count, 1);
+        assert_eq!(second_refresh.after_count, 1);
+        assert_eq!(second_refresh.added, vec!["mcp_srv_new".to_string()]);
+        assert_eq!(second_refresh.removed, vec!["mcp_srv_old".to_string()]);
+        assert!(app.agent.tool_registry.get("mcp_srv_old").is_none());
+        assert!(app.agent.tool_registry.get("mcp_srv_new").is_some());
+        assert!(app
+            .tool_schemas
+            .iter()
+            .any(|schema| schema.name == "mcp_srv_new"));
+        assert!(!app
+            .tool_schemas
+            .iter()
+            .any(|schema| schema.name == "mcp_srv_old"));
+    }
+
+    #[test]
+    fn refresh_agent_tool_snapshot_reports_no_changes_when_current() {
+        let mut app = build_minimal_test_app();
+        let refresh = app.refresh_agent_tool_snapshot();
+
+        assert_eq!(refresh.before_count, 0);
+        assert_eq!(refresh.after_count, 0);
+        assert!(!refresh.changed());
     }
 
     #[test]
@@ -5757,6 +5858,11 @@ mod tests {
 // ---------------------------------------------------------------------------
 // Helper: bridge hermes_tools::ToolRegistry → agent_loop::ToolRegistry
 // ---------------------------------------------------------------------------
+
+fn sorted_tool_names(mut names: Vec<String>) -> Vec<String> {
+    names.sort();
+    names
+}
 
 pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
     bridge_tool_registry_excluding(tools, &[])
