@@ -4259,6 +4259,11 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust image_generate: the tool request/schema now carries image_url and reference_image_urls, FAL has a typed model catalog with edit endpoints/reference caps/payload filtering plus runtime FAL_IMAGE_MODEL/config selection, OpenAI Codex remains explicit text-only, and Rust tests cover forwarding, endpoint routing, reference clamping, capabilities, and unsupported-modality errors."
+    },
+    "5ffbfed193ad13662b9e402f6667f111a7beae63": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as a Rust-native MCP profile instead of a Python optional-mcps manifest: hermes mcp unreal-engine now writes the official Unreal Engine local HTTP endpoint to mcp_servers.json and config.yaml, keeps parallel tool calls disabled for Epic editor-thread execution, exposes status/remove actions, and has focused Rust tests for setup/remove synchronization."
     }
   },
   "subject_patterns": [
