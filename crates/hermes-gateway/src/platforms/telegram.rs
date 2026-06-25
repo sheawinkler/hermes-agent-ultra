@@ -25,6 +25,7 @@ use hermes_tools::approval::{self, ApprovalChoice, GatewayApprovalRequest};
 use crate::adapter::{
     describe_secret, platform_http_client_builder, AdapterProxyConfig, BasePlatformAdapter,
 };
+use crate::commands::all_commands;
 use crate::format::to_telegram_markdown_v2;
 
 /// Maximum message length for Telegram (4096 characters).
@@ -61,6 +62,30 @@ const MAX_CAPTION_LENGTH: usize = 1024;
 
 /// Default aggregation delay for rapid Telegram text chunks.
 const DEFAULT_TEXT_BATCH_DELAY_MS: u64 = 750;
+const TELEGRAM_BOT_COMMAND_API_MAX: usize = 100;
+const DEFAULT_TELEGRAM_COMMAND_MENU_MAX: usize = 60;
+const TELEGRAM_COMMAND_MENU_PRIORITY: &[&str] = &[
+    "start",
+    "new",
+    "help",
+    "stop",
+    "status",
+    "resume",
+    "sessions",
+    "model",
+    "update",
+    "verbose",
+    "commands",
+    "approve",
+    "deny",
+    "queue",
+    "steer",
+    "background",
+    "reasoning",
+    "usage",
+    "platform",
+    "profile",
+];
 
 // ---------------------------------------------------------------------------
 // TelegramConfig
@@ -102,9 +127,9 @@ pub struct TelegramConfig {
 
     /// Use Bot API 10.1 rich messages for eligible final text sends/edits.
     ///
-    /// Enabled by default, but only used for constructs the legacy MarkdownV2
-    /// path degrades: pipe tables, task lists, details blocks, and block math.
-    #[serde(default = "default_true")]
+    /// Opt-in because some Telegram desktop clients accept rich payloads but
+    /// still render specific scripts/layouts worse than the legacy path.
+    #[serde(default)]
     pub rich_messages: bool,
 
     /// Long-polling timeout in seconds.
@@ -174,6 +199,22 @@ pub struct TelegramConfig {
     /// Bot username (without @), used for mention filtering in groups.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bot_username: Option<String>,
+
+    /// Register Telegram BotCommand menu entries on startup.
+    #[serde(default = "default_true")]
+    pub command_menu_enabled: bool,
+
+    /// Maximum BotCommand entries to register. Telegram caps this at 100.
+    #[serde(default = "default_command_menu_max_commands")]
+    pub command_menu_max_commands: usize,
+
+    /// Priority command names that should survive a capped Telegram menu.
+    #[serde(default)]
+    pub command_menu_priority: Vec<String>,
+
+    /// How configured priority interacts with defaults: prepend, append, replace.
+    #[serde(default = "default_command_menu_priority_mode")]
+    pub command_menu_priority_mode: String,
 }
 
 fn default_true() -> bool {
@@ -190,6 +231,14 @@ fn default_reply_to_mode() -> String {
 
 fn default_text_batch_delay_ms() -> u64 {
     DEFAULT_TEXT_BATCH_DELAY_MS
+}
+
+fn default_command_menu_max_commands() -> usize {
+    DEFAULT_TELEGRAM_COMMAND_MENU_MAX
+}
+
+fn default_command_menu_priority_mode() -> String {
+    "prepend".to_string()
 }
 
 /// Effective behavior for Telegram reply anchors across split chunks.
@@ -289,6 +338,9 @@ pub struct TelegramMessage {
     pub document: Option<Document>,
     #[serde(default)]
     pub reply_to_message: Option<Box<TelegramMessage>>,
+    /// Native Bot API rich-message echo for replies to rich bot messages.
+    #[serde(default)]
+    pub rich_message: Option<serde_json::Value>,
     #[serde(default)]
     pub message_thread_id: Option<i64>,
     #[serde(default)]
@@ -417,6 +469,12 @@ pub struct InlineKeyboardButton {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InlineKeyboardMarkup {
     pub inline_keyboard: Vec<Vec<InlineKeyboardButton>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct TelegramBotCommand {
+    command: String,
+    description: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -898,6 +956,141 @@ impl TelegramAdapter {
         reply_to_message_id.is_some() && self.reply_to_mode().references_chunk(chunk_index)
     }
 
+    fn sanitize_bot_command_name(raw: &str) -> Option<String> {
+        let token = raw
+            .trim()
+            .trim_start_matches('/')
+            .split_whitespace()
+            .next()?
+            .split('@')
+            .next()
+            .unwrap_or_default()
+            .trim();
+        if token.is_empty() {
+            return None;
+        }
+
+        let mut out = String::new();
+        let mut last_underscore = false;
+        for ch in token.to_ascii_lowercase().replace('-', "_").chars() {
+            if ch.is_ascii_alphanumeric() {
+                out.push(ch);
+                last_underscore = false;
+            } else if ch == '_' && !last_underscore {
+                out.push('_');
+                last_underscore = true;
+            }
+            if out.len() >= 32 {
+                break;
+            }
+        }
+
+        let out = out.trim_matches('_').to_string();
+        (!out.is_empty()).then_some(out)
+    }
+
+    fn command_menu_limit(&self) -> usize {
+        self.config
+            .command_menu_max_commands
+            .clamp(1, TELEGRAM_BOT_COMMAND_API_MAX)
+    }
+
+    fn command_menu_priority(&self) -> Vec<String> {
+        let configured = self
+            .config
+            .command_menu_priority
+            .iter()
+            .filter_map(|name| Self::sanitize_bot_command_name(name))
+            .collect::<Vec<_>>();
+        let defaults = TELEGRAM_COMMAND_MENU_PRIORITY
+            .iter()
+            .filter_map(|name| Self::sanitize_bot_command_name(name))
+            .collect::<Vec<_>>();
+
+        let mut raw = match self
+            .config
+            .command_menu_priority_mode
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "replace" => configured,
+            "append" => defaults.into_iter().chain(configured).collect(),
+            _ => configured.into_iter().chain(defaults).collect(),
+        };
+
+        let mut seen = HashSet::new();
+        raw.retain(|name| seen.insert(name.clone()));
+        raw
+    }
+
+    fn command_menu_commands(&self) -> Vec<TelegramBotCommand> {
+        if !self.config.command_menu_enabled {
+            return Vec::new();
+        }
+
+        let priority = self
+            .command_menu_priority()
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| (name, index))
+            .collect::<HashMap<_, _>>();
+        let mut seen = HashSet::new();
+        let mut commands = all_commands()
+            .into_iter()
+            .filter_map(|info| {
+                let command = Self::sanitize_bot_command_name(info.name)?;
+                if !seen.insert(command.clone()) {
+                    return None;
+                }
+                Some(TelegramBotCommand {
+                    command,
+                    description: truncate_chars(info.description.trim(), 256),
+                })
+            })
+            .enumerate()
+            .collect::<Vec<_>>();
+
+        commands.sort_by_key(|(original_index, command)| {
+            (
+                priority
+                    .get(&command.command)
+                    .copied()
+                    .unwrap_or(usize::MAX),
+                *original_index,
+            )
+        });
+
+        commands
+            .into_iter()
+            .map(|(_, command)| command)
+            .take(self.command_menu_limit())
+            .collect()
+    }
+
+    async fn register_command_menu(&self) -> Result<usize, GatewayError> {
+        let commands = self.command_menu_commands();
+        if commands.is_empty() {
+            return Ok(0);
+        }
+
+        let url = format!("{}/setMyCommands", self.api_base);
+        for scope_type in ["default", "all_private_chats", "all_group_chats"] {
+            let body = serde_json::json!({
+                "commands": commands.clone(),
+                "scope": { "type": scope_type },
+            });
+            let resp: TelegramResponse<bool> = self.post_json(&url, &body).await?;
+            if !resp.ok {
+                return Err(GatewayError::SendFailed(resp.description.unwrap_or_else(
+                    || format!("setMyCommands failed for scope {scope_type}"),
+                )));
+            }
+        }
+
+        Ok(commands.len())
+    }
+
     fn rich_send_is_disabled(&self) -> bool {
         self.rich_send_disabled
             .lock()
@@ -936,6 +1129,20 @@ impl TelegramAdapter {
             .find_iter(content)
             .any(|block| math.is_match(block.as_str()));
         has_crash_shape
+    }
+
+    fn has_telegram_desktop_cjk_rich_garble_shape(content: &str) -> bool {
+        content.chars().any(|ch| {
+            matches!(
+                ch,
+                '\u{3040}'..='\u{30ff}'
+                    | '\u{3400}'..='\u{4dbf}'
+                    | '\u{4e00}'..='\u{9fff}'
+                    | '\u{ac00}'..='\u{d7af}'
+                    | '\u{f900}'..='\u{faff}'
+                    | '\u{20000}'..='\u{323af}'
+            )
+        })
     }
 
     fn needs_rich_rendering(content: &str) -> bool {
@@ -987,6 +1194,7 @@ impl TelegramAdapter {
             && Self::needs_rich_rendering(text)
             && Self::content_fits_rich_limits(text)
             && !Self::has_telegram_desktop_details_math_crash_shape(text)
+            && !Self::has_telegram_desktop_cjk_rich_garble_shape(text)
     }
 
     fn should_attempt_rich_text(
@@ -1004,10 +1212,11 @@ impl TelegramAdapter {
         reply_to_message_id: Option<i64>,
         message_thread_id: Option<i64>,
     ) -> serde_json::Value {
+        let markdown = Self::rich_normalize_linebreaks(text);
         let mut body = serde_json::json!({
             "chat_id": chat_id,
             "rich_message": {
-                "markdown": text,
+                "markdown": markdown,
             },
         });
         if let Some(thread_id) = message_thread_id {
@@ -1023,17 +1232,193 @@ impl TelegramAdapter {
     }
 
     fn rich_edit_body(&self, chat_id: &str, message_id: &str, text: &str) -> serde_json::Value {
+        let markdown = Self::rich_normalize_linebreaks(text);
         let mut body = serde_json::json!({
             "chat_id": chat_id,
             "message_id": message_id.parse::<i64>().unwrap_or(0),
             "rich_message": {
-                "markdown": text,
+                "markdown": markdown,
             },
         });
         if self.config.disable_link_previews {
             body["link_preview_options"] = serde_json::json!({ "is_disabled": true });
         }
         body
+    }
+
+    fn line_without_newline(line: &str) -> &str {
+        line.trim_end_matches('\n').trim_end_matches('\r')
+    }
+
+    fn rich_line_protection_mask(lines: &[&str]) -> Vec<bool> {
+        let mut protected = vec![false; lines.len()];
+
+        let mut in_fence = false;
+        for (idx, line) in lines.iter().enumerate() {
+            let trimmed = Self::line_without_newline(line).trim_start();
+            if in_fence || trimmed.starts_with("```") {
+                protected[idx] = true;
+            }
+            if trimmed.starts_with("```") {
+                in_fence = !in_fence;
+            }
+        }
+
+        let mut idx = 0;
+        while idx + 1 < lines.len() {
+            if protected[idx] || protected[idx + 1] {
+                idx += 1;
+                continue;
+            }
+
+            let header = Self::line_without_newline(lines[idx]);
+            let delimiter = Self::line_without_newline(lines[idx + 1]);
+            if header.contains('|') && Self::looks_like_markdown_table_separator(delimiter) {
+                protected[idx] = true;
+                protected[idx + 1] = true;
+
+                let mut body_idx = idx + 2;
+                while body_idx < lines.len() {
+                    let body = Self::line_without_newline(lines[body_idx]);
+                    if protected[body_idx] || body.trim().is_empty() || !body.contains('|') {
+                        break;
+                    }
+                    protected[body_idx] = true;
+                    body_idx += 1;
+                }
+
+                idx = body_idx;
+            } else {
+                idx += 1;
+            }
+        }
+
+        protected
+    }
+
+    fn rich_normalize_linebreaks(text: &str) -> String {
+        if text.is_empty() || !text.contains('\n') {
+            return text.to_string();
+        }
+
+        let lines = text.split_inclusive('\n').collect::<Vec<_>>();
+        let protected = Self::rich_line_protection_mask(&lines);
+        let mut out = String::with_capacity(text.len() + lines.len().saturating_mul(2));
+
+        for (idx, line) in lines.iter().enumerate() {
+            let Some(without_newline) = line.strip_suffix('\n') else {
+                out.push_str(line);
+                continue;
+            };
+
+            out.push_str(without_newline);
+            let current_blank = Self::line_without_newline(line).trim().is_empty();
+            let next_blank = lines
+                .get(idx + 1)
+                .map(|next| Self::line_without_newline(next).trim().is_empty())
+                .unwrap_or(false);
+
+            if idx + 1 < lines.len()
+                && !protected[idx]
+                && !protected[idx + 1]
+                && !current_blank
+                && !next_blank
+            {
+                out.push_str("  ");
+            }
+            out.push('\n');
+        }
+
+        out
+    }
+
+    fn flatten_rich_inline_text(value: &serde_json::Value) -> String {
+        match value {
+            serde_json::Value::String(text) => text.clone(),
+            serde_json::Value::Array(items) => items
+                .iter()
+                .map(Self::flatten_rich_inline_text)
+                .collect::<String>(),
+            serde_json::Value::Object(map) => map
+                .get("text")
+                .map(Self::flatten_rich_inline_text)
+                .or_else(|| map.get("children").map(Self::flatten_rich_inline_text))
+                .unwrap_or_default(),
+            _ => String::new(),
+        }
+    }
+
+    fn rich_label_text(value: &serde_json::Value) -> Option<String> {
+        match value {
+            serde_json::Value::String(text) => {
+                let trimmed = text.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }
+            serde_json::Value::Number(_) | serde_json::Value::Bool(_) => Some(value.to_string()),
+            _ => None,
+        }
+    }
+
+    fn flatten_rich_blocks(blocks: &serde_json::Value) -> String {
+        let Some(blocks) = blocks.as_array() else {
+            return String::new();
+        };
+
+        let mut lines = Vec::new();
+        for block in blocks {
+            let Some(block) = block.as_object() else {
+                continue;
+            };
+
+            if let Some(items) = block.get("items").and_then(|value| value.as_array()) {
+                for item in items {
+                    let Some(item) = item.as_object() else {
+                        continue;
+                    };
+                    let item_text = item
+                        .get("blocks")
+                        .map(Self::flatten_rich_blocks)
+                        .unwrap_or_default();
+                    if item_text.trim().is_empty() {
+                        continue;
+                    }
+
+                    let mut item_lines = item_text.lines();
+                    let Some(first_line) = item_lines.next() else {
+                        continue;
+                    };
+                    if let Some(label) = item.get("label").and_then(Self::rich_label_text) {
+                        lines.push(format!("{label} {first_line}"));
+                    } else {
+                        lines.push(first_line.to_string());
+                    }
+                    lines.extend(item_lines.map(ToOwned::to_owned));
+                }
+                continue;
+            }
+
+            if let Some(text) = block.get("text").map(Self::flatten_rich_inline_text) {
+                lines.extend(text.lines().map(ToOwned::to_owned));
+            }
+        }
+
+        lines
+            .into_iter()
+            .map(|line| line.trim_end().to_string())
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn extract_rich_reply_text(reply_to_message: &TelegramMessage) -> Option<String> {
+        let text = reply_to_message
+            .rich_message
+            .as_ref()
+            .and_then(|rich| rich.get("blocks"))
+            .map(Self::flatten_rich_blocks)
+            .unwrap_or_default();
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_string())
     }
 
     fn rich_capability_error(err: &GatewayError) -> bool {
@@ -1456,11 +1841,7 @@ impl TelegramAdapter {
         }
 
         let rendered_text = self.outgoing_text_for_parse_mode(text, parse_mode);
-        if rendered_text.chars().count() > MAX_MESSAGE_LENGTH {
-            return Err(GatewayError::SendFailed(format!(
-                "Telegram edit text exceeds {MAX_MESSAGE_LENGTH} characters; send as split messages instead"
-            )));
-        }
+        let rendered_text = truncate_chars(&rendered_text, MAX_MESSAGE_LENGTH);
 
         let mut body = serde_json::json!({
             "chat_id": chat_id,
@@ -1957,7 +2338,11 @@ impl TelegramAdapter {
         msg: &TelegramMessage,
         callback: Option<(&str, &str)>,
     ) -> Option<IncomingMessage> {
-        let text = msg.text.clone().or_else(|| msg.caption.clone());
+        let text = msg
+            .text
+            .clone()
+            .or_else(|| msg.caption.clone())
+            .or_else(|| Self::extract_rich_reply_text(msg));
         let reply = msg.reply_to_message.as_deref();
         let own_media = msg.voice.is_some()
             || msg.photo.is_some()
@@ -2450,6 +2835,15 @@ impl PlatformAdapter for TelegramAdapter {
             describe_secret(&self.config.token)
         );
         self.base.mark_running();
+        match self.register_command_menu().await {
+            Ok(count) if count > 0 => {
+                info!(count, "Telegram command menu registered");
+            }
+            Ok(_) => {}
+            Err(err) => {
+                warn!(error = %err, "Telegram command menu registration failed");
+            }
+        }
         Ok(())
     }
 
@@ -2717,6 +3111,10 @@ mod tests {
             observe_unmentioned_group_messages: false,
             text_batch_delay_ms: DEFAULT_TEXT_BATCH_DELAY_MS,
             bot_username: None,
+            command_menu_enabled: true,
+            command_menu_max_commands: DEFAULT_TELEGRAM_COMMAND_MENU_MAX,
+            command_menu_priority: Vec::new(),
+            command_menu_priority_mode: "prepend".into(),
         }
     }
 
@@ -2751,14 +3149,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn edit_text_rejects_overflow_without_truncating() {
-        let adapter = test_adapter(test_config());
+    async fn edit_text_clips_overflow_preview_instead_of_erroring() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/editMessageText"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": { "message_id": 456 }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut adapter = test_adapter(test_config());
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
         let text = "a".repeat(MAX_MESSAGE_LENGTH + 1);
-        let err = adapter
+
+        adapter
             .edit_text("123", "456", &text, None)
             .await
-            .expect_err("overflow edits must fail into caller fallback");
-        assert!(err.to_string().contains("exceeds 4096 characters"));
+            .expect("overflow edit clips to one preview message");
+
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 1);
+        let body: Value = requests[0].body_json().expect("json body");
+        let clipped = body
+            .get("text")
+            .and_then(Value::as_str)
+            .expect("clipped text");
+        assert_eq!(clipped.chars().count(), MAX_MESSAGE_LENGTH);
+        assert!(clipped.ends_with("..."));
     }
 
     #[test]
@@ -2769,6 +3188,93 @@ mod tests {
         let chunks = split_message(&text, 4096);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].ends_with('\n'));
+    }
+
+    #[test]
+    fn telegram_rich_normalizes_prose_linebreaks_only() {
+        let normalized = TelegramAdapter::rich_normalize_linebreaks(
+            "intro\nnext\n\n```rust\nlet x = 1;\nlet y = 2;\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\nend",
+        );
+
+        assert!(normalized.starts_with("intro  \nnext\n\n"));
+        assert!(normalized.contains("```rust\nlet x = 1;\nlet y = 2;\n```"));
+        assert!(normalized.contains("| A | B |\n|---|---|\n| 1 | 2 |"));
+    }
+
+    #[test]
+    fn telegram_rich_cjk_guard_matches_desktop_garble_scripts() {
+        assert!(TelegramAdapter::has_telegram_desktop_cjk_rich_garble_shape(
+            "table 你好"
+        ));
+        assert!(TelegramAdapter::has_telegram_desktop_cjk_rich_garble_shape(
+            "かな"
+        ));
+        assert!(TelegramAdapter::has_telegram_desktop_cjk_rich_garble_shape(
+            "한글"
+        ));
+        assert!(!TelegramAdapter::has_telegram_desktop_cjk_rich_garble_shape("plain ascii table"));
+    }
+
+    #[test]
+    fn telegram_command_menu_prioritizes_and_caps_commands() {
+        let mut cfg = test_config();
+        cfg.command_menu_max_commands = 3;
+        cfg.command_menu_priority = vec!["status".into(), "/model".into()];
+        let adapter = test_adapter(cfg);
+
+        let commands = adapter.command_menu_commands();
+        let names = commands
+            .iter()
+            .map(|command| command.command.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["status", "model", "start"]);
+    }
+
+    #[tokio::test]
+    async fn telegram_start_registers_command_menu_for_core_scopes() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/setMyCommands"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": true
+            })))
+            .expect(3)
+            .mount(&server)
+            .await;
+
+        let mut cfg = test_config();
+        cfg.command_menu_max_commands = 2;
+        cfg.command_menu_priority = vec!["status".into()];
+        let mut adapter = test_adapter(cfg);
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        adapter.start().await.expect("start");
+
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 3);
+        let scopes = requests
+            .iter()
+            .map(|request| {
+                let body: Value = request.body_json().expect("json body");
+                assert_eq!(
+                    body.pointer("/commands/0/command").and_then(Value::as_str),
+                    Some("status")
+                );
+                assert_eq!(
+                    body.pointer("/commands/1/command").and_then(Value::as_str),
+                    Some("start")
+                );
+                body.pointer("/scope/type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert!(scopes.contains(&"default".to_string()));
+        assert!(scopes.contains(&"all_private_chats".to_string()));
+        assert!(scopes.contains(&"all_group_chats".to_string()));
     }
 
     #[test]
@@ -3200,7 +3706,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn telegram_rich_messages_default_on_only_for_rich_eligible_content() {
+    async fn telegram_rich_messages_stay_legacy_for_non_eligible_content() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/botfake_token_12345/sendMessage"))
@@ -3223,6 +3729,99 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ids, vec![93]);
+
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].url.path().ends_with("/sendMessage"));
+    }
+
+    #[tokio::test]
+    async fn telegram_rich_messages_default_off_even_for_eligible_content() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/sendMessage"))
+            .and(body_partial_json(serde_json::json!({
+                "chat_id": "123",
+                "text": "| A | B |\n|---|---|\n| 1 | 2 |"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": { "message_id": 94 }
+            })))
+            .mount(&server)
+            .await;
+
+        let cfg: TelegramConfig =
+            serde_json::from_str(r#"{"token":"fake_token_12345"}"#).expect("config");
+        assert!(!cfg.rich_messages);
+        let mut adapter = test_adapter(cfg);
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        let ids = adapter
+            .send_text("123", "| A | B |\n|---|---|\n| 1 | 2 |", None, None)
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![94]);
+
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].url.path().ends_with("/sendMessage"));
+    }
+
+    #[tokio::test]
+    async fn telegram_rich_message_hard_breaks_single_newlines() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/sendRichMessage"))
+            .and(body_partial_json(serde_json::json!({
+                "chat_id": "123",
+                "rich_message": { "markdown": "- [ ] one  \n- [x] two" }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": { "message_id": 95 }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut cfg = test_config();
+        cfg.rich_messages = true;
+        let mut adapter = test_adapter(cfg);
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        let ids = adapter
+            .send_text("123", "- [ ] one\n- [x] two", None, None)
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![95]);
+    }
+
+    #[tokio::test]
+    async fn telegram_rich_message_skips_cjk_content() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/sendMessage"))
+            .and(body_partial_json(serde_json::json!({
+                "chat_id": "123",
+                "text": "| A | B |\n|---|---|\n| 你好 | 2 |"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": { "message_id": 96 }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut cfg = test_config();
+        cfg.rich_messages = true;
+        let mut adapter = test_adapter(cfg);
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        let ids = adapter
+            .send_text("123", "| A | B |\n|---|---|\n| 你好 | 2 |", None, None)
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![96]);
 
         let requests = server.received_requests().await.expect("requests");
         assert_eq!(requests.len(), 1);
@@ -3487,6 +4086,7 @@ mod tests {
             sticker: None,
             document: None,
             reply_to_message: None,
+            rich_message: None,
             message_thread_id: None,
             is_topic_message: None,
         }
@@ -3539,6 +4139,7 @@ mod tests {
                 sticker: None,
                 document: None,
                 reply_to_message: None,
+                rich_message: None,
                 message_thread_id: None,
                 is_topic_message: None,
             }),
@@ -3580,6 +4181,7 @@ mod tests {
                 sticker: None,
                 document: None,
                 reply_to_message: None,
+                rich_message: None,
                 message_thread_id: None,
                 is_topic_message: None,
             }),
@@ -3634,6 +4236,7 @@ mod tests {
                 }),
                 document: None,
                 reply_to_message: None,
+                rich_message: None,
                 message_thread_id: None,
                 is_topic_message: None,
             }),
@@ -3671,6 +4274,7 @@ mod tests {
                     file_size: Some(2048),
                 }),
                 reply_to_message: None,
+                rich_message: None,
                 message_thread_id: None,
                 is_topic_message: None,
             }),
@@ -3711,6 +4315,7 @@ mod tests {
                     sticker: None,
                     document: None,
                     reply_to_message: None,
+                    rich_message: None,
                     message_thread_id: None,
                     is_topic_message: None,
                 }),
@@ -3767,6 +4372,7 @@ mod tests {
             sticker: None,
             document: None,
             reply_to_message: None,
+            rich_message: None,
             message_thread_id: None,
             is_topic_message: None,
         };
@@ -3786,6 +4392,7 @@ mod tests {
                 sticker: None,
                 document: None,
                 reply_to_message: Some(Box::new(reply_msg)),
+                rich_message: None,
                 message_thread_id: Some(999),
                 is_topic_message: None,
             }),
@@ -3819,6 +4426,7 @@ mod tests {
             sticker: None,
             document: None,
             reply_to_message: None,
+            rich_message: None,
             message_thread_id: None,
             is_topic_message: None,
         };
@@ -3838,6 +4446,7 @@ mod tests {
                 sticker: None,
                 document: None,
                 reply_to_message: Some(Box::new(reply_msg)),
+                rich_message: None,
                 message_thread_id: Some(999),
                 is_topic_message: None,
             }),
@@ -3870,6 +4479,7 @@ mod tests {
             sticker: None,
             document: None,
             reply_to_message: None,
+            rich_message: None,
             message_thread_id: None,
             is_topic_message: None,
         };
@@ -3894,6 +4504,7 @@ mod tests {
                 sticker: None,
                 document: None,
                 reply_to_message: Some(Box::new(reply_msg)),
+                rich_message: None,
                 message_thread_id: None,
                 is_topic_message: None,
             }),
@@ -3928,6 +4539,7 @@ mod tests {
                 file_size: Some(TELEGRAM_MAX_DOCUMENT_SIZE_BYTES + 1),
             }),
             reply_to_message: None,
+            rich_message: None,
             message_thread_id: None,
             is_topic_message: None,
         };
@@ -3947,6 +4559,7 @@ mod tests {
                 sticker: None,
                 document: None,
                 reply_to_message: Some(Box::new(reply_msg)),
+                rich_message: None,
                 message_thread_id: None,
                 is_topic_message: None,
             }),
@@ -4198,6 +4811,45 @@ mod tests {
         assert!(resp.parameters.is_none());
     }
 
+    #[test]
+    fn telegram_native_rich_reply_text_is_flattened() {
+        let raw = serde_json::json!({
+            "update_id": 1,
+            "message": {
+                "message_id": 8,
+                "chat": {"id": 123, "type": "private"},
+                "from": {"id": 7, "first_name": "User"},
+                "text": "reply",
+                "reply_to_message": {
+                    "message_id": 6,
+                    "chat": {"id": 123, "type": "private"},
+                    "from": {"id": 42, "first_name": "Hermes", "is_bot": true},
+                    "rich_message": {
+                        "blocks": [
+                            {"text": {"text": "Summary"}},
+                            {
+                                "items": [
+                                    {
+                                        "label": "1.",
+                                        "blocks": [{"text": ["First", " item"]}]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        });
+        let update: Update = serde_json::from_value(raw).expect("telegram update");
+        let msg = update.message.expect("message");
+        let reply = msg.reply_to_message.as_deref().expect("reply");
+
+        assert_eq!(
+            TelegramAdapter::extract_rich_reply_text(reply),
+            Some("Summary\n1. First item".to_string())
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Chat deserialization with optional fields
     // -----------------------------------------------------------------------
@@ -4426,12 +5078,19 @@ mod tests {
         assert!(!cfg.parse_markdown);
         assert!(!cfg.parse_html);
         assert!(!cfg.disable_link_previews);
-        assert!(cfg.rich_messages);
+        assert!(!cfg.rich_messages);
         assert_eq!(cfg.poll_timeout, DEFAULT_POLL_TIMEOUT);
         assert_eq!(cfg.reply_to_mode, "first");
         assert!(cfg.webhook_secret.is_none());
         assert!(!cfg.reactions);
         assert!(cfg.bot_username.is_none());
+        assert!(cfg.command_menu_enabled);
+        assert_eq!(
+            cfg.command_menu_max_commands,
+            DEFAULT_TELEGRAM_COMMAND_MENU_MAX
+        );
+        assert!(cfg.command_menu_priority.is_empty());
+        assert_eq!(cfg.command_menu_priority_mode, "prepend");
     }
 
     #[test]
@@ -4449,7 +5108,11 @@ mod tests {
             "reply_to_mode": "all",
             "reactions": true,
             "disable_link_previews": true,
-            "rich_messages": true
+            "rich_messages": true,
+            "command_menu_enabled": false,
+            "command_menu_max_commands": 12,
+            "command_menu_priority": ["status", "model"],
+            "command_menu_priority_mode": "replace"
         }"#;
         let cfg: TelegramConfig = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.webhook_secret.as_deref(), Some("secret"));
@@ -4457,5 +5120,9 @@ mod tests {
         assert!(cfg.reactions);
         assert!(cfg.disable_link_previews);
         assert!(cfg.rich_messages);
+        assert!(!cfg.command_menu_enabled);
+        assert_eq!(cfg.command_menu_max_commands, 12);
+        assert_eq!(cfg.command_menu_priority, vec!["status", "model"]);
+        assert_eq!(cfg.command_menu_priority_mode, "replace");
     }
 }

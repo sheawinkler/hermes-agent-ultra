@@ -5643,6 +5643,7 @@ mod tests {
         }))
         .await;
 
+        let configured_model = format!("dynamic-runtime-model-{}", std::process::id());
         let set_provider = IncomingMessage {
             platform: "test".into(),
             chat_id: "chat1".into(),
@@ -5658,7 +5659,7 @@ mod tests {
             platform: "test".into(),
             chat_id: "chat1".into(),
             user_id: "user1".into(),
-            text: "/model gpt-4o".into(),
+            text: format!("/model {configured_model}"),
             message_id: None,
             thread_id: None,
             is_dm: true,
@@ -5722,7 +5723,8 @@ mod tests {
             })
             .expect("runtime hint response should exist");
 
-        assert!(echoed.contains("model=gpt-4o"));
+        assert!(echoed.contains(&format!("model={configured_model}")));
+        assert!(!echoed.contains("gpt-4o"));
         assert!(echoed.contains("provider=openai"));
         assert!(echoed.contains("profile=prod"));
         assert!(echoed.contains("branch=feature/parity"));

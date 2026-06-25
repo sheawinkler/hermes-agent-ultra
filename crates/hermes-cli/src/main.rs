@@ -4529,7 +4529,7 @@ fn build_telegram_config(
         parse_markdown,
         parse_html,
         disable_link_previews: extra_bool(platform_cfg, "disable_link_previews", false),
-        rich_messages: extra_bool(platform_cfg, "rich_messages", true),
+        rich_messages: extra_bool(platform_cfg, "rich_messages", false),
         poll_timeout,
         reply_to_mode: reply_to_mode_string(platform_cfg).unwrap_or_else(|| "first".to_string()),
         reactions: extra_bool(platform_cfg, "reactions", false),
@@ -4557,6 +4557,89 @@ fn build_telegram_config(
             .and_then(|v| v.as_u64())
             .unwrap_or(750),
         bot_username: None,
+        command_menu_enabled: telegram_command_menu_bool(platform_cfg, "enabled", true),
+        command_menu_max_commands: telegram_command_menu_usize(platform_cfg, "max_commands", 60),
+        command_menu_priority: telegram_command_menu_string_vec(platform_cfg, "priority"),
+        command_menu_priority_mode: telegram_command_menu_string(
+            platform_cfg,
+            "priority_mode",
+            "prepend",
+        ),
+    }
+}
+
+#[cfg(feature = "gateway-telegram")]
+fn telegram_command_menu_value<'a>(
+    platform_cfg: &'a hermes_config::platform::PlatformConfig,
+    key: &str,
+) -> Option<&'a serde_json::Value> {
+    platform_cfg
+        .extra
+        .get("command_menu")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|menu| menu.get(key))
+        .or_else(|| platform_cfg.extra.get(&format!("command_menu_{key}")))
+}
+
+#[cfg(feature = "gateway-telegram")]
+fn telegram_command_menu_bool(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+    key: &str,
+    default: bool,
+) -> bool {
+    telegram_command_menu_value(platform_cfg, key)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(default)
+}
+
+#[cfg(feature = "gateway-telegram")]
+fn telegram_command_menu_usize(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+    key: &str,
+    default: usize,
+) -> usize {
+    telegram_command_menu_value(platform_cfg, key)
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(default)
+}
+
+#[cfg(feature = "gateway-telegram")]
+fn telegram_command_menu_string(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+    key: &str,
+    default: &str,
+) -> String {
+    telegram_command_menu_value(platform_cfg, key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default)
+        .to_string()
+}
+
+#[cfg(feature = "gateway-telegram")]
+fn telegram_command_menu_string_vec(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+    key: &str,
+) -> Vec<String> {
+    let Some(raw) = telegram_command_menu_value(platform_cfg, key) else {
+        return Vec::new();
+    };
+    match raw {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .filter_map(|value| value.as_str().map(str::trim))
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect(),
+        serde_json::Value::String(value) => value
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -16640,6 +16723,15 @@ mod tests {
             .extra
             .insert("rich_messages".to_string(), serde_json::json!(true));
         platform.extra.insert(
+            "command_menu".to_string(),
+            serde_json::json!({
+                "enabled": false,
+                "max_commands": 12,
+                "priority": ["status", "model"],
+                "priority_mode": "replace"
+            }),
+        );
+        platform.extra.insert(
             "fallback_ips".to_string(),
             serde_json::json!("149.154.167.220,::1"),
         );
@@ -16690,6 +16782,10 @@ mod tests {
         assert!(cfg.reactions);
         assert!(cfg.disable_link_previews);
         assert!(cfg.rich_messages);
+        assert!(!cfg.command_menu_enabled);
+        assert_eq!(cfg.command_menu_max_commands, 12);
+        assert_eq!(cfg.command_menu_priority, vec!["status", "model"]);
+        assert_eq!(cfg.command_menu_priority_mode, "replace");
         assert_eq!(cfg.fallback_ips, vec!["149.154.167.220", "::1"]);
         assert!(cfg.require_mention);
         assert!(cfg.guest_mode);
@@ -16719,6 +16815,11 @@ mod tests {
 
         let cfg = build_telegram_config(&platform, "token".to_string());
         assert_eq!(cfg.reply_to_mode, "off");
+        assert!(!cfg.rich_messages);
+        assert!(cfg.command_menu_enabled);
+        assert_eq!(cfg.command_menu_max_commands, 60);
+        assert!(cfg.command_menu_priority.is_empty());
+        assert_eq!(cfg.command_menu_priority_mode, "prepend");
     }
 
     #[test]

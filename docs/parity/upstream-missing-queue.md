@@ -1,25 +1,25 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T04:46:31.260695+00:00`
+Generated: `2026-06-25T05:38:58.804651+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `6995`.
+- Range: `main..upstream/main`; total commits tracked: `6997`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3131 |
+| #20 | GPAR-01 tests+CI parity | 3132 |
 | #21 | GPAR-02 skills parity | 130 |
 | #22 | GPAR-03 UX parity | 957 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 22 |
 | #25 | GPAR-06 packaging/docs/install parity | 145 |
-| #26 | GPAR-07 upstream queue backfill | 2122 |
+| #26 | GPAR-07 upstream queue backfill | 2123 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 233 |
-| ported | 365 |
-| superseded | 6321 |
+| pending | 222 |
+| ported | 373 |
+| superseded | 6326 |
 
 ## First 100 Pending Commits
 
@@ -94,34 +94,34 @@ Generated: `2026-06-25T04:46:31.260695+00:00`
 | `98ecd0beeba9` | #26 | docs(mcp): fix stale ~0.75s discovery-wait reference in late-refresh docstring |
 | `b1ab5a8ae1d9` | #21 | docs(antigravity-cli): add delegation patterns + output/bounding caveats |
 | `72e4cca00ecc` | #26 | docs(config): correct MCP docs path in cli-config.yaml.example |
-| `29e5e127c6f1` | #20 | fix(telegram): recover reply text from native rich echo |
-| `c1f11f8c69f9` | #20 | fix(telegram): index streamed rich finals via editMessageText too |
 | `8666fd7635ba` | #26 | fix(desktop): preserve other providers' hide-all in model visibility dialog |
 | `461fcc096479` | #26 | test(desktop): harden model-visibility toggle + dedupe default expansion |
 | `04730f32e7e8` | #20 | fix(cli): warn when in-session model switch will preflight-compress |
 | `1ca29723f0ea` | #20 | fix(cli): log instead of swallow preflight-warning errors; consistent TUI warning field |
 | `dd042fc4dfb1` | #20 | fix(tools): preserve core tools when a platform bundle is disabled |
-| `796f618f9987` | #20 | fix(telegram): keep chunk markers outside code fences |
 | `c7e8854cb383` | #20 | fix(tui): persist session messages on force-quit / signal shutdown |
 | `fb3d31ba8b77` | #26 | feat(desktop): add Update now button to About panel |
 | `0e47f68a479a` | #26 | fix(desktop): rename branched session via session.title RPC |
 | `7f43378931f3` | #26 | test(desktop): cover renameSessionPreferringRpc routing |
 | `ed81f0b633c7` | #26 | fix(desktop): log session.title RPC failure before REST fallback |
-| `31e59fe44d18` | #20 | fix(telegram): preserve newlines in rich slash-command output (#46070) |
-| `a9669323922f` | #20 | fix(telegram): exempt tables from rich newline hard-breaks |
 | `65a477f12e35` | #26 | feat(desktop): add Update now button to About panel (#50186) |
-| `ea056b05598c` | #20 | fix(telegram): avoid rich messages for CJK text |
 | `d0de4601d204` | #20 | fix(tui): /compress shows a before/after summary (#46686) |
 | `7bc6f1806284` | #23 | fix(hindsight): skip local_embedded daemon when running as root |
 | `93ea9b04aff2` | #20 | fix(gateway): cap inbound media download size to prevent memory exhaustion |
-| `6183e8ce1b5e` | #20 | fix(telegram): make Bot API 10.1 rich messages opt-in (default off) |
 | `587b5b9ac223` | #23 | fix(backup): capture memory-provider state stored outside HERMES_HOME (#50325) |
 | `2a4542333ee1` | #26 | fix(photon): classify Envoy overflow errors as retryable; add typing cooldown |
 | `9578e52795e3` | #26 | fix(photon): detect unexpected sidecar death and trigger reconnect |
 | `5e3e89cc05d3` | #23 | feat(hindsight): configurable embedded daemon health grace timeout (#50341) |
 | `6bbacc223899` | #26 | fix(desktop): make cold-start port-announcement deadline tolerant |
 | `c0409a87ff05` | #23 | feat(gateway): typed send-error classification (SendResult.error_kind) (#50342) |
-| `565b7c8d9d87` | #20 | fix(telegram): stop typing indicator lingering after final reply |
 | `b6d107240819` | #20 | fix(cli): branch new worktrees from the fresh remote tip, not stale local HEAD (#50355) |
 | `5b45fb269a06` | #20 | fix(security): sanitize kanban markdown html |
 | `f72690825e76` | #26 | fix(desktop/windows): stop in-app update from cascading into a backend restart loop (#50381) |
+| `a4b1554c7349` | #20 | fix(whatsapp): normalize bare phone targets to JIDs before bridge send |
+| `99f3072aa06a` | #20 | fix(model-switch): a failed in-place swap must be a no-op, not a dead session (#50375) |
+| `b7f6cb9c8ba3` | #20 | fix(email): resolve IMAP/SMTP host from config and validate before connecting |
+| `f79e0a7060d0` | #20 | fix(email): mark missing-config as non-retryable + reject blank env vars (#40715) |
+| `745c4db235bd` | #26 | feat(desktop/windows): show update-in-progress feedback before the desktop exits (#50419) (#50448) |
+| `7785655b4ece` | #26 | fix(desktop): keep the floating composer in-bounds so it can't be lost off-screen |
+| `37c37c9dc511` | #26 | fix(antigravity): register google-antigravity ProviderProfile + AUTHOR_MAP |
+| `16aeba17078d` | #26 | fix(desktop): clamp composer peel-off under cursor |
