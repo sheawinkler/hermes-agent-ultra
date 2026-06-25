@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
-# Download sherpa-onnx native runtime for hermes-talk.
+# Download sherpa-onnx CPU static runtime for hermes-talk.
 #
 # Usage:
-#   ./scripts/talk/fetch_sherpa_runtime.sh [cpu|cuda|directml|macos|auto]
-#
-# `auto` (default) picks the platform pack used by `make release-talk`:
-#   macOS → macos (CoreML static)
-#   Windows/Linux x86_64 → cuda
-#   else → cpu
+#   ./scripts/talk/fetch_sherpa_runtime.sh [cpu|auto]
 #
 # Build with:
-#   SHERPA_ONNX_PACK=auto make release-talk
-# or set SHERPA_ONNX_LIB_DIR if you already extracted libs.
+#   SHERPA_ONNX_PACK=cpu make release-talk
 
 set -euo pipefail
 
@@ -23,54 +17,21 @@ CACHE="${SHERPA_ONNX_CACHE:-$ROOT/.cross-cache/sherpa-onnx}"
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
-resolve_auto() {
-  case "$OS:$ARCH" in
-    Darwin:*)     echo "macos" ;;
-    Linux:x86_64) echo "cuda" ;;
-    MINGW*|MSYS*|CYGWIN*) echo "cuda" ;;
-    *)            echo "cpu" ;;
-  esac
-}
+EP="cpu"
 
-if [[ "$EP" == "auto" ]]; then
-  EP="$(resolve_auto)"
+if [[ "${1:-}" == "cuda" || "${1:-}" == "gpu" || "${1:-}" == "directml" || "${1:-}" == "dml" || "${1:-}" == "macos" || "${1:-}" == "coreml" ]]; then
+  echo "SHERPA_ONNX_PACK=${1} is no longer supported; use cpu (default)" >&2
+  exit 1
 fi
 
 archive_for() {
-  case "$EP" in
-    cpu)
-      case "$OS:$ARCH" in
-        Linux:x86_64)  echo "sherpa-onnx-v${VERSION}-linux-x64-static-lib.tar.bz2" ;;
-        Linux:aarch64) echo "sherpa-onnx-v${VERSION}-linux-aarch64-static-lib.tar.bz2" ;;
-        Darwin:arm64)  echo "sherpa-onnx-v${VERSION}-osx-arm64-static-lib.tar.bz2" ;;
-        Darwin:x86_64) echo "sherpa-onnx-v${VERSION}-osx-x64-static-lib.tar.bz2" ;;
-        MINGW*|MSYS*|CYGWIN*) echo "sherpa-onnx-v${VERSION}-win-x64-static-MT-Release-lib.tar.bz2" ;;
-        *) echo "unsupported cpu target: $OS $ARCH" >&2; return 1 ;;
-      esac
-      ;;
-    cuda)
-      case "$OS:$ARCH" in
-        Linux:x86_64)  echo "sherpa-onnx-v${VERSION}-cuda-12.x-cudnn-9.x-linux-x64-gpu.tar.bz2" ;;
-        MINGW*|MSYS*|CYGWIN*) echo "sherpa-onnx-v${VERSION}-cuda-12.x-cudnn-9.x-win-x64-cuda.tar.bz2" ;;
-        *) echo "CUDA prebuilt unavailable for $OS $ARCH" >&2; return 1 ;;
-      esac
-      ;;
-    macos|coreml)
-      case "$OS:$ARCH" in
-        Darwin:arm64)  echo "sherpa-onnx-v${VERSION}-osx-arm64-static-lib.tar.bz2" ;;
-        Darwin:x86_64) echo "sherpa-onnx-v${VERSION}-osx-x64-static-lib.tar.bz2" ;;
-        *) echo "macOS pack requires Darwin" >&2; return 1 ;;
-      esac
-      ;;
-    directml)
-      echo "DirectML: no official prebuilt. Build sherpa-onnx with -DSHERPA_ONNX_ENABLE_DIRECTML=ON" >&2
-      echo "Then: export SHERPA_ONNX_LIB_DIR=/path/to/lib and SHERPA_ONNX_PACK=directml" >&2
-      return 1
-      ;;
-    *)
-      echo "unknown pack: $EP (cpu|cuda|directml|macos|auto)" >&2
-      return 1
-      ;;
+  case "$OS:$ARCH" in
+    Linux:x86_64)  echo "sherpa-onnx-v${VERSION}-linux-x64-static-lib.tar.bz2" ;;
+    Linux:aarch64) echo "sherpa-onnx-v${VERSION}-linux-aarch64-static-lib.tar.bz2" ;;
+    Darwin:arm64)  echo "sherpa-onnx-v${VERSION}-osx-arm64-static-lib.tar.bz2" ;;
+    Darwin:x86_64) echo "sherpa-onnx-v${VERSION}-osx-x64-static-lib.tar.bz2" ;;
+    MINGW*|MSYS*|CYGWIN*) echo "sherpa-onnx-v${VERSION}-win-x64-static-MT-Release-lib.tar.bz2" ;;
+    *) echo "unsupported cpu target: $OS $ARCH" >&2; return 1 ;;
   esac
 }
 

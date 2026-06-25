@@ -115,6 +115,7 @@ fn run_kokoro_driver(
 
     info!(
         model = %cfg.model,
+        provider = %cfg.provider,
         sample_rate = tts.sample_rate(),
         speakers = tts.num_speakers(),
         sid = cfg.sid,

@@ -1,27 +1,19 @@
 # ============================================================
-# hermes-talk 完整配置模板
-# `hermes talk init` 会复制到 $HERMES_HOME/hermes-talk/config.toml
+# hermes-talk 桌面版配置（sherpa-onnx SenseVoice + Kokoro）
+# 用于 make package-talk-* / release-talk；`hermes talk init` 亦使用此模板。
 #
-# 所有配置节均保留；当前桌面默认 sherpa-onnx，其它 backend 字段以注释形式保留。
-# 切换云端：改 [asr]/[tts] backend = "bailian" 并填写 [dashscope]。
-# 切换 Rockchip：改 backend = "local" 并启用 [asr.local] / [tts.local]。
+# 切换云端 ASR/TTS：改 [asr]/[tts] backend = "bailian" 并填写 [dashscope]。
 #
-# GPU 加速（按平台打包，无需额外 Cargo feature）：
-#   make release-talk          # 自动 SHERPA_ONNX_PACK=auto（Win/Linux→CUDA，macOS→CoreML）
-#   make fetch-talk-sherpa-runtime
-#   config: [sherpa] provider = "cuda" | "directml" | "coreml"（依平台 cfg 校验）
-# 开发调试默认 SHERPA_ONNX_PACK=cpu；override 示例:
-#   SHERPA_ONNX_PACK=directml SHERPA_ONNX_LIB_DIR=/path/to/lib cargo build -p hermes-cli --features talk
+# sherpa-onnx 使用 CPU 执行提供者（所有平台）：
+#   [sherpa] provider = "cpu"
 # ============================================================
 
-# sherpa-onnx 全局 execution provider（cpu | cuda | directml | coreml）
-# 未在各子模块单独指定 provider 时，会覆盖默认 cpu。
 [sherpa]
 provider = "cpu"
 
 # ============================================================
 # 语音识别 (ASR)
-# backend: sherpa | bailian | cloud | dashscope | local | rockchip
+# backend: sherpa | bailian | cloud | dashscope
 # ============================================================
 [asr]
 backend = "sherpa"
@@ -39,14 +31,9 @@ use_itn = true
 num_threads = 2
 provider = "cpu"
 
-# Rockchip NPU ASR（backend = local 时启用）
-[asr.local]
-# data_path = "data"
-# auth_config = '{ "trial": 1, "rkauth_modules_config": [{ "module": "asr", "license_path": "auth/key_asr.lic" }] }'
-
 # ============================================================
 # 语音合成 (TTS)
-# backend: sherpa | bailian | cloud | dashscope | local | rockchip
+# backend: sherpa | bailian | cloud | dashscope
 # ============================================================
 [tts]
 backend = "sherpa"
@@ -69,14 +56,6 @@ sid = 0
 speed = 1.0
 num_threads = 2
 provider = "cpu"
-
-# Rockchip NPU TTS（backend = local 时启用）
-[tts.local]
-# auth_config = '{ "trial": 1, "license_path": "auth/key_tts.lic" }'
-# model_path = "models/rk3588"
-# dicts_path = "frontend_extras"
-# speaker_id = 0
-# alpha = 1.0
 
 # ============================================================
 # 云端 DashScope（backend = bailian/cloud/dashscope 时必填）
@@ -144,13 +123,6 @@ lexicon = "models/kws-zh-en/en.phone"
 boost_score = 2.0
 trigger_threshold = 0.35
 num_threads = 2
-# 以下留空时由 model_dir 自动推导
-# encoder = "models/kws-zh-en/encoder.onnx"
-# decoder = "models/kws-zh-en/decoder.onnx"
-# joiner = "models/kws-zh-en/joiner.onnx"
-# tokens = "models/kws-zh-en/tokens.txt"
-# bpe_model = "models/kws-zh-en/bpe.model"
-# phrase = "小白小白"                   # 已废弃，请用 phrases
 
 # ============================================================
 # 会话编排
@@ -201,7 +173,6 @@ max_speech_duration = 15.0
 enabled = true
 variant = "dpdfnet_baseline"
 model_dir = "models/denoise"
-# model_path = "models/denoise/dpdfnet_baseline.onnx"
 
 # ============================================================
 # 回声消除（Speex AEC）
@@ -220,5 +191,4 @@ delay_ms = 0
 enabled = false
 threshold = 0.6
 model_dir = "models/speaker"
-# model_path = "models/speaker/3dspeaker.onnx"
 voiceprint_path = "voiceprint.bin"

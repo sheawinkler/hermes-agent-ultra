@@ -1,3 +1,6 @@
+# Hermes Agent Ultra — Rockchip 板端 talk 包默认 gateway 配置
+# start.sh 首次运行会复制为 $HERMES_HOME/config.yaml
+
 model: custom:auto
 max_turns: 250
 tools:
@@ -13,22 +16,6 @@ budget:
   max_result_size_chars: 100000
   max_aggregate_chars: 1000000
 platforms:
-  wecom:
-    enabled: true
-    unauthorized_dm_behavior: ignore
-    group_sessions_per_user: false
-    allowed_users: []
-    admin_users: []
-    extra:
-      allow_from:
-        - '*'
-      bot_id: aibHDYBhMxONDWaexjD8_E_xDUzTszWQPUg
-      corp_id: ww2d3fc241767f40fd
-      dm_policy: open
-      group_allow_from: []
-      group_policy: open
-      secret: 46QiBZzMRuZqowAtcE2bBNUaGzQZrzk1B4F6EPD3VTg
-      websocket_url: wss://openws.work.weixin.qq.com
 platform_toolsets:
   cli:
     - hermes-cli

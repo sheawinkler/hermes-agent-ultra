@@ -5,9 +5,17 @@ use std::path::Path;
 
 use crate::error::{DemoError, Result};
 
-const CONFIG_EXAMPLE: &str = include_str!("../config.example.toml");
+#[cfg(all(feature = "sherpa-asr-tts", target_os = "windows"))]
+const CONFIG_EXAMPLE: &str =
+    include_str!("../../../scripts/talk/config.example.desktop.windows.toml");
 
-const SUBDIRS: &[&str] = &[
+#[cfg(all(feature = "sherpa-asr-tts", not(target_os = "windows")))]
+const CONFIG_EXAMPLE: &str = include_str!("../../../scripts/talk/config.example.desktop.toml");
+
+#[cfg(all(feature = "rockchip", not(feature = "sherpa-asr-tts")))]
+const CONFIG_EXAMPLE: &str = include_str!("../../../scripts/talk/config.example.rockchip.toml");
+
+const SUBDIRS_COMMON: &[&str] = &[
     "auth",
     "data",
     "frontend_extras",
@@ -16,9 +24,23 @@ const SUBDIRS: &[&str] = &[
     "models/speaker",
     "models/kws-zh-en",
     "models/rk3588",
-    "models/sensevoice",
-    "models/kokoro",
 ];
+
+#[cfg(feature = "sherpa-asr-tts")]
+const SUBDIRS_SHERPA_ASR_TTS: &[&str] = &["models/sensevoice", "models/kokoro"];
+
+fn talk_subdirs() -> Vec<&'static str> {
+    #[cfg(feature = "sherpa-asr-tts")]
+    {
+        let mut dirs: Vec<&'static str> = SUBDIRS_COMMON.to_vec();
+        dirs.extend_from_slice(SUBDIRS_SHERPA_ASR_TTS);
+        dirs
+    }
+    #[cfg(not(feature = "sherpa-asr-tts"))]
+    {
+        SUBDIRS_COMMON.to_vec()
+    }
+}
 
 /// Create Hermes home + talk directory tree and default configs if missing (quiet; auto-init).
 pub fn ensure_talk_home() -> Result<()> {
@@ -29,7 +51,7 @@ pub fn ensure_talk_home() -> Result<()> {
     fs::create_dir_all(&home)
         .map_err(|e| DemoError::Config(format!("mkdir {}: {e}", home.display())))?;
 
-    for sub in SUBDIRS {
+    for sub in talk_subdirs() {
         let dir = home.join(sub);
         fs::create_dir_all(&dir)
             .map_err(|e| DemoError::Config(format!("mkdir {}: {e}", dir.display())))?;
@@ -195,20 +217,10 @@ fn print_post_init_notes(hermes_home: &Path, talk_home: &Path) {
         "  2. Edit {} for embedded Hermes / gateway settings (if using channel transport).",
         hermes_config::config_path().display()
     );
-    println!("  3. Download sherpa-onnx models: make download-talk-models (into <repo>/.models/).");
-    println!(
-        "     Then copy or package into {}/models/ (sensevoice, kokoro, kws-zh-en, vad, …).",
-        talk_home.display()
-    );
-    println!("     Docs: https://k2-fsa.github.io/sherpa/onnx/index.html");
-    println!(
-        "  4. For Rockchip local ASR/TTS, copy SDK data to {}/data, {}/models/rk3588, and licenses to {}/auth/.",
-        talk_home.display(),
-        talk_home.display(),
-        talk_home.display()
-    );
-    println!("  5. Run `hermes talk list-devices` to verify audio devices.");
-    println!("  6. Run `hermes talk` to start the voice dialog loop.");
+    #[cfg(feature = "sherpa-asr-tts")]
+    print_desktop_init_notes(talk_home);
+    #[cfg(all(feature = "rockchip", not(feature = "sherpa-asr-tts")))]
+    print_rockchip_init_notes(talk_home);
     println!();
     println!(
         "Note: `call_hermes` uses in-process channel transport by default (transport = \"channel\")."
@@ -216,4 +228,31 @@ fn print_post_init_notes(hermes_home: &Path, talk_home: &Path) {
     println!(
         "      Set transport = \"ws\" and url = \"ws://127.0.0.1:9100\" for remote Hermes bridge."
     );
+}
+
+#[cfg(feature = "sherpa-asr-tts")]
+fn print_desktop_init_notes(talk_home: &Path) {
+    println!("  3. Download sherpa-onnx models: make download-talk-models (into <repo>/.models/).");
+    println!(
+        "     Then copy or package into {}/models/ (sensevoice, kokoro, kws-zh-en, vad, …).",
+        talk_home.display()
+    );
+    println!("     Docs: https://k2-fsa.github.io/sherpa/onnx/index.html");
+    println!("  4. Run `hermes talk list-devices` to verify audio devices.");
+    println!("  5. Run `hermes talk` to start the voice dialog loop.");
+}
+
+#[cfg(all(feature = "rockchip", not(feature = "sherpa-asr-tts")))]
+fn print_rockchip_init_notes(talk_home: &Path) {
+    println!(
+        "  3. Copy Rockchip SDK data to {}/data, {}/models/rk3588, frontend_extras, and licenses to {}/auth/.",
+        talk_home.display(),
+        talk_home.display(),
+        talk_home.display()
+    );
+    println!(
+        "  4. Download sherpa KWS/VAD models: make download-talk-models (kws-zh-en, vad, denoise, speaker)."
+    );
+    println!("  5. Run `hermes talk list-devices` to verify audio devices.");
+    println!("  6. Run `hermes talk` to start the voice dialog loop.");
 }

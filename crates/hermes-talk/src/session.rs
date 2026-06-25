@@ -115,7 +115,16 @@ impl Session {
         let sleep_phrases = wake_cfg.effective_sleep_phrases();
 
         let asr_backend = AsrBackend::from_config(&self.cfg.asr);
-        let asr_offline = matches!(asr_backend, AsrBackend::Sherpa);
+        let asr_offline = {
+            #[cfg(feature = "sherpa-asr-tts")]
+            {
+                matches!(asr_backend, AsrBackend::Sherpa)
+            }
+            #[cfg(not(feature = "sherpa-asr-tts"))]
+            {
+                false
+            }
+        };
         let (asr, mut asr_rx) = create_asr(
             &self.cfg.dashscope,
             &self.cfg.asr,

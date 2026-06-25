@@ -7,7 +7,8 @@ repository.workspace = true
 description = "Real-time voice dialog engine (ASR + LLM + TTS) for Hermes"
 
 [features]
-default = []
+default = ["sherpa-asr-tts"]
+sherpa-asr-tts = []
 rockchip = []
 
 [dependencies]
@@ -23,7 +24,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }
 pinyin = { workspace = true }
-sherpa-onnx = { workspace = true, default-features = false, features = ["static"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
@@ -33,6 +33,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 webrtc-vad = { workspace = true }
 aec-rs = { workspace = true }
+sherpa-onnx = { workspace = true, default-features = false, features = ["static"] }
 
 [build-dependencies]
 cc = "1"

@@ -1,15 +1,18 @@
 # ============================================================
-# hermes-talk 本地 TTS + ASR 配置（Rockchip NPU）
-# start.sh 首次运行会复制为 $HERMES_HOME/hermes-talk/config.toml
+# hermes-talk Rockchip 板端配置（RK NPU ASR/TTS，无 sherpa SenseVoice/Kokoro）
+# 用于 make package-talk-rockchip；start.sh 首次运行会复制为 config.toml
 # license_path 相对 talk home（start.sh 会链接 bundle/auth/）
 # ============================================================
 
 # ============================================================
 # 语音识别 (ASR)
-# backend: local (板端 NPU) | bailian/cloud/dashscope (云端，任意平台)
+# backend: local | rockchip | bailian | cloud | dashscope
 # ============================================================
 [asr]
 backend = "local"
+sample_rate = 16000
+chunk_ms = 100
+format = "pcm"
 
 [asr.local]
 data_path = "data"
@@ -17,9 +20,12 @@ auth_config = '{ "trial": 1, "rkauth_modules_config": [{ "module": "asr", "licen
 
 # ============================================================
 # 语音合成 (TTS)
+# backend: local | rockchip | bailian | cloud | dashscope
 # ============================================================
 [tts]
 backend = "local"
+sample_rate = 24000
+format = "pcm"
 
 [tts.local]
 auth_config = '{ "trial": 1, "license_path": "auth/key_tts.lic" }'
@@ -28,7 +34,7 @@ dicts_path = "frontend_extras"
 speaker_id = 0
 alpha = 1.0
 
-# 云端 ASR/TTS（board 上也可使用，设置 backend = "bailian" 并配置 dashscope）:
+# 云端 ASR/TTS（板端也可使用，设置 backend = "bailian" 并配置 dashscope）:
 # [dashscope]
 # api_key = "sk-your-dashscope-key"
 
@@ -64,7 +70,7 @@ session_key = "talk-hermes"
 # url = "ws://127.0.0.1:9100"
 
 # ============================================================
-# 唤醒词
+# 唤醒词（sherpa-onnx KWS，需 models/kws-zh-en/）
 # ============================================================
 [wake]
 enabled = true
@@ -72,11 +78,13 @@ phrases = ["小白小白"]
 ack_reply = "哎，我在！"
 grace_after_wake_sec = 5
 idle_after_turn_sec = 30
-# 休眠关键词（ASR 去标点/空白后完整匹配则跳过 LLM；设 [] 可关闭）
+boost_score = 2.0
+trigger_threshold = 0.35
 sleep_phrases = ["休眠", "安静", "mute", "闭嘴", "别说了", "停止", "silence", "shut up", "进入休眠状态"]
 model_dir = "models/kws-zh-en"
 tokens_type = "phone+ppinyin"
 lexicon = "models/kws-zh-en/en.phone"
+num_threads = 2
 
 # ============================================================
 # 会话编排
@@ -87,13 +95,15 @@ min_final_chars = 3
 sentence_min_len = 12
 tts_first_chunk_chars = 6
 barge_in_enabled = true
+barge_in_requires_wake = false
+offline_continuation_ms = 800
 
 # ============================================================
-# 音频降噪
+# 音频设备（留空 = 系统默认）
 # ============================================================
-[denoise]
-enabled = true
-model_dir = "models/denoise"
+[audio]
+input_device = ""
+output_device = ""
 
 # ============================================================
 # VAD 语音活动检测
@@ -101,16 +111,33 @@ model_dir = "models/denoise"
 [vad]
 model_path = "models/vad/silero_vad.onnx"
 threshold = 0.5
+min_silence_duration = 0.55
+min_speech_duration = 0.25
+max_speech_duration = 15.0
+
+# ============================================================
+# 音频降噪
+# ============================================================
+[denoise]
+enabled = true
+variant = "dpdfnet_baseline"
+model_dir = "models/denoise"
 
 # ============================================================
 # 回声消除
 # ============================================================
 [aec]
 enabled = true
+frame_size = 256
+filter_length = 2048
+enable_preprocess = false
+delay_ms = 0
 
 # ============================================================
 # 声纹（可选，需先 hermes talk enroll）
 # ============================================================
 [speaker]
 enabled = false
-model_path = "models/speaker/3dspeaker.onnx"
+threshold = 0.6
+model_dir = "models/speaker"
+voiceprint_path = "voiceprint.bin"

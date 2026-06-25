@@ -43,50 +43,19 @@ fn main() {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SherpaPack {
-    /// Static CPU prebuilt (default dev build).
+    /// Static CPU prebuilt (default).
     Cpu,
-    /// Shared CUDA build (Windows / Linux x64).
-    Cuda,
-    /// Shared DirectML build (Windows; requires SHERPA_ONNX_LIB_DIR if no prebuilt).
-    DirectMl,
-    /// Static macOS build (CoreML EP included in official osx static libs).
-    Macos,
 }
 
-fn resolve_sherpa_pack(target_os: &str, target_arch: &str) -> Result<SherpaPack, DynError> {
+fn resolve_sherpa_pack(_target_os: &str, _target_arch: &str) -> Result<SherpaPack, DynError> {
     let pack = env::var("SHERPA_ONNX_PACK").unwrap_or_else(|_| "cpu".to_string());
     let pack = pack.trim().to_ascii_lowercase();
     match pack.as_str() {
-        "cpu" => Ok(SherpaPack::Cpu),
-        "cuda" | "gpu" => Ok(SherpaPack::Cuda),
-        "directml" | "dml" => Ok(SherpaPack::DirectMl),
-        "macos" | "coreml" | "osx" => Ok(SherpaPack::Macos),
-        "auto" => Ok(auto_pack_for_target(target_os, target_arch)),
-        other => Err(format!(
-            "unknown SHERPA_ONNX_PACK='{other}' (expected cpu, cuda, directml, macos, auto)"
-        )
-        .into()),
-    }
-}
-
-fn auto_pack_for_target(target_os: &str, target_arch: &str) -> SherpaPack {
-    match (target_os, target_arch) {
-        ("macos", _) => SherpaPack::Macos,
-        ("windows", "x86_64") => SherpaPack::Cuda,
-        ("linux", "x86_64") => SherpaPack::Cuda,
-        _ => SherpaPack::Cpu,
-    }
-}
-
-fn emit_linked_pack_cfg(pack: SherpaPack) {
-    println!("cargo:rustc-check-cfg=cfg(sherpa_pack_cuda)");
-    println!("cargo:rustc-check-cfg=cfg(sherpa_pack_coreml)");
-    println!("cargo:rustc-check-cfg=cfg(sherpa_pack_directml)");
-    match pack {
-        SherpaPack::Cuda => println!("cargo:rustc-cfg=sherpa_pack_cuda"),
-        SherpaPack::Macos => println!("cargo:rustc-cfg=sherpa_pack_coreml"),
-        SherpaPack::DirectMl => println!("cargo:rustc-cfg=sherpa_pack_directml"),
-        SherpaPack::Cpu => {}
+        "cpu" | "auto" => Ok(SherpaPack::Cpu),
+        "cuda" | "gpu" | "directml" | "dml" | "macos" | "coreml" | "osx" => {
+            Err(format!("SHERPA_ONNX_PACK={pack} is no longer supported; use cpu (default)").into())
+        }
+        other => Err(format!("unknown SHERPA_ONNX_PACK='{other}' (expected cpu)").into()),
     }
 }
 
@@ -104,10 +73,9 @@ fn try_main() -> Result<(), DynError> {
 
     let target_os = env::var("CARGO_CFG_TARGET_OS")?;
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH")?;
-    let pack = resolve_sherpa_pack(&target_os, &target_arch)?;
-    emit_linked_pack_cfg(pack);
-    let link_mode = resolve_link_mode(pack)?;
-    let lib_dir = resolve_lib_dir(link_mode, pack, &target_os, &target_arch)?;
+    let _pack = resolve_sherpa_pack(&target_os, &target_arch)?;
+    let link_mode = resolve_link_mode()?;
+    let lib_dir = resolve_lib_dir(link_mode, &target_os, &target_arch)?;
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
 
@@ -129,11 +97,7 @@ fn try_main() -> Result<(), DynError> {
     Ok(())
 }
 
-fn resolve_link_mode(pack: SherpaPack) -> Result<LinkMode, DynError> {
-    if matches!(pack, SherpaPack::Cuda | SherpaPack::DirectMl) {
-        return Ok(LinkMode::Shared);
-    }
-
+fn resolve_link_mode() -> Result<LinkMode, DynError> {
     let static_enabled = env::var_os("CARGO_FEATURE_STATIC").is_some();
     let shared_enabled = env::var_os("CARGO_FEATURE_SHARED").is_some();
 
@@ -150,7 +114,6 @@ fn resolve_link_mode(pack: SherpaPack) -> Result<LinkMode, DynError> {
 
 fn resolve_lib_dir(
     link_mode: LinkMode,
-    pack: SherpaPack,
     target_os: &str,
     target_arch: &str,
 ) -> Result<PathBuf, DynError> {
@@ -166,24 +129,15 @@ fn resolve_lib_dir(
         return Ok(path);
     }
 
-    download_prebuilt_libs(link_mode, pack, target_os, target_arch)
+    download_prebuilt_libs(link_mode, target_os, target_arch)
 }
 
 fn download_prebuilt_libs(
     link_mode: LinkMode,
-    pack: SherpaPack,
     target_os: &str,
     target_arch: &str,
 ) -> Result<PathBuf, DynError> {
-    if pack == SherpaPack::DirectMl && env::var_os("SHERPA_ONNX_LIB_DIR").is_none() {
-        return Err(
-            "SHERPA_ONNX_PACK=directml requires SHERPA_ONNX_LIB_DIR pointing to a DirectML-enabled \
-             sherpa-onnx lib/ directory (no official prebuilt release)."
-                .into(),
-        );
-    }
-
-    let archive_name = archive_name(link_mode, pack, target_os, target_arch)?;
+    let archive_name = archive_name(link_mode, target_os, target_arch)?;
     let archive_stem = archive_name.trim_end_matches(".tar.bz2");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
@@ -262,84 +216,47 @@ fn download_prebuilt_libs(
 
 fn archive_name(
     link_mode: LinkMode,
-    pack: SherpaPack,
     target_os: &str,
     target_arch: &str,
 ) -> Result<String, DynError> {
     let version = env!("CARGO_PKG_VERSION");
 
-    if pack == SherpaPack::Cuda {
-        let name = match (target_os, target_arch) {
-            ("windows", "x86_64") => {
-                format!("sherpa-onnx-v{version}-cuda-12.x-cudnn-9.x-win-x64-cuda.tar.bz2")
-            }
-            ("linux", "x86_64") => {
-                format!("sherpa-onnx-v{version}-cuda-12.x-cudnn-9.x-linux-x64-gpu.tar.bz2")
-            }
-            _ => {
-                return Err(format!(
-                    "SHERPA_ONNX_PACK=cuda unsupported for os={target_os}, arch={target_arch}"
-                )
-                .into());
-            }
-        };
-        if link_mode != LinkMode::Shared {
-            return Err("CUDA pack requires shared sherpa-onnx libs".into());
-        }
-        return Ok(name);
-    }
-
-    if pack == SherpaPack::Macos
-        && !matches!((target_os, target_arch), ("macos", "aarch64" | "x86_64"))
-    {
-        return Err(format!(
-            "SHERPA_ONNX_PACK=macos unsupported for os={target_os}, arch={target_arch}"
-        )
-        .into());
-    }
-
-    let name = match (link_mode, pack, target_os, target_arch) {
-        (LinkMode::Static, SherpaPack::Macos, "macos", "aarch64") => {
-            format!("sherpa-onnx-v{version}-osx-arm64-static-lib.tar.bz2")
-        }
-        (LinkMode::Static, SherpaPack::Macos, "macos", "x86_64") => {
-            format!("sherpa-onnx-v{version}-osx-x64-static-lib.tar.bz2")
-        }
-        (LinkMode::Static, SherpaPack::Cpu, "linux", "x86_64") => {
+    let name = match (link_mode, target_os, target_arch) {
+        (LinkMode::Static, "linux", "x86_64") => {
             format!("sherpa-onnx-v{version}-linux-x64-static-lib.tar.bz2")
         }
-        (LinkMode::Static, SherpaPack::Cpu, "linux", "aarch64") => {
+        (LinkMode::Static, "linux", "aarch64") => {
             format!("sherpa-onnx-v{version}-linux-aarch64-static-lib.tar.bz2")
         }
-        (LinkMode::Static, SherpaPack::Cpu, "macos", "x86_64") => {
+        (LinkMode::Static, "macos", "x86_64") => {
             format!("sherpa-onnx-v{version}-osx-x64-static-lib.tar.bz2")
         }
-        (LinkMode::Static, SherpaPack::Cpu, "macos", "aarch64") => {
+        (LinkMode::Static, "macos", "aarch64") => {
             format!("sherpa-onnx-v{version}-osx-arm64-static-lib.tar.bz2")
         }
-        (LinkMode::Static, SherpaPack::Cpu, "windows", "x86_64") => {
+        (LinkMode::Static, "windows", "x86_64") => {
             format!("sherpa-onnx-v{version}-win-x64-static-MT-Release-lib.tar.bz2")
         }
-        (LinkMode::Shared, SherpaPack::Cpu, "linux", "x86_64") => {
+        (LinkMode::Shared, "linux", "x86_64") => {
             format!("sherpa-onnx-v{version}-linux-x64-shared-lib.tar.bz2")
         }
-        (LinkMode::Shared, SherpaPack::Cpu, "linux", "aarch64") => {
+        (LinkMode::Shared, "linux", "aarch64") => {
             format!("sherpa-onnx-v{version}-linux-aarch64-shared-cpu-lib.tar.bz2")
         }
-        (LinkMode::Shared, SherpaPack::Cpu, "macos", "x86_64") => {
+        (LinkMode::Shared, "macos", "x86_64") => {
             format!("sherpa-onnx-v{version}-osx-x64-shared-lib.tar.bz2")
         }
-        (LinkMode::Shared, SherpaPack::Cpu, "macos", "aarch64") => {
+        (LinkMode::Shared, "macos", "aarch64") => {
             format!("sherpa-onnx-v{version}-osx-arm64-shared-lib.tar.bz2")
         }
-        (LinkMode::Shared, SherpaPack::Cpu, "windows", "x86_64") => {
+        (LinkMode::Shared, "windows", "x86_64") => {
             format!("sherpa-onnx-v{version}-win-x64-shared-MT-Release-lib.tar.bz2")
         }
         _ => {
             return Err(format!(
-                "Unsupported sherpa-onnx pack={pack:?} link={link_mode:?} os={target_os} arch={target_arch}"
+                "Unsupported sherpa-onnx link={link_mode:?} os={target_os} arch={target_arch}"
             )
-            .into())
+            .into());
         }
     };
 

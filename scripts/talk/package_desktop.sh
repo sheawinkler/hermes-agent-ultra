@@ -63,6 +63,16 @@ rm -rf "${OUT}"
 mkdir -p "${OUT}/bin" "${OUT}/models"
 
 cp -f "${BIN}" "${OUT}/bin/"
+BIN_DIR="$(dirname "${BIN}")"
+if compgen -G "${BIN_DIR}/*.dll" >/dev/null 2>&1; then
+  cp -f "${BIN_DIR}"/*.dll "${OUT}/bin/" 2>/dev/null || true
+fi
+if compgen -G "${BIN_DIR}"/*.so >/dev/null 2>&1; then
+  cp -f "${BIN_DIR}"/*.so* "${OUT}/bin/" 2>/dev/null || true
+fi
+if compgen -G "${BIN_DIR}"/*.dylib >/dev/null 2>&1; then
+  cp -f "${BIN_DIR}"/*.dylib "${OUT}/bin/" 2>/dev/null || true
+fi
 if [[ "${PLATFORM}" != "windows" ]]; then
   chmod +x "${OUT}/bin/$(basename "${BIN}")"
 fi
@@ -71,8 +81,8 @@ for sub in sensevoice kokoro kws-zh-en vad denoise speaker; do
   copy_models "${sub}"
 done
 
-cp "${ROOT}/crates/hermes-talk/config.example.toml" "${OUT}/config.example.toml"
-cp "${ROOT}/crates/hermes-config/config.example.yaml" "${OUT}/config.example.yaml"
+cp "${ROOT}/scripts/talk/config.example.desktop.toml" "${OUT}/config.example.toml"
+cp "${ROOT}/scripts/talk/config.example.desktop.yaml" "${OUT}/config.example.yaml"
 
 if [[ "${PLATFORM}" == "windows" ]]; then
   cp "${ROOT}/scripts/talk/start_desktop.ps1" "${OUT}/start.ps1"

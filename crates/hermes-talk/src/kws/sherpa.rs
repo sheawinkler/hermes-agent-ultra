@@ -1,8 +1,9 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 
 use sherpa_onnx::{KeywordSpotter, KeywordSpotterConfig};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::config::WakeConfig;
 use crate::error::{DemoError, Result};
@@ -11,12 +12,29 @@ use crate::kws::keywords::encode_phrases;
 pub struct WakeDetectorHandle {
     pcm_tx: SyncSender<Vec<f32>>,
     wake_rx: Receiver<()>,
+    dropped_frames: AtomicU64,
     _thread: JoinHandle<()>,
 }
 
 impl WakeDetectorHandle {
     pub fn feed(&self, samples: &[f32]) {
-        let _ = self.pcm_tx.try_send(samples.to_vec());
+        if samples.is_empty() {
+            return;
+        }
+        match self.pcm_tx.try_send(samples.to_vec()) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(_)) => {
+                let dropped = self.dropped_frames.fetch_add(1, Ordering::Relaxed) + 1;
+                if dropped == 1 || dropped % 20 == 0 {
+                    warn!(
+                        dropped,
+                        "kws audio queue full; blocking (wake word may lag — consider wake.provider=cpu)"
+                    );
+                }
+                let _ = self.pcm_tx.send(samples.to_vec());
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {}
+        }
     }
 
     pub fn try_recv_wake(&self) -> bool {
@@ -43,7 +61,7 @@ pub fn start_wake_detector(cfg: &WakeConfig, sample_rate: u32) -> Result<WakeDet
         DemoError::Config("failed to create KeywordSpotter (check model paths)".into())
     })?;
 
-    let (pcm_tx, pcm_rx) = mpsc::sync_channel::<Vec<f32>>(64);
+    let (pcm_tx, pcm_rx) = mpsc::sync_channel::<Vec<f32>>(256);
     let (wake_tx, wake_rx) = mpsc::channel();
 
     let phrase = phrases.join(", ");
@@ -53,10 +71,11 @@ pub fn start_wake_detector(cfg: &WakeConfig, sample_rate: u32) -> Result<WakeDet
         }
     });
 
-    info!(phrase = %phrase, "wake word detector started");
+    info!(phrase = %phrase, provider = %cfg.provider, "wake word detector started");
     Ok(WakeDetectorHandle {
         pcm_tx,
         wake_rx,
+        dropped_frames: AtomicU64::new(0),
         _thread: thread,
     })
 }

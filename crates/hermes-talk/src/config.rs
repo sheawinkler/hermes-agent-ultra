@@ -54,7 +54,7 @@ fn default_ws_url() -> String {
 /// Global sherpa-onnx ONNX Runtime settings applied to local ASR/TTS/KWS/VAD/denoise/speaker.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SherpaConfig {
-    /// Execution provider: `cpu`, `cuda`, `directml`, or `coreml`.
+    /// Execution provider: `cpu` only.
     #[serde(default = "default_sherpa_provider")]
     pub provider: String,
 }
@@ -1102,6 +1102,7 @@ impl Config {
         merge_gateway_llm_defaults(&mut cfg);
         merge_dashscope_defaults(&mut cfg);
         cfg.apply_sherpa_runtime();
+        cfg.normalize_sherpa_providers_to_cpu();
         cfg.wake.normalize();
         cfg.wake.validate()?;
         validate_talk_backends(&cfg)?;
@@ -1109,10 +1110,31 @@ impl Config {
         Ok(cfg)
     }
 
+    /// Downgrade legacy directml/coreml settings to cpu.
+    pub fn normalize_sherpa_providers_to_cpu(&mut self) {
+        let fix = |p: &mut String| {
+            if p != "cpu" {
+                tracing::warn!(old = %p, "sherpa provider not supported; using cpu");
+                *p = "cpu".to_string();
+            }
+        };
+        fix(&mut self.sherpa.provider);
+        if let Some(asr) = &mut self.asr.sherpa {
+            fix(&mut asr.provider);
+        }
+        if let Some(tts) = &mut self.tts.sherpa {
+            fix(&mut tts.provider);
+        }
+        fix(&mut self.wake.provider);
+        fix(&mut self.speaker.provider);
+        fix(&mut self.vad.provider);
+        fix(&mut self.denoise.provider);
+    }
+
     /// Propagate `[sherpa].provider` to per-module defaults still at `cpu`.
     fn apply_sherpa_runtime(&mut self) {
         let global = self.sherpa.provider.trim();
-        if global.is_empty() || global == "cpu" {
+        if global.is_empty() || global != "cpu" {
             return;
         }
         if let Some(asr) = &mut self.asr.sherpa {
@@ -1276,6 +1298,50 @@ fn validate_talk_backends(cfg: &Config) -> Result<()> {
                 .into(),
         ));
     }
+
+    #[cfg(not(feature = "sherpa-asr-tts"))]
+    {
+        use crate::backends::{uses_sherpa_asr, uses_sherpa_tts};
+        if uses_sherpa_asr(&cfg.asr.backend) {
+            return Err(DemoError::Config(
+                "asr backend \"sherpa\" is not available in this build (Rockchip-only); \
+                 use backend = \"local\" or \"rockchip\""
+                    .into(),
+            ));
+        }
+        if uses_sherpa_tts(&cfg.tts.backend) {
+            return Err(DemoError::Config(
+                "tts backend \"sherpa\" is not available in this build (Rockchip-only); \
+                 use backend = \"local\" or \"rockchip\""
+                    .into(),
+            ));
+        }
+    }
+
+    #[cfg(all(
+        feature = "rockchip",
+        target_arch = "aarch64",
+        not(feature = "sherpa-asr-tts")
+    ))]
+    {
+        use crate::backends::{TalkBackendKind, classify_talk_backend};
+        if classify_talk_backend(&cfg.asr.backend) == TalkBackendKind::LocalHardware
+            && cfg.asr.local.is_none()
+        {
+            return Err(DemoError::Config(
+                "asr backend is local/rockchip but [asr.local] is missing".into(),
+            ));
+        }
+        let rk_tts = cfg.tts.local.as_ref().or(cfg.tts.rockchip.as_ref());
+        if classify_talk_backend(&cfg.tts.backend) == TalkBackendKind::LocalHardware
+            && rk_tts.is_none()
+        {
+            return Err(DemoError::Config(
+                "tts backend is local/rockchip but [tts.local] is missing".into(),
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -1283,16 +1349,18 @@ fn validate_sherpa_providers(cfg: &Config) -> Result<()> {
     use crate::backends::{
         TalkBackendKind, classify_talk_backend, uses_sherpa_asr, uses_sherpa_tts,
     };
-    use crate::sherpa::{provider_hint, validate_provider};
+    use crate::sherpa::validate_provider;
 
     let mut providers = Vec::new();
     providers.push(cfg.sherpa.provider.as_str());
     if uses_sherpa_asr(&cfg.asr.backend) {
+        #[cfg(feature = "sherpa-asr-tts")]
         if let Some(asr) = &cfg.asr.sherpa {
             providers.push(asr.provider.as_str());
         }
     }
     if uses_sherpa_tts(&cfg.tts.backend) {
+        #[cfg(feature = "sherpa-asr-tts")]
         if let Some(tts) = &cfg.tts.sherpa {
             providers.push(tts.provider.as_str());
         }
@@ -1307,49 +1375,14 @@ fn validate_sherpa_providers(cfg: &Config) -> Result<()> {
         providers.push(cfg.speaker.provider.as_str());
     }
     if classify_talk_backend(&cfg.asr.backend) == TalkBackendKind::Sherpa {
+        #[cfg(feature = "sherpa-asr-tts")]
         providers.push(cfg.vad.provider.as_str());
     }
 
     for provider in providers {
         validate_provider(provider)?;
-        if provider == "cpu" {
-            continue;
-        }
-        if !provider_linked_at_build(provider) {
-            tracing::warn!(
-                provider,
-                pack = std::env::var("SHERPA_ONNX_PACK").unwrap_or_else(|_| "cpu".into()),
-                "sherpa provider configured but this binary may not link the matching runtime; \
-                 rebuild with `make release-talk` or set SHERPA_ONNX_PACK"
-            );
-        }
-        if let Some(hint) = provider_hint(provider) {
-            tracing::debug!(provider, hint, "sherpa non-cpu provider");
-        }
     }
     Ok(())
-}
-
-/// Whether the current binary was built with native libs for this provider.
-fn provider_linked_at_build(provider: &str) -> bool {
-    use crate::sherpa::platform_supports;
-
-    match provider {
-        "cpu" => true,
-        #[cfg(sherpa_pack_cuda)]
-        "cuda" => true,
-        #[cfg(not(sherpa_pack_cuda))]
-        "cuda" => false,
-        #[cfg(sherpa_pack_coreml)]
-        "coreml" => true,
-        #[cfg(not(sherpa_pack_coreml))]
-        "coreml" => false,
-        #[cfg(sherpa_pack_directml)]
-        "directml" => true,
-        #[cfg(not(sherpa_pack_directml))]
-        "directml" => false,
-        _ => platform_supports(provider),
-    }
 }
 
 fn join_if_relative(base: &Path, path: &str) -> String {
@@ -1424,6 +1457,7 @@ url = "ws://127.0.0.1:9100"
 }
 
 #[cfg(test)]
+#[cfg(feature = "sherpa-asr-tts")]
 mod sherpa_backend_config_tests {
     use super::Config;
     use super::validate_sherpa_providers;
@@ -1493,7 +1527,7 @@ model = "m"
 
     #[test]
     fn config_example_template_parses() {
-        let raw = include_str!("../config.example.toml");
+        let raw = include_str!("../../../scripts/talk/config.example.desktop.toml");
         let cfg: Config = toml::from_str(raw).unwrap();
         assert_eq!(cfg.asr.backend, "sherpa");
         assert_eq!(cfg.tts.backend, "sherpa");
@@ -1502,11 +1536,63 @@ model = "m"
     }
 
     #[test]
+    fn legacy_directml_providers_normalized_to_cpu() {
+        let mut cfg: Config = toml::from_str(
+            r#"
+[sherpa]
+provider = "directml"
+[asr]
+backend = "sherpa"
+[asr.sherpa]
+model = "m.onnx"
+tokens = "t.txt"
+provider = "directml"
+[tts]
+backend = "sherpa"
+[tts.sherpa]
+model = "m.onnx"
+voices = "v.bin"
+tokens = "t.txt"
+data_dir = "d"
+dict_dir = "d"
+lexicon = "l.txt"
+provider = "directml"
+[wake]
+provider = "directml"
+[llm]
+base_url = "http://127.0.0.1/v1"
+api_key = "k"
+model = "m"
+"#,
+        )
+        .unwrap();
+        cfg.apply_sherpa_runtime();
+        cfg.normalize_sherpa_providers_to_cpu();
+        assert_eq!(cfg.sherpa.provider, "cpu");
+        assert_eq!(cfg.asr.sherpa.as_ref().unwrap().provider, "cpu");
+        assert_eq!(cfg.tts.sherpa.as_ref().unwrap().provider, "cpu");
+        assert_eq!(cfg.wake.provider, "cpu");
+    }
+
+    #[cfg(all(target_os = "windows", feature = "sherpa-asr-tts"))]
+    #[test]
+    fn windows_config_example_template_parses() {
+        let raw = include_str!("../../../scripts/talk/config.example.desktop.windows.toml");
+        let mut cfg: Config = toml::from_str(raw).unwrap();
+        cfg.apply_sherpa_runtime();
+        cfg.normalize_sherpa_providers_to_cpu();
+        assert_eq!(cfg.sherpa.provider, "cpu");
+        assert_eq!(cfg.asr.sherpa.as_ref().unwrap().provider, "cpu");
+        assert_eq!(cfg.tts.sherpa.as_ref().unwrap().provider, "cpu");
+        assert_eq!(cfg.wake.provider, "cpu");
+    }
+
+    #[test]
     fn global_sherpa_provider_propagates_to_modules() {
         let mut cfg: Config = toml::from_str(
             r#"
 [sherpa]
-provider = "cuda"
+provider = "cpu"
 [asr]
 backend = "sherpa"
 [asr.sherpa]
@@ -1529,9 +1615,9 @@ model = "m"
         )
         .unwrap();
         cfg.apply_sherpa_runtime();
-        assert_eq!(cfg.asr.sherpa.as_ref().unwrap().provider, "cuda");
-        assert_eq!(cfg.tts.sherpa.as_ref().unwrap().provider, "cuda");
-        assert_eq!(cfg.wake.provider, "cuda");
+        assert_eq!(cfg.asr.sherpa.as_ref().unwrap().provider, "cpu");
+        assert_eq!(cfg.tts.sherpa.as_ref().unwrap().provider, "cpu");
+        assert_eq!(cfg.wake.provider, "cpu");
     }
 
     #[test]

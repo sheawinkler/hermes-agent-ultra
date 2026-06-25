@@ -54,13 +54,18 @@ Ensure-Dir (Join-Path $Out "bin")
 Ensure-Dir (Join-Path $Out "models")
 
 Copy-Item $Bin (Join-Path $Out "bin\") -Force
+$OutBin = Join-Path $Out "bin"
+$BinDir = Split-Path -Parent $Bin
+
+Get-ChildItem -Path $BinDir -Filter "*.dll" -ErrorAction SilentlyContinue |
+    Copy-Item -Destination $OutBin -Force
 
 foreach ($sub in @("sensevoice", "kokoro", "kws-zh-en", "vad", "denoise", "speaker")) {
     Copy-Models $sub
 }
 
-Copy-Item (Join-Path $Root "crates\hermes-talk\config.example.toml") (Join-Path $Out "config.example.toml") -Force
-Copy-Item (Join-Path $Root "crates\hermes-config\config.example.yaml") (Join-Path $Out "config.example.yaml") -Force
+Copy-Item (Join-Path $Root "scripts\talk\config.example.desktop.windows.toml") (Join-Path $Out "config.example.toml") -Force
+Copy-Item (Join-Path $Root "scripts\talk\config.example.desktop.yaml") (Join-Path $Out "config.example.yaml") -Force
 Copy-Item (Join-Path $Root "scripts\talk\start_desktop.ps1") (Join-Path $Out "start.ps1") -Force
 
 Write-Host "Bundled: $Out"

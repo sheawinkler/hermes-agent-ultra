@@ -10,7 +10,7 @@
 #   .models/data/                   (optional; falls back to RK_ASR_SDK_DIR)
 #   .models/frontend_extras/        (optional; falls back to RK_TTS_SDK_DIR)
 #   .models/auth/                   Rockchip license keys (key_asr.lic, key_tts.lic)
-# Board default config template: scripts/talk/config.example.toml
+# Board default config: scripts/talk/config.example.rockchip.{toml,yaml}
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -100,8 +100,8 @@ else
   echo "warn: missing ${MODELS_ROOT}/auth (Rockchip license keys)" >&2
 fi
 
-cp "${ROOT}/scripts/talk/config.example.toml" "${OUT}/config.example.toml"
-cp "${ROOT}/scripts/talk/config.example.yaml" "${OUT}/config.example.yaml"
+cp "${ROOT}/scripts/talk/config.example.rockchip.toml" "${OUT}/config.example.toml"
+cp "${ROOT}/scripts/talk/config.example.rockchip.yaml" "${OUT}/config.example.yaml"
 cp "${ROOT}/scripts/talk/start_board.sh" "${OUT}/start.sh"
 chmod +x "${OUT}/start.sh"
 
