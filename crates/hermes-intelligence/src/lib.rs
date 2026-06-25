@@ -67,10 +67,10 @@ pub use display::{
     format_tool_result, format_usage_stats, get_cute_tool_message, render_inline_unified_diff,
 };
 pub use model_metadata::{
-    estimate_messages_tokens_rough, estimate_request_tokens_rough, estimate_tokens_rough,
-    get_model_context_length, get_model_info, get_next_probe_tier, infer_provider_from_url,
-    is_local_endpoint, known_models, max_output_tokens, supports_tools, supports_vision,
-    ModelMetadataEntry,
+    build_model_switch_preflight_warning, estimate_messages_tokens_rough,
+    estimate_request_tokens_rough, estimate_tokens_rough, get_model_context_length, get_model_info,
+    get_next_probe_tier, infer_provider_from_url, is_local_endpoint, known_models,
+    max_output_tokens, supports_tools, supports_vision, ModelMetadataEntry,
 };
 pub use usage_pricing::{
     calculate_cost, format_token_count_compact, get_pricing, get_pricing_entry, has_known_pricing,

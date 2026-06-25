@@ -628,7 +628,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, display.busy_input_mode|busy_ack_enabled|memory_notifications, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, model_switch.persist_switch_by_default, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, display.busy_input_mode|busy_ack_enabled|memory_notifications, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -857,6 +857,10 @@ fn apply_user_config_patch_dotted(
         ["kanban", "dispatch_in_gateway"] => {
             config.kanban.dispatch_in_gateway =
                 parse_config_bool("kanban.dispatch_in_gateway", value)?;
+        }
+        ["model_switch", "persist_switch_by_default"] | ["model", "persist_switch_by_default"] => {
+            config.model_switch.persist_switch_by_default =
+                parse_config_bool("model_switch.persist_switch_by_default", value)?;
         }
         ["agent", "api_max_retries"] | ["agent", "apiMaxRetries"] => {
             config.agent.api_max_retries = Some(value.parse().map_err(|_| {
@@ -1123,6 +1127,9 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
         ["sessions", "vacuum_after_prune"] => Ok(config.sessions.vacuum_after_prune.to_string()),
         ["sessions", "min_interval_hours"] => Ok(config.sessions.min_interval_hours.to_string()),
         ["kanban", "dispatch_in_gateway"] => Ok(config.kanban.dispatch_in_gateway.to_string()),
+        ["model_switch", "persist_switch_by_default"] | ["model", "persist_switch_by_default"] => {
+            Ok(config.model_switch.persist_switch_by_default.to_string())
+        }
         ["agent", "api_max_retries"] | ["agent", "apiMaxRetries"] => Ok(config
             .agent
             .api_max_retries

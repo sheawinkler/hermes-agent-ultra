@@ -4801,10 +4801,17 @@ async fn process_modal_confirm(state: &mut TuiState, app: &mut App) -> Result<()
         }
         PickerKind::ModelForProvider { provider } => {
             let provider_model = format!("{provider}:{}", item.value.trim());
+            let warning = app.model_switch_preflight_warning(&provider_model);
             app.switch_model(&provider_model);
-            app.push_ui_assistant(format!("Model switched to: {}", provider_model));
+            let mut notice = format!("Model switched to: {}", provider_model);
+            if let Some(warning) = warning.as_deref() {
+                notice.push('\n');
+                notice.push_str(warning);
+            }
+            app.push_ui_assistant(notice);
             state.close_modal();
-            state.status_message = format!("Switched model to {}", provider_model);
+            state.status_message =
+                warning.unwrap_or_else(|| format!("Switched model to {}", provider_model));
         }
         PickerKind::Personality => {
             app.switch_personality(item.value.as_str());

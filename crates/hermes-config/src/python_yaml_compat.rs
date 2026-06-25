@@ -110,6 +110,20 @@ fn normalize_model_block(map: &mut Mapping) {
             map.insert(model_key, Value::String(s));
         }
         Value::Mapping(m) => {
+            if let Some(persist) = m.get(&key("persist_switch_by_default")).cloned() {
+                let switch_key = key("model_switch");
+                let mut switch_map = match map.remove(&switch_key) {
+                    Some(Value::Mapping(existing)) => existing,
+                    Some(other) => {
+                        let mut existing = Mapping::new();
+                        existing.insert(key("value"), other);
+                        existing
+                    }
+                    None => Mapping::new(),
+                };
+                switch_map.insert(key("persist_switch_by_default"), persist);
+                map.insert(switch_key, Value::Mapping(switch_map));
+            }
             let default = m
                 .get(&key("default"))
                 .and_then(as_str)
@@ -586,9 +600,28 @@ max_turns: 99
         normalize_config_yaml_root(m);
         let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
         assert_eq!(cfg.model.as_deref(), Some("openrouter:z-ai/glm-5.1"));
+        assert!(cfg.model_switch.persist_switch_by_default);
         assert_eq!(cfg.max_turns, 99);
         let or = cfg.llm_providers.get("openrouter").expect("openrouter");
         assert_eq!(or.base_url.as_deref(), Some("https://openrouter.ai/api/v1"));
+    }
+
+    #[test]
+    fn python_model_block_lifts_persist_default_flag() {
+        let raw = r#"
+model:
+  default: zai/glm-5.2
+  provider: openrouter
+  persist_switch_by_default: "false"
+"#;
+        let mut root: Value = serde_yaml::from_str(raw).unwrap();
+        let Value::Mapping(ref mut m) = root else {
+            panic!();
+        };
+        normalize_config_yaml_root(m);
+        let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+        assert_eq!(cfg.model.as_deref(), Some("openrouter:zai/glm-5.2"));
+        assert!(!cfg.model_switch.persist_switch_by_default);
     }
 
     #[test]

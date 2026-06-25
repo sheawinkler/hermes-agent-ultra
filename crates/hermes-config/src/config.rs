@@ -18,9 +18,13 @@ use crate::streaming::StreamingConfig;
 /// Top-level configuration for the hermes gateway.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GatewayConfig {
-    /// Default LLM model identifier (e.g. "gpt-4o", "claude-3-opus").
+    /// Default LLM model identifier (for example `nous:nousresearch/hermes-4-70b`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+
+    /// Model-switch persistence controls.
+    #[serde(default)]
+    pub model_switch: ModelSwitchConfig,
 
     /// Personality / persona name to load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -171,6 +175,7 @@ impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
             model: None,
+            model_switch: ModelSwitchConfig::default(),
             personality: None,
             max_turns: default_max_turns(),
             system_prompt: None,
@@ -204,6 +209,25 @@ impl Default for GatewayConfig {
             profile: ProfileConfig::default(),
             agent: AgentLoopBehaviorConfig::default(),
             home_dir: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelSwitchConfig {
+    /// Persist plain `/model <name>` switches to config by default.
+    #[serde(
+        default = "default_true",
+        deserialize_with = "deserialize_boolish",
+        skip_serializing_if = "is_true"
+    )]
+    pub persist_switch_by_default: bool,
+}
+
+impl Default for ModelSwitchConfig {
+    fn default() -> Self {
+        Self {
+            persist_switch_by_default: true,
         }
     }
 }

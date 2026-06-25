@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T05:38:58.804651+00:00`
+Generated: `2026-06-25T06:30:25.062192+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `6997`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-25T05:38:58.804651+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 222 |
-| ported | 373 |
+| pending | 219 |
+| ported | 376 |
 | superseded | 6326 |
 
 ## First 100 Pending Commits
@@ -32,7 +32,6 @@ Generated: `2026-06-25T05:38:58.804651+00:00`
 | `bce1e36b5769` | #20 | fix(discord): unwrap dict choices + soft-boundary truncate clarify buttons |
 | `92451151c642` | #22 | Revert "feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899)" |
 | `9a2f2756f7e6` | #26 | fix(desktop): allow selecting slash output and shell logs in thread (#49063) |
-| `fad4b40d9d38` | #20 | fix(model): persist /model switch by default across sessions |
 | `6cb04be779de` | #26 | feat(desktop): Keys tab groups by backend provider identity |
 | `ee0de638d719` | #26 | feat(desktop): add API-keys search; keep provider lists priority-sorted |
 | `d91b8d8368bb` | #26 | test(desktop): make keyVar a typed EnvVarInfo factory |
@@ -96,8 +95,6 @@ Generated: `2026-06-25T05:38:58.804651+00:00`
 | `72e4cca00ecc` | #26 | docs(config): correct MCP docs path in cli-config.yaml.example |
 | `8666fd7635ba` | #26 | fix(desktop): preserve other providers' hide-all in model visibility dialog |
 | `461fcc096479` | #26 | test(desktop): harden model-visibility toggle + dedupe default expansion |
-| `04730f32e7e8` | #20 | fix(cli): warn when in-session model switch will preflight-compress |
-| `1ca29723f0ea` | #20 | fix(cli): log instead of swallow preflight-warning errors; consistent TUI warning field |
 | `dd042fc4dfb1` | #20 | fix(tools): preserve core tools when a platform bundle is disabled |
 | `c7e8854cb383` | #20 | fix(tui): persist session messages on force-quit / signal shutdown |
 | `fb3d31ba8b77` | #26 | feat(desktop): add Update now button to About panel |
@@ -125,3 +122,6 @@ Generated: `2026-06-25T05:38:58.804651+00:00`
 | `7785655b4ece` | #26 | fix(desktop): keep the floating composer in-bounds so it can't be lost off-screen |
 | `37c37c9dc511` | #26 | fix(antigravity): register google-antigravity ProviderProfile + AUTHOR_MAP |
 | `16aeba17078d` | #26 | fix(desktop): clamp composer peel-off under cursor |
+| `bef1d3e4ff6a` | #26 | fix(desktop): filter undefined entries in AttachmentList to prevent refText crash on session switch (#49624) |
+| `13ce8119067e` | #26 | fix: show desktop approval fallback (#46548) |
+| `e5e25836350a` | #26 | fix(desktop): relaunch on Linux after in-app update instead of hanging (#45205) |

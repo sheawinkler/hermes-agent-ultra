@@ -26,6 +26,7 @@ use hermes_config::{hermes_home as hermes_home_dir, load_config, state_dir, Gate
 use hermes_core::ToolSchema;
 use hermes_core::{AgentError, LlmProvider, UsageStats};
 use hermes_cron::{CronRunner, CronScheduler, FileJobPersistence};
+use hermes_intelligence::{build_model_switch_preflight_warning, estimate_messages_tokens_rough};
 pub use hermes_provider_runtime::{
     active_llm_provider_config, allow_no_api_key, normalize_runtime_provider_name,
     provider_api_key_from_env, provider_base_url_from_env, provider_default_base_url,
@@ -288,7 +289,7 @@ pub struct App {
     /// Whether the application loop is still running.
     pub running: bool,
 
-    /// Currently active model identifier (e.g. "openai:gpt-4o").
+    /// Currently active model identifier (for example, "dynamic" or "provider:model").
     pub current_model: String,
 
     /// Actual provider-reported usage for the most recently applied agent run.
@@ -2697,6 +2698,18 @@ impl App {
         tracing::info!("Switched model to: {}", provider_model);
     }
 
+    /// Warn before a user-initiated model switch if the current transcript is
+    /// likely to trigger preflight compression under the new context window.
+    pub fn model_switch_preflight_warning(&self, provider_model: &str) -> Option<String> {
+        let values = self
+            .messages
+            .iter()
+            .filter_map(|message| serde_json::to_value(message).ok())
+            .collect::<Vec<_>>();
+        let estimate = estimate_messages_tokens_rough(&values);
+        build_model_switch_preflight_warning(Some(&self.current_model), provider_model, estimate)
+    }
+
     fn rebuild_agent_for_active_session(&mut self) {
         let provider = build_provider(&self.config, &self.current_model);
         let mut agent_config = build_agent_config(&self.config, &self.current_model);
@@ -3994,7 +4007,7 @@ fn apply_cli_runtime_overrides(config: &mut GatewayConfig, cli: &Cli) {
         .filter(|v| !v.is_empty())
     {
         let provider = normalize_runtime_provider_name(provider);
-        let existing_model = config.model.as_deref().unwrap_or("gpt-4o").trim();
+        let existing_model = config.model.as_deref().unwrap_or("dynamic").trim();
         let model_name = existing_model
             .split_once(':')
             .map(|(_, name)| name.trim())
@@ -4092,16 +4105,16 @@ mod tests {
         std::fs::create_dir_all(&cron_dir).expect("create cron test dir");
         let cron_scheduler = Arc::new(build_runtime_cron_scheduler(
             config.as_ref(),
-            "openai:gpt-4o",
+            "dynamic",
             cron_dir,
             &tool_registry,
         ));
         let agent_tool_registry = Arc::new(bridge_tool_registry(&tool_registry));
         let session_id = "test-session".to_string();
-        let mut agent_config = build_agent_config(config.as_ref(), "openai:gpt-4o");
+        let mut agent_config = build_agent_config(config.as_ref(), "dynamic");
         agent_config.session_id = Some(session_id.clone());
         let provider: Arc<dyn LlmProvider> = Arc::new(hermes_provider_runtime::NoBackendProvider {
-            model: "openai:gpt-4o".to_string(),
+            model: "dynamic".to_string(),
         });
         let agent_inner = hermes_agent::attach_discovered_memory(AgentLoop::new(
             agent_config,
@@ -4126,7 +4139,7 @@ mod tests {
             ui_messages: Vec::new(),
             session_id,
             running: true,
-            current_model: "openai:gpt-4o".to_string(),
+            current_model: "dynamic".to_string(),
             last_usage: None,
             session_usage: None,
             session_cost_usd: 0.0,
@@ -4258,6 +4271,29 @@ mod tests {
                 None => std::env::remove_var(key),
             }
         }
+    }
+
+    #[test]
+    fn model_switch_preflight_warning_is_ui_only_and_keeps_messages_clean() {
+        let mut app = build_minimal_test_app();
+        app.current_model = "anthropic:claude-sonnet-4-6".to_string();
+        app.messages = vec![hermes_core::Message::user("abcd".repeat(90_000))];
+
+        let warning = app
+            .model_switch_preflight_warning("deepseek-chat")
+            .expect("large transcript should warn");
+
+        assert!(warning.contains("Context warning"));
+        assert!(warning.contains("preflight compression"));
+        assert_eq!(
+            app.messages.len(),
+            1,
+            "warning must not mutate model context"
+        );
+        assert!(
+            app.ui_messages.is_empty(),
+            "warning calculation must not add UI transcript rows"
+        );
     }
 
     #[test]
@@ -4509,7 +4545,7 @@ mod tests {
     fn test_session_info_serialization() {
         let info = SessionInfo {
             session_id: "test-123".to_string(),
-            model: "gpt-4o".to_string(),
+            model: "dynamic".to_string(),
             personality: Some("helpful".to_string()),
             message_count: 5,
             created_at: "2025-01-01T00:00:00Z".to_string(),
@@ -4517,7 +4553,7 @@ mod tests {
         let json = serde_json::to_string(&info).unwrap();
         let back: SessionInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(back.session_id, "test-123");
-        assert_eq!(back.model, "gpt-4o");
+        assert_eq!(back.model, "dynamic");
     }
 
     #[test]
@@ -5008,7 +5044,7 @@ mod tests {
     #[test]
     fn test_apply_cli_runtime_overrides_applies_provider_to_prefixed_model() {
         let mut cfg = GatewayConfig::default();
-        cfg.model = Some("openai:gpt-4o".to_string());
+        cfg.model = Some("openai:dynamic".to_string());
         let cli = Cli {
             command: None,
             verbose: false,
@@ -5023,7 +5059,7 @@ mod tests {
         };
 
         apply_cli_runtime_overrides(&mut cfg, &cli);
-        assert_eq!(cfg.model.as_deref(), Some("nous:gpt-4o"));
+        assert_eq!(cfg.model.as_deref(), Some("nous:dynamic"));
     }
 
     #[test]

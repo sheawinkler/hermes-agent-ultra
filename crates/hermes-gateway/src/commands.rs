@@ -11,7 +11,7 @@ pub enum GatewayCommandResult {
     /// Reset the session and send a reply.
     ResetSession(String),
     /// Switch the model and send a reply.
-    SwitchModel { model: String, reply: String },
+    SwitchModel { request: ModelSwitchRequest },
     /// Switch the personality and send a reply.
     SwitchPersonality { name: String, reply: String },
     /// Stop the currently running agent task.
@@ -98,6 +98,26 @@ pub enum GatewayCommandResult {
     Noop,
 }
 
+/// Requested persistence behavior for `/model`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelSwitchScope {
+    /// Defer to config (`model_switch.persist_switch_by_default`, default true).
+    Default,
+    /// Persist the model switch as the gateway default.
+    Global,
+    /// Apply only to the current gateway session.
+    Session,
+}
+
+/// Parsed `/model` command payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelSwitchRequest {
+    pub model: String,
+    pub provider: Option<String>,
+    pub scope: ModelSwitchScope,
+    pub force_refresh: bool,
+}
+
 /// Metadata about a slash command.
 pub struct CommandInfo {
     pub name: &'static str,
@@ -137,7 +157,7 @@ pub fn all_commands() -> Vec<CommandInfo> {
             name: "/model",
             aliases: &[],
             description: "Show or switch the LLM model",
-            usage: "/model [name]",
+            usage: "/model [name] [--session|--global] [--provider provider]",
         },
         CommandInfo {
             name: "/personality",
@@ -353,9 +373,106 @@ pub fn all_commands() -> Vec<CommandInfo> {
 }
 
 fn normalize_command_args(args: &str) -> String {
-    args.replace("\u{2014}\u{2014}", "--")
+    let mut normalized = args.to_string();
+    for flag in ["provider", "global", "session", "refresh"] {
+        for dash in ['\u{2012}', '\u{2013}', '\u{2014}', '\u{2015}'] {
+            normalized = normalized.replace(&format!("{dash}{flag}"), &format!("--{flag}"));
+        }
+    }
+    normalized
+        .replace("\u{2014}\u{2014}", "--")
         .replace('\u{2014}', "--")
         .replace('\u{2013}', "-")
+}
+
+fn parse_model_switch_args(args: &str) -> Result<ModelSwitchRequest, String> {
+    let mut is_global = false;
+    let mut is_session = false;
+    let mut provider: Option<String> = None;
+    let mut force_refresh = false;
+    let mut model_parts = Vec::new();
+
+    let tokens = args.split_whitespace().collect::<Vec<_>>();
+    let mut i = 0;
+    while i < tokens.len() {
+        match tokens[i].to_ascii_lowercase().as_str() {
+            "--global" => {
+                is_global = true;
+                i += 1;
+            }
+            "--session" => {
+                is_session = true;
+                i += 1;
+            }
+            "--refresh" => {
+                force_refresh = true;
+                i += 1;
+            }
+            "--provider" => {
+                let Some(value) = tokens
+                    .get(i + 1)
+                    .map(|v| v.trim())
+                    .filter(|v| !v.is_empty())
+                else {
+                    return Err(
+                        "Usage: /model <name> [--provider provider] [--session|--global]"
+                            .to_string(),
+                    );
+                };
+                provider = Some((*value).to_string());
+                i += 2;
+            }
+            other if other.starts_with("--provider=") => {
+                let value = tokens[i]
+                    .split_once('=')
+                    .map(|(_, value)| value.trim())
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| {
+                        "Usage: /model <name> [--provider provider] [--session|--global]"
+                            .to_string()
+                    })?;
+                provider = Some(value.to_string());
+                i += 1;
+            }
+            _ => {
+                model_parts.push(tokens[i]);
+                i += 1;
+            }
+        }
+    }
+
+    let raw_model = model_parts.join(" ");
+    let model = raw_model.trim();
+    if model.is_empty() {
+        if force_refresh {
+            return Err(
+                "Gateway model catalog refresh requires a model value. Use `/model <name> --refresh`."
+                    .to_string(),
+            );
+        }
+        return Err("Usage: /model <name> [--session|--global] [--provider provider]".to_string());
+    }
+
+    let model = if model.contains(':') || provider.is_none() {
+        model.to_string()
+    } else {
+        format!("{}:{}", provider.as_deref().unwrap_or_default(), model)
+    };
+
+    let scope = if is_session {
+        ModelSwitchScope::Session
+    } else if is_global {
+        ModelSwitchScope::Global
+    } else {
+        ModelSwitchScope::Default
+    };
+
+    Ok(ModelSwitchRequest {
+        model,
+        provider,
+        scope,
+        force_refresh,
+    })
 }
 
 fn parse_fast_service_tier(args: &str) -> Result<Option<String>, String> {
@@ -459,12 +576,12 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         "/model" => {
             if args.is_empty() {
                 GatewayCommandResult::Reply(
-                    "Current model shown in status. Use /model <name> to switch.".to_string(),
+                    "Current model shown in status. Use /model <name> to switch, or /model <name> --session for a one-off switch.".to_string(),
                 )
             } else {
-                GatewayCommandResult::SwitchModel {
-                    model: args.clone(),
-                    reply: format!("🔀 Model switched to: {}", args),
+                match parse_model_switch_args(&args) {
+                    Ok(request) => GatewayCommandResult::SwitchModel { request },
+                    Err(msg) => GatewayCommandResult::Reply(msg),
                 }
             }
         }
@@ -757,33 +874,48 @@ mod tests {
 
     #[test]
     fn test_model_switch() {
-        match handle_command("/model gpt-4o") {
-            GatewayCommandResult::SwitchModel { model, .. } => {
-                assert_eq!(model, "gpt-4o");
+        match handle_command("/model nousresearch/hermes-4-70b") {
+            GatewayCommandResult::SwitchModel { request } => {
+                assert_eq!(request.model, "nousresearch/hermes-4-70b");
+                assert_eq!(request.scope, ModelSwitchScope::Default);
+                assert!(request.provider.is_none());
             }
             other => panic!("Expected SwitchModel, got {:?}", other),
         }
     }
 
     #[test]
-    fn test_model_switch_normalizes_ios_unicode_dashes() {
+    fn test_model_switch_parses_scope_provider_and_unicode_dashes() {
         let em_dash = '\u{2014}';
         let en_dash = '\u{2013}';
 
-        let em_input = format!("/model glm-4.7 {}provider zai", em_dash);
+        let em_input = format!("/model glm-5.2 {}provider zai {}session", em_dash, em_dash);
         match handle_command(&em_input) {
-            GatewayCommandResult::SwitchModel { model, .. } => {
-                assert_eq!(model, "glm-4.7 --provider zai");
+            GatewayCommandResult::SwitchModel { request } => {
+                assert_eq!(request.model, "zai:glm-5.2");
+                assert_eq!(request.provider.as_deref(), Some("zai"));
+                assert_eq!(request.scope, ModelSwitchScope::Session);
             }
             other => panic!("Expected SwitchModel for em dash input, got {:?}", other),
         }
 
-        let en_input = format!("/model glm-4.7 {}provider zai", en_dash);
+        let en_input = format!("/model zai/glm-5.2 {}global", en_dash);
         match handle_command(&en_input) {
-            GatewayCommandResult::SwitchModel { model, .. } => {
-                assert_eq!(model, "glm-4.7 -provider zai");
+            GatewayCommandResult::SwitchModel { request } => {
+                assert_eq!(request.model, "zai/glm-5.2");
+                assert_eq!(request.scope, ModelSwitchScope::Global);
             }
             other => panic!("Expected SwitchModel for en dash input, got {:?}", other),
+        }
+
+        match handle_command("/model zai/glm-5.2 --global --session") {
+            GatewayCommandResult::SwitchModel { request } => {
+                assert_eq!(request.scope, ModelSwitchScope::Session);
+            }
+            other => panic!(
+                "Expected SwitchModel with session precedence, got {:?}",
+                other
+            ),
         }
     }
 

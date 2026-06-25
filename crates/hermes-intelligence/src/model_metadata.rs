@@ -8,6 +8,8 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use serde::{Deserialize, Serialize};
 
+use crate::usage_pricing::format_token_count_compact;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -471,6 +473,53 @@ pub fn estimate_request_tokens_rough(
     ((total_chars as u64) + 3) / 4
 }
 
+/// Build a user-facing warning when a model switch will likely require
+/// preflight context compression on the next request.
+pub fn build_model_switch_preflight_warning(
+    current_model: Option<&str>,
+    new_model: &str,
+    estimated_tokens: u64,
+) -> Option<String> {
+    if estimated_tokens == 0 {
+        return None;
+    }
+
+    let new_model = new_model.trim();
+    if new_model.is_empty() {
+        return None;
+    }
+
+    let new_context = get_model_context_length(new_model);
+    let threshold = (((new_context as f64) * 0.5) as u64).max(MINIMUM_CONTEXT_LENGTH);
+    if estimated_tokens < threshold {
+        return None;
+    }
+
+    let shrink = current_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .map(|old_model| (old_model, get_model_context_length(old_model)))
+        .filter(|(_, old_context)| *old_context > new_context)
+        .map(|(old_model, old_context)| {
+            format!(
+                " Context window shrinks from {} ({}) to {} ({}).",
+                old_model,
+                format_token_count_compact(old_context),
+                new_model,
+                format_token_count_compact(new_context)
+            )
+        })
+        .unwrap_or_default();
+
+    Some(format!(
+        "Context warning:{} Current session is about {} tokens; {} auto-compresses at about {} tokens. The next message may run preflight compression before the model replies.",
+        shrink,
+        format_token_count_compact(estimated_tokens),
+        new_model,
+        format_token_count_compact(threshold)
+    ))
+}
+
 fn estimate_message_tokens_rough(message: &serde_json::Value) -> u64 {
     let Some(content) = message.get("content") else {
         return estimate_tokens_rough(&message.to_string());
@@ -736,6 +785,29 @@ mod tests {
         assert!(
             estimate < 5_000,
             "image payload bytes should not dominate token estimate"
+        );
+    }
+
+    #[test]
+    fn test_model_switch_preflight_warning_reports_shrink_and_threshold() {
+        let warning = build_model_switch_preflight_warning(
+            Some("anthropic:claude-sonnet-4-6"),
+            "deepseek-chat",
+            100_000,
+        )
+        .expect("warning");
+
+        assert!(warning.contains("Context warning"));
+        assert!(warning.contains("Context window shrinks"));
+        assert!(warning.contains("100"));
+        assert!(warning.contains("tokens"));
+        assert!(warning.contains("preflight compression"));
+    }
+
+    #[test]
+    fn test_model_switch_preflight_warning_ignores_small_contexts() {
+        assert!(
+            build_model_switch_preflight_warning(Some("dynamic"), "deepseek-chat", 1_000).is_none()
         );
     }
 
