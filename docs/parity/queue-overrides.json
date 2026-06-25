@@ -4423,6 +4423,36 @@
       "disposition": "ported",
       "notes": "Rust gateway media handling now applies a default 128MiB inbound media cap, rejects oversized cached byte payloads and Content-Length values, streams MediaCache downloads with running-size enforcement, and routes direct platform image-url downloads for native-upload adapters through a shared bounded streaming helper. Focused gateway tests cover helper success/oversize and MediaCache oversize rejection.",
       "owner": "rust-runtime"
+    },
+    "a4b1554c7349": {
+      "disposition": "ported",
+      "notes": "Rust WhatsApp Cloud API payload builders normalize outbound recipients for text, reaction, linked media, and uploaded media sends: phone-like values are reduced to digits and Baileys user JIDs collapse to their phone component, while group/status targets are preserved because this Rust adapter does not run the Baileys bridge.",
+      "owner": "rust-runtime"
+    },
+    "b7f6cb9c8ba3": {
+      "disposition": "ported",
+      "notes": "Rust email adapter trims typed IMAP/SMTP/username/password settings and rejects missing fields with email_missing_configuration before adapter construction or raw IMAP/SMTP network calls. The Rust gateway already reads hosts from typed platform config, so the upstream extra/env fallback is covered by the local config surface.",
+      "owner": "rust-runtime"
+    },
+    "f79e0a7060d0": {
+      "disposition": "ported",
+      "notes": "Blank and whitespace-only email settings now fail as email_missing_configuration before gateway registration/connect and before private raw SMTP/IMAP paths can touch the network, avoiding the upstream missing-config retry loop failure mode in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "77fdbbfe81d8": {
+      "disposition": "superseded",
+      "notes": "Upstream validates Baileys bridge PID identity before killing a stale pidfile process. Hermes Agent Ultra's Rust WhatsApp platform is a Meta Cloud API adapter with no local Baileys bridge pidfile or bridge-process kill path, so this failure mode is absent.",
+      "owner": "rust-runtime"
+    },
+    "069ab40c5f3f": {
+      "disposition": "superseded",
+      "notes": "Upstream bridge-port cleanup only kills LISTENers for the Baileys bridge. Hermes Agent Ultra's Rust WhatsApp Cloud API adapter has no local bridge port reaper, so it cannot kill unrelated client sockets through this path.",
+      "owner": "rust-runtime"
+    },
+    "615a8e651606": {
+      "disposition": "superseded",
+      "notes": "Upstream fixes a Python re import and Python test relocation after WhatsApp adapter plugin migration. The Rust WhatsApp module is compile-tested under the whatsapp feature and has no Python adapter import path.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [

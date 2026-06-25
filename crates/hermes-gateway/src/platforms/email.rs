@@ -42,6 +42,45 @@ fn default_poll_interval() -> u64 {
     60
 }
 
+fn trim_email_config(mut config: EmailConfig) -> EmailConfig {
+    config.imap_host = config.imap_host.trim().to_string();
+    config.smtp_host = config.smtp_host.trim().to_string();
+    config.username = config.username.trim().to_string();
+    config.password = config.password.trim().to_string();
+    config
+}
+
+fn require_email_fields(fields: &[(&'static str, &str)]) -> Result<(), GatewayError> {
+    let missing = fields
+        .iter()
+        .filter_map(|(name, value)| {
+            if value.trim().is_empty() {
+                Some(*name)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    Err(GatewayError::Platform(format!(
+        "email_missing_configuration: missing {}",
+        missing.join(", ")
+    )))
+}
+
+fn validate_email_config(config: &EmailConfig) -> Result<(), GatewayError> {
+    require_email_fields(&[
+        ("imap_host", &config.imap_host),
+        ("smtp_host", &config.smtp_host),
+        ("username", &config.username),
+        ("password", &config.password),
+    ])
+}
+
 pub struct EmailAdapter {
     base: BasePlatformAdapter,
     config: EmailConfig,
@@ -50,6 +89,8 @@ pub struct EmailAdapter {
 
 impl EmailAdapter {
     pub fn new(config: EmailConfig) -> Result<Self, GatewayError> {
+        let config = trim_email_config(config);
+        validate_email_config(&config)?;
         let base = BasePlatformAdapter::new(&config.username).with_proxy(config.proxy.clone());
         base.validate_token()?;
         Ok(Self {
@@ -264,6 +305,15 @@ fn smtp_send_raw(
     use std::net::TcpStream;
     use std::time::Duration;
 
+    let host = host.trim();
+    let username = username.trim();
+    let password = password.trim();
+    require_email_fields(&[
+        ("smtp_host", host),
+        ("username", username),
+        ("password", password),
+    ])?;
+
     let addr = format!("{host}:{port}");
     let mut stream = TcpStream::connect(&addr)
         .map_err(|e| GatewayError::SendFailed(format!("SMTP connect {addr}: {e}")))?;
@@ -369,6 +419,15 @@ fn imap_fetch_unseen(
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::Duration;
+
+    let host = host.trim();
+    let username = username.trim();
+    let password = password.trim();
+    require_email_fields(&[
+        ("imap_host", host),
+        ("username", username),
+        ("password", password),
+    ])?;
 
     let addr = format!("{host}:{port}");
 
@@ -580,6 +639,81 @@ fn base64_encode_lines(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn config() -> EmailConfig {
+        EmailConfig {
+            imap_host: "imap.example.com".to_string(),
+            imap_port: 993,
+            smtp_host: "smtp.example.com".to_string(),
+            smtp_port: 587,
+            username: "agent@example.com".to_string(),
+            password: "secret".to_string(),
+            poll_interval_secs: 60,
+            proxy: AdapterProxyConfig::default(),
+        }
+    }
+
+    #[test]
+    fn email_adapter_trims_config_before_use() {
+        let adapter = EmailAdapter::new(EmailConfig {
+            imap_host: " imap.example.com ".to_string(),
+            smtp_host: "\tsmtp.example.com\n".to_string(),
+            username: " agent@example.com ".to_string(),
+            password: " secret ".to_string(),
+            ..config()
+        })
+        .expect("adapter");
+
+        assert_eq!(adapter.config().imap_host, "imap.example.com");
+        assert_eq!(adapter.config().smtp_host, "smtp.example.com");
+        assert_eq!(adapter.config().username, "agent@example.com");
+        assert_eq!(adapter.config().password, "secret");
+    }
+
+    #[test]
+    fn email_adapter_rejects_blank_required_config() {
+        let result = EmailAdapter::new(EmailConfig {
+            imap_host: " ".to_string(),
+            smtp_host: "\t".to_string(),
+            username: "".to_string(),
+            password: "\n".to_string(),
+            ..config()
+        });
+        let err = match result {
+            Ok(_) => panic!("missing config should fail"),
+            Err(err) => err,
+        };
+
+        let msg = err.to_string();
+        assert!(msg.contains("email_missing_configuration"));
+        assert!(msg.contains("imap_host"));
+        assert!(msg.contains("smtp_host"));
+        assert!(msg.contains("username"));
+        assert!(msg.contains("password"));
+    }
+
+    #[test]
+    fn raw_email_paths_reject_blank_host_before_network() {
+        let smtp_err = smtp_send_raw(
+            " ",
+            587,
+            "agent@example.com",
+            "secret",
+            "agent@example.com",
+            "user@example.com",
+            "subject",
+            "body",
+            None,
+        )
+        .expect_err("blank SMTP host should fail before connect");
+        assert!(smtp_err.to_string().contains("email_missing_configuration"));
+        assert!(smtp_err.to_string().contains("smtp_host"));
+
+        let imap_err = imap_fetch_unseen(" ", 993, "agent@example.com", "secret")
+            .expect_err("blank IMAP host should fail before TLS/connect");
+        assert!(imap_err.to_string().contains("email_missing_configuration"));
+        assert!(imap_err.to_string().contains("imap_host"));
+    }
 
     #[test]
     fn image_email_body_with_caption() {
