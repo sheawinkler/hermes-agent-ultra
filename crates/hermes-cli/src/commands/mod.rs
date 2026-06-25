@@ -194,7 +194,7 @@ pub(crate) fn truncate_chars(input: &str, max_len: usize) -> String {
     out
 }
 
-#[cfg(feature = "talk")]
+#[cfg(any(feature = "talk", feature = "talk-rockchip"))]
 pub use cli_handlers::handle_cli_talk;
 pub(crate) use cli_handlers::{
     discover_plugin_surface, render_plugin_surface_table, whatsapp_cloud_setup_impl,

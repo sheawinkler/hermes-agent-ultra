@@ -90,13 +90,26 @@ num_threads = 2
 # 会话编排
 # ============================================================
 [orchestrator]
+min_silence_ms = 450
 endpoint_silence_ms = 800
-min_final_chars = 3
+trigger_on_asr_final = true
+cold_start_sec = 1
+min_final_chars = 2
+grace_min_final_chars = 2
 sentence_min_len = 12
 tts_first_chunk_chars = 6
+barge_in_frames = 2
 barge_in_enabled = true
+speculative_llm = true
+speculative_stable_ms = 450
+min_rms_trigger = 0.0
+min_rms_barge_in = 0.0
+barge_in_sustain_frames = 4
+barge_in_cooldown_ms = 1000
 barge_in_requires_wake = true
+max_context_messages = 20
 offline_continuation_ms = 800
+vad_mode = 3
 
 # ============================================================
 # 音频设备（留空 = 系统默认）
@@ -130,7 +143,7 @@ model_dir = "models/denoise"
 enabled = true
 frame_size = 256
 filter_length = 2048
-enable_preprocess = false
+enable_preprocess = true
 delay_ms = 0
 
 # ============================================================

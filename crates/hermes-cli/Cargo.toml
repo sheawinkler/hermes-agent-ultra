@@ -12,8 +12,8 @@ build = "build.rs"
 default = []
 otlp = ["hermes-telemetry/otlp"]
 swarms = ["hermes-intelligence/swarms"]
-talk = ["dep:hermes-talk"]
-talk-rockchip = ["talk", "hermes-talk/rockchip"]
+talk = ["dep:hermes-talk", "hermes-talk/sherpa-asr-tts"]
+talk-rockchip = ["dep:hermes-talk", "hermes-talk/rockchip"]
 
 [[bin]]
 name = "hermes"

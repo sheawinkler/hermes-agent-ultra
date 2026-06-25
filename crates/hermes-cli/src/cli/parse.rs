@@ -91,7 +91,7 @@ fn parse_shallow_command(
         ShallowCommand::Plugins { .. } => commands::parse_plugins(args),
         ShallowCommand::Memory { .. } => commands::parse_memory(args),
         ShallowCommand::Meeting { .. } => commands::parse_meeting(args),
-        #[cfg(feature = "talk")]
+        #[cfg(any(feature = "talk", feature = "talk-rockchip"))]
         ShallowCommand::Talk { .. } => commands::parse_talk(args),
         ShallowCommand::Interest { .. } => commands::parse_interest(args),
         ShallowCommand::Contribute { .. } => commands::parse_contribute(args),

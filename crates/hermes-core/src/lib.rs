@@ -62,7 +62,7 @@ pub use traits::{
 // Re-export tool call parser public API
 pub use tool_call_parser::{
     HermesToolCallParser, ToolCallParser, format_tool_calls, get_parser, parse_tool_calls,
-    register_parser, separate_text_and_calls,
+    register_parser, separate_text_and_calls, speakable_tts_prefix_end,
 };
 
 // Re-export ParseMode from traits

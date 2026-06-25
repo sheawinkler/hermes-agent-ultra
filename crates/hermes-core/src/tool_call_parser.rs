@@ -302,7 +302,41 @@ impl ToolCallParser for HermesToolCallParser {
         }
 
         if calls.is_empty() {
-            let func_shorthand_re = Regex::new(r#"(?s)<function=(\w+)>([\s\S]*?)</function>"#).unwrap();
+            let ps_re = Regex::new(r"(?is)<powershell>([\s\S]*?)</powershell>").unwrap();
+            for caps in ps_re.captures_iter(content) {
+                let command = caps.get(1).unwrap().as_str().trim();
+                if command.is_empty() {
+                    continue;
+                }
+                calls.push(ToolCall {
+                    id: next_call_id(),
+                    function: FunctionCall {
+                        name: "execute".to_string(),
+                        arguments: serde_json::json!({ "command": command }).to_string(),
+                    },
+                    extra_content: None,
+                });
+            }
+            let cmd_re = Regex::new(r"(?is)<cmd>([\s\S]*?)</cmd>").unwrap();
+            for caps in cmd_re.captures_iter(content) {
+                let command = caps.get(1).unwrap().as_str().trim();
+                if command.is_empty() {
+                    continue;
+                }
+                calls.push(ToolCall {
+                    id: next_call_id(),
+                    function: FunctionCall {
+                        name: "execute".to_string(),
+                        arguments: serde_json::json!({ "command": command }).to_string(),
+                    },
+                    extra_content: None,
+                });
+            }
+        }
+
+        if calls.is_empty() {
+            let func_shorthand_re =
+                Regex::new(r#"(?s)<function=(\w+)>([\s\S]*?)</function>"#).unwrap();
             let param_shorthand_re =
                 Regex::new(r#"(?s)<parameter=(\w+)>([\s\S]*?)</parameter>"#).unwrap();
             for func_caps in func_shorthand_re.captures_iter(content) {
@@ -417,10 +451,74 @@ pub fn separate_text_and_calls(content: &str) -> (String, Vec<ToolCall>) {
     let parameter_re = Regex::new(r#"<parameter\s+name="[^"]+">.*?</parameter>"#).unwrap();
     result = parameter_re.replace_all(&result, "").to_string();
 
+    // Remove <powershell>...</powershell> and <cmd>...</cmd> shell shortcuts
+    let ps_tag_re = Regex::new(r"(?is)<powershell>[\s\S]*?</powershell>").unwrap();
+    result = ps_tag_re.replace_all(&result, "").to_string();
+    let cmd_tag_re = Regex::new(r"(?is)<cmd>[\s\S]*?</cmd>").unwrap();
+    result = cmd_tag_re.replace_all(&result, "").to_string();
+
     // Trim excessive whitespace left behind
     let result = result.trim().to_string();
 
     (result, calls)
+}
+
+/// Byte index up to which `content` is safe to send to TTS (excludes tool-call markup).
+///
+/// Handles complete markers and incomplete trailing tags (e.g. `<seed:` still streaming in).
+pub fn speakable_tts_prefix_end(content: &str) -> usize {
+    const MARKERS: &[&str] = &[
+        "<seed:tool_call",
+        "<tool_call",
+        "<function_calls>",
+        "<function=",
+        "<tool_use>",
+        "<invoke ",
+        "```tool_call",
+        "<|tool_call",
+        "<parameter=",
+        "<powershell",
+        "</powershell",
+        "<cmd>",
+        "</cmd>",
+    ];
+    const PARTIAL_SUFFIXES: &[&str] = &[
+        "<seed:",
+        "<seed:tool",
+        "<tool_call",
+        "<function",
+        "<function=",
+        "<parameter",
+        "<param",
+        "</seed",
+        "```tool",
+        "<invoke",
+        "<tool_use",
+        "<power",
+        "<powershell",
+        "</powershell",
+        "<cmd",
+    ];
+
+    let mut end = content.len();
+    for marker in MARKERS {
+        if let Some(i) = content.find(marker) {
+            end = end.min(i);
+        }
+    }
+    for partial in PARTIAL_SUFFIXES {
+        if let Some(i) = content.rfind(partial) {
+            let tail = &content[i..];
+            let incomplete = partial.contains(':')
+                || partial.starts_with("</")
+                || !tail.contains('>')
+                || tail.starts_with("```tool");
+            if incomplete {
+                end = end.min(i);
+            }
+        }
+    }
+    end
 }
 
 // ---------------------------------------------------------------------------
@@ -817,6 +915,44 @@ Proceeding now.
         assert!(!text.contains("minimax:tool_call"));
         assert!(!text.contains("<invoke"));
         assert!(!text.contains("<parameter"));
+    }
+
+    #[test]
+    fn test_speakable_tts_prefix_end_with_seed_tool_call() {
+        let content = "好的。<seed:tool_call><function=execute_command>";
+        assert_eq!(
+            speakable_tts_prefix_end(content),
+            content.find("<seed:").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_speakable_tts_prefix_end_with_incomplete_suffix() {
+        let content = "用户问时间<seed:";
+        assert_eq!(
+            speakable_tts_prefix_end(content),
+            content.find("<seed:").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_parse_powershell_shell_tag() {
+        let content = r#"思考中…
+<powershell>powershell -Command "Get-Date"</powershell>"#;
+        let calls = parse_tool_calls(content).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.name, "execute");
+        let args: serde_json::Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
+        assert_eq!(args["command"], r#"powershell -Command "Get-Date""#);
+    }
+
+    #[test]
+    fn test_speakable_tts_prefix_end_with_powershell_tag() {
+        let content = "好的。<powershell>powershell -Command \"Get-Date\"</powershell>";
+        assert_eq!(
+            speakable_tts_prefix_end(content),
+            content.find("<powershell").unwrap()
+        );
     }
 
     #[test]

@@ -29,7 +29,7 @@ model = "models/sensevoice/model.int8.onnx"
 tokens = "models/sensevoice/tokens.txt"
 language = "auto"
 use_itn = true
-num_threads = 2
+num_threads = 4
 provider = "cpu"
 
 # ============================================================
@@ -43,7 +43,7 @@ sample_rate = 24000
 format = "pcm"
 
 [tts.sherpa]
-num_threads = 2
+num_threads = 4
 provider = "cpu"
 
 [tts.sherpa.kokoro]
@@ -197,7 +197,7 @@ provider = "cpu"
 enabled = true
 frame_size = 256
 filter_length = 2048
-enable_preprocess = false
+enable_preprocess = true
 delay_ms = 0
 
 # ============================================================

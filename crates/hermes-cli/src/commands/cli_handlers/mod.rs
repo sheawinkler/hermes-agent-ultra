@@ -19,7 +19,7 @@ mod plugins;
 mod server;
 mod server_config;
 mod sessions;
-#[cfg(feature = "talk")]
+#[cfg(any(feature = "talk", feature = "talk-rockchip"))]
 mod talk;
 mod whatsapp;
 
@@ -39,7 +39,7 @@ pub use pairing::handle_cli_pairing;
 pub use plugins::{handle_cli_external_plugin_subcommand, handle_cli_plugins};
 pub use server::handle_cli_server;
 pub use sessions::handle_cli_sessions;
-#[cfg(feature = "talk")]
+#[cfg(any(feature = "talk", feature = "talk-rockchip"))]
 pub use talk::handle_cli_talk;
 pub use whatsapp::handle_cli_whatsapp;
 

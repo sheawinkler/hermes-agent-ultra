@@ -57,7 +57,7 @@ pub mod skin_engine;
 pub mod startup_metrics;
 pub mod state_paths;
 pub mod systems;
-#[cfg(feature = "talk")]
+#[cfg(any(feature = "talk", feature = "talk-rockchip"))]
 pub mod talk_embedded;
 pub mod teams_pipeline_cli;
 pub mod terminal_backend;

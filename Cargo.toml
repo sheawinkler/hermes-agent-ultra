@@ -68,7 +68,7 @@ hermes-parity-tests = { path = "crates/hermes-parity-tests" }
 hermes-strategies = { path = "crates/hermes-strategies" }
 hermes-market-watch = { path = "crates/hermes-market-watch" }
 hermes-copilot-lite = { path = "crates/hermes-copilot-lite" }
-hermes-talk = { path = "crates/hermes-talk" }
+hermes-talk = { path = "crates/hermes-talk", default-features = false }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

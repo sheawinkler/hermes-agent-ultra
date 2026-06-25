@@ -947,7 +947,7 @@ pub fn parse_meeting(args: &[OsString]) -> Result<CliCommand, clap::Error> {
     })
 }
 
-#[cfg(feature = "talk")]
+#[cfg(any(feature = "talk", feature = "talk-rockchip"))]
 #[derive(Parser, Debug, Clone)]
 #[command(name = "talk", about = "Real-time voice dialog (ASR + LLM + TTS)")]
 struct TalkArgs {
@@ -961,7 +961,7 @@ struct TalkArgs {
     seconds: u64,
 }
 
-#[cfg(feature = "talk")]
+#[cfg(any(feature = "talk", feature = "talk-rockchip"))]
 pub fn parse_talk(args: &[OsString]) -> Result<CliCommand, clap::Error> {
     parse_subcommand::<TalkArgs, _>(args, |a| CliCommand::Talk {
         action: a.action,
@@ -1188,7 +1188,7 @@ pub fn all_subcommand_commands() -> Vec<clap::Command> {
         MediaArgs,
         McpArgs,
         MeetingArgs,
-        #[cfg(feature = "talk")]
+        #[cfg(any(feature = "talk", feature = "talk-rockchip"))]
         TalkArgs,
         SessionsArgs,
         ResumeArgs,

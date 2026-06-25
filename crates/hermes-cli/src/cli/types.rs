@@ -323,7 +323,7 @@ pub enum CliCommand {
     /// `hermes talk <action> [options]` — real-time voice dialog (requires `--features talk`).
     ///
     /// Actions: `run` (default), `init`, `list-devices`, `probe-capture`, `probe-playback`, `enroll`.
-    #[cfg(feature = "talk")]
+    #[cfg(any(feature = "talk", feature = "talk-rockchip"))]
     Talk {
         action: Option<String>,
         /// Path to talk config.toml (default: `$HERMES_HOME/hermes-talk/config.toml`).
