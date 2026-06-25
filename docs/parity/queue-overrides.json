@@ -4318,6 +4318,66 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust OpenViking memory plugin: canonical OpenViking tool_status values and inbound alias sets are named constants; conversion emits completed/error/pending consistently and tests cover JSON error result mapping."
+    },
+    "29e5e127c6f1c35fcc67abf0281c50c237e2929f": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram adapter: TelegramMessage now deserializes Bot API rich_message echoes and parse_update flattens native rich blocks into text when Telegram omits text/caption, with focused rich-reply coverage."
+    },
+    "c1f11f8c69f9721a4b5227231a6ff23a91826f76": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream indexes streamed rich finals in a Python rich_sent_store fallback. Ultra's Rust Telegram path has no rich_sent_store; rich edit/send payloads are generated from live adapter state and native rich echoes are parsed directly."
+    },
+    "796f618f9987306722c4e27fdfb757291240386b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream fixes Python chunk marker placement around Markdown fences. Ultra's Rust Telegram split_message path does not append chunk markers, so the marker-inside-fence corruption mode is absent."
+    },
+    "31e59fe44d18498ae53f624a3d3d5dbbad2d165e": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram adapter: rich send/edit payloads normalize prose single newlines into Telegram hard breaks while preserving protected Markdown regions, with slash-output newline coverage."
+    },
+    "a9669323922f6e79482536f2c05846c354571528": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram adapter: rich newline normalization protects Markdown pipe tables from hard-break injection, preserving table layout with focused regression coverage."
+    },
+    "ea056b05598cab8330555defe095988c3a7928f9": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram adapter: rich-message eligibility now rejects CJK scripts to avoid Telegram desktop garbling, with guard and legacy-payload tests."
+    },
+    "6183e8ce1b5ee79f2d808d0c17ea46fbbf128c37": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram config: Bot API 10.1 rich messages are opt-in/default-off in serde defaults and CLI config mapping, with gateway and CLI tests pinning the default."
+    },
+    "565b7c8d9d879c6423c55e9be84596936bc489ba": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream repairs lingering Python sendChatAction typing refreshes. Ultra's Rust Telegram adapter does not implement a typing-indicator refresh loop, so there is no post-final typing state to re-arm or clear."
+    },
+    "dbe14ce35d9cb087ae9fe3e3f166f6c475297e25": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram adapter: startup registers BotCommand menus for default/private/group scopes from the Rust gateway command catalog with configurable priority, mode, and cap."
+    },
+    "d4be583d986f7bcca4f8414fd21ef9e34b18c948": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram adapter: the default command-menu cap is 60 while still clamping to Telegram's 100-command API maximum, with command ordering/cap coverage."
+    },
+    "73a20a6ad62b678d69335ef3a352ccf9ab85167b": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported to Rust's edit surface: oversized Telegram edit previews are clipped to the Bot API text limit instead of failing mid-stream; final sends continue through the normal send/split path."
+    },
+    "17beb55e3c9c3574bce849a75430887dec910423": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream gates Python rich draft previews separately from finals. Ultra has no Telegram sendRichMessageDraft or rich draft-preview runtime surface; rich final send/edit attempts remain controlled by rich_messages."
     }
   },
   "subject_patterns": [
