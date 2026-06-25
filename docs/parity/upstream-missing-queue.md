@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T15:09:17.893661+00:00`
+Generated: `2026-06-25T15:56:30.884476+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7012`.
 
@@ -17,9 +17,9 @@ Generated: `2026-06-25T15:09:17.893661+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 181 |
-| ported | 413 |
-| superseded | 6342 |
+| pending | 179 |
+| ported | 414 |
+| superseded | 6343 |
 
 ## First 100 Pending Commits
 
@@ -97,8 +97,6 @@ Generated: `2026-06-25T15:09:17.893661+00:00`
 | `9578e52795e3` | #26 | fix(photon): detect unexpected sidecar death and trigger reconnect |
 | `5e3e89cc05d3` | #23 | feat(hindsight): configurable embedded daemon health grace timeout (#50341) |
 | `6bbacc223899` | #26 | fix(desktop): make cold-start port-announcement deadline tolerant |
-| `b6d107240819` | #20 | fix(cli): branch new worktrees from the fresh remote tip, not stale local HEAD (#50355) |
-| `5b45fb269a06` | #20 | fix(security): sanitize kanban markdown html |
 | `f72690825e76` | #26 | fix(desktop/windows): stop in-app update from cascading into a backend restart loop (#50381) |
 | `745c4db235bd` | #26 | feat(desktop/windows): show update-in-progress feedback before the desktop exits (#50419) (#50448) |
 | `7785655b4ece` | #26 | fix(desktop): keep the floating composer in-bounds so it can't be lost off-screen |
@@ -125,3 +123,5 @@ Generated: `2026-06-25T15:09:17.893661+00:00`
 | `17dfc6bec4a8` | #26 | fix(desktop): set AppUserModelID on Windows so notifications fire (#50808) |
 | `f2e37549c673` | #20 | feat(computer_use): cross-platform cua-driver (macOS/Windows/Linux) |
 | `e3505c7f73a4` | #26 | fix(computer_use): reconcile Linux gate with stale "gated off" comments |
+| `70e7132e2ff7` | #20 | fix(openviking): gate memory writes and add viking_forget |
+| `c7e0501e9b58` | #23 | fix(openviking): drain memory mirror workers on shutdown |

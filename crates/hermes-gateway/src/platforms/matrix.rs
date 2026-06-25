@@ -545,7 +545,7 @@ impl MatrixE2ee {
 /// and `[text](url)` links. This is intentionally simple; a full
 /// CommonMark parser (e.g. `pulldown-cmark`) can replace it later.
 pub fn markdown_to_html(md: &str) -> String {
-    let mut html = md.to_string();
+    let mut html = escape_html_text(md);
 
     // Code blocks (triple backtick) — must come before inline code
     let code_block_re = Regex::new(r"```(\w*)\n([\s\S]*?)```").expect("valid regex");
@@ -583,13 +583,49 @@ pub fn markdown_to_html(md: &str) -> String {
     // Links [text](url)
     let link_re = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").expect("valid regex");
     html = link_re
-        .replace_all(&html, r#"<a href="$2">$1</a>"#)
+        .replace_all(&html, |caps: &regex::Captures| {
+            let label = &caps[1];
+            let href = caps[2].trim();
+            if markdown_href_is_safe(href) {
+                format!(
+                    r#"<a href="{}">{}</a>"#,
+                    escape_preescaped_attr(href),
+                    label
+                )
+            } else {
+                label.to_string()
+            }
+        })
         .into_owned();
 
     // Line breaks
     html = html.replace('\n', "<br/>");
 
     html
+}
+
+fn markdown_href_is_safe(href: &str) -> bool {
+    let lower = href.trim_start().to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:")
+}
+
+fn escape_html_text(raw: &str) -> String {
+    let mut escaped = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn escape_preescaped_attr(raw: &str) -> String {
+    raw.replace('`', "&#96;")
 }
 
 // ---------------------------------------------------------------------------
@@ -2687,6 +2723,34 @@ mod tests {
     fn test_markdown_to_html_link() {
         let html = markdown_to_html("[click](https://example.com)");
         assert!(html.contains(r#"<a href="https://example.com">click</a>"#));
+    }
+
+    #[test]
+    fn test_markdown_to_html_escapes_raw_html() {
+        let html = markdown_to_html(r#"hi <img src=x onerror=alert(1)> <script>x</script>"#);
+
+        assert!(!html.contains("<img"));
+        assert!(!html.contains("<script"));
+        assert!(html.contains("&lt;img src=x onerror=alert(1)&gt;"));
+        assert!(html.contains("&lt;script&gt;x&lt;/script&gt;"));
+    }
+
+    #[test]
+    fn test_markdown_to_html_rejects_unsafe_link_scheme() {
+        let html = markdown_to_html("[click](javascript:alert(1)) [mail](mailto:a@example.com)");
+
+        assert!(!html.contains("javascript:"));
+        assert!(!html.contains("<a href=\"javascript:"));
+        assert!(html.contains("click)"));
+        assert!(html.contains(r#"<a href="mailto:a@example.com">mail</a>"#));
+    }
+
+    #[test]
+    fn test_markdown_to_html_escapes_link_label_and_href() {
+        let html = markdown_to_html(r#"[<b>x</b>](https://example.com/?q="bad"&ok=1)"#);
+
+        assert!(html.contains("&lt;b&gt;x&lt;/b&gt;"));
+        assert!(html.contains(r#"href="https://example.com/?q=&quot;bad&quot;&amp;ok=1""#));
     }
 
     #[test]

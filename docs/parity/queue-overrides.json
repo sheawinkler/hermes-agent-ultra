@@ -4613,6 +4613,16 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust intentionally keeps the delivery cap constant with no new HERMES_DELIVERY_MAX_PLATFORM_OUTPUT env knob; verified Rust chunking adapters (Discord, Telegram, Slack, WhatsApp, Weixin) opt into splits_long_messages, while non-chunking Rust adapters remain conservative and protected by truncation plus full-output audit files. The upstream-only Teams/Yuanbao/WhatsApp Cloud adapter flags have no Rust files in this tree."
+    },
+    "5b45fb269a06": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Upstream sanitizes JS kanban dashboard markdown before HTML insertion. The Rust runtime equivalent sink is Matrix formatted_body generation: markdown_to_html now escapes raw HTML before markdown expansion, only emits links for http/https/mailto hrefs, escapes generated link attributes, and feature-enabled Matrix tests cover raw <script>/<img> payloads, unsafe javascript: links, safe mailto links, and escaped labels/hrefs."
+    },
+    "b6d107240819": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream fixes Python CLI --worktree branching from stale local HEAD. The Rust CLI in this repository has no --worktree/git-worktree creation path (rg across crates finds only TERMINAL_CWD consumption and docs/tests), so there is no Rust runtime worktree-base resolver to patch. Existing Rust terminal/file tools consume an already-materialized TERMINAL_CWD and do not create branches."
     }
   },
   "subject_patterns": [
