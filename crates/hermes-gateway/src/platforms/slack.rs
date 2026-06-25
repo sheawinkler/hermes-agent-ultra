@@ -12,10 +12,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use regex::{Regex, RegexBuilder};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
@@ -54,6 +55,18 @@ pub struct SlackConfig {
     /// Whether reaction lifecycle updates are enabled.
     #[serde(default = "default_true")]
     pub reactions: bool,
+
+    /// Whether non-DM channel messages must mention or wake-word address the bot.
+    #[serde(default)]
+    pub require_mention: bool,
+
+    /// Optional Slack bot user id used for literal `<@BOTID>` mention checks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_user_id: Option<String>,
+
+    /// Extra regex wake words accepted when `require_mention` is enabled.
+    #[serde(default)]
+    pub mention_patterns: Vec<String>,
 
     /// Proxy configuration for outbound requests.
     #[serde(default)]
@@ -202,6 +215,24 @@ pub struct IncomingSlackMessage {
     pub is_bot: bool,
 }
 
+/// Token-free mention policy used by Socket Mode routing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SlackMentionPolicy {
+    pub require_mention: bool,
+    pub bot_user_id: Option<String>,
+    pub mention_patterns: Vec<String>,
+}
+
+impl SlackMentionPolicy {
+    fn from_config(config: &SlackConfig) -> Self {
+        Self {
+            require_mention: config.require_mention,
+            bot_user_id: config.bot_user_id.clone(),
+            mention_patterns: config.mention_patterns.clone(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Socket Mode session management
 // ---------------------------------------------------------------------------
@@ -231,13 +262,23 @@ pub enum SocketModeAction {
 pub struct SocketModeSession {
     state: SocketModeConnectionState,
     envelopes_acked: u64,
+    mention_policy: SlackMentionPolicy,
 }
 
 impl SocketModeSession {
     pub fn new() -> Self {
+        Self::with_mention_policy(SlackMentionPolicy::default())
+    }
+
+    pub fn with_config(config: &SlackConfig) -> Self {
+        Self::with_mention_policy(SlackMentionPolicy::from_config(config))
+    }
+
+    pub fn with_mention_policy(mention_policy: SlackMentionPolicy) -> Self {
         Self {
             state: SocketModeConnectionState::Disconnected,
             envelopes_acked: 0,
+            mention_policy,
         }
     }
 
@@ -280,7 +321,8 @@ impl SocketModeSession {
             }
             "events_api" => {
                 self.envelopes_acked += 1;
-                match SlackAdapter::parse_event(envelope) {
+                match SlackAdapter::parse_event_with_mention_policy(envelope, &self.mention_policy)
+                {
                     Some(msg) => SocketModeAction::MessageEvent(msg),
                     None => SocketModeAction::Ack,
                 }
@@ -917,6 +959,45 @@ impl SlackAdapter {
 
     /// Parse a Socket Mode envelope into an IncomingSlackMessage.
     pub fn parse_event(envelope: &SocketModeEnvelope) -> Option<IncomingSlackMessage> {
+        Self::parse_event_unfiltered(envelope)
+    }
+
+    /// Parse a Socket Mode envelope and apply Slack mention/wake-word policy.
+    pub fn parse_event_with_config(
+        envelope: &SocketModeEnvelope,
+        config: &SlackConfig,
+    ) -> Option<IncomingSlackMessage> {
+        Self::parse_event_with_mention_policy(envelope, &SlackMentionPolicy::from_config(config))
+    }
+
+    pub fn parse_event_with_mention_policy(
+        envelope: &SocketModeEnvelope,
+        policy: &SlackMentionPolicy,
+    ) -> Option<IncomingSlackMessage> {
+        let msg = Self::parse_event_unfiltered(envelope)?;
+        if slack_event_is_dm(envelope, &msg.channel) || !policy.require_mention {
+            return Some(msg);
+        }
+
+        let env_bot_user_id = std::env::var("SLACK_BOT_USER_ID")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let bot_user_id = policy
+            .bot_user_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or(env_bot_user_id.as_deref());
+
+        if slack_message_is_addressed(&msg.text, bot_user_id, &policy.mention_patterns) {
+            return Some(msg);
+        }
+
+        None
+    }
+
+    fn parse_event_unfiltered(envelope: &SocketModeEnvelope) -> Option<IncomingSlackMessage> {
         let payload = envelope.payload.as_ref()?;
         let event = payload.get("event")?;
 
@@ -1352,6 +1433,109 @@ fn reactions_toggle_enabled(raw: Option<&str>, default_enabled: bool) -> bool {
     }
 }
 
+fn slack_event_is_dm(envelope: &SocketModeEnvelope, channel_id: &str) -> bool {
+    let channel_type = envelope
+        .payload
+        .as_ref()
+        .and_then(|payload| payload.get("event"))
+        .and_then(|event| event.get("channel_type"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    matches!(channel_type, "im" | "mpim") || channel_id.starts_with('D')
+}
+
+fn parse_slack_mention_pattern_values(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        match value {
+            serde_json::Value::Array(values) => {
+                return values
+                    .into_iter()
+                    .filter_map(|value| match value {
+                        serde_json::Value::String(s) => Some(s),
+                        serde_json::Value::Number(n) => Some(n.to_string()),
+                        _ => None,
+                    })
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+            serde_json::Value::String(s) => {
+                return s
+                    .trim()
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|part| !part.is_empty())
+                    .map(str::to_string)
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+
+    trimmed
+        .replace('\n', ",")
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn slack_mention_pattern_sources(configured: &[String]) -> Vec<String> {
+    let mut patterns: Vec<String> = configured
+        .iter()
+        .flat_map(|pattern| parse_slack_mention_pattern_values(pattern))
+        .collect();
+    if patterns.is_empty() {
+        if let Ok(raw) = std::env::var("SLACK_MENTION_PATTERNS") {
+            patterns = parse_slack_mention_pattern_values(&raw);
+        }
+    }
+    patterns
+}
+
+fn compile_slack_mention_patterns(configured: &[String]) -> Vec<Regex> {
+    slack_mention_pattern_sources(configured)
+        .into_iter()
+        .filter_map(
+            |pattern| match RegexBuilder::new(&pattern).case_insensitive(true).build() {
+                Ok(regex) => Some(regex),
+                Err(err) => {
+                    warn!(pattern = %pattern, error = %err, "Invalid Slack mention pattern");
+                    None
+                }
+            },
+        )
+        .collect()
+}
+
+fn slack_message_matches_mention_patterns(text: &str, configured: &[String]) -> bool {
+    if text.trim().is_empty() {
+        return false;
+    }
+    compile_slack_mention_patterns(configured)
+        .iter()
+        .any(|pattern| pattern.is_match(text))
+}
+
+fn slack_message_is_addressed(
+    text: &str,
+    bot_user_id: Option<&str>,
+    mention_patterns: &[String],
+) -> bool {
+    if let Some(bot_user_id) = bot_user_id.map(str::trim).filter(|s| !s.is_empty()) {
+        if text.contains(&format!("<@{bot_user_id}>")) {
+            return true;
+        }
+    }
+    slack_message_matches_mention_patterns(text, mention_patterns)
+}
+
 /// Split a message into chunks that fit within the given max length.
 fn split_message(text: &str, max_len: usize) -> Vec<String> {
     if text.len() <= max_len {
@@ -1405,8 +1589,28 @@ fn slack_image_url_blocks(image_url: &str, caption: Option<&str>) -> (serde_json
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
     use wiremock::matchers::{method, path, query_param, query_param_is_missing};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    fn slack_test_config() -> SlackConfig {
+        SlackConfig {
+            token: "xoxb-test".into(),
+            app_token: None,
+            socket_mode: false,
+            reactions: true,
+            require_mention: false,
+            bot_user_id: None,
+            mention_patterns: Vec::new(),
+            proxy: AdapterProxyConfig::default(),
+        }
+    }
 
     // --- Original tests (preserved) ---
 
@@ -1479,6 +1683,133 @@ mod tests {
             })),
         };
         assert!(SlackAdapter::parse_event(&env).is_none());
+    }
+
+    #[test]
+    fn slack_mention_patterns_parse_json_string_and_csv_newlines() {
+        assert_eq!(
+            parse_slack_mention_pattern_values(r#"["^\\s*chompy\\b","@hermes"]"#),
+            vec![r"^\s*chompy\b", "@hermes"]
+        );
+        assert_eq!(
+            parse_slack_mention_pattern_values("chompy\\b\n@hermes, sigma"),
+            vec!["chompy\\b", "@hermes", "sigma"]
+        );
+        assert_eq!(
+            parse_slack_mention_pattern_values(r#""hey hermes""#),
+            vec!["hey hermes"]
+        );
+    }
+
+    #[test]
+    fn slack_mention_patterns_env_fallback_splits_mixed_csv_and_newlines() {
+        let _env = env_lock();
+        unsafe {
+            std::env::set_var("SLACK_MENTION_PATTERNS", "chompy\\b\n@hermes, sigma");
+        }
+        assert!(slack_message_matches_mention_patterns(
+            "SIGMA status",
+            &Vec::new()
+        ));
+        assert!(slack_message_matches_mention_patterns(
+            "hey @Hermes",
+            &Vec::new()
+        ));
+        assert!(!slack_message_matches_mention_patterns(
+            "plain channel chatter",
+            &Vec::new()
+        ));
+        unsafe {
+            std::env::remove_var("SLACK_MENTION_PATTERNS");
+        }
+    }
+
+    #[test]
+    fn parse_event_with_config_requires_mention_but_accepts_wake_word() {
+        let mut cfg = slack_test_config();
+        cfg.require_mention = true;
+        cfg.bot_user_id = Some("UBOT".into());
+        cfg.mention_patterns = vec![r"^\s*chompy\b".into()];
+
+        let env = SocketModeEnvelope {
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env123".into()),
+            payload: Some(serde_json::json!({
+                "event": {
+                    "type": "message",
+                    "text": "Chompy check gateway",
+                    "channel": "C123",
+                    "channel_type": "channel",
+                    "user": "U456",
+                    "ts": "1.0"
+                }
+            })),
+        };
+
+        let msg = SlackAdapter::parse_event_with_config(&env, &cfg).unwrap();
+        assert_eq!(msg.text, "Chompy check gateway");
+    }
+
+    #[test]
+    fn parse_event_with_config_blocks_unaddressed_channel_but_allows_dm() {
+        let mut cfg = slack_test_config();
+        cfg.require_mention = true;
+        cfg.bot_user_id = Some("UBOT".into());
+
+        let channel_env = SocketModeEnvelope {
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env123".into()),
+            payload: Some(serde_json::json!({
+                "event": {
+                    "type": "message",
+                    "text": "general channel chatter",
+                    "channel": "C123",
+                    "channel_type": "channel",
+                    "user": "U456",
+                    "ts": "1.0"
+                }
+            })),
+        };
+        assert!(SlackAdapter::parse_event_with_config(&channel_env, &cfg).is_none());
+
+        let dm_env = SocketModeEnvelope {
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env124".into()),
+            payload: Some(serde_json::json!({
+                "event": {
+                    "type": "message",
+                    "text": "dm chatter",
+                    "channel": "D123",
+                    "channel_type": "im",
+                    "user": "U456",
+                    "ts": "2.0"
+                }
+            })),
+        };
+        assert!(SlackAdapter::parse_event_with_config(&dm_env, &cfg).is_some());
+    }
+
+    #[test]
+    fn parse_event_with_config_accepts_literal_bot_mention() {
+        let mut cfg = slack_test_config();
+        cfg.require_mention = true;
+        cfg.bot_user_id = Some("UBOT".into());
+
+        let env = SocketModeEnvelope {
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env123".into()),
+            payload: Some(serde_json::json!({
+                "event": {
+                    "type": "message",
+                    "text": "<@UBOT> status",
+                    "channel": "C123",
+                    "channel_type": "channel",
+                    "user": "U456",
+                    "ts": "1.0"
+                }
+            })),
+        };
+        assert!(SlackAdapter::parse_event_with_config(&env, &cfg).is_some());
     }
 
     // --- Socket Mode session ---
@@ -1556,6 +1887,50 @@ mod tests {
             })),
         };
         assert_eq!(session.handle_envelope(&non_msg), SocketModeAction::Ack);
+        assert_eq!(session.envelopes_acked(), 2);
+    }
+
+    #[test]
+    fn handle_envelope_events_api_respects_mention_policy() {
+        let mut cfg = slack_test_config();
+        cfg.require_mention = true;
+        cfg.mention_patterns = vec![r"^\s*chompy\b".into()];
+        let mut session = SocketModeSession::with_config(&cfg);
+
+        let unaddressed = SocketModeEnvelope {
+            envelope_type: "events_api".into(),
+            envelope_id: Some("e1".into()),
+            payload: Some(serde_json::json!({
+                "event": {
+                    "type": "message",
+                    "text": "general chatter",
+                    "channel": "C9",
+                    "channel_type": "channel",
+                    "user": "UA",
+                    "ts": "1.2"
+                }
+            })),
+        };
+        assert_eq!(session.handle_envelope(&unaddressed), SocketModeAction::Ack);
+
+        let addressed = SocketModeEnvelope {
+            envelope_type: "events_api".into(),
+            envelope_id: Some("e2".into()),
+            payload: Some(serde_json::json!({
+                "event": {
+                    "type": "message",
+                    "text": "Chompy status",
+                    "channel": "C9",
+                    "channel_type": "channel",
+                    "user": "UA",
+                    "ts": "1.3"
+                }
+            })),
+        };
+        match session.handle_envelope(&addressed) {
+            SocketModeAction::MessageEvent(m) => assert_eq!(m.text, "Chompy status"),
+            other => panic!("Expected MessageEvent, got {:?}", other),
+        }
         assert_eq!(session.envelopes_acked(), 2);
     }
 
@@ -1868,6 +2243,9 @@ mod tests {
             app_token: None,
             socket_mode: false,
             reactions: true,
+            require_mention: false,
+            bot_user_id: None,
+            mention_patterns: Vec::new(),
             proxy: AdapterProxyConfig::default(),
         })
         .expect("adapter");
@@ -1904,6 +2282,9 @@ mod tests {
             app_token: None,
             socket_mode: false,
             reactions: true,
+            require_mention: false,
+            bot_user_id: None,
+            mention_patterns: Vec::new(),
             proxy: AdapterProxyConfig::default(),
         })
         .expect("adapter");

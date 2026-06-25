@@ -72,6 +72,9 @@ pub enum GatewayError {
     #[error("Authentication error: {0}")]
     Auth(String),
 
+    #[error("Rate limited{0}", retry_after_secs.map(|s| format!(" (retry after {}s)", s)).unwrap_or_default())]
+    RateLimited { retry_after_secs: Option<u64> },
+
     #[error("Session expired: {0}")]
     SessionExpired(String),
 }
@@ -166,6 +169,14 @@ mod tests {
     fn tool_error_display() {
         let err = ToolError::NotFound("my_tool".into());
         assert_eq!(err.to_string(), "Tool not found: my_tool");
+    }
+
+    #[test]
+    fn gateway_error_rate_limit_display() {
+        let err = GatewayError::RateLimited {
+            retry_after_secs: Some(42),
+        };
+        assert_eq!(err.to_string(), "Rate limited (retry after 42s)");
     }
 
     #[test]
