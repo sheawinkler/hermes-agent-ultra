@@ -28202,6 +28202,197 @@ pub async fn handle_cli_acp(
     Ok(())
 }
 
+const CLI_BACKUP_HERMES_PREFIX: &str = "hermes";
+const CLI_BACKUP_EXTERNAL_PREFIX: &str = "external";
+
+fn backup_secret_like_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    matches!(name, ".env" | "auth.json" | "state.db")
+        || path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext, "env" | "json" | "conf"))
+}
+
+fn safe_relative_archive_path(path: &Path) -> Option<PathBuf> {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => out.push(part),
+            std::path::Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    if out.as_os_str().is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn backup_collect_regular_files(base: &Path) -> Vec<PathBuf> {
+    let Ok(meta) = std::fs::symlink_metadata(base) else {
+        return Vec::new();
+    };
+    if meta.file_type().is_symlink() {
+        return Vec::new();
+    }
+    if meta.is_file() {
+        return vec![base.to_path_buf()];
+    }
+    if !meta.is_dir() {
+        return Vec::new();
+    }
+
+    let mut files = Vec::new();
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return files;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            files.extend(backup_collect_regular_files(&path));
+        } else if meta.is_file() {
+            files.push(path);
+        }
+    }
+    files
+}
+
+fn collect_memory_provider_external_backup_files(
+    hermes_dir: &Path,
+    home_dir: &Path,
+) -> Vec<(PathBuf, PathBuf)> {
+    let Ok(home_resolved) = home_dir.canonicalize() else {
+        return Vec::new();
+    };
+    let hermes_resolved = hermes_dir.canonicalize().ok();
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+
+    for provider in hermes_agent::memory_plugins::discover_available_providers() {
+        for declared in provider.backup_paths() {
+            let Ok(resolved) = declared.canonicalize() else {
+                continue;
+            };
+            if !resolved.starts_with(&home_resolved) {
+                continue;
+            }
+            if hermes_resolved
+                .as_ref()
+                .is_some_and(|hermes| resolved.starts_with(hermes))
+            {
+                continue;
+            }
+            for file in backup_collect_regular_files(&resolved) {
+                let Ok(file_resolved) = file.canonicalize() else {
+                    continue;
+                };
+                if !seen.insert(file_resolved.clone()) {
+                    continue;
+                }
+                let Ok(rel_to_home) = file_resolved.strip_prefix(&home_resolved) else {
+                    continue;
+                };
+                let mut archive_path = PathBuf::from(CLI_BACKUP_EXTERNAL_PREFIX);
+                archive_path.push(rel_to_home);
+                out.push((file_resolved, archive_path));
+            }
+        }
+    }
+
+    out
+}
+
+fn restore_archive_entry_target(
+    member: &Path,
+    hermes_dir: &Path,
+    home_dir: &Path,
+) -> Option<PathBuf> {
+    let safe = safe_relative_archive_path(member)?;
+    let mut components = safe.components();
+    let first = components.next()?.as_os_str().to_string_lossy().to_string();
+    let rel: PathBuf = components.as_path().to_path_buf();
+    if rel.as_os_str().is_empty() {
+        return None;
+    }
+    match first.as_str() {
+        CLI_BACKUP_EXTERNAL_PREFIX => Some(home_dir.join(rel)),
+        CLI_BACKUP_HERMES_PREFIX => Some(hermes_dir.join(rel)),
+        _ => Some(hermes_dir.join(safe)),
+    }
+}
+
+fn restore_backup_archive(
+    archive: &mut tar::Archive<flate2::read::GzDecoder<std::fs::File>>,
+    hermes_dir: &Path,
+    home_dir: &Path,
+) -> Result<(usize, usize), hermes_core::AgentError> {
+    std::fs::create_dir_all(hermes_dir).map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+    let mut restored = 0usize;
+    let mut restored_external = 0usize;
+
+    let entries = archive
+        .entries()
+        .map_err(|e| hermes_core::AgentError::Io(format!("Read archive error: {}", e)))?;
+    for entry in entries {
+        let mut entry = entry
+            .map_err(|e| hermes_core::AgentError::Io(format!("Archive entry error: {}", e)))?;
+        let entry_path = entry
+            .path()
+            .map_err(|e| hermes_core::AgentError::Io(format!("Archive path error: {}", e)))?
+            .into_owned();
+        let Some(target) = restore_archive_entry_target(&entry_path, hermes_dir, home_dir) else {
+            continue;
+        };
+        let is_external = safe_relative_archive_path(&entry_path)
+            .and_then(|p| p.components().next().map(|c| c.as_os_str().to_owned()))
+            .is_some_and(|first| first == CLI_BACKUP_EXTERNAL_PREFIX);
+        let entry_type = entry.header().entry_type();
+
+        if entry_type.is_dir() {
+            std::fs::create_dir_all(&target)
+                .map_err(|e| hermes_core::AgentError::Io(format!("Create dir error: {}", e)))?;
+            continue;
+        }
+        if !(entry_type.is_file() || entry_type == tar::EntryType::Regular) {
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| hermes_core::AgentError::Io(format!("Create dir error: {}", e)))?;
+        }
+        entry
+            .unpack(&target)
+            .map_err(|e| hermes_core::AgentError::Io(format!("Extract error: {}", e)))?;
+        if is_external {
+            restored_external += 1;
+            if backup_secret_like_file(&target) {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(mut permissions) = std::fs::metadata(&target).map(|m| m.permissions())
+                    {
+                        permissions.set_mode(0o600);
+                        let _ = std::fs::set_permissions(&target, permissions);
+                    }
+                }
+            }
+        }
+        restored += 1;
+    }
+
+    Ok((restored, restored_external))
+}
+
 /// Handle `hermes backup [output]`.
 pub async fn handle_cli_backup(output: Option<String>) -> Result<(), hermes_core::AgentError> {
     let hermes_dir = hermes_config::hermes_home();
@@ -28226,11 +28417,23 @@ pub async fn handle_cli_backup(output: Option<String>) -> Result<(), hermes_core
     let mut tar = tar::Builder::new(enc);
     tar.append_dir_all("hermes", &hermes_dir)
         .map_err(|e| hermes_core::AgentError::Io(format!("Tar error: {}", e)))?;
+    let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let external_files = collect_memory_provider_external_backup_files(&hermes_dir, &home_dir);
+    for (file, archive_path) in &external_files {
+        tar.append_path_with_name(file, archive_path)
+            .map_err(|e| hermes_core::AgentError::Io(format!("Tar external error: {}", e)))?;
+    }
     tar.finish()
         .map_err(|e| hermes_core::AgentError::Io(format!("Tar finish error: {}", e)))?;
 
     let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
     println!("Backup complete: {} ({} KB)", out, size / 1024);
+    if !external_files.is_empty() {
+        println!(
+            "Included {} memory-provider file(s) stored outside HERMES_HOME.",
+            external_files.len()
+        );
+    }
     Ok(())
 }
 
@@ -28252,14 +28455,21 @@ pub async fn handle_cli_import(path: String) -> Result<(), hermes_core::AgentErr
         .map_err(|e| hermes_core::AgentError::Io(format!("Cannot open {}: {}", path, e)))?;
     let dec = flate2::read::GzDecoder::new(file);
     let mut archive = tar::Archive::new(dec);
-    archive
-        .unpack(&hermes_dir)
-        .map_err(|e| hermes_core::AgentError::Io(format!("Extract error: {}", e)))?;
+    let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let (restored, restored_external) =
+        restore_backup_archive(&mut archive, &hermes_dir, &home_dir)?;
 
     println!(
-        "Import complete. Files restored to {}",
+        "Import complete. {} files restored to {}",
+        restored,
         hermes_dir.display()
     );
+    if restored_external > 0 {
+        println!(
+            "Restored {} memory-provider file(s) outside HERMES_HOME.",
+            restored_external
+        );
+    }
     Ok(())
 }
 
@@ -28416,6 +28626,134 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Python plugin command dispatch is disabled"));
+    }
+
+    fn tar_gz_entry_names(path: &Path) -> Vec<String> {
+        let file = std::fs::File::open(path).expect("open archive");
+        let dec = flate2::read::GzDecoder::new(file);
+        let mut archive = tar::Archive::new(dec);
+        archive
+            .entries()
+            .expect("entries")
+            .filter_map(|entry| {
+                entry
+                    .ok()
+                    .and_then(|entry| entry.path().ok().map(|path| path.to_string_lossy().into()))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn backup_restore_target_rejects_absolute_and_parent_paths() {
+        let hermes = Path::new("/tmp/hermes");
+        let home = Path::new("/tmp/home");
+
+        assert!(restore_archive_entry_target(Path::new("../escape"), hermes, home).is_none());
+        assert!(
+            restore_archive_entry_target(Path::new("external/../escape"), hermes, home).is_none()
+        );
+        assert_eq!(
+            restore_archive_entry_target(Path::new("hermes/config.yaml"), hermes, home),
+            Some(hermes.join("config.yaml"))
+        );
+        assert_eq!(
+            restore_archive_entry_target(Path::new("external/.openviking/auth.json"), hermes, home),
+            Some(home.join(".openviking/auth.json"))
+        );
+    }
+
+    #[tokio::test]
+    async fn cli_backup_import_strips_hermes_archive_prefix() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let hermes_home = tmp.path().join("hermes-home");
+        let fake_home = tmp.path().join("home");
+        std::fs::create_dir_all(&hermes_home).expect("hermes home");
+        std::fs::create_dir_all(&fake_home).expect("fake home");
+        std::fs::write(hermes_home.join("config.yaml"), "model: dynamic\n").expect("write config");
+        let _home_guard = TempHomeGuard::new(&hermes_home);
+        let _unix_home = EnvVarGuard::set("HOME", &fake_home);
+        let _openviking_endpoint = EnvVarGuard::remove("OPENVIKING_ENDPOINT");
+        let _hindsight_mode = EnvVarGuard::remove("HINDSIGHT_MODE");
+        let archive = tmp.path().join("backup.tar.gz");
+
+        handle_cli_backup(Some(archive.to_string_lossy().to_string()))
+            .await
+            .expect("backup");
+        std::fs::remove_file(hermes_home.join("config.yaml")).expect("remove config");
+        handle_cli_import(archive.to_string_lossy().to_string())
+            .await
+            .expect("import");
+
+        assert_eq!(
+            std::fs::read_to_string(hermes_home.join("config.yaml")).expect("restored config"),
+            "model: dynamic\n"
+        );
+        assert!(!hermes_home.join("hermes/config.yaml").exists());
+    }
+
+    #[tokio::test]
+    async fn cli_backup_import_round_trips_openviking_external_state() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let hermes_home = tmp.path().join("hermes-home");
+        let fake_home = tmp.path().join("home");
+        let openviking_dir = fake_home.join(".openviking");
+        std::fs::create_dir_all(&hermes_home).expect("hermes home");
+        std::fs::create_dir_all(&openviking_dir).expect("openviking dir");
+        std::fs::write(
+            hermes_home.join("openviking.json"),
+            r#"{"enabled":true,"endpoint":"http://127.0.0.1:1933"}"#,
+        )
+        .expect("write openviking config");
+        std::fs::write(openviking_dir.join("auth.json"), r#"{"token":"secret"}"#)
+            .expect("write auth");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            openviking_dir.join("auth.json"),
+            openviking_dir.join("link.json"),
+        )
+        .expect("symlink");
+        let _home_guard = TempHomeGuard::new(&hermes_home);
+        let _unix_home = EnvVarGuard::set("HOME", &fake_home);
+        let _openviking_endpoint = EnvVarGuard::remove("OPENVIKING_ENDPOINT");
+        let _openviking_key = EnvVarGuard::remove("OPENVIKING_API_KEY");
+        let archive = tmp.path().join("backup.tar.gz");
+
+        handle_cli_backup(Some(archive.to_string_lossy().to_string()))
+            .await
+            .expect("backup");
+
+        let entries = tar_gz_entry_names(&archive);
+        assert!(entries
+            .iter()
+            .any(|entry| entry == "external/.openviking/auth.json"));
+        assert!(!entries
+            .iter()
+            .any(|entry| entry == "external/.openviking/link.json"));
+
+        std::fs::remove_dir_all(&openviking_dir).expect("remove external");
+        handle_cli_import(archive.to_string_lossy().to_string())
+            .await
+            .expect("import");
+
+        let restored = openviking_dir.join("auth.json");
+        assert_eq!(
+            std::fs::read_to_string(&restored).expect("restored auth"),
+            r#"{"token":"secret"}"#
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&restored)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
     }
 
     #[test]

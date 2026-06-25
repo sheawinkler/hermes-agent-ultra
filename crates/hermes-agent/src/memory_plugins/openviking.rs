@@ -33,13 +33,7 @@ const TOOL_STATUS_ERROR: &str = "error";
 const TOOL_STATUS_PENDING: &str = "pending";
 const TOOL_STATUS_ERROR_ALIASES: &[&str] = &["error", "failed", "failure"];
 const TOOL_STATUS_COMPLETED_ALIASES: &[&str] = &["completed", "complete", "success", "succeeded"];
-const DERIVED_MEMORY_FILENAMES: &[&str] = &[
-    ".abstract.md",
-    ".overview.md",
-    ".read.md",
-    ".full.md",
-    ".relations.json",
-];
+const GENERATED_MEMORY_SUMMARY_FILENAMES: &[&str] = &[".abstract.md", ".overview.md"];
 
 fn search_schema() -> Value {
     json!({
@@ -388,7 +382,7 @@ fn validate_forget_memory_uri(raw_uri: Option<&str>) -> Result<String, String> {
     }
 
     let filename = uri.rsplit('/').next().unwrap_or("");
-    if DERIVED_MEMORY_FILENAMES.contains(&filename) {
+    if GENERATED_MEMORY_SUMMARY_FILENAMES.contains(&filename) {
         return Err("viking_forget cannot delete generated memory summary files".to_string());
     }
 
@@ -1310,6 +1304,12 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         "openviking"
     }
 
+    fn backup_paths(&self) -> Vec<PathBuf> {
+        dirs::home_dir()
+            .map(|home| vec![home.join(".openviking")])
+            .unwrap_or_default()
+    }
+
     fn is_available(&self) -> bool {
         std::env::var("OPENVIKING_ENDPOINT")
             .map(|s| !s.trim().is_empty())
@@ -1999,6 +1999,11 @@ mod tests {
                 .expect("valid"),
             "viking://user/default/memories/profile.md"
         );
+        assert_eq!(
+            validate_forget_memory_uri(Some("viking://user/default/memories/.full.md"))
+                .expect("valid"),
+            "viking://user/default/memories/.full.md"
+        );
     }
 
     #[test]
@@ -2014,6 +2019,7 @@ mod tests {
             "viking://user/memories/preferences/",
             "viking://user/memories/preferences/.overview.md",
             "viking://user/memories/preferences/.abstract.md",
+            "viking://user/memories/preferences/.relations.json",
             "viking://user/memories/preferences/mem_abc123.md?recursive=true",
         ] {
             assert!(

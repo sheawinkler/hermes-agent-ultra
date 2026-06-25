@@ -4668,6 +4668,16 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported the first-class Rust runtime surface for Mem0 v3/self-hosted management: schemas now expose mem0_list, mem0_add, mem0_update, and mem0_delete; legacy mem0_profile/mem0_conclude calls remain accepted; search/list include IDs for management; update/delete validate exact memory IDs and issue PATCH/DELETE requests with fallback endpoint shapes; self-hosted host/base_url mode is supported without empty auth headers. Python OSS setup subprocess and local vector-store provisioning are intentionally not copied into the Rust runtime."
+    },
+    "027cb649ef80": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust memory fan-out and OpenViking validation: AgentLoop only mirrors built-in memory writes to external providers when the memory tool returns structured JSON with success=true and staged!=true, failing closed for unclear/non-object/non-JSON tool results. OpenViking viking_forget now treats only .abstract.md and .overview.md as generated summaries, so concrete user memory files such as .full.md remain deletable while non-.md sidecars are rejected by the exact-file guard. Focused Rust tests cover the fail-closed gate and URI validation."
+    },
+    "587b5b9ac223": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust CLI backup/import and memory provider trait: MemoryProviderPlugin exposes config-only backup_paths, Honcho/Hindsight/OpenViking declare their home-scoped dotdirs, hermes backup archives existing regular external provider files under a reserved external/ archive prefix only when they live under HOME and outside HERMES_HOME, and hermes import safely restores hermes/ entries into HERMES_HOME while restoring external/ entries to HOME with traversal checks and 0600 tightening for credential-shaped files. Focused Rust tests cover prefix stripping, OpenViking external state round-trip, and traversal rejection."
     }
   },
   "subject_patterns": [

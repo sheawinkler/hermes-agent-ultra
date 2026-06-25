@@ -1,25 +1,25 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T17:46:51.495581+00:00`
+Generated: `2026-06-25T18:58:02.554663+00:00`
 
-- Range: `origin/main..upstream/main`; total commits tracked: `7013`.
+- Range: `origin/main..upstream/main`; total commits tracked: `7021`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3140 |
+| #20 | GPAR-01 tests+CI parity | 3146 |
 | #21 | GPAR-02 skills parity | 130 |
 | #22 | GPAR-03 UX parity | 957 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 22 |
 | #25 | GPAR-06 packaging/docs/install parity | 146 |
-| #26 | GPAR-07 upstream queue backfill | 2130 |
+| #26 | GPAR-07 upstream queue backfill | 2132 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
 | pending | 171 |
-| ported | 419 |
-| superseded | 6347 |
+| ported | 421 |
+| superseded | 6353 |
 
 ## First 100 Pending Commits
 
@@ -89,7 +89,6 @@ Generated: `2026-06-25T17:46:51.495581+00:00`
 | `7f43378931f3` | #26 | test(desktop): cover renameSessionPreferringRpc routing |
 | `ed81f0b633c7` | #26 | fix(desktop): log session.title RPC failure before REST fallback |
 | `65a477f12e35` | #26 | feat(desktop): add Update now button to About panel (#50186) |
-| `587b5b9ac223` | #23 | fix(backup): capture memory-provider state stored outside HERMES_HOME (#50325) |
 | `2a4542333ee1` | #26 | fix(photon): classify Envoy overflow errors as retryable; add typing cooldown |
 | `9578e52795e3` | #26 | fix(photon): detect unexpected sidecar death and trigger reconnect |
 | `6bbacc223899` | #26 | fix(desktop): make cold-start port-announcement deadline tolerant |
@@ -116,7 +115,6 @@ Generated: `2026-06-25T17:46:51.495581+00:00`
 | `17dfc6bec4a8` | #26 | fix(desktop): set AppUserModelID on Windows so notifications fire (#50808) |
 | `f2e37549c673` | #20 | feat(computer_use): cross-platform cua-driver (macOS/Windows/Linux) |
 | `e3505c7f73a4` | #26 | fix(computer_use): reconcile Linux gate with stale "gated off" comments |
-| `027cb649ef80` | #20 | fix(memory): fail closed on unclear write results |
 | `79f270f54962` | #26 | fix(desktop): portal floating composer to body so it can't be clipped off-screen |
 | `aff5ae692fb2` | #26 | fix(desktop): move composer out of contain wrapper instead of portaling |
 | `ea5fa505d974` | #26 | fix(desktop): clamp floating composer to the thread area, not the whole window |
@@ -125,3 +123,5 @@ Generated: `2026-06-25T17:46:51.495581+00:00`
 | `0223ea5f590a` | #26 | feat(computer-use): surface macOS permission preflight in the desktop |
 | `2dfcead68367` | #26 | feat(computer-use): make the preflight cross-platform (win/linux) |
 | `a6b670d4a251` | #26 | fix(desktop): avoid stack overflow on embedded image replay |
+| `3fffecbdafec` | #26 | feat(desktop): add timeline rail for long chat threads |
+| `ba9e3a491bfa` | #23 | feat(memory): Honcho OAuth connect — desktop and CLI flows + token refresh (#44335) |
