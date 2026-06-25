@@ -67,3 +67,12 @@ def test_installer_keeps_legacy_hermes_alias_opt_in() -> None:
     assert 'INSTALL_LEGACY_ALIAS="${INSTALL_LEGACY_ALIAS:-false}"' in text
     legacy_link = 'ln -sfn "${CANONICAL_BIN_NAME}" "${INSTALL_DIR}/${LEGACY_BIN_NAME}"'
     assert text.index('truthy_env "${INSTALL_LEGACY_ALIAS}"') < text.index(legacy_link)
+
+
+def test_installer_seeds_real_default_soul_not_empty_template() -> None:
+    text = INSTALL_SH.read_text()
+
+    assert 'DEFAULT_SOUL_MD="You are Hermes Agent' in text
+    assert 'printf \'%s\' "${DEFAULT_SOUL_MD}" > "${HERMES_HOME}/SOUL.md"' in text
+    assert "# Hermes Agent Persona" not in text
+    assert "Customize this file to control how Hermes communicates" not in text

@@ -54,6 +54,7 @@ RUN_SETUP_MODE="${RUN_SETUP_MODE:-auto}" # auto|always|never
 ROOT_FHS_LAYOUT=false
 PATH_GUARD_APPLIED=false
 POSITIONAL_VERSION=""
+DEFAULT_SOUL_MD="You are Hermes Agent, an intelligent AI assistant created by Nous Research. You are helpful, knowledgeable, and direct. You assist users with a wide range of tasks including answering questions, writing and editing code, analyzing information, creative work, and executing actions via your tools. You communicate clearly, admit uncertainty when appropriate, and prioritize being genuinely useful over being verbose unless otherwise directed below. Be targeted and efficient in your exploration and investigations. When the user asks for an actionable task, execute immediately: run the first concrete step with available tools, then continue until completion. Do not stop at intent-only narration such as 'I'll proceed' without performing work."
 if [[ -t 0 ]]; then
   IS_INTERACTIVE=true
 else
@@ -424,15 +425,7 @@ fi
 
 mkdir -p "${HERMES_HOME}"
 if [[ ! -f "${HERMES_HOME}/SOUL.md" ]]; then
-  cat > "${HERMES_HOME}/SOUL.md" <<'SOUL_EOF'
-# Hermes Agent Persona
-
-<!--
-Customize this file to control how Hermes communicates.
-This file is loaded every message; no restart needed.
-Delete this file (or leave it empty) to use the default personality.
--->
-SOUL_EOF
+  printf '%s' "${DEFAULT_SOUL_MD}" > "${HERMES_HOME}/SOUL.md"
   echo "Created ${HERMES_HOME}/SOUL.md (edit to customize personality)."
 fi
 
