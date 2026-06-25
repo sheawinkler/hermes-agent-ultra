@@ -4538,6 +4538,36 @@
       "disposition": "ported",
       "notes": "Rust Objective OS now has durable wait barriers for /objective and /goal: PID, process-session, and timed waits persist in the objective contract, pause/resume lifecycle clears stale waits, and the mission/autonomous continuation enforcer parks while live barriers are active and fail-safe clears stale ones.",
       "owner": "rust-runtime"
+    },
+    "af7b7f632272": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust coding context now exposes structured ProjectFacts via hermes_agent::coding_context and the HTTP JSON-RPC project.facts method. Focused agent and HTTP route tests cover manifests, package managers, verification commands, context files, and null outside-workspace behavior."
+    },
+    "211ba9c7d31d": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust one-shot helper now renders commit-message templates, strips wrapping code fences, runs through the auxiliary client without session mutation, and exposes llm.oneshot over HTTP JSON-RPC with deterministic validation errors. Focused agent and HTTP tests cover template rendering, client usage, and missing-prompt failure."
+    },
+    "e32ebc6aa26f": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust gateway now registers /learn as a first-class slash command that builds a standards-guided skill-learning prompt and forwards it into the normal agent loop. The prompt uses existing agent tools, skill_manage, and the hardline Hermes skill-authoring rules; gateway tests cover registration, bypass behavior, and prompt contents."
+    },
+    "a4fa1481e281": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust gateway command dispatch now routes /learn through a ForwardPrompt result into SlashCommandOutcome::ForwardToAgent, so the synthesized learning prompt fires as a normal agent turn instead of being handled as a static reply. Gateway tests lock the parser and active-session bypass behavior."
+    },
+    "7ef0f360d0ce": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust tools now record bounded passive terminal verification evidence under HERMES_HOME and HTTP JSON-RPC exposes verification.status for workspace/session lookup. Focused tools and HTTP route tests cover ledger recording, pass/fail status, session filtering, workspace scoping, and not-applicable behavior."
+    },
+    "e62afaca6259": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust /learn prompt now embeds the full hardline skill-authoring standards: <=60-char description count-and-trim, platforms gating, human-first author credit, Hermes wrapped-tool framing, and scripts/references/templates layout. Gateway tests assert the standards remain present."
     }
   },
   "subject_patterns": [

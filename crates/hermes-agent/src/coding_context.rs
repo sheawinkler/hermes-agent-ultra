@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use serde::{Deserialize, Serialize};
+
 pub const CODING_TOOLSET: &str = "coding";
 
 const INTERACTIVE_CODING_PLATFORMS: &[&str] = &["", "cli", "tui", "acp", "desktop", "local"];
@@ -133,6 +135,16 @@ pub struct RuntimeMode {
     pub mode: CodingContextMode,
     pub workspace_root: Option<PathBuf>,
     pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectFacts {
+    pub root: String,
+    pub manifests: Vec<String>,
+    pub package_managers: Vec<String>,
+    pub verify_commands: Vec<String>,
+    pub context_files: Vec<String>,
 }
 
 impl RuntimeMode {
@@ -285,6 +297,33 @@ pub fn build_coding_workspace_block(root: &Path) -> Option<String> {
     (lines.len() > 2).then(|| lines.join("\n"))
 }
 
+pub fn detect_project_facts(root: &Path) -> ProjectFacts {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let manifests = project_manifest_names(&root);
+    let package_managers = package_managers(&root);
+    let verify_commands = verify_commands(&root);
+    let context_files = CONTEXT_FILES
+        .iter()
+        .copied()
+        .filter(|name| root.join(name).is_file())
+        .map(str::to_string)
+        .collect();
+
+    ProjectFacts {
+        root: root.display().to_string(),
+        manifests,
+        package_managers,
+        verify_commands,
+        context_files,
+    }
+}
+
+pub fn project_facts_for(cwd: Option<&Path>) -> Option<ProjectFacts> {
+    let resolved = resolve_cwd(cwd);
+    let root = workspace_root(&resolved)?;
+    Some(detect_project_facts(&root))
+}
+
 fn normalize_platform(platform: Option<&str>) -> String {
     platform
         .unwrap_or("")
@@ -371,6 +410,27 @@ fn detected_project_markers(root: &Path) -> Vec<String> {
         }
     }
     markers
+}
+
+fn project_manifest_names(root: &Path) -> Vec<String> {
+    PROJECT_MARKERS
+        .iter()
+        .copied()
+        .filter(|marker| !CONTEXT_FILES.contains(marker))
+        .filter(|marker| root.join(marker).exists())
+        .map(str::to_string)
+        .collect()
+}
+
+fn package_managers(root: &Path) -> Vec<String> {
+    let mut managers = Vec::new();
+    if let Some(pm) = js_package_manager(root) {
+        managers.push(pm.to_string());
+    }
+    if let Some(pm) = python_package_manager(root) {
+        managers.push(pm.to_string());
+    }
+    dedup_truncate(managers)
 }
 
 fn js_package_manager(root: &Path) -> Option<&'static str> {
@@ -656,6 +716,37 @@ mod tests {
         assert!(!block.contains("run dev"));
         assert!(block.contains("Context files: AGENTS.md"));
         assert!(block.contains("Status:"));
+    }
+
+    #[test]
+    fn project_facts_are_structured_from_workspace_detector() {
+        let tmp = tempfile::tempdir().unwrap();
+        git_init(tmp.path());
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"scripts":{"test":"vitest","lint":"eslint .","dev":"vite"}}"#,
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("pnpm-lock.yaml"), "").unwrap();
+        std::fs::write(tmp.path().join("AGENTS.md"), "# rules").unwrap();
+
+        let facts = project_facts_for(Some(tmp.path())).expect("project facts");
+
+        assert_eq!(
+            facts.root,
+            tmp.path().canonicalize().unwrap().display().to_string()
+        );
+        assert!(facts.manifests.contains(&"package.json".to_string()));
+        assert_eq!(facts.package_managers, vec!["pnpm".to_string()]);
+        assert!(facts.verify_commands.contains(&"pnpm run test".to_string()));
+        assert!(facts.verify_commands.contains(&"pnpm run lint".to_string()));
+        assert!(!facts.verify_commands.iter().any(|cmd| cmd.contains("dev")));
+        assert_eq!(facts.context_files, vec!["AGENTS.md".to_string()]);
+
+        let rendered = build_coding_workspace_block(tmp.path()).unwrap();
+        for command in &facts.verify_commands {
+            assert!(rendered.contains(command));
+        }
     }
 
     #[test]
