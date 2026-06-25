@@ -408,12 +408,16 @@ pub enum McpServerConfig {
         url: String,
         #[serde(default)]
         headers: Vec<EnvVar>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keepalive_interval: Option<u64>,
     },
     Sse {
         name: String,
         url: String,
         #[serde(default)]
         headers: Vec<EnvVar>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keepalive_interval: Option<u64>,
     },
 }
 

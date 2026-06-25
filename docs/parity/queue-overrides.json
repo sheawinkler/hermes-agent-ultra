@@ -4489,6 +4489,11 @@
       "owner": "rust-runtime",
       "notes": "Rust CLI /reasoning now exposes full|clamp runtime modes, status/help report the active mode, and the TUI live-thinking preview keeps complete text in full mode while retaining compact caps in clamp mode. Focused command and TUI tests cover mode switching, status/help output, and cap bypass behavior; detailed transcript rendering already preserves stored reasoning_content line-for-line."
     },
+    "40722058e532": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust MCP HTTP/SSE clients now honor per-server keepalive_interval with a 180s default and 5s floor, probe idle sessions with MCP ping, latch -32601 ping-unsupported responses to tools/list fallback, and run manager-owned keepalive workers that reconnect failed HTTP sessions once. Config.yaml, mcp_servers.json, ACP-provided MCP servers, docs/status output, and the Unreal MCP profile carry the interval; focused fake-transport and parser/profile tests cover the behavior."
+    },
     "4314d451ca96": {
       "disposition": "ported",
       "owner": "rust-runtime",

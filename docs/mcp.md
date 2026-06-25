@@ -32,7 +32,8 @@ Equivalent JSON shape:
   },
   "remote-api": {
     "url": "https://example.com/mcp",
-    "enabled": true
+    "enabled": true,
+    "keepalive_interval": 10
   }
 }
 ```
@@ -43,6 +44,7 @@ Validation rules:
 - `url` must use `http` or `https`.
 - If both `url` and `command` are present, HTTP wins and the CLI prints a warning.
 - `supports_parallel_tool_calls` is preserved and displayed by `mcp list` and `mcp test`.
+- `keepalive_interval` is optional for HTTP/SSE servers. It defaults to 180 seconds and is floored at 5 seconds; set it below a server's idle session TTL when that server expires sessions aggressively.
 
 ## Runtime Behavior
 
@@ -52,6 +54,7 @@ Validation rules:
 - `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, and `prompts/get` client methods.
 - Parallel connection/discovery reporting through `McpManager::connect_all_parallel`.
 - Server-initiated sampling through `sampling/createMessage` with per-client policy, callback wiring, rate limits, token caps, model allowlists, tool-loop limits, and audit counters.
+- HTTP/SSE keepalive probes using MCP `ping`, with `tools/list` fallback for servers that do not implement optional `ping`, plus reconnect on failed keepalive.
 - Stale transport detection with one reconnect attempt on tool calls.
 - Bearer/OAuth authentication providers for remote servers.
 - Media block caching for image tool responses.

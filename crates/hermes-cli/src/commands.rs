@@ -14800,20 +14800,24 @@ fn render_mcp_runtime_status(
                 .unwrap_or("<stdio>");
             let _ = writeln!(
                 out,
-                "  - {:<18} {}  [source:config.yaml; parallel_tool_calls:{}]",
+                "  - {:<18} {}  [source:config.yaml; parallel_tool_calls:{}; keepalive:{}]",
                 server.name,
                 endpoint,
                 if server.supports_parallel_tool_calls {
                     "on"
                 } else {
                     "off"
-                }
+                },
+                server
+                    .keepalive_interval
+                    .map(|secs| format!("{secs}s"))
+                    .unwrap_or_else(|| "default".to_string())
             );
         }
         if let Some(server) = json_servers.iter().find(|server| server.name == name) {
             let _ = writeln!(
                 out,
-                "  - {:<18} {}  [source:mcp_servers.json; {}; enabled:{}; parallel_tool_calls:{}]",
+                "  - {:<18} {}  [source:mcp_servers.json; {}; enabled:{}; parallel_tool_calls:{}; keepalive:{}]",
                 server.name,
                 server.transport_display(),
                 server.transport_kind().as_str(),
@@ -14822,7 +14826,11 @@ fn render_mcp_runtime_status(
                     "on"
                 } else {
                     "off"
-                }
+                },
+                server
+                    .keepalive_interval
+                    .map(|secs| format!("{secs}s"))
+                    .unwrap_or_else(|| "default".to_string())
             );
         }
     }
@@ -25600,7 +25608,7 @@ pub async fn handle_cli_mcp(
                 println!("MCP servers ({}):", mcp_config_path.display());
                 for entry in &config.servers {
                     println!(
-                        "  • {} — {}  [{}; enabled:{}; parallel_tool_calls:{}]",
+                        "  • {} — {}  [{}; enabled:{}; parallel_tool_calls:{}; keepalive:{}]",
                         entry.name,
                         entry.transport_display(),
                         entry.transport_kind().as_str(),
@@ -25609,7 +25617,11 @@ pub async fn handle_cli_mcp(
                             "on"
                         } else {
                             "off"
-                        }
+                        },
+                        entry
+                            .keepalive_interval
+                            .map(|secs| format!("{secs}s"))
+                            .unwrap_or_else(|| "default".to_string())
                     );
                 }
             }
@@ -25695,6 +25707,7 @@ pub async fn handle_cli_mcp(
                 yaml_command,
                 yaml_url,
                 yaml_parallel,
+                None,
                 false,
             )?;
             println!(
@@ -25728,7 +25741,7 @@ pub async fn handle_cli_mcp(
                         .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
                     std::fs::write(&mcp_config_path, json)
                         .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-                    update_yaml_mcp_server(&config_dir, &srv, None, None, false, true)?;
+                    update_yaml_mcp_server(&config_dir, &srv, None, None, false, None, true)?;
                     println!("MCP server '{}' removed.", srv);
                     if mcp_auth_path.exists() {
                         let raw = std::fs::read_to_string(&mcp_auth_path).unwrap_or_default();
@@ -25794,6 +25807,13 @@ pub async fn handle_cli_mcp(
                         } else {
                             "off"
                         }
+                    );
+                    println!(
+                        "  Keepalive interval: {}",
+                        entry
+                            .keepalive_interval
+                            .map(|secs| format!("{secs}s"))
+                            .unwrap_or_else(|| "default".to_string())
                     );
                     if entry.transport_kind() == McpTransportKind::Http {
                         let url = entry.url.as_deref().unwrap_or_default();
@@ -25946,7 +25966,8 @@ fn unreal_mcp_entry() -> serde_json::Value {
     serde_json::json!({
         "url": UNREAL_MCP_URL,
         "enabled": true,
-        "supports_parallel_tool_calls": false
+        "supports_parallel_tool_calls": false,
+        "keepalive_interval": 10
     })
 }
 
@@ -25956,6 +25977,7 @@ fn update_yaml_mcp_server(
     command: Option<String>,
     url: Option<String>,
     supports_parallel_tool_calls: bool,
+    keepalive_interval: Option<u64>,
     remove: bool,
 ) -> Result<(), hermes_core::AgentError> {
     let cfg_path = config_dir.join("config.yaml");
@@ -25968,6 +25990,7 @@ fn update_yaml_mcp_server(
             command,
             url,
             supports_parallel_tool_calls,
+            keepalive_interval,
         });
         cfg.mcp_servers.sort_by(|a, b| a.name.cmp(&b.name));
     }
@@ -25997,6 +26020,7 @@ fn upsert_sentrux_mcp_profile(config_dir: &Path) -> Result<bool, hermes_core::Ag
         Some(format!("{SENTRUX_MCP_COMMAND} {SENTRUX_MCP_ARG}")),
         None,
         true,
+        None,
         false,
     )?;
     Ok(command_on_path(SENTRUX_MCP_COMMAND))
@@ -26024,6 +26048,7 @@ fn upsert_unreal_mcp_profile(config_dir: &Path) -> Result<(), hermes_core::Agent
         None,
         Some(UNREAL_MCP_URL.to_string()),
         false,
+        Some(10),
         false,
     )
 }
@@ -26043,7 +26068,15 @@ fn remove_sentrux_mcp_profile(config_dir: &Path) -> Result<(), hermes_core::Agen
         std::fs::write(&mcp_config_path, json)
             .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
     }
-    update_yaml_mcp_server(config_dir, SENTRUX_MCP_SERVER_NAME, None, None, false, true)
+    update_yaml_mcp_server(
+        config_dir,
+        SENTRUX_MCP_SERVER_NAME,
+        None,
+        None,
+        false,
+        None,
+        true,
+    )
 }
 
 fn remove_unreal_mcp_profile(config_dir: &Path) -> Result<(), hermes_core::AgentError> {
@@ -26061,7 +26094,15 @@ fn remove_unreal_mcp_profile(config_dir: &Path) -> Result<(), hermes_core::Agent
         std::fs::write(&mcp_config_path, json)
             .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
     }
-    update_yaml_mcp_server(config_dir, UNREAL_MCP_SERVER_NAME, None, None, false, true)
+    update_yaml_mcp_server(
+        config_dir,
+        UNREAL_MCP_SERVER_NAME,
+        None,
+        None,
+        false,
+        None,
+        true,
+    )
 }
 
 fn sentrux_mcp_status(config_dir: &Path) -> (bool, bool, bool) {
@@ -30536,6 +30577,7 @@ mod tests {
             command: Some("local-mcp".to_string()),
             url: None,
             supports_parallel_tool_calls: false,
+            keepalive_interval: None,
         }];
 
         let status = render_mcp_runtime_status(&yaml, Some(&cfg), &path);
@@ -31106,6 +31148,10 @@ mod tests {
                 .and_then(|v| v.as_bool()),
             Some(false)
         );
+        assert_eq!(
+            unreal.get("keepalive_interval").and_then(|v| v.as_u64()),
+            Some(10)
+        );
 
         let cfg = hermes_config::load_user_config_file(&config_dir.join("config.yaml"))
             .expect("load config.yaml");
@@ -31114,7 +31160,8 @@ mod tests {
                 .iter()
                 .any(|entry| entry.name == UNREAL_MCP_SERVER_NAME
                     && entry.url.as_deref() == Some(UNREAL_MCP_URL)
-                    && !entry.supports_parallel_tool_calls),
+                    && !entry.supports_parallel_tool_calls
+                    && entry.keepalive_interval == Some(10)),
             "config.yaml mcp_servers should include the Unreal HTTP profile"
         );
 

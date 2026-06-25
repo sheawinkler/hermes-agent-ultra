@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T10:29:48.601584+00:00`
+Generated: `2026-06-25T11:10:05.059592+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7011`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-25T10:29:48.601584+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 203 |
-| ported | 394 |
+| pending | 202 |
+| ported | 395 |
 | superseded | 6338 |
 
 ## First 100 Pending Commits
@@ -47,7 +47,6 @@ Generated: `2026-06-25T10:29:48.601584+00:00`
 | `929dbf777801` | #26 | fix(desktop): make rendered logs selectable so they can be copied |
 | `b6e2a54a94f5` | #20 | fix(mcp): address adversarial review round 1 (cache parity, gates, races) |
 | `f06508836dd4` | #26 | docs(security): enumerate cron job scripts in §2.3 credential scoping |
-| `40722058e532` | #20 | fix(mcp): keep short-TTL HTTP sessions alive with configurable ping keepalive |
 | `2bd1977d8fad` | #26 | chore: release v0.17.0 (2026.6.19) |
 | `866f1d65c4aa` | #26 | chore(desktop): sync package.json version fallback to 0.17.0 (#49236) |
 | `7a7b56d49830` | #23 | fix(windows): prefer managed node for whatsapp and desktop |
@@ -125,3 +124,4 @@ Generated: `2026-06-25T10:29:48.601584+00:00`
 | `c6fbd5a10494` | #26 | style(desktop): lead --dt-font-mono with bundled JetBrains Mono |
 | `ac128af1cec3` | #26 | feat(desktop): syntax-highlight inline diffs via Shiki |
 | `64a507da44d2` | #20 | feat(relay): handle passthrough_forward over the WS (Phase 5 §5.1, gateway half) (#50702) |
+| `61c266b0dc75` | #26 | style(desktop): soften dark-mode syntax highlighting |

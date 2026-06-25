@@ -720,13 +720,26 @@ fn acp_mcp_server_to_hermes_config(
             }
             Some((name, config))
         }
-        McpServerConfig::Http { name, url, headers }
-        | McpServerConfig::Sse { name, url, headers } => {
+        McpServerConfig::Http {
+            name,
+            url,
+            headers,
+            keepalive_interval,
+        }
+        | McpServerConfig::Sse {
+            name,
+            url,
+            headers,
+            keepalive_interval,
+        } => {
             let name = sanitize_mcp_name_component(name.trim());
             if name.is_empty() || url.trim().is_empty() {
                 return None;
             }
             let mut config = HermesMcpServerConfig::http(url.trim());
+            if let Some(seconds) = keepalive_interval {
+                config = config.with_keepalive_interval(*seconds);
+            }
             if let Some(token) = bearer_token_from_headers(headers) {
                 config = config.with_auth(Arc::new(BearerTokenAuth::new(token)));
             }
