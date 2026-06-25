@@ -71,7 +71,9 @@ pub use tools::homeassistant::{
     HaCallServiceHandler, HaGetStateHandler, HaListEntitiesHandler, HaListServicesHandler,
     HomeAssistantBackend,
 };
-pub use tools::image_gen::{ImageGenBackend, ImageGenerateHandler};
+pub use tools::image_gen::{
+    ImageGenBackend, ImageGenCapabilities, ImageGenerateHandler, ImageGenerateRequest,
+};
 pub use tools::integrations_snapshot::IntegrationsSnapshotHandler;
 pub use tools::managed_tool_gateway::ManagedToolGatewayHandler;
 pub use tools::memory::{MemoryBackend, MemoryHandler};

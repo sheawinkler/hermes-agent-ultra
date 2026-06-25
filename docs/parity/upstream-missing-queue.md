@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T02:06:15.775590+00:00`
+Generated: `2026-06-25T02:33:07.046683+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `6978`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-25T02:06:15.775590+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 241 |
-| ported | 354 |
+| pending | 240 |
+| ported | 355 |
 | superseded | 6307 |
 
 ## First 100 Pending Commits
@@ -29,7 +29,6 @@ Generated: `2026-06-25T02:06:15.775590+00:00`
 | `73cd8622f9fc` | #22 | feat(billing): /billing terminal billing — interactive TUI + CLI client (#45449) |
 | `36851fa576eb` | #20 | fix(docker): support WebUI installs from read-only sources (#48541) |
 | `cfb55de5ea49` | #21 | Update Stripe Projects skill docs (#48673) |
-| `c02192ff6ace` | #20 | feat(image-gen): add image-to-image / editing to image_generate (#48705) |
 | `c7b7f92ec14a` | #20 | fix(openviking): sync structured turns with tool parts |
 | `d7cd0bc0863c` | #20 | fix(openviking): preserve structured sync attribution |
 | `9362ce2575e0` | #22 | feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899) |
@@ -125,3 +124,4 @@ Generated: `2026-06-25T02:06:15.775590+00:00`
 | `7bc6f1806284` | #23 | fix(hindsight): skip local_embedded daemon when running as root |
 | `93ea9b04aff2` | #20 | fix(gateway): cap inbound media download size to prevent memory exhaustion |
 | `6183e8ce1b5e` | #20 | fix(telegram): make Bot API 10.1 rich messages opt-in (default off) |
+| `587b5b9ac223` | #23 | fix(backup): capture memory-provider state stored outside HERMES_HOME (#50325) |

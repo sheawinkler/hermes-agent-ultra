@@ -4254,6 +4254,11 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream fixes a Python tui_gateway slash.exec -> command.dispatch fallback for pending-input commands. Ultra's Rust gateway has no split slash.exec/command.dispatch RPC path: slash input is parsed once by crates/hermes-gateway/src/commands.rs into typed GatewayCommandResult variants, and /retry, /undo, /queue, /q, and /steer are consumed directly by crates/hermes-gateway/src/gateway.rs. The fragile client-side fallback failure mode is absent; /goal and /plan are CLI-only Rust commands, not gateway pending-input RPCs."
+    },
+    "c02192ff6ace129fc9bcc2f8907eabd6eb3f0f1d": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust image_generate: the tool request/schema now carries image_url and reference_image_urls, FAL has a typed model catalog with edit endpoints/reference caps/payload filtering plus runtime FAL_IMAGE_MODEL/config selection, OpenAI Codex remains explicit text-only, and Rust tests cover forwarding, endpoint routing, reference clamping, capabilities, and unsupported-modality errors."
     }
   },
   "subject_patterns": [
