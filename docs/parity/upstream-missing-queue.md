@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-24T08:45:17.529440+00:00`
+Generated: `2026-06-25T00:35:24.714987+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `6907`.
 
@@ -17,31 +17,16 @@ Generated: `2026-06-24T08:45:17.529440+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 268 |
-| ported | 321 |
-| superseded | 6242 |
+| pending | 251 |
+| ported | 335 |
+| superseded | 6245 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `2dace37f6b55` | #23 | feat(memory): improve OpenViking setup UX |
-| `b0e25c9cb295` | #23 | fix(memory): restrict OpenViking setup file permissions |
-| `70f53f36cb1c` | #23 | feat(memory): add manual OpenViking setup path |
-| `94523764fca8` | #23 | fix(memory): choose OpenViking key type before prompting |
-| `2b972472cee8` | #23 | fix(memory): validate OpenViking manual setup steps |
-| `3c76dac4fdbf` | #23 | fix(memory): log OpenViking chmod failures |
-| `2c2ca0443bba` | #20 | feat(memory): improve OpenViking setup UX |
-| `315fdae5f8ad` | #23 | fix(memory): tighten OpenViking local autostart |
-| `166d2457b292` | #23 | fix(memory): avoid setup autostart for unhealthy OpenViking |
-| `813a4e3838f6` | #23 | fix(openviking): implement on_session_switch hook (#28296) |
-| `a30b40c73ab6` | #23 | fix(openviking): close session-boundary races on sync_turn and on_session_end |
-| `eddbf291a415` | #23 | fix(openviking): close remaining session-boundary races on switch |
-| `91e9459e1006` | #23 | fix(openviking): track writers per-session so commit waits for all |
-| `00c045b43f30` | #23 | fix(openviking): harden session writes and switch commits |
 | `547a014e7eae` | #26 | fix(desktop): avoid stack overflow rendering huge fenced blocks |
 | `b82eca2bebd8` | #26 | fix(desktop): isolate message render crashes from the root boundary |
-| `3ac6551ba3d3` | #23 | fix(openviking): handle rewound session switches |
 | `435c706e8e5a` | #26 | fix(desktop): stop a failed turn leaking into every other thread |
 | `f4100f439430` | #26 | fix(desktop): list markers and quote border follow RTL message direction |
 | `0138282f97c9` | #26 | perf(desktop): keep oversized messages from freezing the chat |
@@ -49,7 +34,6 @@ Generated: `2026-06-24T08:45:17.529440+00:00`
 | `c2fa302e933a` | #26 | Merge pull request #47913 from xxxigm/fix/desktop-backend-skew-toast-nag |
 | `b07b7894ec55` | #26 | fix(desktop): keep streaming painting in unfocused secondary chat windows (#47919) |
 | `33b1d144590a` | #20 | fix(desktop): pin Electron below the broken native extract-zip install (#47792) |
-| `c835448908e7` | #23 | fix(openviking): don't block the command thread on session switch; lock turn state |
 | `5a00bd151896` | #20 | fix(desktop): persist /title set before the first message instead of queuing (#47987) |
 | `ee41aa0c1a0a` | #26 | feat(desktop): add dismiss control to chat error banners (#47985) |
 | `fd674af47fa6` | #20 | fix(photon): preserve text in mixed iMessage attachments (salvage #46513) (#46818) |
@@ -68,7 +52,6 @@ Generated: `2026-06-24T08:45:17.529440+00:00`
 | `4c8bbe641696` | #20 | feat(cron): Chronos NAS-mediated managed-cron provider (scale-to-zero) |
 | `3fc7b624d860` | #20 | feat(cron,gateway): NAS-JWT fire verifier + /api/cron/fire webhook (Chronos) |
 | `b75757d4aa85` | #22 | feat(cron): wire on_jobs_changed, cron.chronos config, docs + agent↔NAS contract |
-| `5494c1e9b660` | #23 | refactor(openviking): reuse atomic_json_write for ovcli config; drop dead constants |
 | `0b54a33a3467` | #26 | fix(langfuse): scope trace state by turn/request ids |
 | `e1d10ec1ed29` | #20 | refactor(langfuse): extract _scope_prefix from _trace_key |
 | `f4fbaa6cda8b` | #20 | fix(langfuse): bound _TRACE_STATE growth from non-finalizing turns |
@@ -125,3 +108,20 @@ Generated: `2026-06-24T08:45:17.529440+00:00`
 | `ba49fb51a585` | #20 | fix(discord): hydrate channel context when replying to a message (#49212) |
 | `40722058e532` | #20 | fix(mcp): keep short-TTL HTTP sessions alive with configurable ping keepalive |
 | `2bd1977d8fad` | #26 | chore: release v0.17.0 (2026.6.19) |
+| `866f1d65c4aa` | #26 | chore(desktop): sync package.json version fallback to 0.17.0 (#49236) |
+| `7a7b56d49830` | #23 | fix(windows): prefer managed node for whatsapp and desktop |
+| `d4e7dd609da6` | #23 | refactor(windows): tidy managed-node resolver helpers |
+| `a7983d5ad768` | #20 | fix(dashboard): hide sidecar sessions from history (#49269) |
+| `d799284b1554` | #21 | feat(optional-skills/creative-ideation): expand to v2.1.0 method library (#42402) |
+| `5f55f0ff85f0` | #20 | feat(teams): native send_video/send_voice/send_document attachments (#49308) |
+| `8ebe37f6ad2d` | #26 | feat(desktop): notify renderer when GPU acceleration is disabled due to remote display |
+| `8cf7df867e7d` | #20 | fix(plugins): silence raft check_fn log spam for users without raft CLI |
+| `1b7b4d138a67` | #26 | fix(desktop): handle slash exec dispatch payloads (#49358) |
+| `236f0597e562` | #26 | feat(desktop): pop the composer out into a draggable floating window |
+| `f697c97e02f0` | #26 | fix(desktop): keep floating composer radius consistent with docked |
+| `eed78d6ebb51` | #26 | fix(desktop): composer popout polish — peel-off placement, panels, chip editing |
+| `ae8db1ab531b` | #26 | fix(desktop): mute hidden link-title window so historical links don't autoplay audio |
+| `7eb9678c5470` | #26 | test(desktop): cover link-title window audio muting |
+| `a7dd98c8609c` | #23 | fix(env): guard remaining malformed int/float env var casts with utils helpers |
+| `5600105478ff` | #20 | refactor(gateway): migrate slack/dingtalk/whatsapp/matrix/feishu/telegram/wecom/email/sms adapters to bundled plugins |
+| `404fe730b7a2` | #26 | fix: add tooltips to right sidebar header buttons |

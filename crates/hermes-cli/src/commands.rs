@@ -25021,12 +25021,159 @@ fn setup_honcho_provider(yes: bool) -> Result<PathBuf, AgentError> {
     Ok(hermes_config::hermes_home().join("honcho.json"))
 }
 
+fn normalize_openviking_setup_endpoint(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let endpoint = if trimmed.is_empty() {
+        "http://127.0.0.1:1933".to_string()
+    } else if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{trimmed}")
+    };
+    endpoint.trim_end_matches('/').to_string()
+}
+
+fn openviking_setup_endpoint_is_local(endpoint: &str) -> bool {
+    endpoint.starts_with("http://127.0.0.1:")
+        || endpoint.starts_with("http://localhost:")
+        || endpoint == "http://127.0.0.1"
+        || endpoint == "http://localhost"
+}
+
+fn normalize_openviking_setup_key_type(raw: &str, endpoint: &str, api_key: &str) -> String {
+    let normalized = match raw.trim().to_ascii_lowercase().as_str() {
+        "root" | "root_api_key" | "root-api-key" => "root",
+        "none" | "dev" | "local" | "no_api_key" | "no-api-key" => "none",
+        "user" | "user_api_key" | "user-api-key" => "user",
+        "" if openviking_setup_endpoint_is_local(endpoint) && api_key.trim().is_empty() => "none",
+        _ => "user",
+    };
+    normalized.to_string()
+}
+
+struct OpenVikingSetupConfigInput<'a> {
+    endpoint: &'a str,
+    api_key: &'a str,
+    api_key_type: &'a str,
+    account: &'a str,
+    user: &'a str,
+    agent: &'a str,
+}
+
+fn build_openviking_setup_config(
+    input: OpenVikingSetupConfigInput<'_>,
+) -> Result<serde_json::Value, AgentError> {
+    let endpoint = normalize_openviking_setup_endpoint(input.endpoint);
+    let api_key_type =
+        normalize_openviking_setup_key_type(input.api_key_type, &endpoint, input.api_key);
+    let api_key = input.api_key.trim();
+    if api_key_type != "none" && api_key.is_empty() {
+        return Err(AgentError::Config(format!(
+            "OpenViking {api_key_type} setup requires an API key."
+        )));
+    }
+    let account = input.account.trim();
+    let user = input.user.trim();
+    if api_key_type == "root" && (account.is_empty() || user.is_empty()) {
+        return Err(AgentError::Config(
+            "OpenViking root API key setup requires account and user.".into(),
+        ));
+    }
+    let account = if account.is_empty() {
+        "default"
+    } else {
+        account
+    };
+    let user = if user.is_empty() { "default" } else { user };
+    let agent = if input.agent.trim().is_empty() {
+        "hermes"
+    } else {
+        input.agent.trim()
+    };
+
+    Ok(serde_json::json!({
+        "enabled": true,
+        "endpoint": endpoint,
+        "api_key": api_key,
+        "api_key_type": api_key_type,
+        "account": account,
+        "user": user,
+        "agent": agent,
+        "setup_mode": "manual"
+    }))
+}
+
+fn setup_openviking_provider(yes: bool) -> Result<PathBuf, AgentError> {
+    let endpoint_default = std::env::var("OPENVIKING_ENDPOINT")
+        .unwrap_or_else(|_| "http://127.0.0.1:1933".to_string());
+    let endpoint = normalize_openviking_setup_endpoint(&prompt_memory_setup_value(
+        "OpenViking server URL",
+        Some(&endpoint_default),
+        yes,
+    )?);
+    let api_key_default = std::env::var("OPENVIKING_API_KEY").unwrap_or_default();
+    let key_type_default = std::env::var("OPENVIKING_API_KEY_TYPE").unwrap_or_else(|_| {
+        if openviking_setup_endpoint_is_local(&endpoint) && api_key_default.trim().is_empty() {
+            "none".to_string()
+        } else {
+            "user".to_string()
+        }
+    });
+    let key_type = normalize_openviking_setup_key_type(
+        &prompt_memory_setup_value(
+            "OpenViking API key type (none|user|root)",
+            Some(&key_type_default),
+            yes,
+        )?,
+        &endpoint,
+        &api_key_default,
+    );
+    let api_key = if key_type == "none" {
+        String::new()
+    } else {
+        let label = if key_type == "root" {
+            "OpenViking root API key"
+        } else {
+            "OpenViking user API key"
+        };
+        prompt_memory_setup_value(label, Some(&api_key_default), yes)?
+    };
+    let account_default = std::env::var("OPENVIKING_ACCOUNT").unwrap_or_else(|_| "default".into());
+    let user_default = std::env::var("OPENVIKING_USER").unwrap_or_else(|_| "default".into());
+    let account = if key_type == "root" || key_type == "none" {
+        prompt_memory_setup_value("OpenViking account", Some(&account_default), yes)?
+    } else {
+        account_default
+    };
+    let user = if key_type == "root" || key_type == "none" {
+        prompt_memory_setup_value("OpenViking user", Some(&user_default), yes)?
+    } else {
+        user_default
+    };
+    let agent_default = std::env::var("OPENVIKING_AGENT").unwrap_or_else(|_| "hermes".into());
+    let agent = prompt_memory_setup_value("OpenViking agent", Some(&agent_default), yes)?;
+    let config = build_openviking_setup_config(OpenVikingSetupConfigInput {
+        endpoint: &endpoint,
+        api_key: &api_key,
+        api_key_type: &key_type,
+        account: &account,
+        user: &user,
+        agent: &agent,
+    })?;
+
+    hermes_agent::memory_plugins::openviking::OpenVikingMemoryPlugin::new()
+        .save_config(&config)
+        .map_err(AgentError::Config)?;
+    Ok(hermes_config::hermes_home().join("openviking.json"))
+}
+
 fn setup_memory_provider_target(provider: &str, yes: bool) -> Result<PathBuf, AgentError> {
     match provider.trim().to_ascii_lowercase().as_str() {
         "mem0" => setup_mem0_provider(yes),
         "honcho" => setup_honcho_provider(yes),
+        "openviking" | "ov" => setup_openviking_provider(yes),
         other => Err(AgentError::Config(format!(
-            "Unsupported memory provider setup target '{other}'. Supported: honcho, mem0"
+            "Unsupported memory provider setup target '{other}'. Supported: honcho, mem0, openviking"
         ))),
     }
 }
@@ -27695,6 +27842,34 @@ mod tests {
         }
     }
 
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     async fn build_test_app_with_stream(home: &Path) -> App {
         let config_dir = home.join("config");
         std::fs::create_dir_all(&config_dir).expect("create config dir");
@@ -27809,9 +27984,103 @@ mod tests {
     }
 
     #[test]
+    fn memory_openviking_setup_config_normalizes_local_no_key_mode() {
+        let cfg = build_openviking_setup_config(OpenVikingSetupConfigInput {
+            endpoint: "localhost:1933/",
+            api_key: "",
+            api_key_type: "none",
+            account: "",
+            user: "",
+            agent: "",
+        })
+        .expect("local setup config");
+
+        assert_eq!(cfg["enabled"], true);
+        assert_eq!(cfg["endpoint"], "http://localhost:1933");
+        assert_eq!(cfg["api_key"], "");
+        assert_eq!(cfg["api_key_type"], "none");
+        assert_eq!(cfg["account"], "default");
+        assert_eq!(cfg["user"], "default");
+        assert_eq!(cfg["agent"], "hermes");
+    }
+
+    #[test]
+    fn memory_openviking_setup_config_requires_root_tenant_identity() {
+        let err = build_openviking_setup_config(OpenVikingSetupConfigInput {
+            endpoint: "https://openviking.example",
+            api_key: "root-secret",
+            api_key_type: "root",
+            account: "",
+            user: "operator",
+            agent: "hermes",
+        })
+        .expect_err("missing account should fail");
+
+        assert!(err.to_string().contains("requires account and user"));
+    }
+
+    #[test]
+    fn memory_openviking_setup_config_supports_user_key_without_tenant_prompts() {
+        let cfg = build_openviking_setup_config(OpenVikingSetupConfigInput {
+            endpoint: "https://openviking.example/",
+            api_key: "user-secret",
+            api_key_type: "user",
+            account: "",
+            user: "",
+            agent: "agent",
+        })
+        .expect("user setup config");
+
+        assert_eq!(cfg["endpoint"], "https://openviking.example");
+        assert_eq!(cfg["api_key_type"], "user");
+        assert_eq!(cfg["api_key"], "user-secret");
+        assert_eq!(cfg["account"], "default");
+        assert_eq!(cfg["user"], "default");
+        assert_eq!(cfg["agent"], "agent");
+    }
+
+    #[test]
+    fn memory_openviking_setup_target_writes_owner_only_config() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home = TempHomeGuard::new(tmp.path());
+        let _endpoint = EnvVarGuard::set("OPENVIKING_ENDPOINT", "http://localhost:1933");
+        let _api_key = EnvVarGuard::remove("OPENVIKING_API_KEY");
+        let _key_type = EnvVarGuard::remove("OPENVIKING_API_KEY_TYPE");
+        let _account = EnvVarGuard::remove("OPENVIKING_ACCOUNT");
+        let _user = EnvVarGuard::remove("OPENVIKING_USER");
+        let _agent = EnvVarGuard::remove("OPENVIKING_AGENT");
+
+        let path = setup_memory_provider_target("openviking", true).expect("setup openviking");
+
+        assert_eq!(path, tmp.path().join("openviking.json"));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
+                .expect("json");
+        assert_eq!(parsed["enabled"], true);
+        assert_eq!(parsed["endpoint"], "http://localhost:1933");
+        assert_eq!(parsed["api_key_type"], "none");
+        assert_eq!(parsed["agent"], "hermes");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
     fn memory_setup_prompt_classifies_secret_labels() {
         assert!(memory_setup_label_is_secret("Mem0 API key"));
         assert!(memory_setup_label_is_secret("Honcho local JWT/API key"));
+        assert!(memory_setup_label_is_secret("OpenViking root API key"));
         assert!(!memory_setup_label_is_secret("Mem0 base_url"));
         assert!(!memory_setup_label_is_secret("Deployment shape"));
     }

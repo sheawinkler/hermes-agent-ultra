@@ -2,20 +2,24 @@
 //!
 //! Mirrors Python `plugins/memory/openviking/__init__.py` (HTTP subset).
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
 
 use crate::memory_manager::MemoryProviderPlugin;
+use crate::memory_plugins::config_io;
 
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:1933";
 const DEFAULT_AGENT: &str = "hermes";
 const DEFAULT_MEMORY_SUBDIR: &str = "preferences";
+const DEFAULT_SESSION_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_RESOURCE_PREFIXES: &[&str] = &["http://", "https://", "git@", "ssh://", "git://"];
 
 fn search_schema() -> Value {
@@ -100,6 +104,136 @@ fn add_resource_schema() -> Value {
     })
 }
 
+#[derive(Debug, Clone)]
+struct OpenVikingConfig {
+    endpoint: String,
+    api_key: String,
+    api_key_type: String,
+    account: String,
+    user: String,
+    agent: String,
+}
+
+impl OpenVikingConfig {
+    fn config_path(hermes_home: &str) -> PathBuf {
+        Path::new(hermes_home).join("openviking.json")
+    }
+
+    fn default_config_path() -> PathBuf {
+        config_io::default_hermes_home().join("openviking.json")
+    }
+
+    fn configured_at(path: &Path) -> bool {
+        let object = config_io::read_json_object(path);
+        if object
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .is_some_and(|enabled| enabled)
+        {
+            return true;
+        }
+        ["endpoint", "api_key", "root_api_key"].iter().any(|key| {
+            object
+                .get(*key)
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        })
+    }
+
+    fn load(hermes_home: &str) -> Self {
+        let mut config = Self {
+            endpoint: std::env::var("OPENVIKING_ENDPOINT")
+                .unwrap_or_else(|_| DEFAULT_ENDPOINT.to_string()),
+            api_key: std::env::var("OPENVIKING_API_KEY").unwrap_or_default(),
+            api_key_type: std::env::var("OPENVIKING_API_KEY_TYPE")
+                .unwrap_or_else(|_| "user".to_string()),
+            account: std::env::var("OPENVIKING_ACCOUNT").unwrap_or_else(|_| "default".into()),
+            user: std::env::var("OPENVIKING_USER").unwrap_or_else(|_| "default".into()),
+            agent: std::env::var("OPENVIKING_AGENT").unwrap_or_else(|_| DEFAULT_AGENT.into()),
+        };
+
+        let path = Self::config_path(hermes_home);
+        let raw = config_io::read_json_object(&path);
+        apply_openviking_config_map(&mut config, &raw);
+
+        config.endpoint = normalize_openviking_endpoint(&config.endpoint);
+        config.api_key_type = normalize_openviking_key_type(&config.api_key_type);
+        config.account = nonempty_or(&config.account, "default");
+        config.user = nonempty_or(&config.user, "default");
+        config.agent = nonempty_or(&config.agent, DEFAULT_AGENT);
+        config
+    }
+}
+
+fn apply_openviking_config_map(
+    config: &mut OpenVikingConfig,
+    raw: &serde_json::Map<String, Value>,
+) {
+    if let Some(endpoint) = raw
+        .get("endpoint")
+        .or(raw.get("base_url"))
+        .or(raw.get("baseUrl"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
+        config.endpoint = endpoint.to_string();
+    }
+    if let Some(api_key) = raw
+        .get("api_key")
+        .or(raw.get("apiKey"))
+        .or(raw.get("root_api_key"))
+        .or(raw.get("rootApiKey"))
+        .and_then(Value::as_str)
+    {
+        config.api_key = api_key.to_string();
+    }
+    if let Some(key_type) = raw
+        .get("api_key_type")
+        .or(raw.get("apiKeyType"))
+        .and_then(Value::as_str)
+    {
+        config.api_key_type = key_type.to_string();
+    }
+    if let Some(account) = raw.get("account").and_then(Value::as_str) {
+        config.account = account.to_string();
+    }
+    if let Some(user) = raw.get("user").and_then(Value::as_str) {
+        config.user = user.to_string();
+    }
+    if let Some(agent) = raw.get("agent").and_then(Value::as_str) {
+        config.agent = agent.to_string();
+    }
+}
+
+fn normalize_openviking_endpoint(raw: &str) -> String {
+    let value = raw.trim();
+    let with_scheme = if value.is_empty() {
+        DEFAULT_ENDPOINT.to_string()
+    } else if value.contains("://") {
+        value.to_string()
+    } else {
+        format!("http://{value}")
+    };
+    with_scheme.trim_end_matches('/').to_string()
+}
+
+fn normalize_openviking_key_type(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "root" | "root_api_key" | "root-api-key" => "root".to_string(),
+        "none" | "dev" | "local" | "no_api_key" | "no-api-key" => "none".to_string(),
+        _ => "user".to_string(),
+    }
+}
+
+fn nonempty_or(raw: &str, default: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        default.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 #[derive(Clone)]
 struct VikingState {
     client: Client,
@@ -114,7 +248,8 @@ struct VikingState {
 
 pub struct OpenVikingMemoryPlugin {
     state: Mutex<Option<VikingState>>,
-    prefetch: std::sync::Arc<Mutex<String>>,
+    prefetch: Arc<Mutex<String>>,
+    inflight_writers: Arc<Mutex<HashMap<String, Vec<JoinHandle<()>>>>>,
 }
 
 fn viking_headers(st: &VikingState) -> reqwest::header::HeaderMap {
@@ -464,12 +599,137 @@ impl ExpandUserPath for PathBuf {
     }
 }
 
+type InflightWriters = Arc<Mutex<HashMap<String, Vec<JoinHandle<()>>>>>;
+
+fn openviking_session_drain_timeout() -> Duration {
+    std::env::var("OPENVIKING_SESSION_DRAIN_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(DEFAULT_SESSION_DRAIN_TIMEOUT)
+}
+
+fn drain_writers_for_session(
+    writers: &InflightWriters,
+    session_id: &str,
+    timeout: Duration,
+) -> bool {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return true;
+    }
+    let deadline = Instant::now() + timeout;
+    loop {
+        let finished = {
+            let mut guard = writers.lock().unwrap();
+            let mut finished = Vec::new();
+            let mut pending = Vec::new();
+            let remove_session = {
+                let Some(handles) = guard.get_mut(session_id) else {
+                    return true;
+                };
+                for handle in handles.drain(..) {
+                    if handle.is_finished() {
+                        finished.push(handle);
+                    } else {
+                        pending.push(handle);
+                    }
+                }
+                if pending.is_empty() {
+                    true
+                } else {
+                    *handles = pending;
+                    false
+                }
+            };
+            if remove_session {
+                guard.remove(session_id);
+            }
+            finished
+        };
+        for handle in finished {
+            if handle.join().is_err() {
+                tracing::warn!("OpenViking writer for {session_id} panicked");
+            }
+        }
+        if writers
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .is_none_or(|handles| handles.is_empty())
+        {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn commit_openviking_session(st: &VikingState) -> bool {
+    if st.session_id.trim().is_empty() {
+        return false;
+    }
+    let h = viking_headers(st);
+    let url = format!("{}/api/v1/sessions/{}/commit", st.endpoint, st.session_id);
+    match st.client.post(&url).headers(h).send() {
+        Ok(resp) if resp.status().is_success() => true,
+        Ok(resp) => {
+            tracing::warn!(
+                "OpenViking session commit for {} returned HTTP {}",
+                st.session_id,
+                resp.status()
+            );
+            false
+        }
+        Err(err) => {
+            tracing::warn!(
+                "OpenViking session commit for {} failed: {err}",
+                st.session_id
+            );
+            false
+        }
+    }
+}
+
+fn spawn_deferred_commit(st: VikingState, writers: InflightWriters, context: &'static str) {
+    std::thread::spawn(move || {
+        if !drain_writers_for_session(&writers, &st.session_id, openviking_session_drain_timeout())
+        {
+            tracing::warn!(
+                "OpenViking writer for {} still alive after drain during {context}; leaving session uncommitted",
+                st.session_id
+            );
+            return;
+        }
+        let _ = commit_openviking_session(&st);
+    });
+}
+
 impl OpenVikingMemoryPlugin {
     pub fn new() -> Self {
         Self {
             state: Mutex::new(None),
-            prefetch: std::sync::Arc::new(Mutex::new(String::new())),
+            prefetch: Arc::new(Mutex::new(String::new())),
+            inflight_writers: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn spawn_session_writer<F>(&self, session_id: String, job: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        if session_id.trim().is_empty() {
+            return;
+        }
+        let handle = std::thread::spawn(job);
+        self.inflight_writers
+            .lock()
+            .unwrap()
+            .entry(session_id)
+            .or_default()
+            .push(handle);
     }
 }
 
@@ -482,17 +742,12 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         std::env::var("OPENVIKING_ENDPOINT")
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false)
+            || OpenVikingConfig::configured_at(&OpenVikingConfig::default_config_path())
     }
 
-    fn initialize(&self, session_id: &str, _hermes_home: &str) {
-        let endpoint = std::env::var("OPENVIKING_ENDPOINT")
-            .unwrap_or_else(|_| DEFAULT_ENDPOINT.to_string())
-            .trim_end_matches('/')
-            .to_string();
-        let api_key = std::env::var("OPENVIKING_API_KEY").unwrap_or_default();
-        let account = std::env::var("OPENVIKING_ACCOUNT").unwrap_or_else(|_| "root".into());
-        let user = std::env::var("OPENVIKING_USER").unwrap_or_else(|_| "default".into());
-        let agent = std::env::var("OPENVIKING_AGENT").unwrap_or_else(|_| DEFAULT_AGENT.into());
+    fn initialize(&self, session_id: &str, hermes_home: &str) {
+        let config = OpenVikingConfig::load(hermes_home);
+        let api_key_type = config.api_key_type.clone();
         let client = match Client::builder().timeout(Duration::from_secs(45)).build() {
             Ok(c) => c,
             Err(e) => {
@@ -502,17 +757,17 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         };
         let st = VikingState {
             client,
-            endpoint,
-            api_key,
-            account,
-            user,
-            agent,
+            endpoint: config.endpoint,
+            api_key: config.api_key,
+            account: config.account,
+            user: config.user,
+            agent: config.agent,
             session_id: session_id.to_string(),
             turn_count: 0,
         };
         let health_url = format!("{}/health", st.endpoint);
         let h = viking_headers(&st);
-        if !st
+        if st
             .client
             .get(&health_url)
             .headers(h)
@@ -520,13 +775,15 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
             .map(|r| r.status().is_success())
             .unwrap_or(false)
         {
+            *self.state.lock().unwrap() = Some(st);
+            tracing::info!("OpenViking memory plugin initialized ({api_key_type} credential mode)");
+        } else {
             tracing::warn!(
-                "OpenViking health check failed for {} — tools may still work if the server is warming up",
+                "OpenViking health check failed for {}; OpenViking memory disabled for this session",
                 st.endpoint
             );
+            *self.state.lock().unwrap() = None;
         }
-        *self.state.lock().unwrap() = Some(st);
-        tracing::info!("OpenViking memory plugin initialized");
     }
 
     fn system_prompt_block(&self) -> String {
@@ -573,18 +830,30 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         });
     }
 
-    fn sync_turn(&self, user_content: &str, assistant_content: &str, _session_id: &str) {
-        let mut lock = self.state.lock().unwrap();
-        let st = match lock.as_mut() {
-            Some(s) => s,
-            None => return,
+    fn sync_turn(&self, user_content: &str, assistant_content: &str, session_id: &str) {
+        let (sid, stc) = {
+            let mut lock = self.state.lock().unwrap();
+            let st = match lock.as_mut() {
+                Some(s) => s,
+                None => return,
+            };
+            let sid = if session_id.trim().is_empty() {
+                st.session_id.clone()
+            } else {
+                session_id.trim().to_string()
+            };
+            if sid.is_empty() {
+                return;
+            }
+            st.turn_count = st.turn_count.saturating_add(1);
+            let mut stc = st.clone();
+            stc.session_id = sid.clone();
+            (sid, stc)
         };
-        st.turn_count = st.turn_count.saturating_add(1);
-        let stc = st.clone();
         let u = user_content.chars().take(4000).collect::<String>();
         let a = assistant_content.chars().take(4000).collect::<String>();
         let h = viking_headers(&stc);
-        std::thread::spawn(move || {
+        self.spawn_session_writer(sid, move || {
             let url = format!(
                 "{}/api/v1/sessions/{}/messages",
                 stc.endpoint, stc.session_id
@@ -612,9 +881,24 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         if st.turn_count == 0 {
             return;
         }
-        let h = viking_headers(&st);
-        let url = format!("{}/api/v1/sessions/{}/commit", st.endpoint, st.session_id);
-        let _ = st.client.post(&url).headers(h).send();
+        if !drain_writers_for_session(
+            &self.inflight_writers,
+            &st.session_id,
+            openviking_session_drain_timeout(),
+        ) {
+            tracing::warn!(
+                "OpenViking writer for {} still alive after drain; skipping session commit",
+                st.session_id
+            );
+            return;
+        }
+        if commit_openviking_session(&st) {
+            if let Some(current) = self.state.lock().unwrap().as_mut() {
+                if current.session_id == st.session_id {
+                    current.turn_count = 0;
+                }
+            }
+        }
     }
 
     fn on_session_switch(&self, new_session_id: &str, _parent_session_id: &str, _reset: bool) {
@@ -622,11 +906,27 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         if new_session_id.is_empty() {
             return;
         }
-        if let Some(st) = self.state.lock().unwrap().as_mut() {
+        *self.prefetch.lock().unwrap() = String::new();
+        let old_state = {
+            let mut guard = self.state.lock().unwrap();
+            let Some(st) = guard.as_mut() else {
+                return;
+            };
+            if st.session_id == new_session_id {
+                return;
+            }
+            let old = st.clone();
             st.session_id = new_session_id.to_string();
             st.turn_count = 0;
+            old
+        };
+        if old_state.turn_count > 0 {
+            spawn_deferred_commit(
+                old_state,
+                Arc::clone(&self.inflight_writers),
+                "session switch",
+            );
         }
-        *self.prefetch.lock().unwrap() = String::new();
     }
 
     fn on_memory_write(&self, action: &str, target: &str, content: &str) {
@@ -640,7 +940,7 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         let h = viking_headers(&st);
         let url = format!("{}/api/v1/content/write", st.endpoint);
         let body = content_write_body(&st, memory_subdir_for_target(target), content);
-        std::thread::spawn(move || {
+        self.spawn_session_writer(st.session_id.clone(), move || {
             let _ = st.client.post(&url).headers(h).json(&body).send();
         });
     }
@@ -800,6 +1100,15 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
     }
 
     fn shutdown(&self) {
+        let writers = Arc::clone(&self.inflight_writers);
+        let session_ids = writers.lock().unwrap().keys().cloned().collect::<Vec<_>>();
+        for session_id in session_ids {
+            let _ = drain_writers_for_session(
+                &writers,
+                &session_id,
+                openviking_session_drain_timeout(),
+            );
+        }
         *self.state.lock().unwrap() = None;
     }
 
@@ -807,8 +1116,16 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         Some(json!([
             {"key": "endpoint", "description": "OpenViking server URL", "env_var": "OPENVIKING_ENDPOINT", "default": DEFAULT_ENDPOINT},
             {"key": "api_key", "description": "API key", "secret": true, "env_var": "OPENVIKING_API_KEY"},
+            {"key": "api_key_type", "description": "Credential type: none|user|root", "default": "user", "env_var": "OPENVIKING_API_KEY_TYPE"},
+            {"key": "account", "description": "Tenant account for root/local trusted mode", "env_var": "OPENVIKING_ACCOUNT", "default": "default"},
+            {"key": "user", "description": "Tenant user for root/local trusted mode", "env_var": "OPENVIKING_USER", "default": "default"},
             {"key": "agent", "description": "OpenViking agent namespace", "env_var": "OPENVIKING_AGENT", "default": DEFAULT_AGENT}
         ]))
+    }
+
+    fn save_config(&self, config: &Value) -> Result<(), String> {
+        let path = OpenVikingConfig::default_config_path();
+        config_io::merge_and_write_owner_only(&path, config)
     }
 }
 
@@ -860,10 +1177,110 @@ impl OpenVikingPrefetch {
 mod tests {
     use super::*;
 
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     #[test]
     fn name() {
         let p = OpenVikingMemoryPlugin::new();
         assert_eq!(p.name(), "openviking");
+    }
+
+    #[test]
+    fn config_file_activates_provider_and_loads_values() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _endpoint = EnvGuard::remove("OPENVIKING_ENDPOINT");
+        let _api_key = EnvGuard::remove("OPENVIKING_API_KEY");
+        let _account = EnvGuard::remove("OPENVIKING_ACCOUNT");
+        let _user = EnvGuard::remove("OPENVIKING_USER");
+        let _agent = EnvGuard::remove("OPENVIKING_AGENT");
+        std::fs::write(
+            tmp.path().join("openviking.json"),
+            r#"{
+                "enabled": true,
+                "endpoint": "localhost:1934/",
+                "api_key": "ov-secret",
+                "api_key_type": "root",
+                "account": "acct",
+                "user": "operator",
+                "agent": "ultra"
+            }"#,
+        )
+        .expect("write config");
+
+        assert!(OpenVikingMemoryPlugin::new().is_available());
+        let config = OpenVikingConfig::load(tmp.path().to_str().expect("home"));
+        assert_eq!(config.endpoint, "http://localhost:1934");
+        assert_eq!(config.api_key, "ov-secret");
+        assert_eq!(config.api_key_type, "root");
+        assert_eq!(config.account, "acct");
+        assert_eq!(config.user, "operator");
+        assert_eq!(config.agent, "ultra");
+    }
+
+    #[test]
+    fn save_config_merges_and_writes_owner_only() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let path = tmp.path().join("openviking.json");
+        std::fs::write(&path, r#"{"agent":"existing"}"#).expect("write existing");
+
+        OpenVikingMemoryPlugin::new()
+            .save_config(&json!({
+                "enabled": true,
+                "endpoint": "https://openviking.example",
+                "api_key": "ov-secret"
+            }))
+            .expect("save config");
+
+        let parsed: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
+                .expect("json");
+        assert_eq!(parsed["agent"], "existing");
+        assert_eq!(parsed["enabled"], true);
+        assert_eq!(parsed["endpoint"], "https://openviking.example");
+        assert_eq!(parsed["api_key"], "ov-secret");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
     }
 
     #[test]
@@ -934,7 +1351,7 @@ mod tests {
             user: "user".to_string(),
             agent: "agent".to_string(),
             session_id: "old".to_string(),
-            turn_count: 7,
+            turn_count: 0,
         });
         *plugin.prefetch.lock().unwrap() = "stale".to_string();
 
@@ -944,6 +1361,95 @@ mod tests {
         assert_eq!(state.session_id, "new");
         assert_eq!(state.turn_count, 0);
         assert!(plugin.prefetch.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn drain_writers_waits_for_all_finished_session_writers() {
+        let plugin = OpenVikingMemoryPlugin::new();
+        plugin.spawn_session_writer("sid".to_string(), || {});
+        plugin.spawn_session_writer("sid".to_string(), || {});
+
+        assert!(drain_writers_for_session(
+            &plugin.inflight_writers,
+            "sid",
+            Duration::from_secs(1)
+        ));
+        assert!(plugin.inflight_writers.lock().unwrap().get("sid").is_none());
+    }
+
+    #[test]
+    fn session_end_skips_commit_when_writer_outlives_drain() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let _timeout = EnvGuard::set("OPENVIKING_SESSION_DRAIN_TIMEOUT_MS", "1");
+        let plugin = OpenVikingMemoryPlugin::new();
+        *plugin.state.lock().unwrap() = Some(VikingState {
+            client: Client::new(),
+            endpoint: "http://127.0.0.1:9".to_string(),
+            api_key: String::new(),
+            account: "acct".to_string(),
+            user: "user".to_string(),
+            agent: "agent".to_string(),
+            session_id: "old".to_string(),
+            turn_count: 2,
+        });
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        plugin.spawn_session_writer("old".to_string(), move || {
+            let _ = release_rx.recv();
+        });
+
+        plugin.on_session_end(&[]);
+
+        assert_eq!(
+            plugin
+                .state
+                .lock()
+                .unwrap()
+                .as_ref()
+                .expect("state")
+                .turn_count,
+            2
+        );
+        release_tx.send(()).expect("release writer");
+        assert!(drain_writers_for_session(
+            &plugin.inflight_writers,
+            "old",
+            Duration::from_secs(1)
+        ));
+    }
+
+    #[test]
+    fn session_switch_rotates_without_waiting_for_old_writer() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let _timeout = EnvGuard::set("OPENVIKING_SESSION_DRAIN_TIMEOUT_MS", "1");
+        let plugin = OpenVikingMemoryPlugin::new();
+        *plugin.state.lock().unwrap() = Some(VikingState {
+            client: Client::new(),
+            endpoint: "http://127.0.0.1:9".to_string(),
+            api_key: String::new(),
+            account: "acct".to_string(),
+            user: "user".to_string(),
+            agent: "agent".to_string(),
+            session_id: "old".to_string(),
+            turn_count: 2,
+        });
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        plugin.spawn_session_writer("old".to_string(), move || {
+            let _ = release_rx.recv();
+        });
+        let start = Instant::now();
+
+        plugin.on_session_switch("new", "old", false);
+
+        assert!(start.elapsed() < Duration::from_millis(100));
+        let state = plugin.state.lock().unwrap().clone().expect("state");
+        assert_eq!(state.session_id, "new");
+        assert_eq!(state.turn_count, 0);
+        release_tx.send(()).expect("release writer");
+        assert!(drain_writers_for_session(
+            &plugin.inflight_writers,
+            "old",
+            Duration::from_secs(1)
+        ));
     }
 
     #[test]
