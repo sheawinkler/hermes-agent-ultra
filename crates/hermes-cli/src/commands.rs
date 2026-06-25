@@ -48,19 +48,22 @@ use sha2::{Digest, Sha256};
 use crate::alpha_runtime::{
     append_counterfactual, append_objective_learning_entry, build_objective_dag_from_contract,
     canonical_objective_behavior_mode, canonical_objective_lifecycle_status,
-    clear_objective_contract, clear_objective_dag, clear_objective_learning_ledger,
-    enqueue_loop_event, ensure_alpha_runtime_bootstrap, ensure_trading_runtime_bootstrap,
-    load_alpha_loops, load_claim_verifier_policy, load_contextlattice_policy,
-    load_last_trading_alpha_report, load_objective_contract, load_objective_dag,
-    load_objective_ensemble_policy, load_objective_eval_trend, load_objective_learning_ledger,
-    load_objective_profile, load_objective_simulation_policy, load_quorum_policy,
-    objective_lifecycle_is_active, objective_profile_specialized_for, recover_orphan_loop_events,
-    refresh_trading_alpha_report, render_mission_board, render_trading_alpha_board,
-    replay_loop_queue, reset_objective_profile_generalized, set_claim_verifier_enabled,
-    set_contextlattice_policy_mode, set_objective_contract_behavior_mode,
-    set_objective_contract_lifecycle_status, set_objective_ensemble_mode, set_objective_profile,
+    clear_objective_contract, clear_objective_contract_wait_barrier, clear_objective_dag,
+    clear_objective_learning_ledger, enqueue_loop_event, ensure_alpha_runtime_bootstrap,
+    ensure_trading_runtime_bootstrap, load_alpha_loops, load_claim_verifier_policy,
+    load_contextlattice_policy, load_last_trading_alpha_report, load_objective_contract,
+    load_objective_dag, load_objective_ensemble_policy, load_objective_eval_trend,
+    load_objective_learning_ledger, load_objective_profile, load_objective_simulation_policy,
+    load_quorum_policy, objective_lifecycle_is_active, objective_profile_specialized_for,
+    recover_orphan_loop_events, refresh_trading_alpha_report, render_mission_board,
+    render_trading_alpha_board, replay_loop_queue, reset_objective_profile_generalized,
+    set_claim_verifier_enabled, set_contextlattice_policy_mode,
+    set_objective_contract_behavior_mode, set_objective_contract_lifecycle_status,
+    set_objective_contract_wait_pid, set_objective_contract_wait_seconds,
+    set_objective_contract_wait_session, set_objective_ensemble_mode, set_objective_profile,
     set_objective_simulation_mode, set_quorum_policy, summarize_objective_contract,
-    upsert_objective_contract, utility_terms_from_contract, ObjectiveLearningLedgerEntry,
+    summarize_objective_wait_barrier, upsert_objective_contract, utility_terms_from_contract,
+    ObjectiveLearningLedgerEntry,
 };
 use crate::app::{build_runtime_cron_scheduler, App, PetDock, PetSettings};
 use crate::kanban::{
@@ -255,7 +258,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "/objective",
-        "Set/show objective contract + profile/policies (`status|verify|plan|constraints|counterfactual|profile|context|simulator|ensemble|ledger|dag|eval|clear`)",
+        "Set/show objective contract + profile/policies (`status|verify|plan|constraints|counterfactual|wait|unwait|profile|context|simulator|ensemble|ledger|dag|eval|clear`)",
     ),
     (
         "/claims",
@@ -3334,6 +3337,10 @@ fn command_nested_candidates(cmd: &str, subcommand: &str, arg_position: usize) -
             .iter()
             .map(|v| (*v).to_string())
             .collect(),
+        ("/objective", "wait", 1) => ["--session", "--seconds", "for"]
+            .iter()
+            .map(|v| (*v).to_string())
+            .collect(),
         ("/model", "why-not", 1) => [
             "--cap",
             "--min-context",
@@ -3362,6 +3369,8 @@ fn command_subcommand_overrides(cmd: &str) -> &'static [&'static str] {
             "plan",
             "constraints",
             "counterfactual",
+            "wait",
+            "unwait",
             "profile",
             "context",
             "simulator",
@@ -17245,11 +17254,190 @@ fn apply_objective_lifecycle_update(
     Ok(CommandResult::Handled)
 }
 
+enum ObjectiveWaitRequest {
+    Pid(u32, String),
+    Session(String, String),
+    Seconds(u64, String),
+}
+
+fn parse_objective_wait_seconds(raw: &str) -> Option<u64> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_suffix = trimmed
+        .strip_suffix('s')
+        .or_else(|| trimmed.strip_suffix("sec"))
+        .or_else(|| trimmed.strip_suffix("secs"))
+        .or_else(|| trimmed.strip_suffix("seconds"))
+        .unwrap_or(trimmed);
+    without_suffix.trim().parse::<u64>().ok().filter(|v| *v > 0)
+}
+
+fn parse_objective_wait_request(args: &[&str]) -> Result<ObjectiveWaitRequest, String> {
+    let Some(raw_target) = args.get(1).map(|v| v.trim()).filter(|v| !v.is_empty()) else {
+        return Err(
+            "Usage: /objective wait <pid|session_id|session:<id>|--session <id>|--seconds <n>|for <n>s> [reason...]"
+                .to_string(),
+        );
+    };
+    let lower = raw_target.to_ascii_lowercase();
+    let reason_from = |start: usize| -> String {
+        args.get(start..)
+            .unwrap_or(&[])
+            .join(" ")
+            .trim()
+            .to_string()
+    };
+
+    if matches!(lower.as_str(), "--session" | "session" | "sid") {
+        let Some(session_id) = args.get(2).map(|v| v.trim()).filter(|v| !v.is_empty()) else {
+            return Err("Usage: /objective wait --session <session_id> [reason...]".to_string());
+        };
+        return Ok(ObjectiveWaitRequest::Session(
+            session_id.to_string(),
+            reason_from(3),
+        ));
+    }
+
+    if matches!(
+        lower.as_str(),
+        "--seconds" | "seconds" | "second" | "secs" | "sec" | "for" | "timer"
+    ) {
+        let Some(raw_seconds) = args.get(2).map(|v| v.trim()).filter(|v| !v.is_empty()) else {
+            return Err("Usage: /objective wait --seconds <seconds> [reason...]".to_string());
+        };
+        let seconds = parse_objective_wait_seconds(raw_seconds)
+            .ok_or_else(|| "objective wait seconds must be positive".to_string())?;
+        return Ok(ObjectiveWaitRequest::Seconds(seconds, reason_from(3)));
+    }
+
+    for prefix in ["session:", "sid:"] {
+        if let Some(session_id) = raw_target.strip_prefix(prefix) {
+            let session_id = session_id.trim();
+            if session_id.is_empty() {
+                return Err("objective wait session id cannot be empty".to_string());
+            }
+            return Ok(ObjectiveWaitRequest::Session(
+                session_id.to_string(),
+                reason_from(2),
+            ));
+        }
+    }
+
+    for prefix in ["seconds:", "secs:", "sec:", "for:"] {
+        if let Some(raw_seconds) = raw_target.strip_prefix(prefix) {
+            let seconds = parse_objective_wait_seconds(raw_seconds)
+                .ok_or_else(|| "objective wait seconds must be positive".to_string())?;
+            return Ok(ObjectiveWaitRequest::Seconds(seconds, reason_from(2)));
+        }
+    }
+
+    if let Some(seconds) = parse_objective_wait_seconds(raw_target).filter(|_| {
+        raw_target.ends_with('s') || lower.ends_with("sec") || lower.ends_with("seconds")
+    }) {
+        return Ok(ObjectiveWaitRequest::Seconds(seconds, reason_from(2)));
+    }
+
+    if let Ok(pid) = raw_target.parse::<u32>() {
+        if pid == 0 {
+            return Err("objective wait pid must be positive".to_string());
+        }
+        return Ok(ObjectiveWaitRequest::Pid(pid, reason_from(2)));
+    }
+
+    Ok(ObjectiveWaitRequest::Session(
+        raw_target.to_string(),
+        reason_from(2),
+    ))
+}
+
+fn apply_objective_wait_request(
+    app: &mut App,
+    request: ObjectiveWaitRequest,
+) -> Result<CommandResult, AgentError> {
+    let (updated, decision, command) = match request {
+        ObjectiveWaitRequest::Pid(pid, reason) => (
+            set_objective_contract_wait_pid(pid, Some(&reason))?,
+            "objective_wait_pid".to_string(),
+            format!("/objective wait {pid}"),
+        ),
+        ObjectiveWaitRequest::Session(session_id, reason) => (
+            set_objective_contract_wait_session(&session_id, Some(&reason))?,
+            "objective_wait_session".to_string(),
+            format!("/objective wait --session {session_id}"),
+        ),
+        ObjectiveWaitRequest::Seconds(seconds, reason) => (
+            set_objective_contract_wait_seconds(seconds, Some(&reason))?,
+            "objective_wait_seconds".to_string(),
+            format!("/objective wait --seconds {seconds}"),
+        ),
+    };
+
+    let _ = append_objective_learning_entry(ObjectiveLearningLedgerEntry {
+        recorded_at: String::new(),
+        objective_id: updated.id.clone(),
+        objective_state: canonical_objective_lifecycle_status(&updated.lifecycle_status),
+        decision,
+        evidence_files: vec!["alpha/objective_contract.json".to_string()],
+        evidence_commands: vec![command],
+        notes: format!(
+            "Objective wait barrier set: {}",
+            summarize_objective_wait_barrier(&updated)
+        ),
+    });
+
+    let mut out = String::new();
+    out.push_str("Objective wait barrier set\n");
+    out.push_str("--------------------------\n");
+    let _ = writeln!(out, "objective_id={}", updated.id);
+    let _ = writeln!(
+        out,
+        "wait_barrier={}",
+        summarize_objective_wait_barrier(&updated)
+    );
+    let _ = writeln!(out, "continuation_enforcer=parked_until_released");
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
 fn handle_objective_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let objective_usage = "Usage: `/objective <text>` or `/objective status|verify|plan|constraints|counterfactual <scenario> | <expected_delta>|lifecycle [status|active|pause|resume|budget-limited|achieved|unmet]|behavior [status|list|balanced|strict|autonomous|mission|minimal]|profile [status|list|general|me|set <id>]|context [status|list|max|balanced|fast]|simulator [status|balanced|strict|aggressive]|ensemble [status|committee|single|debate]|ledger [status|tail [n]|clear]|dag [status|rebuild|clear]|eval [status|tail [n]]|clear`.";
+    let objective_usage = "Usage: `/objective <text>` or `/objective status|verify|plan|constraints|counterfactual <scenario> | <expected_delta>|wait <pid|session_id|--session <id>|--seconds <n>|for <n>s> [reason...]|unwait|lifecycle [status|active|pause|resume|budget-limited|achieved|unmet]|behavior [status|list|balanced|strict|autonomous|mission|minimal]|profile [status|list|general|me|set <id>]|context [status|list|max|balanced|fast]|simulator [status|balanced|strict|aggressive]|ensemble [status|committee|single|debate]|ledger [status|tail [n]|clear]|dag [status|rebuild|clear]|eval [status|tail [n]]|clear`.";
 
     if let Some(first) = args.first() {
         let cmd = first.trim().to_ascii_lowercase();
+
+        if cmd == "wait" {
+            match parse_objective_wait_request(args) {
+                Ok(request) => return apply_objective_wait_request(app, request),
+                Err(usage) => {
+                    emit_command_output(app, usage);
+                    return Ok(CommandResult::Handled);
+                }
+            }
+        }
+
+        if cmd == "unwait" || cmd == "clear-wait" || cmd == "clear_wait" {
+            let updated = clear_objective_contract_wait_barrier()?;
+            let _ = append_objective_learning_entry(ObjectiveLearningLedgerEntry {
+                recorded_at: String::new(),
+                objective_id: updated.id.clone(),
+                objective_state: canonical_objective_lifecycle_status(&updated.lifecycle_status),
+                decision: "objective_unwait".to_string(),
+                evidence_files: vec!["alpha/objective_contract.json".to_string()],
+                evidence_commands: vec!["/objective unwait".to_string()],
+                notes: "Objective wait barrier cleared by operator command.".to_string(),
+            });
+            emit_command_output(
+                app,
+                format!(
+                    "Objective wait barrier cleared.\nobjective_id={}\nwait_barrier={}",
+                    updated.id,
+                    summarize_objective_wait_barrier(&updated)
+                ),
+            );
+            return Ok(CommandResult::Handled);
+        }
 
         let lifecycle_alias = match cmd.as_str() {
             "pause" => Some("paused"),
@@ -29819,6 +30007,86 @@ mod tests {
         assert_eq!(resume_result, CommandResult::Handled);
         assert_eq!(app.session_objective.as_deref(), Some("stabilize indexing"));
         assert!(latest_ui_assistant_text(&app).contains("status=active"));
+    }
+
+    #[tokio::test]
+    async fn objective_wait_pid_and_unwait_update_contract() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        handle_slash_command(&mut app, "/objective", &["stabilize", "release"])
+            .await
+            .expect("set objective");
+
+        let wait_result = handle_slash_command(
+            &mut app,
+            "/objective",
+            &["wait", "4242", "CI", "still", "running"],
+        )
+        .await
+        .expect("set wait pid");
+        assert_eq!(wait_result, CommandResult::Handled);
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("Objective wait barrier set"));
+        assert!(output.contains("pid=4242"));
+        let contract = load_objective_contract()
+            .expect("load contract")
+            .expect("contract");
+        assert_eq!(contract.waiting_on_pid, Some(4242));
+        assert_eq!(contract.waiting_reason, "CI still running");
+
+        let unwait_result = handle_slash_command(&mut app, "/goal", &["unwait"])
+            .await
+            .expect("unwait");
+        assert_eq!(unwait_result, CommandResult::Handled);
+        let contract = load_objective_contract()
+            .expect("load contract")
+            .expect("contract");
+        assert!(contract.waiting_on_pid.is_none());
+        assert!(contract.waiting_on_session.is_none());
+        assert_eq!(contract.waiting_until_unix_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn objective_wait_supports_session_and_seconds_forms() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        handle_slash_command(&mut app, "/objective", &["ship", "build"])
+            .await
+            .expect("set objective");
+
+        handle_slash_command(
+            &mut app,
+            "/objective",
+            &["wait", "--session", "proc_abc", "build", "watcher"],
+        )
+        .await
+        .expect("set session wait");
+        let contract = load_objective_contract()
+            .expect("load contract")
+            .expect("contract");
+        assert_eq!(contract.waiting_on_session.as_deref(), Some("proc_abc"));
+        assert_eq!(contract.waiting_reason, "build watcher");
+
+        handle_slash_command(
+            &mut app,
+            "/objective",
+            &["wait", "for", "30s", "rate", "limit"],
+        )
+        .await
+        .expect("set seconds wait");
+        let contract = load_objective_contract()
+            .expect("load contract")
+            .expect("contract");
+        assert!(contract.waiting_on_session.is_none());
+        assert!(contract.waiting_until_unix_ms > crate::alpha_runtime::objective_now_unix_ms());
+        assert_eq!(contract.waiting_reason, "rate limit");
+        assert!(latest_ui_assistant_text(&app).contains("remaining_seconds="));
     }
 
     #[tokio::test]

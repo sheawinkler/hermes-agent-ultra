@@ -91,6 +91,23 @@ pub struct ObjectiveContract {
     pub trading_sensitive: bool,
     #[serde(default)]
     pub counterfactual_journal: Vec<CounterfactualEntry>,
+    #[serde(default)]
+    pub waiting_on_pid: Option<u32>,
+    #[serde(default)]
+    pub waiting_on_session: Option<String>,
+    #[serde(default)]
+    pub waiting_until_unix_ms: i64,
+    #[serde(default)]
+    pub waiting_reason: String,
+    #[serde(default)]
+    pub waiting_since: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObjectiveWaitTarget {
+    Pid(u32),
+    Session(String),
+    Time { until_unix_ms: i64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -515,6 +532,18 @@ fn objective_behavior_directives_for_mode(mode: &str) -> Vec<String> {
 
 fn default_objective_behavior_directives() -> Vec<String> {
     objective_behavior_directives_for_mode(&default_objective_behavior_mode())
+}
+
+pub fn objective_now_unix_ms() -> i64 {
+    Utc::now().timestamp_millis()
+}
+
+fn clear_objective_wait_fields(contract: &mut ObjectiveContract) {
+    contract.waiting_on_pid = None;
+    contract.waiting_on_session = None;
+    contract.waiting_until_unix_ms = 0;
+    contract.waiting_reason.clear();
+    contract.waiting_since.clear();
 }
 
 pub fn canonical_objective_lifecycle_status(status: &str) -> String {
@@ -1139,6 +1168,7 @@ pub fn upsert_objective_contract(
         .as_ref()
         .map(|v| v.counterfactual_journal.clone())
         .unwrap_or_default();
+    let preserve_existing_wait = existing_objective.eq_ignore_ascii_case(objective_text.trim());
     let contract = ObjectiveContract {
         id: objective_id(objective_text),
         created_at,
@@ -1164,6 +1194,30 @@ pub fn upsert_objective_contract(
         confidence: calibrate_confidence(objective_text),
         trading_sensitive,
         counterfactual_journal,
+        waiting_on_pid: existing
+            .as_ref()
+            .filter(|_| preserve_existing_wait)
+            .and_then(|v| v.waiting_on_pid),
+        waiting_on_session: existing
+            .as_ref()
+            .filter(|_| preserve_existing_wait)
+            .and_then(|v| v.waiting_on_session.clone())
+            .filter(|v| !v.trim().is_empty()),
+        waiting_until_unix_ms: existing
+            .as_ref()
+            .filter(|_| preserve_existing_wait)
+            .map(|v| v.waiting_until_unix_ms)
+            .unwrap_or_default(),
+        waiting_reason: existing
+            .as_ref()
+            .filter(|_| preserve_existing_wait)
+            .map(|v| v.waiting_reason.trim().to_string())
+            .unwrap_or_default(),
+        waiting_since: existing
+            .as_ref()
+            .filter(|_| preserve_existing_wait)
+            .map(|v| v.waiting_since.trim().to_string())
+            .unwrap_or_default(),
     };
     write_json_file(&objective_contract_path(), &contract)?;
     Ok(contract)
@@ -1198,6 +1252,7 @@ pub fn set_objective_contract_lifecycle_status(
         )
     })?;
     contract.lifecycle_status = canonical_objective_lifecycle_status(status);
+    clear_objective_wait_fields(&mut contract);
     if let Some(reason) = reason {
         let trimmed = reason.trim();
         if !trimmed.is_empty() {
@@ -1210,6 +1265,157 @@ pub fn set_objective_contract_lifecycle_status(
     contract.updated_at = now_rfc3339();
     write_json_file(&objective_contract_path(), &contract)?;
     Ok(contract)
+}
+
+pub fn set_objective_contract_wait_pid(
+    pid: u32,
+    reason: Option<&str>,
+) -> Result<ObjectiveContract, AgentError> {
+    if pid == 0 {
+        return Err(AgentError::Config(
+            "objective wait pid must be positive".to_string(),
+        ));
+    }
+    let mut contract = load_objective_contract()?.ok_or_else(|| {
+        AgentError::Config(
+            "objective contract is not initialized; run `/objective <text>` first".to_string(),
+        )
+    })?;
+    if !objective_lifecycle_is_active(&contract.lifecycle_status) {
+        return Err(AgentError::Config(
+            "objective wait requires an active objective".to_string(),
+        ));
+    }
+    clear_objective_wait_fields(&mut contract);
+    contract.waiting_on_pid = Some(pid);
+    contract.waiting_reason = reason.unwrap_or("").trim().to_string();
+    contract.waiting_since = now_rfc3339();
+    contract.updated_at = now_rfc3339();
+    write_json_file(&objective_contract_path(), &contract)?;
+    Ok(contract)
+}
+
+pub fn set_objective_contract_wait_session(
+    session_id: &str,
+    reason: Option<&str>,
+) -> Result<ObjectiveContract, AgentError> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return Err(AgentError::Config(
+            "objective wait session id cannot be empty".to_string(),
+        ));
+    }
+    let mut contract = load_objective_contract()?.ok_or_else(|| {
+        AgentError::Config(
+            "objective contract is not initialized; run `/objective <text>` first".to_string(),
+        )
+    })?;
+    if !objective_lifecycle_is_active(&contract.lifecycle_status) {
+        return Err(AgentError::Config(
+            "objective wait requires an active objective".to_string(),
+        ));
+    }
+    clear_objective_wait_fields(&mut contract);
+    contract.waiting_on_session = Some(session_id.to_string());
+    contract.waiting_reason = reason.unwrap_or("").trim().to_string();
+    contract.waiting_since = now_rfc3339();
+    contract.updated_at = now_rfc3339();
+    write_json_file(&objective_contract_path(), &contract)?;
+    Ok(contract)
+}
+
+pub fn set_objective_contract_wait_seconds(
+    seconds: u64,
+    reason: Option<&str>,
+) -> Result<ObjectiveContract, AgentError> {
+    if seconds == 0 {
+        return Err(AgentError::Config(
+            "objective wait seconds must be positive".to_string(),
+        ));
+    }
+    let mut contract = load_objective_contract()?.ok_or_else(|| {
+        AgentError::Config(
+            "objective contract is not initialized; run `/objective <text>` first".to_string(),
+        )
+    })?;
+    if !objective_lifecycle_is_active(&contract.lifecycle_status) {
+        return Err(AgentError::Config(
+            "objective wait requires an active objective".to_string(),
+        ));
+    }
+    let delta_ms = i64::try_from(seconds.saturating_mul(1000)).unwrap_or(i64::MAX);
+    clear_objective_wait_fields(&mut contract);
+    contract.waiting_until_unix_ms = objective_now_unix_ms().saturating_add(delta_ms);
+    contract.waiting_reason = reason.unwrap_or("").trim().to_string();
+    contract.waiting_since = now_rfc3339();
+    contract.updated_at = now_rfc3339();
+    write_json_file(&objective_contract_path(), &contract)?;
+    Ok(contract)
+}
+
+pub fn clear_objective_contract_wait_barrier() -> Result<ObjectiveContract, AgentError> {
+    let mut contract = load_objective_contract()?.ok_or_else(|| {
+        AgentError::Config(
+            "objective contract is not initialized; run `/objective <text>` first".to_string(),
+        )
+    })?;
+    clear_objective_wait_fields(&mut contract);
+    contract.updated_at = now_rfc3339();
+    write_json_file(&objective_contract_path(), &contract)?;
+    Ok(contract)
+}
+
+pub fn objective_wait_target(contract: &ObjectiveContract) -> Option<ObjectiveWaitTarget> {
+    if let Some(pid) = contract.waiting_on_pid.filter(|pid| *pid > 0) {
+        return Some(ObjectiveWaitTarget::Pid(pid));
+    }
+    if let Some(session_id) = contract
+        .waiting_on_session
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        return Some(ObjectiveWaitTarget::Session(session_id.to_string()));
+    }
+    if contract.waiting_until_unix_ms > 0 {
+        return Some(ObjectiveWaitTarget::Time {
+            until_unix_ms: contract.waiting_until_unix_ms,
+        });
+    }
+    None
+}
+
+pub fn objective_wait_remaining_seconds(contract: &ObjectiveContract) -> Option<i64> {
+    if contract.waiting_until_unix_ms <= 0 {
+        return None;
+    }
+    Some(
+        contract
+            .waiting_until_unix_ms
+            .saturating_sub(objective_now_unix_ms())
+            .saturating_add(999)
+            / 1000,
+    )
+}
+
+pub fn summarize_objective_wait_barrier(contract: &ObjectiveContract) -> String {
+    let reason = contract.waiting_reason.trim();
+    let suffix = if reason.is_empty() {
+        String::new()
+    } else {
+        format!(" reason={reason}")
+    };
+    match objective_wait_target(contract) {
+        Some(ObjectiveWaitTarget::Pid(pid)) => format!("pid={pid}{suffix}"),
+        Some(ObjectiveWaitTarget::Session(session_id)) => {
+            format!("session_id={session_id}{suffix}")
+        }
+        Some(ObjectiveWaitTarget::Time { until_unix_ms }) => {
+            let remaining = objective_wait_remaining_seconds(contract).unwrap_or_default();
+            format!("until_unix_ms={until_unix_ms} remaining_seconds={remaining}{suffix}")
+        }
+        None => "none".to_string(),
+    }
 }
 
 pub fn set_objective_contract_behavior_mode(mode: &str) -> Result<ObjectiveContract, AgentError> {
@@ -1928,10 +2134,11 @@ pub fn summarize_objective_contract(contract: &ObjectiveContract) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "objective_id: {}\nlifecycle_status: {}\nbehavior_mode: {}\nconfidence: {:.2}\nutility_terms: {}\nhard_constraints: {}\nhorizons: {}",
+        "objective_id: {}\nlifecycle_status: {}\nbehavior_mode: {}\nwait_barrier: {}\nconfidence: {:.2}\nutility_terms: {}\nhard_constraints: {}\nhorizons: {}",
         contract.id,
         canonical_objective_lifecycle_status(&contract.lifecycle_status),
         canonical_objective_behavior_mode(&contract.behavior_mode),
+        summarize_objective_wait_barrier(contract),
         contract.confidence,
         terms,
         constraints,
@@ -3593,6 +3800,85 @@ mod tests {
                 canonical_objective_lifecycle_status(&replaced.lifecycle_status),
                 "active"
             );
+        });
+    }
+
+    #[test]
+    fn objective_wait_barrier_roundtrip_and_lifecycle_clear() {
+        with_test_hermes_home(|| {
+            upsert_objective_contract("stabilize runtime telemetry", false).expect("objective set");
+
+            let waiting =
+                set_objective_contract_wait_pid(4242, Some("build still running")).expect("wait");
+            assert_eq!(waiting.waiting_on_pid, Some(4242));
+            assert_eq!(waiting.waiting_reason, "build still running");
+            assert!(matches!(
+                objective_wait_target(&waiting),
+                Some(ObjectiveWaitTarget::Pid(4242))
+            ));
+            let reloaded = load_objective_contract()
+                .expect("load objective")
+                .expect("objective present");
+            assert_eq!(reloaded.waiting_on_pid, Some(4242));
+
+            let session_wait =
+                set_objective_contract_wait_session("proc_abc", Some("watcher")).expect("wait");
+            assert_eq!(session_wait.waiting_on_session.as_deref(), Some("proc_abc"));
+            assert!(matches!(
+                objective_wait_target(&session_wait),
+                Some(ObjectiveWaitTarget::Session(ref session_id)) if session_id == "proc_abc"
+            ));
+
+            let seconds_wait =
+                set_objective_contract_wait_seconds(30, Some("backoff")).expect("wait seconds");
+            assert!(seconds_wait.waiting_until_unix_ms > objective_now_unix_ms());
+            assert!(objective_wait_remaining_seconds(&seconds_wait).unwrap_or_default() > 0);
+
+            let paused = set_objective_contract_lifecycle_status("pause", Some("manual hold"))
+                .expect("pause");
+            assert!(objective_wait_target(&paused).is_none());
+            assert_eq!(summarize_objective_wait_barrier(&paused), "none");
+        });
+    }
+
+    #[test]
+    fn objective_legacy_contract_loads_without_wait_fields() {
+        with_test_hermes_home(|| {
+            ensure_alpha_dir().expect("alpha dir");
+            let path = objective_contract_path();
+            std::fs::write(
+                &path,
+                serde_json::json!({
+                    "id": "obj-legacy",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "objective_text": "legacy objective",
+                    "lifecycle_status": "active",
+                    "status_reason": "",
+                    "behavior_mode": "balanced",
+                    "behavior_directives": [],
+                    "success_criteria": [],
+                    "utility": {"objective": "legacy", "terms": [], "hard_constraints": []},
+                    "horizons": [],
+                    "promotion_gate": {
+                        "min_patch_items": 1,
+                        "min_unique_files": 1,
+                        "min_unique_commands": 1,
+                        "require_objective_state": true
+                    },
+                    "confidence": 0.5,
+                    "trading_sensitive": false,
+                    "counterfactual_journal": []
+                })
+                .to_string(),
+            )
+            .expect("write legacy");
+            let loaded = load_objective_contract()
+                .expect("load objective")
+                .expect("objective present");
+            assert!(objective_wait_target(&loaded).is_none());
+            assert_eq!(loaded.waiting_until_unix_ms, 0);
+            assert!(loaded.waiting_reason.is_empty());
         });
     }
 

@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T12:20:28.572991+00:00`
+Generated: `2026-06-25T12:44:22.004656+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7012`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-25T12:20:28.572991+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 196 |
-| ported | 398 |
+| pending | 195 |
+| ported | 399 |
 | superseded | 6342 |
 
 ## First 100 Pending Commits
@@ -124,4 +124,4 @@ Generated: `2026-06-25T12:20:28.572991+00:00`
 | `86e4521cb1d9` | #23 | fix(delivery): make cron output truncation configurable + adapter-aware |
 | `e9cd8c5bf3ea` | #23 | fix(delivery): drop env-var knob, flag all chunking adapters |
 | `d4fa2db1c5df` | #26 | fix(desktop): show all of a provider's models when searching the composer picker |
-| `ff85af3fc7d3` | #20 | feat(goals): /goal wait <pid> — park the loop on a background process (#50503) |
+| `17dfc6bec4a8` | #26 | fix(desktop): set AppUserModelID on Windows so notifications fire (#50808) |

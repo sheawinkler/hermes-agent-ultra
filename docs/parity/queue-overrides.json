@@ -4533,6 +4533,11 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust MCP refresh parity now diffs reload snapshots against the advertised tool schema surface, so restricted/custom platform toolsets do not report hidden MCP handlers as added. ACP prompt execution no longer appends all live mcp-* schemas after planner filtering; explicit MCP server aliases still resolve through the shared platform planner. Python in-place tools/valid_tool_names race and post-build memory/context reinjection issues are superseded by Rust AgentLoop construction plus advertised-tool-name guards."
+    },
+    "ff85af3fc7d3": {
+      "disposition": "ported",
+      "notes": "Rust Objective OS now has durable wait barriers for /objective and /goal: PID, process-session, and timed waits persist in the objective contract, pause/resume lifecycle clears stale waits, and the mission/autonomous continuation enforcer parks while live barriers are active and fail-safe clears stale ones.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [

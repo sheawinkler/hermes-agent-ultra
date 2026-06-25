@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use hermes_agent::agent_loop::ToolRegistry as AgentToolRegistry;
@@ -36,8 +36,10 @@ use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
 use crate::alpha_runtime::{
-    canonical_objective_behavior_mode, load_objective_contract, load_quorum_policy,
-    objective_lifecycle_is_active, ObjectiveContract, QuorumPolicy,
+    canonical_objective_behavior_mode, clear_objective_contract_wait_barrier,
+    load_objective_contract, load_quorum_policy, objective_lifecycle_is_active,
+    objective_now_unix_ms, objective_wait_remaining_seconds, objective_wait_target,
+    summarize_objective_wait_barrier, ObjectiveContract, ObjectiveWaitTarget, QuorumPolicy,
 };
 use crate::auth::{
     login_nous_device_code, resolve_gemini_oauth_runtime_credentials,
@@ -746,7 +748,99 @@ impl App {
         (has_future_language && !has_execution_evidence) || has_weakness_markers
     }
 
-    fn should_force_objective_continuation(
+    #[cfg(unix)]
+    fn objective_pid_is_alive(pid: u32) -> bool {
+        // SAFETY: signal 0 performs a liveness/permission probe without sending a signal.
+        let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        if rc == 0 {
+            true
+        } else {
+            matches!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(libc::EPERM)
+            )
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn objective_pid_is_alive(_pid: u32) -> bool {
+        false
+    }
+
+    fn clear_stale_objective_wait_barrier(&self, reason: &str) {
+        match clear_objective_contract_wait_barrier() {
+            Ok(updated) => Self::emit_lifecycle_event(
+                &self.stream_handle_shared,
+                format!(
+                    "objective wait barrier auto-cleared: {} (objective_id={})",
+                    reason, updated.id
+                ),
+            ),
+            Err(err) => tracing::warn!("objective wait barrier auto-clear failed: {}", err),
+        }
+    }
+
+    async fn process_session_is_running(&self, session_id: &str) -> bool {
+        let raw = self
+            .tool_registry
+            .dispatch_async("process", json!({"action":"poll","session_id":session_id}))
+            .await;
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            return false;
+        };
+        value
+            .get("status")
+            .and_then(Value::as_str)
+            .map(|status| status.eq_ignore_ascii_case("running"))
+            .unwrap_or(false)
+    }
+
+    async fn objective_wait_barrier_active_message(
+        &self,
+        contract: &ObjectiveContract,
+    ) -> Option<String> {
+        match objective_wait_target(contract)? {
+            ObjectiveWaitTarget::Pid(pid) => {
+                if Self::objective_pid_is_alive(pid) {
+                    Some(format!(
+                        "objective wait barrier active: {}",
+                        summarize_objective_wait_barrier(contract)
+                    ))
+                } else {
+                    self.clear_stale_objective_wait_barrier(&format!("pid {pid} is not running"));
+                    None
+                }
+            }
+            ObjectiveWaitTarget::Session(session_id) => {
+                if self.process_session_is_running(&session_id).await {
+                    Some(format!(
+                        "objective wait barrier active: {}",
+                        summarize_objective_wait_barrier(contract)
+                    ))
+                } else {
+                    self.clear_stale_objective_wait_barrier(&format!(
+                        "process session {session_id} is not running"
+                    ));
+                    None
+                }
+            }
+            ObjectiveWaitTarget::Time { until_unix_ms } => {
+                if objective_now_unix_ms() < until_unix_ms {
+                    let remaining = objective_wait_remaining_seconds(contract).unwrap_or_default();
+                    Some(format!(
+                        "objective wait barrier active: {} (remaining_seconds={})",
+                        summarize_objective_wait_barrier(contract),
+                        remaining.max(0)
+                    ))
+                } else {
+                    self.clear_stale_objective_wait_barrier("timer elapsed");
+                    None
+                }
+            }
+        }
+    }
+
+    async fn should_force_objective_continuation(
         &self,
         result: &hermes_core::AgentResult,
         baseline_len: usize,
@@ -757,6 +851,10 @@ impl App {
         let contract = Self::load_active_objective_contract()?;
         let behavior_mode = canonical_objective_behavior_mode(&contract.behavior_mode);
         if !matches!(behavior_mode.as_str(), "autonomous" | "mission") {
+            return None;
+        }
+        if let Some(message) = self.objective_wait_barrier_active_message(&contract).await {
+            Self::emit_lifecycle_event(&self.stream_handle_shared, message);
             return None;
         }
 
@@ -3399,8 +3497,9 @@ impl App {
                     let interrupted = result.interrupted;
                     let finished_naturally = result.finished_naturally;
                     if objective_continuation_attempts < objective_continuation_limit {
-                        if let Some(reason) =
-                            self.should_force_objective_continuation(&result, baseline_len)
+                        if let Some(reason) = self
+                            .should_force_objective_continuation(&result, baseline_len)
+                            .await
                         {
                             self.messages = result.messages;
                             self.messages.push(hermes_core::Message::system(
@@ -4166,6 +4265,14 @@ mod tests {
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
         test_env_lock::lock()
+    }
+
+    fn block_on_test<T>(future: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
     }
 
     struct EnvSnapshot {
@@ -5907,7 +6014,52 @@ mod tests {
         };
 
         let reason = app.should_force_objective_continuation(&result, baseline_len);
+        let reason = block_on_test(reason);
         assert!(reason.is_some());
+
+        match prev_home {
+            Some(val) => std::env::set_var("HERMES_HOME", val),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+        std::env::remove_var("HERMES_OBJECTIVE_EXECUTION_ENFORCER");
+    }
+
+    #[test]
+    fn test_objective_wait_timer_parks_continuation_enforcer() {
+        let _lock = env_test_lock();
+        let prev_home = std::env::var("HERMES_HOME").ok();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::env::set_var("HERMES_HOME", tmp.path());
+        std::env::set_var("HERMES_OBJECTIVE_EXECUTION_ENFORCER", "1");
+
+        let mut app = build_minimal_test_app();
+        app.messages.push(hermes_core::Message::user(
+            "Proceed with objective and improve outcomes continuously.",
+        ));
+        upsert_objective_contract(
+            "Run this assignment in perpetuity and continuously improve output quality",
+            false,
+        )
+        .expect("set objective");
+        set_objective_contract_behavior_mode("mission").expect("set mission mode");
+        crate::alpha_runtime::set_objective_contract_wait_seconds(60, Some("CI cooldown"))
+            .expect("set wait");
+
+        let baseline_len = app.messages.len();
+        let mut result_messages = app.messages.clone();
+        result_messages.push(hermes_core::Message::assistant(
+            "I will proceed with the next steps and share updates shortly.",
+        ));
+        let result = hermes_core::AgentResult {
+            messages: result_messages,
+            finished_naturally: true,
+            total_turns: 1,
+            ..Default::default()
+        };
+
+        let reason = app.should_force_objective_continuation(&result, baseline_len);
+        let reason = block_on_test(reason);
+        assert!(reason.is_none());
 
         match prev_home {
             Some(val) => std::env::set_var("HERMES_HOME", val),
