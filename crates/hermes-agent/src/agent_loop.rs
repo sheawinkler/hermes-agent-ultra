@@ -37,7 +37,7 @@ use crate::budget;
 use crate::code_index::CodeIndex;
 use crate::coding_context::resolve_runtime_mode;
 use crate::context::{
-    load_builtin_memory_snapshot, load_soul_md, resolve_personality, ContextManager,
+    load_builtin_memory_snapshot, load_soul_md_from_home, resolve_personality, ContextManager,
     SystemPromptBuilder,
 };
 use crate::context_files::{load_hermes_context_files, load_workspace_context};
@@ -4002,7 +4002,7 @@ impl AgentLoop {
         tool_schemas: &[ToolSchema],
         model_for_prompt: &str,
     ) -> String {
-        let soul = load_soul_md();
+        let soul = load_soul_md_from_home(self.config.hermes_home.as_deref());
         let mut builder = SystemPromptBuilder::new().with_personality(soul.as_deref());
         if let Some(base) = self.config.system_prompt.as_deref() {
             builder = builder.with_system_message(base);

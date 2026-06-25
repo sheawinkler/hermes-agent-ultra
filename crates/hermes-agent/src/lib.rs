@@ -49,8 +49,10 @@ pub use agent_loop::{
 // Re-export context management
 pub use compression::summarize_messages_with_llm;
 pub use context::{
-    builtin_personality_descriptions, builtin_personality_names, load_context_files, load_soul_md,
-    load_soul_md_from, switch_personality, ContextManager, SystemPromptBuilder,
+    builtin_personality_descriptions, builtin_personality_names, ensure_default_soul_md,
+    is_legacy_template_soul, load_context_files, load_soul_md, load_soul_md_from,
+    load_soul_md_from_home, switch_personality, ContextManager, SoulSeedOutcome,
+    SystemPromptBuilder,
 };
 
 // Re-export budget enforcement

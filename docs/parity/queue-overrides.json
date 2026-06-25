@@ -4268,6 +4268,26 @@
     "73cd8622f9fcd5e368060d1a1678e08bd3d0a794": {
       "disposition": "ported",
       "notes": "Ported as a Rust-native terminal billing surface: `hermes billing` and `/billing` now render Nous billing state fail-open from the auth store and billing API, support scoped `billing:manage` device-code step-up, explicit-confirmation charge and auto-reload actions with idempotency-key handling and typed error mapping, charge status polling, deterministic portal URL normalization, decimal-string money formatting, and focused Rust tests for state parsing, scope detection, client contracts, CLI parsing, slash behavior, auth isolation, and confirmation gating."
+    },
+    "36851fa576eb4079f0397010f418cafa15a4ab26": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python setup.py/WebUI read-only-source workaround is structurally absent in Ultra: there is no top-level setup.py or Python WebUI install path. This batch pins the Rust Docker image contract instead: LICENSE/NOTICE are shipped in the image, .dockerignore cannot exclude them, and tests assert immutable /usr/local/bin code with writable HERMES_HOME=/data."
+    },
+    "eb51c180e6484ec15809d04c25a8115e6e48dc3c": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported to Ultra Docker/Rust dashboard contract: docker-compose runs dashboard on 127.0.0.1 by default, docs remove the stale HERMES_DASHBOARD side-process/insecure escape hatch, and Rust API server bind guards still require API_SERVER_KEY for network-accessible binds even when dashboard --insecure acknowledges non-localhost binding."
+    },
+    "cbd6ba1bdd916d8342f6c741cb290b62dd89dbc4": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream durable lazy Python install target is superseded by Ultra Rust packaging: the container ships a compiled /usr/local/bin/hermes binary, has no top-level setup.py/pip install surface, keeps runtime state under /data, and now has Dockerfile contracts proving code immutability plus license packaging."
+    },
+    "411faf08bd678fe3e49b22afcef1e9fd2d7f5592": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust/setup/install: hermes-agent now exposes DEFAULT_AGENT_IDENTITY-backed SOUL.md seeding, ignores exact legacy comment-only templates at prompt load, upgrades those templates during setup, preserves customized SOUL.md files, respects explicit/HERMES_HOME resolution, and install.sh seeds the real default persona instead of an empty scaffold."
     }
   },
   "subject_patterns": [

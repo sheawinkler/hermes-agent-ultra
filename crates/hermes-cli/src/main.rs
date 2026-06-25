@@ -12185,13 +12185,16 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
         println!("  ✓ Created default profile");
     }
 
-    // 7. Ensure SOUL.md exists so users can customize persona immediately.
-    let soul_path = config_dir.join("SOUL.md");
-    if !soul_path.exists() {
-        let soul_template = "# Hermes Agent Persona\n\n<!--\nCustomize this file to control how Hermes communicates.\nThis file is loaded every message; no restart needed.\nDelete this file (or leave it empty) to use the default personality.\n-->\n";
-        std::fs::write(&soul_path, soul_template)
-            .map_err(|e| AgentError::Io(format!("Failed to write SOUL.md: {}", e)))?;
-        println!("  ✓ Created SOUL.md");
+    // 7. Ensure SOUL.md contains a real default persona. Exact legacy
+    // comment-only scaffolds are safe to upgrade; customized files are kept.
+    match hermes_agent::ensure_default_soul_md(&config_dir)
+        .map_err(|e| AgentError::Io(format!("Failed to initialize SOUL.md: {}", e)))?
+    {
+        hermes_agent::SoulSeedOutcome::Created => println!("  ✓ Created SOUL.md"),
+        hermes_agent::SoulSeedOutcome::UpgradedLegacy => {
+            println!("  ✓ Upgraded legacy SOUL.md template")
+        }
+        hermes_agent::SoulSeedOutcome::Preserved => {}
     }
 
     if full_setup && prompt_yes_no("\nConfigure optional setup sections now?", true).await? {

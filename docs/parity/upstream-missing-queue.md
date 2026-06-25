@@ -1,8 +1,8 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T03:33:51.999047+00:00`
+Generated: `2026-06-25T04:12:55.364845+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `6978`.
+- Range: `origin/main..upstream/main`; total commits tracked: `6978`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
@@ -17,15 +17,14 @@ Generated: `2026-06-25T03:33:51.999047+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 238 |
-| ported | 357 |
-| superseded | 6307 |
+| pending | 234 |
+| ported | 359 |
+| superseded | 6309 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `36851fa576eb` | #20 | fix(docker): support WebUI installs from read-only sources (#48541) |
 | `cfb55de5ea49` | #21 | Update Stripe Projects skill docs (#48673) |
 | `c7b7f92ec14a` | #20 | fix(openviking): sync structured turns with tool parts |
 | `d7cd0bc0863c` | #20 | fix(openviking): preserve structured sync attribution |
@@ -125,3 +124,4 @@ Generated: `2026-06-25T03:33:51.999047+00:00`
 | `587b5b9ac223` | #23 | fix(backup): capture memory-provider state stored outside HERMES_HOME (#50325) |
 | `2a4542333ee1` | #26 | fix(photon): classify Envoy overflow errors as retryable; add typing cooldown |
 | `9578e52795e3` | #26 | fix(photon): detect unexpected sidecar death and trigger reconnect |
+| `5e3e89cc05d3` | #23 | feat(hindsight): configurable embedded daemon health grace timeout (#50341) |

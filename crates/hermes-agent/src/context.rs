@@ -392,6 +392,25 @@ unless otherwise directed below. Be targeted and efficient in your exploration a
 When the user asks for an actionable task, execute immediately: run the first concrete step with available tools, \
 then continue until completion. Do not stop at intent-only narration such as 'I'll proceed' without performing work.";
 
+const LEGACY_INSTALLER_SOUL_TEMPLATE: &str = "# Hermes Agent Persona\n\n<!--\nCustomize this file to control how Hermes communicates.\nThis file is loaded every message; no restart needed.\nDelete this file (or leave it empty) to use the default personality.\n-->";
+
+const LEGACY_UPSTREAM_SOUL_TEMPLATE_WITH_EXAMPLES: &str = "# Hermes Agent Persona\n\n<!--\nThis file defines the agent's personality and tone.\nThe agent will embody whatever you write here.\nEdit this to customize how Hermes communicates with you.\n\nExamples:\n  - \"You are a warm, playful assistant who uses kaomoji occasionally.\"\n  - \"You are a concise technical expert. No fluff, just facts.\"\n  - \"You speak like a friendly coworker who happens to know everything.\"\n\nThis file is loaded fresh each message -- no restart needed.\nDelete the contents (or this file) to use the default personality.\n-->";
+
+const LEGACY_UPSTREAM_SOUL_TEMPLATE: &str = "# Hermes Agent Persona\n\n<!--\nThis file defines the agent's personality and tone.\nThe agent will embody whatever you write here.\nEdit this to customize how Hermes communicates with you.\n\nThis file is loaded fresh each message -- no restart needed.\nDelete the contents (or this file) to use the default personality.\n-->";
+
+const LEGACY_SOUL_TEMPLATES: &[&str] = &[
+    LEGACY_INSTALLER_SOUL_TEMPLATE,
+    LEGACY_UPSTREAM_SOUL_TEMPLATE_WITH_EXAMPLES,
+    LEGACY_UPSTREAM_SOUL_TEMPLATE,
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SoulSeedOutcome {
+    Created,
+    UpgradedLegacy,
+    Preserved,
+}
+
 const BUILTIN_PERSONALITY_CODER: &str = "You are operating in the `coder` persona.\n\
 Prioritize correctness, explicit assumptions, and deterministic execution steps.\n\
 When editing code, prefer small verifiable changes and explain trade-offs briefly.\n\
@@ -564,12 +583,50 @@ const BUILTIN_PERSONALITY_DESCRIPTIONS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Load the SOUL.md personality file from `~/.hermes/SOUL.md`.
+fn normalize_soul_template(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim_start_matches('\u{feff}')
+        .trim()
+        .to_string()
+}
+
+pub fn is_legacy_template_soul(text: &str) -> bool {
+    let normalized = normalize_soul_template(text);
+    LEGACY_SOUL_TEMPLATES
+        .iter()
+        .any(|template| normalized == normalize_soul_template(template))
+}
+
+pub fn ensure_default_soul_md(hermes_home: &Path) -> std::io::Result<SoulSeedOutcome> {
+    std::fs::create_dir_all(hermes_home)?;
+    let soul_path = hermes_home.join("SOUL.md");
+    match std::fs::read_to_string(&soul_path) {
+        Ok(existing) => {
+            if is_legacy_template_soul(&existing) {
+                std::fs::write(&soul_path, DEFAULT_AGENT_IDENTITY)?;
+                Ok(SoulSeedOutcome::UpgradedLegacy)
+            } else {
+                Ok(SoulSeedOutcome::Preserved)
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::write(&soul_path, DEFAULT_AGENT_IDENTITY)?;
+            Ok(SoulSeedOutcome::Created)
+        }
+        Err(_) => Ok(SoulSeedOutcome::Preserved),
+    }
+}
+
+/// Load the SOUL.md personality file from the active Hermes home.
 ///
 /// Returns `None` if the file doesn't exist or can't be read.
 pub fn load_soul_md() -> Option<String> {
-    let home = dirs::home_dir()?;
-    let soul_path = home.join(".hermes").join("SOUL.md");
+    load_soul_md_from_home(None)
+}
+
+pub fn load_soul_md_from_home(hermes_home_override: Option<&str>) -> Option<String> {
+    let soul_path = resolve_hermes_home(hermes_home_override).join("SOUL.md");
     load_soul_md_from(&soul_path)
 }
 
@@ -577,6 +634,11 @@ fn resolve_hermes_home(hermes_home_override: Option<&str>) -> PathBuf {
     hermes_home_override
         .map(PathBuf::from)
         .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
+        .or_else(|| {
+            std::env::var("HERMES_AGENT_ULTRA_HOME")
+                .ok()
+                .map(PathBuf::from)
+        })
         .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
         .unwrap_or_else(|| PathBuf::from(".hermes"))
 }
@@ -638,7 +700,9 @@ pub fn resolve_personality(name: &str, hermes_home_override: Option<&str>) -> Op
 /// Load a SOUL.md file from a specific path.
 pub fn load_soul_md_from(path: &Path) -> Option<String> {
     match std::fs::read_to_string(path) {
-        Ok(content) if !content.trim().is_empty() => Some(content),
+        Ok(content) if !content.trim().is_empty() && !is_legacy_template_soul(&content) => {
+            Some(content)
+        }
         _ => None,
     }
 }
@@ -1093,6 +1157,85 @@ mod tests {
 
         let result = load_soul_md_from(&soul_path);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_load_soul_md_ignores_legacy_template() {
+        let tmp = tempfile::tempdir().unwrap();
+        let soul_path = tmp.path().join("SOUL.md");
+        std::fs::write(
+            &soul_path,
+            format!("\u{feff}{LEGACY_INSTALLER_SOUL_TEMPLATE}\r\n"),
+        )
+        .unwrap();
+
+        assert!(is_legacy_template_soul(
+            &std::fs::read_to_string(&soul_path).unwrap()
+        ));
+        assert!(load_soul_md_from(&soul_path).is_none());
+    }
+
+    #[test]
+    fn test_legacy_template_detection_preserves_custom_persona() {
+        let custom = format!("{LEGACY_INSTALLER_SOUL_TEMPLATE}\nYou are a helpful pirate.");
+
+        assert!(!is_legacy_template_soul(&custom));
+    }
+
+    #[test]
+    fn test_load_soul_md_from_home_uses_explicit_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("SOUL.md"), "Use explicit home.").unwrap();
+
+        let result = load_soul_md_from_home(Some(tmp.path().to_string_lossy().as_ref()));
+
+        assert_eq!(result.as_deref(), Some("Use explicit home."));
+    }
+
+    #[test]
+    fn test_ensure_default_soul_md_creates_default() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let outcome = ensure_default_soul_md(tmp.path()).unwrap();
+
+        assert_eq!(outcome, SoulSeedOutcome::Created);
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("SOUL.md")).unwrap(),
+            DEFAULT_AGENT_IDENTITY
+        );
+    }
+
+    #[test]
+    fn test_ensure_default_soul_md_upgrades_legacy_template() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("SOUL.md"),
+            format!("{LEGACY_UPSTREAM_SOUL_TEMPLATE_WITH_EXAMPLES}\n"),
+        )
+        .unwrap();
+
+        let outcome = ensure_default_soul_md(tmp.path()).unwrap();
+
+        assert_eq!(outcome, SoulSeedOutcome::UpgradedLegacy);
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("SOUL.md")).unwrap(),
+            DEFAULT_AGENT_IDENTITY
+        );
+    }
+
+    #[test]
+    fn test_ensure_default_soul_md_preserves_custom_persona() {
+        let tmp = tempfile::tempdir().unwrap();
+        let soul_path = tmp.path().join("SOUL.md");
+        std::fs::write(&soul_path, "Custom persona.").unwrap();
+
+        let outcome = ensure_default_soul_md(tmp.path()).unwrap();
+
+        assert_eq!(outcome, SoulSeedOutcome::Preserved);
+        assert_eq!(
+            std::fs::read_to_string(soul_path).unwrap(),
+            "Custom persona."
+        );
     }
 
     #[test]
