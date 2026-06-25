@@ -4244,6 +4244,16 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in this batch: /model refresh [provider|provider:model] clears signed provider catalog payload/signature files and reloads through the configured provider catalog path with command and cache tests."
+    },
+    "49596b70cb2d0d328d68645905febb074e494e77": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: SessionPersistence resolves resume targets through compression-continuation children only when the parent ended with end_reason='compression', has ended_at set, and the child was created after that end time; CLI resume snapshot loading follows the resolved tip so parent resumes include post-compression child messages. Focused tests cover non-empty compressed parents, branch-child guardrails, chain traversal, and snapshot reload."
+    },
+    "1699525638ed4feba3fd35f0be5c6d4d2d326a49": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream fixes a Python tui_gateway slash.exec -> command.dispatch fallback for pending-input commands. Ultra's Rust gateway has no split slash.exec/command.dispatch RPC path: slash input is parsed once by crates/hermes-gateway/src/commands.rs into typed GatewayCommandResult variants, and /retry, /undo, /queue, /q, and /steer are consumed directly by crates/hermes-gateway/src/gateway.rs. The fragile client-side fallback failure mode is absent; /goal and /plan are CLI-only Rust commands, not gateway pending-input RPCs."
     }
   },
   "subject_patterns": [

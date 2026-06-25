@@ -1026,6 +1026,42 @@ impl SessionPersistence {
         }
     }
 
+    /// Update lineage/end-state metadata for an existing session row.
+    pub fn update_session_lineage(
+        &self,
+        session_id: &str,
+        parent_session_id: Option<&str>,
+        end_reason: Option<&str>,
+        created_at: Option<&str>,
+        ended_at: Option<&str>,
+    ) -> Result<bool, AgentError> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() || !self.db_path.exists() {
+            return Ok(false);
+        }
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let changed = conn
+            .execute(
+                "UPDATE sessions
+                 SET parent_session_id = ?1,
+                     end_reason = ?2,
+                     created_at = COALESCE(?3, created_at),
+                     updated_at = COALESCE(?3, updated_at),
+                     ended_at = ?4
+                 WHERE id = ?5",
+                rusqlite::params![
+                    parent_session_id,
+                    end_reason,
+                    created_at,
+                    ended_at,
+                    session_id
+                ],
+            )
+            .map_err(|e| AgentError::Io(format!("Failed to update session lineage: {e}")))?;
+        Ok(changed > 0)
+    }
+
     /// Read the persisted model metadata for a session without creating a database.
     pub fn get_session_model(&self, session_id: &str) -> Result<Option<String>, AgentError> {
         if session_id.trim().is_empty() || !self.db_path.exists() {
@@ -1053,6 +1089,70 @@ impl SessionPersistence {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(AgentError::Io(format!("Failed to read session model: {e}"))),
         }
+    }
+
+    /// Follow compression-continuation children to the live resume tip.
+    ///
+    /// Auto-compression ends the current session with `end_reason='compression'`
+    /// and forks a child. The parent can still contain flushed messages, so a
+    /// naive resume of the parent id misses turns written to the continuation.
+    pub fn get_compression_tip(&self, session_id: &str) -> Result<String, AgentError> {
+        let mut current = session_id.trim().to_string();
+        if current.is_empty() || !self.db_path.exists() {
+            return Ok(current);
+        }
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..128 {
+            if !seen.insert(current.clone()) {
+                break;
+            }
+            let mut stmt = match conn.prepare(
+                "SELECT c.id
+                 FROM sessions c
+                 JOIN sessions p ON p.id = c.parent_session_id
+                 WHERE c.parent_session_id = ?1
+                   AND p.end_reason = 'compression'
+                   AND NULLIF(TRIM(p.ended_at), '') IS NOT NULL
+                   AND c.created_at >= p.ended_at
+                 ORDER BY c.created_at DESC, c.updated_at DESC, c.id DESC
+                 LIMIT 1",
+            ) {
+                Ok(stmt) => stmt,
+                Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+                    if message.contains("no such table") || message.contains("no such column") =>
+                {
+                    return Ok(current);
+                }
+                Err(e) => {
+                    return Err(AgentError::Io(format!(
+                        "Failed to prepare compression-tip query: {e}"
+                    )));
+                }
+            };
+            let next = match stmt.query_row(rusqlite::params![current.as_str()], |row| {
+                row.get::<_, String>(0)
+            }) {
+                Ok(next) => next,
+                Err(rusqlite::Error::QueryReturnedNoRows) => break,
+                Err(e) => {
+                    return Err(AgentError::Io(format!(
+                        "Failed to resolve compression tip: {e}"
+                    )));
+                }
+            };
+            if next.trim().is_empty() || next == current {
+                break;
+            }
+            current = next;
+        }
+        Ok(current)
+    }
+
+    /// Resolve a resume target through compression continuations when present.
+    pub fn resolve_resume_session_id(&self, session_id: &str) -> Result<String, AgentError> {
+        self.get_compression_tip(session_id)
     }
 
     /// Soft-delete the target user turn and all later active rows.
@@ -1456,6 +1556,34 @@ mod tests {
             params![ts, session_id],
         )
         .expect("update updated_at");
+    }
+
+    fn set_session_lineage(
+        sp: &SessionPersistence,
+        session_id: &str,
+        parent_session_id: Option<&str>,
+        end_reason: Option<&str>,
+        created_at: &str,
+        ended_at: Option<&str>,
+    ) {
+        let conn = rusqlite::Connection::open(&sp.db_path).expect("open db");
+        conn.execute(
+            "UPDATE sessions
+             SET parent_session_id = ?1,
+                 end_reason = ?2,
+                 created_at = ?3,
+                 updated_at = ?3,
+                 ended_at = ?4
+             WHERE id = ?5",
+            params![
+                parent_session_id,
+                end_reason,
+                created_at,
+                ended_at,
+                session_id
+            ],
+        )
+        .expect("update session lineage");
     }
 
     fn grow_sessions_wal(
@@ -1878,6 +2006,157 @@ mod tests {
             )
             .unwrap();
         assert_eq!(model, "nous:hermes-4");
+    }
+
+    #[test]
+    fn resolve_resume_session_id_follows_compression_tip_with_nonempty_parent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session(
+            "root",
+            &[Message::user("pre-compression turn")],
+            None,
+            Some("cli"),
+            None,
+            None,
+        )
+        .unwrap();
+        sp.persist_session(
+            "cont",
+            &[Message::assistant("post-compression reply")],
+            None,
+            Some("cli"),
+            None,
+            None,
+        )
+        .unwrap();
+        let base = Utc::now() - ChronoDuration::hours(1);
+        let root_created = base.to_rfc3339();
+        let root_ended = (base + ChronoDuration::seconds(10)).to_rfc3339();
+        let cont_created = (base + ChronoDuration::seconds(20)).to_rfc3339();
+        set_session_lineage(
+            &sp,
+            "root",
+            None,
+            Some("compression"),
+            &root_created,
+            Some(&root_ended),
+        );
+        set_session_lineage(&sp, "cont", Some("root"), None, &cont_created, None);
+
+        assert_eq!(sp.resolve_resume_session_id("root").unwrap(), "cont");
+    }
+
+    #[test]
+    fn resolve_resume_session_id_ignores_non_compression_branch_child() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session(
+            "root",
+            &[Message::user("parent turn")],
+            None,
+            Some("cli"),
+            None,
+            None,
+        )
+        .unwrap();
+        sp.persist_session(
+            "branch",
+            &[Message::assistant("delegated work")],
+            None,
+            Some("cli"),
+            None,
+            None,
+        )
+        .unwrap();
+        let base = Utc::now() - ChronoDuration::hours(1);
+        let root_created = base.to_rfc3339();
+        let branch_created = (base + ChronoDuration::seconds(20)).to_rfc3339();
+        set_session_lineage(&sp, "root", None, None, &root_created, None);
+        set_session_lineage(&sp, "branch", Some("root"), None, &branch_created, None);
+
+        assert_eq!(sp.resolve_resume_session_id("root").unwrap(), "root");
+    }
+
+    #[test]
+    fn resolve_resume_session_id_ignores_child_created_before_parent_end() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        sp.persist_session(
+            "root",
+            &[Message::user("parent turn")],
+            None,
+            Some("cli"),
+            None,
+            None,
+        )
+        .unwrap();
+        sp.persist_session(
+            "early",
+            &[Message::assistant("older branch")],
+            None,
+            Some("cli"),
+            None,
+            None,
+        )
+        .unwrap();
+        let base = Utc::now() - ChronoDuration::hours(1);
+        let root_created = base.to_rfc3339();
+        let root_ended = (base + ChronoDuration::seconds(30)).to_rfc3339();
+        let early_created = (base + ChronoDuration::seconds(10)).to_rfc3339();
+        set_session_lineage(
+            &sp,
+            "root",
+            None,
+            Some("compression"),
+            &root_created,
+            Some(&root_ended),
+        );
+        set_session_lineage(&sp, "early", Some("root"), None, &early_created, None);
+
+        assert_eq!(sp.resolve_resume_session_id("root").unwrap(), "root");
+    }
+
+    #[test]
+    fn resolve_resume_session_id_walks_compression_chain_to_latest_tip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        for id in ["root", "mid", "tip"] {
+            sp.persist_session(
+                id,
+                &[Message::assistant(format!("{id} message"))],
+                None,
+                Some("cli"),
+                None,
+                None,
+            )
+            .unwrap();
+        }
+        let base = Utc::now() - ChronoDuration::hours(1);
+        let root_created = base.to_rfc3339();
+        let root_ended = (base + ChronoDuration::seconds(10)).to_rfc3339();
+        let mid_created = (base + ChronoDuration::seconds(20)).to_rfc3339();
+        let mid_ended = (base + ChronoDuration::seconds(30)).to_rfc3339();
+        let tip_created = (base + ChronoDuration::seconds(40)).to_rfc3339();
+        set_session_lineage(
+            &sp,
+            "root",
+            None,
+            Some("compression"),
+            &root_created,
+            Some(&root_ended),
+        );
+        set_session_lineage(
+            &sp,
+            "mid",
+            Some("root"),
+            Some("compression"),
+            &mid_created,
+            Some(&mid_ended),
+        );
+        set_session_lineage(&sp, "tip", Some("mid"), None, &tip_created, None);
+
+        assert_eq!(sp.resolve_resume_session_id("root").unwrap(), "tip");
     }
 
     #[test]
