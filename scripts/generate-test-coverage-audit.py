@@ -342,8 +342,12 @@ def main() -> int:
     by_disposition = queue_summary.get("by_disposition", {})
     queue_pending = int(by_disposition.get("pending", 0) or 0)
     if queue_pending:
-        critical_gaps.append(
-            critical_gap("upstream_queue_pending", "upstream missing queue has pending rows", pending=queue_pending)
+        advisory_gaps.append(
+            advisory(
+                "upstream_queue_pending",
+                "upstream missing queue has pending rows; queue closure is enforced by global parity thresholds",
+                pending=queue_pending,
+            )
         )
 
     intent_summary = intent_mapping.get("summary", {})

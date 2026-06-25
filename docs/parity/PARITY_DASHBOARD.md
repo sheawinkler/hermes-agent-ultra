@@ -1,6 +1,6 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-06-25T07:40:42.894185+00:00`_
+_Generated from source artifacts: `2026-06-25T08:37:52.088568+00:00`_
 
 ## Snapshot
 
@@ -8,7 +8,7 @@ _Generated from source artifacts: `2026-06-25T07:40:42.894185+00:00`_
 - Workstream snapshot generated: `2026-06-23T05:17:48-06:00`
 - Parity matrix generated: `2026-06-12T11:29:13.798398+00:00`
 - Queue snapshot generated: `2026-06-25T08:21:54.340532+00:00`
-- Proof snapshot generated: `2026-06-25T07:40:42.894185+00:00`
+- Proof snapshot generated: `2026-06-25T08:37:52.088568+00:00`
 
 ## Gate Status
 
@@ -18,8 +18,8 @@ _Generated from source artifacts: `2026-06-25T07:40:42.894185+00:00`_
 - SOTA harness matrix: **PASS**
 - Behavioral similarity diff: **PASS**
 - Deep problem-solving diff: **PASS**
-- Release gate failures: max_queue_pending_commits (actual=213.0, limit=0)
-- CI gate failures: max_commits_behind (actual=5880.0, limit=5500); max_upstream_patch_missing (actual=5657.0, limit=5000); max_queue_pending_commits (actual=213.0, limit=100)
+- Release gate failures: max_queue_pending_commits (actual=207.0, limit=0)
+- CI gate failures: max_commits_behind (actual=5880.0, limit=5500); max_upstream_patch_missing (actual=5657.0, limit=5000); max_queue_pending_commits (actual=207.0, limit=100)
 - CI gate warnings: none
 
 ## Test Coverage Audit
@@ -29,7 +29,7 @@ _Generated from source artifacts: `2026-06-25T07:40:42.894185+00:00`_
 | Tracked behavior rows | 419 |
 | Covered behavior rows | 419 |
 | Tracked behavior coverage ratio | 1.0000 |
-| Rust test functions | 3630 |
+| Rust test functions | 3749 |
 | Missing Rust test refs | 0 |
 | Critical gaps | 0 |
 
