@@ -57,6 +57,13 @@ impl CachedMedia {
 // MediaCacheConfig
 // ---------------------------------------------------------------------------
 
+/// Default cap for a single inbound/downloaded media payload.
+///
+/// This bounds the in-memory and on-disk blast radius of hostile media links or
+/// unusually large platform uploads while keeping ordinary images, voice notes,
+/// and short clips well inside the default.
+pub const DEFAULT_INBOUND_MEDIA_MAX_BYTES: u64 = 128 * 1024 * 1024;
+
 /// Configuration for the media cache.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaCacheConfig {
@@ -83,7 +90,7 @@ impl Default for MediaCacheConfig {
             cache_dir: default_cache_dir(),
             max_size: 0,
             ttl_seconds: 0,
-            max_file_size: 0,
+            max_file_size: DEFAULT_INBOUND_MEDIA_MAX_BYTES,
         }
     }
 }
@@ -529,6 +536,20 @@ impl MediaCache {
         data: &[u8],
         display_name: &str,
     ) -> Result<PathBuf, GatewayError> {
+        self.validate_max_file_size(data.len() as u64, "inbound media payload")?;
+        if self.max_size > 0 {
+            let current_size = self.calculate_cache_size().await.unwrap_or(0);
+            if current_size.saturating_add(data.len() as u64) > self.max_size {
+                return Err(GatewayError::ConnectionFailed(format!(
+                    "Cache size limit exceeded while caching {} (current={}, incoming={}, max={})",
+                    display_name,
+                    current_size,
+                    data.len(),
+                    self.max_size
+                )));
+            }
+        }
+
         let dest_dir = self.cache_dir.join(subdir);
         fs::create_dir_all(&dest_dir).await.map_err(|e| {
             GatewayError::ConnectionFailed(format!(
@@ -554,6 +575,16 @@ impl MediaCache {
             GatewayError::ConnectionFailed(format!("Failed to flush file {:?}: {}", dest_path, e))
         })?;
         Ok(dest_path)
+    }
+
+    fn validate_max_file_size(&self, size: u64, context: &str) -> Result<(), GatewayError> {
+        if self.max_file_size > 0 && size > self.max_file_size {
+            return Err(GatewayError::ConnectionFailed(format!(
+                "File too large for {}: {} bytes exceeds max_file_size {}",
+                context, size, self.max_file_size
+            )));
+        }
+        Ok(())
     }
 
     /// Generic file caching implementation.
@@ -622,52 +653,79 @@ impl MediaCache {
 
         if self.max_file_size > 0 {
             if let Some(content_length) = response.content_length() {
-                if content_length > self.max_file_size {
-                    return Err(GatewayError::ConnectionFailed(format!(
-                        "File too large: {} bytes exceeds max_file_size {}",
-                        content_length, self.max_file_size
-                    )));
-                }
+                self.validate_max_file_size(content_length, "Content-Length")?;
             }
         }
 
-        let bytes = response.bytes().await.map_err(|e| {
-            GatewayError::ConnectionFailed(format!("Failed to read response body: {}", e))
-        })?;
-
-        if self.max_file_size > 0 && bytes.len() as u64 > self.max_file_size {
+        let current_size = if self.max_size > 0 {
+            self.calculate_cache_size().await.unwrap_or(0)
+        } else {
+            0
+        };
+        let tmp_path = dest_dir.join(format!(
+            ".{}.{}.part",
+            safe_name,
+            uuid::Uuid::new_v4().simple()
+        ));
+        if !is_path_within(&tmp_path, &dest_dir) {
             return Err(GatewayError::ConnectionFailed(format!(
-                "File too large after download: {} bytes exceeds max_file_size {}",
-                bytes.len(),
-                self.max_file_size
+                "Refusing to cache temporary file outside cache directory: {}",
+                safe_name
             )));
         }
 
-        // Check cache size limits
-        if self.max_size > 0 {
-            let current_size = self.calculate_cache_size().await.unwrap_or(0);
-            if current_size + bytes.len() as u64 > self.max_size {
-                return Err(GatewayError::ConnectionFailed(format!(
-                    "Cache size limit exceeded while caching {} (current={}, incoming={}, max={})",
-                    safe_name,
-                    current_size,
-                    bytes.len(),
-                    self.max_size
-                )));
+        let download_result: Result<u64, GatewayError> = async {
+            let mut file = fs::File::create(&tmp_path).await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!(
+                    "Failed to create file {:?}: {}",
+                    tmp_path, e
+                ))
+            })?;
+            let mut response = response;
+            let mut total = 0u64;
+            while let Some(chunk) = response.chunk().await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Failed to read response body: {}", e))
+            })? {
+                total = total.saturating_add(chunk.len() as u64);
+                self.validate_max_file_size(total, "downloaded body")?;
+                if self.max_size > 0 && current_size.saturating_add(total) > self.max_size {
+                    return Err(GatewayError::ConnectionFailed(format!(
+                        "Cache size limit exceeded while caching {} (current={}, incoming={}, max={})",
+                        safe_name, current_size, total, self.max_size
+                    )));
+                }
+                file.write_all(&chunk).await.map_err(|e| {
+                    GatewayError::ConnectionFailed(format!(
+                        "Failed to write file {:?}: {}",
+                        tmp_path, e
+                    ))
+                })?;
             }
+            file.flush().await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Failed to flush file {:?}: {}", tmp_path, e))
+            })?;
+            Ok(total)
+        }
+        .await;
+
+        if let Err(err) = download_result {
+            let _ = fs::remove_file(&tmp_path).await;
+            return Err(err);
         }
 
-        // Write to file
-        let mut file = fs::File::create(&dest_path).await.map_err(|e| {
-            GatewayError::ConnectionFailed(format!("Failed to create file {:?}: {}", dest_path, e))
-        })?;
-
-        file.write_all(&bytes).await.map_err(|e| {
-            GatewayError::ConnectionFailed(format!("Failed to write file {:?}: {}", dest_path, e))
-        })?;
-
-        file.flush().await.map_err(|e| {
-            GatewayError::ConnectionFailed(format!("Failed to flush file {:?}: {}", dest_path, e))
+        if fs::try_exists(&dest_path).await.unwrap_or(false) {
+            fs::remove_file(&dest_path).await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!(
+                    "Failed to replace existing cached file {:?}: {}",
+                    dest_path, e
+                ))
+            })?;
+        }
+        fs::rename(&tmp_path, &dest_path).await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!(
+                "Failed to move cached file {:?} to {:?}: {}",
+                tmp_path, dest_path, e
+            ))
         })?;
 
         debug!("Cached {} -> {:?}", url, dest_path);
@@ -867,7 +925,7 @@ mod tests {
         assert!(!config.cache_dir.is_empty());
         assert_eq!(config.max_size, 0);
         assert_eq!(config.ttl_seconds, 0);
-        assert_eq!(config.max_file_size, 0);
+        assert_eq!(config.max_file_size, DEFAULT_INBOUND_MEDIA_MAX_BYTES);
     }
 
     #[tokio::test]
@@ -955,6 +1013,69 @@ mod tests {
             .await
             .unwrap();
         assert!(invalid.is_none());
+    }
+
+    #[tokio::test]
+    async fn cache_media_bytes_rejects_oversized_payload_before_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = MediaCache::new(&MediaCacheConfig {
+            cache_dir: dir.path().to_string_lossy().to_string(),
+            max_size: 0,
+            ttl_seconds: 0,
+            max_file_size: 4,
+        })
+        .unwrap();
+
+        let err = cache
+            .cache_media_bytes(b"%PDF-1.4", Some("report.pdf"), None, None)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("inbound media payload"));
+        assert!(!dir.path().join("documents").exists());
+    }
+
+    #[tokio::test]
+    async fn cache_file_rejects_oversized_content_length_before_body() {
+        crate::ssrf::reset_allow_private_cache_for_tests();
+        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "true");
+        crate::ssrf::reset_allow_private_cache_for_tests();
+
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let served = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            use tokio::io::AsyncReadExt;
+            let mut buf = [0u8; 512];
+            let _ = stream.read(&mut buf).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\noversized")
+                .await
+                .unwrap();
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache = MediaCache::new(&MediaCacheConfig {
+            cache_dir: dir.path().to_string_lossy().to_string(),
+            max_size: 0,
+            ttl_seconds: 0,
+            max_file_size: 4,
+        })
+        .unwrap();
+
+        let err = cache
+            .cache_document(&format!("http://{addr}/big.pdf"), "big.pdf")
+            .await
+            .unwrap_err();
+        served.await.unwrap();
+
+        assert!(err.to_string().contains("Content-Length"));
+        assert!(!dir.path().join("documents").join("big.pdf").exists());
+
+        std::env::remove_var("HERMES_ALLOW_PRIVATE_URLS");
+        crate::ssrf::reset_allow_private_cache_for_tests();
     }
 
     #[test]

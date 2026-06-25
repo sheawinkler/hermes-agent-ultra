@@ -15,6 +15,7 @@ use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 
 use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
+use crate::platforms::helpers::download_media_url;
 
 #[cfg(test)]
 use std::future::Future;
@@ -782,33 +783,7 @@ impl PlatformAdapter for MattermostAdapter {
         image_url: &str,
         caption: Option<&str>,
     ) -> Result<(), GatewayError> {
-        let downloaded = async {
-            let resp = self
-                .client
-                .get(image_url)
-                .send()
-                .await
-                .map_err(|e| format!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                return Err(format!("status {}", resp.status()));
-            }
-
-            let content_type = resp
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|h| h.to_str().ok())
-                .map(|s| s.to_string());
-            let bytes = resp
-                .bytes()
-                .await
-                .map_err(|e| format!("read body failed: {e}"))?
-                .to_vec();
-            if bytes.is_empty() {
-                return Err("empty body".to_string());
-            }
-            Ok((bytes, content_type))
-        }
-        .await;
+        let downloaded = download_media_url(&self.client, image_url).await;
 
         let (bytes, content_type) = match downloaded {
             Ok(result) => result,

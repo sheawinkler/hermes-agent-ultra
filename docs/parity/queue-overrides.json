@@ -4408,6 +4408,21 @@
     "fff0561441d2": {
       "disposition": "superseded",
       "notes": "Google Chat OAuth client-secret anchoring is Python adapter-only in upstream; this Rust gateway surface has no Google Chat platform adapter or OAuth helper under crates/hermes-gateway, so no Rust runtime path exists to port."
+    },
+    "dd042fc4dfb1": {
+      "disposition": "ported",
+      "notes": "Rust tool planning now honors agent.disabled_toolsets after platform/default toolset resolution while treating hermes-* platform bundles as non-core deltas, so disabling a platform bundle preserves shared core tools such as terminal/read_file/web_search. Focused hermes-tool-planning tests cover regular toolset removal and platform-bundle core preservation.",
+      "owner": "rust-runtime"
+    },
+    "d0de4601d204": {
+      "disposition": "ported",
+      "notes": "Rust /compress now emits a before/after message and estimated-token summary before the existing removal detail, with focused CLI coverage for the user-visible command output.",
+      "owner": "rust-runtime"
+    },
+    "93ea9b04aff2": {
+      "disposition": "ported",
+      "notes": "Rust gateway media handling now applies a default 128MiB inbound media cap, rejects oversized cached byte payloads and Content-Length values, streams MediaCache downloads with running-size enforcement, and routes direct platform image-url downloads for native-upload adapters through a shared bounded streaming helper. Focused gateway tests cover helper success/oversize and MediaCache oversize rejection.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [

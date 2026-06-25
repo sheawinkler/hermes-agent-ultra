@@ -6325,6 +6325,13 @@ fn handle_compress_rules_command(
     Ok(CommandResult::Handled)
 }
 
+fn estimate_message_tokens_for_compress(messages: &[hermes_core::Message]) -> usize {
+    messages
+        .iter()
+        .map(|m| m.content.as_ref().map_or(0, |c| c.len()) / 4)
+        .sum()
+}
+
 fn handle_compress_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if args
         .first()
@@ -6342,6 +6349,8 @@ fn handle_compress_command(app: &mut App, args: &[&str]) -> Result<CommandResult
         return Ok(CommandResult::Handled);
     }
 
+    let before_count = msg_count;
+    let before_tokens = estimate_message_tokens_for_compress(&app.messages);
     let keep = std::cmp::max(2, msg_count / 3);
     let removed = msg_count - keep;
     let summary_text = format!(
@@ -6355,14 +6364,14 @@ fn handle_compress_command(app: &mut App, args: &[&str]) -> Result<CommandResult
     app.messages
         .push(hermes_core::Message::system(summary_text));
     app.messages.extend(retained);
+    let after_count = app.messages.len();
+    let after_tokens = estimate_message_tokens_for_compress(&app.messages);
 
     emit_command_output(
         app,
         format!(
-            "Compressed context: removed {} messages, kept {}. Total now: {}.",
-            removed,
-            keep,
-            app.messages.len(),
+            "Compressed: {} → {} messages / ~{} → ~{} tokens.\nCompressed context: removed {} messages, kept {}. Total now: {}.",
+            before_count, after_count, before_tokens, after_tokens, removed, keep, after_count
         ),
     );
     Ok(CommandResult::Handled)
@@ -30042,6 +30051,27 @@ mod tests {
                 .as_deref(),
             Some("320")
         );
+    }
+
+    #[tokio::test]
+    async fn compress_command_reports_before_after_message_and_token_summary() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        app.messages = (0..6)
+            .map(|idx| hermes_core::Message::user(format!("message-{idx} {}", "x".repeat(80))))
+            .collect();
+
+        handle_slash_command(&mut app, "/compress", &[])
+            .await
+            .expect("compress command");
+
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("Compressed:"));
+        assert!(output.contains("6 → 3 messages"));
+        assert!(output.contains("tokens"));
+        assert!(output.contains("removed 4 messages, kept 2"));
     }
 
     #[test]

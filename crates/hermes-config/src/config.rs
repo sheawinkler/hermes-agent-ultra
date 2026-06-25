@@ -804,6 +804,12 @@ pub struct AgentLoopBehaviorConfig {
     /// toolset. `on` forces prompt-only posture; `off` disables it.
     #[serde(default = "default_agent_coding_context")]
     pub coding_context: String,
+    /// Toolsets to subtract after the platform/default toolset selection.
+    ///
+    /// Platform bundle names (`hermes-*`) are interpreted by the Rust planner as
+    /// non-core deltas so core tools shared by other presets stay available.
+    #[serde(default)]
+    pub disabled_toolsets: Vec<String>,
     /// When true (default), spawn the extra LLM pass for memory/skill review — Python has no master off-switch.
     #[serde(default = "default_agent_background_review_enabled")]
     pub background_review_enabled: bool,
@@ -887,6 +893,7 @@ impl Default for AgentLoopBehaviorConfig {
             skill_creation_nudge_interval: default_agent_skill_nudge_interval(),
             skip_context_files: default_agent_skip_context_files(),
             coding_context: default_agent_coding_context(),
+            disabled_toolsets: Vec::new(),
             background_review_enabled: default_agent_background_review_enabled(),
             code_index_enabled: default_agent_code_index_enabled(),
             code_index_max_files: default_agent_code_index_max_files(),

@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T07:03:00.694496+00:00`
+Generated: `2026-06-25T07:40:42.585742+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `6997`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-25T07:03:00.694496+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 216 |
-| ported | 379 |
+| pending | 213 |
+| ported | 382 |
 | superseded | 6326 |
 
 ## First 100 Pending Commits
@@ -92,16 +92,13 @@ Generated: `2026-06-25T07:03:00.694496+00:00`
 | `72e4cca00ecc` | #26 | docs(config): correct MCP docs path in cli-config.yaml.example |
 | `8666fd7635ba` | #26 | fix(desktop): preserve other providers' hide-all in model visibility dialog |
 | `461fcc096479` | #26 | test(desktop): harden model-visibility toggle + dedupe default expansion |
-| `dd042fc4dfb1` | #20 | fix(tools): preserve core tools when a platform bundle is disabled |
 | `c7e8854cb383` | #20 | fix(tui): persist session messages on force-quit / signal shutdown |
 | `fb3d31ba8b77` | #26 | feat(desktop): add Update now button to About panel |
 | `0e47f68a479a` | #26 | fix(desktop): rename branched session via session.title RPC |
 | `7f43378931f3` | #26 | test(desktop): cover renameSessionPreferringRpc routing |
 | `ed81f0b633c7` | #26 | fix(desktop): log session.title RPC failure before REST fallback |
 | `65a477f12e35` | #26 | feat(desktop): add Update now button to About panel (#50186) |
-| `d0de4601d204` | #20 | fix(tui): /compress shows a before/after summary (#46686) |
 | `7bc6f1806284` | #23 | fix(hindsight): skip local_embedded daemon when running as root |
-| `93ea9b04aff2` | #20 | fix(gateway): cap inbound media download size to prevent memory exhaustion |
 | `587b5b9ac223` | #23 | fix(backup): capture memory-provider state stored outside HERMES_HOME (#50325) |
 | `2a4542333ee1` | #26 | fix(photon): classify Envoy overflow errors as retryable; add typing cooldown |
 | `9578e52795e3` | #26 | fix(photon): detect unexpected sidecar death and trigger reconnect |
@@ -125,3 +122,6 @@ Generated: `2026-06-25T07:03:00.694496+00:00`
 | `84e1d31e5442` | #22 | refactor(kanban): fold worker/orchestrator skills into injected guidance (#50473) |
 | `77fdbbfe81d8` | #20 | fix(whatsapp): validate bridge PID identity before killing stale pidfile entry |
 | `069ab40c5f3f` | #20 | fix(whatsapp): only kill LISTENers when freeing the bridge port, never clients |
+| `615a8e651606` | #20 | fix(whatsapp): add missing re import + fix test import path after adapter relocation |
+| `b6d2ac176e27` | #23 | feat(mem0): add self-hosted support via MEM0_HOST / host config |
+| `452a725ae19f` | #23 | fix(mem0): address PR review — restore docstrings, keep api_key required |
