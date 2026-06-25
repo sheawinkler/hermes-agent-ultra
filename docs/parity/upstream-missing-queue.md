@@ -1,76 +1,35 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T00:35:24.714987+00:00`
+Generated: `2026-06-25T01:15:51.624357+00:00`
 
-- Range: `origin/main..upstream/main`; total commits tracked: `6907`.
+- Range: `main..upstream/main`; total commits tracked: `6972`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3078 |
+| #20 | GPAR-01 tests+CI parity | 3115 |
 | #21 | GPAR-02 skills parity | 130 |
-| #22 | GPAR-03 UX parity | 956 |
-| #23 | GPAR-04 gateway/plugin-memory parity | 486 |
+| #22 | GPAR-03 UX parity | 957 |
+| #23 | GPAR-04 gateway/plugin-memory parity | 488 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 22 |
 | #25 | GPAR-06 packaging/docs/install parity | 144 |
-| #26 | GPAR-07 upstream queue backfill | 2091 |
+| #26 | GPAR-07 upstream queue backfill | 2116 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 251 |
-| ported | 335 |
-| superseded | 6245 |
+| pending | 241 |
+| ported | 351 |
+| superseded | 6304 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `547a014e7eae` | #26 | fix(desktop): avoid stack overflow rendering huge fenced blocks |
-| `b82eca2bebd8` | #26 | fix(desktop): isolate message render crashes from the root boundary |
-| `435c706e8e5a` | #26 | fix(desktop): stop a failed turn leaking into every other thread |
-| `f4100f439430` | #26 | fix(desktop): list markers and quote border follow RTL message direction |
-| `0138282f97c9` | #26 | perf(desktop): keep oversized messages from freezing the chat |
-| `c6c8abbadb80` | #20 | refactor: remove agent-callable send_message tool (#47856) |
-| `c2fa302e933a` | #26 | Merge pull request #47913 from xxxigm/fix/desktop-backend-skew-toast-nag |
-| `b07b7894ec55` | #26 | fix(desktop): keep streaming painting in unfocused secondary chat windows (#47919) |
-| `33b1d144590a` | #20 | fix(desktop): pin Electron below the broken native extract-zip install (#47792) |
-| `5a00bd151896` | #20 | fix(desktop): persist /title set before the first message instead of queuing (#47987) |
-| `ee41aa0c1a0a` | #26 | feat(desktop): add dismiss control to chat error banners (#47985) |
-| `fd674af47fa6` | #20 | fix(photon): preserve text in mixed iMessage attachments (salvage #46513) (#46818) |
-| `016bce1a09ba` | #26 | fix(desktop): recover stranded session windows when resume fails (#47655) |
-| `f8098c6b6fe5` | #20 | fix(desktop): resolve electronDist to the actual electron install location (#48081) |
-| `6092be413d59` | #20 | Harden hosted Docker install tree against self-modification (#47490) |
-| `ab1a42fcea4f` | #26 | docs: relay<->connector cross-repo contract (v1, experimental) |
-| `5feec8b4cfcb` | #20 | test(gateway): enforce relay contract-doc ⟷ Python conformance |
-| `6e20c1992ff9` | #26 | docs(gateway): rewrite contract §6 to the A2 trust-boundary model |
-| `c1f9eb0ec4b9` | #20 | fix(desktop): resolve electronDist dynamically + self-heal blocked installs (supersedes #48081/#48082) (#48091) |
-| `86f2946fbe78` | #22 | fix(dashboard): recover the Chat tab when the agent session ends (NS-504) (#47674) |
-| `4b7a18600393` | #26 | fix(desktop): retry the self-update rebuild once so the app relaunches (#48122) |
-| `c276b017adc4` | #20 | feat(relay): connector⇄gateway channel auth + signed-HTTP inbound receiver + enroll CLI (#48147) |
-| `ae8fa11097e1` | #20 | feat(cron): cron.provider config + plugins/cron discovery + resolver |
-| `4440d77bf32d` | #20 | fix(update): scope install-method stamp to the code tree, not $HERMES_HOME (#48188) |
-| `4c8bbe641696` | #20 | feat(cron): Chronos NAS-mediated managed-cron provider (scale-to-zero) |
-| `3fc7b624d860` | #20 | feat(cron,gateway): NAS-JWT fire verifier + /api/cron/fire webhook (Chronos) |
-| `b75757d4aa85` | #22 | feat(cron): wire on_jobs_changed, cron.chronos config, docs + agent↔NAS contract |
-| `0b54a33a3467` | #26 | fix(langfuse): scope trace state by turn/request ids |
-| `e1d10ec1ed29` | #20 | refactor(langfuse): extract _scope_prefix from _trace_key |
-| `f4fbaa6cda8b` | #20 | fix(langfuse): bound _TRACE_STATE growth from non-finalizing turns |
-| `2a5d51c16e94` | #23 | fix(openviking): adapt memory provider for current api |
 | `2f7c4858a764` | #20 | fix(tui): refresh tool snapshot when MCP discovery lands after agent build (#48403) |
-| `92e6d8c858f6` | #26 | fix(desktop): dispose open PTY sessions in before-quit handler |
 | `5ffbfed193ad` | #20 | feat(mcp-catalog): add official Unreal Engine 5.8 MCP server |
-| `0fa7d6f6609c` | #20 | fix(desktop): never persist or restore a named custom provider as bare "custom" (#48547) |
-| `51ee5b2c94d0` | #20 | fix(desktop,tui): surface self-improvement review summary + honor memory_notifications |
 | `73cd8622f9fc` | #22 | feat(billing): /billing terminal billing — interactive TUI + CLI client (#45449) |
-| `4ed2f3399418` | #26 | fix(thread): allow scrolling long user messages in chat history (#48619) |
-| `9705e7944ae4` | #20 | fix(picker): remove max_models=50 cap in interactive model pickers |
 | `49596b70cb2d` | #20 | fix(gateway): resume follows the compression tip so post-compression replies render |
-| `769f307042d2` | #26 | fix(npm): lock react-simple-icons to 13.11.1 |
-| `03d9a95a74b2` | #20 | fix(desktop): show Hindsight memory provider (#37546) |
-| `d2c53ff5583e` | #20 | feat(relay): WS-only inbound on the gateway adapter (Phase 3) (#48294) |
 | `36851fa576eb` | #20 | fix(docker): support WebUI installs from read-only sources (#48541) |
-| `c34840e22e08` | #20 | fix(cron): serve /api/cron/fire on the dashboard app (hosted-agent surface) |
-| `620fd59b8e6f` | #20 | feat(model-picker): add Refresh Models control to bust stale model cache (#48691) |
 | `cfb55de5ea49` | #21 | Update Stripe Projects skill docs (#48673) |
 | `c02192ff6ace` | #20 | feat(image-gen): add image-to-image / editing to image_generate (#48705) |
 | `c7b7f92ec14a` | #20 | fix(openviking): sync structured turns with tool parts |
@@ -125,3 +84,44 @@ Generated: `2026-06-25T00:35:24.714987+00:00`
 | `a7dd98c8609c` | #23 | fix(env): guard remaining malformed int/float env var casts with utils helpers |
 | `5600105478ff` | #20 | refactor(gateway): migrate slack/dingtalk/whatsapp/matrix/feishu/telegram/wecom/email/sms adapters to bundled plugins |
 | `404fe730b7a2` | #26 | fix: add tooltips to right sidebar header buttons |
+| `838daca9f4cf` | #26 | chore(desktop): format tooltip indentation + author map for #49697 |
+| `75b36a138f43` | #22 | feat(pets): TUI pet pane, picker + gateway RPCs |
+| `86b990fe0fac` | #26 | feat(desktop): floating pet, pop-out overlay + Cmd+K picker |
+| `6fd839ac84d0` | #22 | docs(pets): feature guide, petdex skill + catalog |
+| `491579fa05ef` | #23 | fix(whatsapp): resolve bridge dir with HERMES_HOME mirror in Docker |
+| `37fa3c58b40e` | #21 | docs(kanban-worker): document kanban_complete artifacts deliverable param (#49854) |
+| `31bdb60013c9` | #22 | docs(skills): fix himalaya CLI arg order and download flag |
+| `2b08a4295a65` | #26 | docs(README.zh-CN): update Windows install from 'not supported' to native PowerShell |
+| `9e4348f28ac1` | #25 | docs(windows): document uv.exe AV false positive |
+| `f6275a59e790` | #26 | docs(contributing): add "search first" guidance to cut duplicate PRs |
+| `4c206b972d49` | #26 | fix(gateway): correct sys.path insertion in plugins to prevent cron namespace collision (#49410) |
+| `79f297834a9b` | #26 | fix(gateway): widen cron namespace-collision fix to all migrated adapters |
+| `46cc0345ae8a` | #21 | docs(skills): add hermes-agent verification rule |
+| `5eb158e3173d` | #21 | docs(hermes-agent skill): document project context files and their discovery rules |
+| `2609bcccca30` | #25 | feat(i18n): add complete Spanish translation |
+| `df4015bbc176` | #26 | docs: session lifecycle documentation |
+| `eec9c1d84ebd` | #26 | docs(agents): clarify background delegation durability |
+| `f80088f035de` | #26 | docs: add missing Prerequisites/How to Run sections to SKILL.md template |
+| `242962e1f5a0` | #22 | docs(providers): clarify vllm qwen reasoning output |
+| `95d970a7521c` | #21 | docs: sharpen software-development skills |
+| `defeda8c559f` | #22 | docs: sync documentation with current implementation |
+| `98ecd0beeba9` | #26 | docs(mcp): fix stale ~0.75s discovery-wait reference in late-refresh docstring |
+| `b1ab5a8ae1d9` | #21 | docs(antigravity-cli): add delegation patterns + output/bounding caveats |
+| `72e4cca00ecc` | #26 | docs(config): correct MCP docs path in cli-config.yaml.example |
+| `29e5e127c6f1` | #20 | fix(telegram): recover reply text from native rich echo |
+| `c1f11f8c69f9` | #20 | fix(telegram): index streamed rich finals via editMessageText too |
+| `8666fd7635ba` | #26 | fix(desktop): preserve other providers' hide-all in model visibility dialog |
+| `461fcc096479` | #26 | test(desktop): harden model-visibility toggle + dedupe default expansion |
+| `04730f32e7e8` | #20 | fix(cli): warn when in-session model switch will preflight-compress |
+| `1ca29723f0ea` | #20 | fix(cli): log instead of swallow preflight-warning errors; consistent TUI warning field |
+| `dd042fc4dfb1` | #20 | fix(tools): preserve core tools when a platform bundle is disabled |
+| `796f618f9987` | #20 | fix(telegram): keep chunk markers outside code fences |
+| `c7e8854cb383` | #20 | fix(tui): persist session messages on force-quit / signal shutdown |
+| `fb3d31ba8b77` | #26 | feat(desktop): add Update now button to About panel |
+| `0e47f68a479a` | #26 | fix(desktop): rename branched session via session.title RPC |
+| `7f43378931f3` | #26 | test(desktop): cover renameSessionPreferringRpc routing |
+| `ed81f0b633c7` | #26 | fix(desktop): log session.title RPC failure before REST fallback |
+| `31e59fe44d18` | #20 | fix(telegram): preserve newlines in rich slash-command output (#46070) |
+| `a9669323922f` | #20 | fix(telegram): exempt tables from rich newline hard-breaks |
+| `65a477f12e35` | #26 | feat(desktop): add Update now button to About panel (#50186) |
+| `ea056b05598c` | #20 | fix(telegram): avoid rich messages for CJK text |

@@ -95,7 +95,7 @@ pub type LlmCallback = Arc<
     dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, McpError>> + Send>> + Send + Sync,
 >;
 
-const DEFAULT_MCP_CALL_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_MCP_CALL_TIMEOUT_SECS: u64 = 300;
 const MAX_MCP_CALL_TIMEOUT_SECS: u64 = 900;
 const STALE_TRANSPORT_MARKERS: &[&str] = &[
     "closedresourceerror",
@@ -2340,8 +2340,9 @@ impl McpManager {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache_mcp_image_block, is_stale_transport_error, validate_mcp_server_config, LlmCallback,
-        McpClient, McpManager, McpServerConfig, SamplingConfig,
+        cache_mcp_image_block, is_stale_transport_error, mcp_call_timeout_duration,
+        validate_mcp_server_config, LlmCallback, McpClient, McpManager, McpServerConfig,
+        SamplingConfig,
     };
     use crate::transport::McpTransport;
     use crate::McpError;
@@ -2397,6 +2398,19 @@ mod tests {
             self.closed.store(true, Ordering::SeqCst);
             Ok(())
         }
+    }
+
+    #[test]
+    fn mcp_call_timeout_defaults_to_upstream_long_running_budget() {
+        std::env::remove_var("HERMES_MCP_CALL_TIMEOUT_SECS");
+        assert_eq!(mcp_call_timeout_duration().as_secs(), 300);
+
+        std::env::set_var("HERMES_MCP_CALL_TIMEOUT_SECS", "120");
+        assert_eq!(mcp_call_timeout_duration().as_secs(), 120);
+
+        std::env::set_var("HERMES_MCP_CALL_TIMEOUT_SECS", "9999");
+        assert_eq!(mcp_call_timeout_duration().as_secs(), 900);
+        std::env::remove_var("HERMES_MCP_CALL_TIMEOUT_SECS");
     }
 
     #[test]

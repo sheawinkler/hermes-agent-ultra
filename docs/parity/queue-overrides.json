@@ -4031,6 +4031,211 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Rust OpenViking uses repo-native openviking.json with shared atomic owner-only config IO instead of mutating ovcli profiles; dead Python ovcli constants are not part of the Rust runtime."
+    },
+    "c6c8abbadb80": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: default static agent toolsets no longer expose send_message, messaging was removed from built-in toolset distributions, explicit SendMessageHandler/GatewayMessagingBackend remain for gateway/cron/CLI runtime sends, and hermes-mcp default tool-call timeout is now 300s with env override/cap coverage."
+    },
+    "5a00bd151896": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust gateway already persists /title immediately because route_message creates the session before command handling and SessionManager::set_title updates live state directly; gateway_title_command_persists_and_surfaces_session_title covers set/show/status/session-list behavior."
+    },
+    "547a014e7eae": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream fix is apps/desktop React markdown preprocessing for huge fenced blocks. Ultra has no Electron desktop renderer; Rust CLI/TUI/gateway output handling and terminal/tool result surfaces own runtime rendering instead."
+    },
+    "b82eca2bebd8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream fix isolates React desktop message render crashes. Ultra does not ship apps/desktop; Rust CLI/TUI/gateway rendering paths do not use the Streamdown/root-boundary pipeline fixed upstream."
+    },
+    "435c706e8e5a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream fix is React desktop session-cache error isolation. Ultra session/error state is Rust-owned by hermes-cli App and hermes-gateway session/runtime state, not the apps/desktop view cache."
+    },
+    "f4100f439430": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream RTL list-marker/blockquote fix targets desktop DOM/CSS. Ultra has no React DOM transcript; terminal/TUI text rendering is Rust-native and not affected by browser dir=auto box direction."
+    },
+    "0138282f97c9": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream oversized-message freeze fix targets synchronous React/Streamdown/Shiki desktop rendering. Ultra lacks that renderer; Rust terminal/tool-result truncation and TUI viewport behavior are the applicable runtime surfaces."
+    },
+    "c2fa302e933a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Desktop backend-skew toast nag is apps/desktop update-store UX. Ultra does not run that Electron update store; Rust CLI/TUI version/status surfaces own runtime skew reporting."
+    },
+    "b07b7894ec55": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Streaming paint in unfocused secondary Electron windows is an apps/desktop BrowserWindow preference fix. Ultra has no Electron session windows; Rust TUI/gateway streaming is terminal/platform-adapter driven."
+    },
+    "33b1d144590a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Electron dependency pin and npm lockfile repair apply to upstream desktop packaging. Ultra has no apps/desktop package tree and builds/releases through the Rust workspace/install scripts."
+    },
+    "ee41aa0c1a0a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Chat error banner dismissal is React desktop local view state. Ultra handles turn errors through Rust CLI/TUI/gateway messages and does not persist the upstream desktop banner component."
+    },
+    "016bce1a09ba": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Stranded routed session-window recovery is apps/desktop route/resume hook behavior. Ultra sessions are Rust CLI/TUI/gateway sessions, not Electron pop-out windows."
+    },
+    "f8098c6b6fe5": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Static electronDist path repair is desktop/npm packaging only. Ultra does not package Electron from apps/desktop; Rust release/install verification is cargo/Homebrew/script based."
+    },
+    "c1f9eb0ec4b9": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Dynamic electronDist self-heal supersedes an upstream desktop packaging failure class. Ultra has no Electron builder/runtime in this repo, so the Rust build/install path is unaffected."
+    },
+    "4b7a18600393": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Desktop self-update rebuild retry spans Electron and bootstrap-installer/Tauri paths absent from Ultra. Rust update/release behavior is owned by the CLI and repository release scripts."
+    },
+    "92e6d8c858f6": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Disposing node-pty sessions during Electron before-quit is desktop main-process cleanup. Ultra PTY/process lifecycle is Rust-owned by hermes-tools terminal/process handlers and not node-pty."
+    },
+    "4ed2f3399418": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Long user-message scrolling is a desktop React thread presentation fix. Ultra uses Rust terminal/TUI history rendering instead of apps/desktop thread components."
+    },
+    "769f307042d2": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "react-simple-icons npm lockfile noise is specific to upstream desktop/package management. Ultra has no npm desktop dependency tree in this Rust runtime repo."
+    },
+    "fd674af47fa6": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Photon/Spectrum is an upstream Python plus Node optional platform plugin. Ultra does not expose a Rust-native Photon adapter, so this iMessage attachment salvage fix is outside the Rust runtime surface."
+    },
+    "6092be413d59": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream hardens Python/s6 hosted Docker install-tree self-modification. Ultra uses a Rust multi-stage image with immutable /usr/local/bin binaries, /data as HERMES_HOME, and tini/gosu entrypoint ownership only for runtime state."
+    },
+    "ab1a42fcea4f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Relay connector contract is retained only as experimental/reference documentation; current Ultra Rust runtime does not register the upstream Python relay adapter as a first-class platform surface."
+    },
+    "5feec8b4cfcb": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream relay conformance tests target the Python gateway relay adapter. Ultra has no active Rust relay adapter for this experimental contract, so the Python conformance harness is not a Rust runtime requirement."
+    },
+    "6e20c1992ff9": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Relay A2 trust-boundary rewrite applies to the experimental cross-repo relay contract. Ultra keeps the doc as reference only; active Rust gateway adapters enforce their own platform auth paths."
+    },
+    "86f2946fbe78": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Dashboard Chat tab recovery is an upstream React web surface. Ultra has no apps/desktop/web ChatPage Rust runtime; CLI/TUI/gateway session recovery is owned by Rust surfaces."
+    },
+    "c276b017adc4": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Connector-to-gateway relay channel auth, signed HTTP inbound receiver, and enroll CLI are upstream Python relay surfaces. Ultra does not expose that experimental relay adapter in Rust."
+    },
+    "ae8fa11097e1": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: crates/hermes-cron loads cron.provider/cron.chronos config, constructs ChronosNasCronProvider from environment/config, and scheduler tests cover managed provider reconciliation."
+    },
+    "4440d77bf32d": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Install-method stamping and Python Docker stage2 mutation are absent from Ultra. The Rust container separates code in /usr/local/bin from writable HERMES_HOME=/data and does not chown or mutate an install tree at runtime."
+    },
+    "4c8bbe641696": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: ChronosNasCronProvider provisions/cancels/lists NAS-mediated one-shots, scheduler disables in-process polling when managed cron is active, and focused managed-provider tests pass."
+    },
+    "3fc7b624d860": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: hermes-cron verifies NAS JWT fire tokens with asymmetric keys/audience/purpose checks and hermes-gateway exposes POST /api/cron/fire behind api-server with focused route coverage."
+    },
+    "b75757d4aa85": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: scheduler mutation paths reconcile/cancel managed Chronos jobs, cron.chronos config is documented in docs/chronos-managed-cron-contract.md, and managed fire duplicate/stale tests pass."
+    },
+    "0b54a33a3467": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust-native telemetry shape: agent loop emits request/turn scoped tracing spans for LLM/tool events and Langfuse uses OTLP config without a Python process-global _TRACE_STATE map; Langfuse tests pass."
+    },
+    "e1d10ec1ed29": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust-native telemetry shape: Langfuse endpoint/header/resource config is centralized in hermes-telemetry and span scope is carried by tracing fields rather than Python trace-key prefixes; focused tests pass."
+    },
+    "f4fbaa6cda8b": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust-native telemetry shape: there is no unbounded Python _TRACE_STATE dict in Ultra; spans are created/dropped per LLM/tool event and Langfuse OTLP config tests pass."
+    },
+    "2a5d51c16e94": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust OpenViking provider: current API setup/config/headers/content writes/resource uploads/session writer drain behavior are implemented in crates/hermes-agent memory_plugins/openviking with focused tests passing."
+    },
+    "0fa7d6f6609c": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: named custom providers are preserved through llm_providers, provider catalog/model guard paths, and app-runtime config mapping; tests cover named custom runtime provider behavior."
+    },
+    "51ee5b2c94d0": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in this batch: display.memory_notifications is typed config with env/config set/get bridge, and gateway background review callbacks are gated by this setting with focused tests."
+    },
+    "9705e7944ae4": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in this batch: Rust provider catalog entries no longer truncate picker models to 50; CLI/TUI/model command call sites use the full configured catalog and regression tests cover 60 entries."
+    },
+    "03d9a95a74b2": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: Hindsight is a first-class bundled memory provider discovered by memory_plugins::discover_available_providers, with config, recall, turn buffering, and owner-only config tests passing."
+    },
+    "d2c53ff5583e": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "WS-only inbound relay is part of the upstream experimental Python relay adapter. Ultra keeps native Rust platform adapters and does not expose the relay adapter as active runtime surface."
+    },
+    "c34840e22e08": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: /api/cron/fire is served by the Rust API server route with Chronos NAS auth bypassing the generic API token path only for that route; focused api-server feature test passes."
+    },
+    "620fd59b8e6f": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in this batch: /model refresh [provider|provider:model] clears signed provider catalog payload/signature files and reloads through the configured provider catalog path with command and cache tests."
     }
   },
   "subject_patterns": [

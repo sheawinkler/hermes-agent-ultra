@@ -17,7 +17,6 @@ use sha2::{Digest, Sha256};
 use crate::providers::{canonical_provider_id, provider_capability_for};
 const NOUS_DEFAULT_INFERENCE_BASE_URL: &str = "https://inference-api.nousresearch.com/v1";
 const PROVIDER_CATALOG_CACHE_VERSION: u32 = 2;
-pub const DEFAULT_VISIBLE_MODELS_PER_PROVIDER: usize = 50;
 const OLLAMA_LOCAL_DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434/v1";
 const LLAMA_CPP_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 const VLLM_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8000/v1";
@@ -457,6 +456,27 @@ pub fn cached_provider_catalog_status(provider: &str) -> Option<CatalogCacheStat
     provider_catalog_cache_status(provider)
 }
 
+pub fn clear_provider_catalog_cache(provider: &str) -> Result<bool, AgentError> {
+    let mut removed = false;
+    for path in [
+        provider_catalog_cache_path(provider),
+        provider_catalog_signature_path(provider),
+    ] {
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed = true,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(AgentError::Io(format!(
+                    "Failed to clear provider catalog cache {}: {}",
+                    path.display(),
+                    err
+                )));
+            }
+        }
+    }
+    Ok(removed)
+}
+
 fn load_provider_catalog_cache(provider: &str) -> Option<Vec<String>> {
     let ttl = catalog_cache_ttl_secs();
     let status = provider_catalog_cache_status(provider)?;
@@ -844,7 +864,6 @@ pub async fn provider_model_ids_for_config(provider: &str, config: &GatewayConfi
 
 pub async fn provider_catalog_entries_for_config(
     config: &GatewayConfig,
-    max_models: usize,
 ) -> Vec<ProviderCatalogEntry> {
     let providers = provider_slugs_for_config(config);
     let mut entries = Vec::new();
@@ -855,7 +874,6 @@ pub async fn provider_catalog_entries_for_config(
             continue;
         }
         let total_models = models.len();
-        let models = models.into_iter().take(max_models).collect();
         entries.push(ProviderCatalogEntry {
             provider,
             models,
@@ -1377,10 +1395,7 @@ pub async fn provider_model_ids(provider: &str) -> Vec<String> {
     provider_model_ids_with_client(provider, default_client()).await
 }
 
-pub async fn provider_catalog_entries(
-    providers: &[&str],
-    max_models: usize,
-) -> Vec<ProviderCatalogEntry> {
+pub async fn provider_catalog_entries(providers: &[&str]) -> Vec<ProviderCatalogEntry> {
     let client = default_client();
     let mut entries = Vec::new();
 
@@ -1390,7 +1405,6 @@ pub async fn provider_catalog_entries(
             continue;
         }
         let total_models = models.len();
-        let models = models.into_iter().take(max_models).collect();
         entries.push(ProviderCatalogEntry {
             provider: (*provider).to_string(),
             models,
@@ -1411,13 +1425,14 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        cached_provider_catalog_status, is_models_dev_preferred_provider,
-        load_provider_catalog_cache, merge_with_models_dev, normalize_provider_model,
-        persist_provider_catalog_cache, provider_catalog_cache_path, provider_catalog_entries,
-        provider_catalog_entries_for_config, provider_curated_models,
-        provider_model_ids_for_config, provider_model_ids_with_client, provider_picker_description,
+        cached_provider_catalog_status, clear_provider_catalog_cache,
+        is_models_dev_preferred_provider, load_provider_catalog_cache, merge_with_models_dev,
+        normalize_provider_model, persist_provider_catalog_cache, provider_catalog_cache_path,
+        provider_catalog_entries, provider_catalog_entries_for_config,
+        provider_catalog_signature_path, provider_curated_models, provider_model_ids_for_config,
+        provider_model_ids_with_client, provider_picker_description,
         provider_slug_from_provider_model, provider_slugs_for_config,
-        resolve_huggingface_catalog_endpoint_and_token, DEFAULT_VISIBLE_MODELS_PER_PROVIDER,
+        resolve_huggingface_catalog_endpoint_and_token,
     };
 
     fn env_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -1838,7 +1853,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_catalog_entries_truncates_but_keeps_total() {
+    async fn provider_catalog_entry_fixture_keeps_total_with_subset_preview() {
         let client = seeded_client(json!({
             "opencode-go": {
                 "models": {
@@ -1874,7 +1889,7 @@ mod tests {
     #[tokio::test]
     async fn provider_catalog_entries_uses_global_client_shape() {
         // Smoke-test the function shape with unknown providers only, avoiding network use.
-        let entries = provider_catalog_entries(&["unknown-provider"], 2).await;
+        let entries = provider_catalog_entries(&["unknown-provider"]).await;
         assert!(entries.is_empty());
     }
 
@@ -1934,17 +1949,17 @@ mod tests {
         let providers = provider_slugs_for_config(&cfg);
         assert!(providers.iter().any(|provider| provider == "baidu-coding"));
 
-        let entries = provider_catalog_entries_for_config(&cfg, 1).await;
+        let entries = provider_catalog_entries_for_config(&cfg).await;
         let entry = entries
             .iter()
             .find(|entry| entry.provider == "baidu-coding")
             .expect("custom provider entry");
-        assert_eq!(entry.models, vec!["kimi-k2.5"]);
+        assert_eq!(entry.models, vec!["kimi-k2.5", "glm-5"]);
         assert_eq!(entry.total_models, 2);
     }
 
     #[tokio::test]
-    async fn default_visible_models_per_provider_shows_first_fifty() {
+    async fn provider_catalog_entries_do_not_truncate_model_picker_results() {
         let mut cfg = hermes_config::GatewayConfig::default();
         let models = (0..60)
             .map(|idx| format!("model-{idx:02}"))
@@ -1958,17 +1973,16 @@ mod tests {
             },
         );
 
-        let entries =
-            provider_catalog_entries_for_config(&cfg, DEFAULT_VISIBLE_MODELS_PER_PROVIDER).await;
+        let entries = provider_catalog_entries_for_config(&cfg).await;
         let entry = entries
             .iter()
             .find(|entry| entry.provider == "wide-provider")
             .expect("wide provider entry");
 
         assert_eq!(entry.total_models, 60);
-        assert_eq!(entry.models.len(), 50);
+        assert_eq!(entry.models.len(), 60);
         assert_eq!(entry.models.first().map(String::as_str), Some("model-00"));
-        assert_eq!(entry.models.last().map(String::as_str), Some("model-49"));
+        assert_eq!(entry.models.last().map(String::as_str), Some("model-59"));
     }
 
     #[tokio::test]
@@ -2024,6 +2038,23 @@ mod tests {
 
         let status = cached_provider_catalog_status("openai").expect("cache status");
         assert!(status.verified);
+    }
+
+    #[test]
+    fn clearing_provider_catalog_cache_removes_payload_and_signature() {
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _env = ScopedCatalogEnv::new(tmp.path());
+
+        let models = vec!["gpt-4o".to_string()];
+        persist_provider_catalog_cache("openai", &models);
+        assert!(cached_provider_catalog_status("openai").is_some());
+
+        assert!(clear_provider_catalog_cache("openai").expect("clear cache"));
+        assert!(cached_provider_catalog_status("openai").is_none());
+        assert!(!provider_catalog_cache_path("openai").exists());
+        assert!(!provider_catalog_signature_path("openai").exists());
+        assert!(!clear_provider_catalog_cache("openai").expect("idempotent clear"));
     }
 
     #[test]

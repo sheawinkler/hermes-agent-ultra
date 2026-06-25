@@ -41,7 +41,7 @@ use hermes_cli::config_env::hydrate_env_from_config;
 use hermes_cli::model_switch::{
     cached_provider_catalog_status, format_stale_auxiliary_warning, normalize_provider_model,
     provider_catalog_entries_for_config, provider_model_ids, provider_picker_description,
-    provider_slug_from_provider_model, DEFAULT_VISIBLE_MODELS_PER_PROVIDER,
+    provider_slug_from_provider_model,
 };
 use hermes_cli::providers::provider_capability_for;
 use hermes_cli::runtime_tool_wiring::{
@@ -1809,9 +1809,7 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
             println!("Current model: {}", current);
 
             // List providers with merged models.dev-aware previews.
-            let entries =
-                provider_catalog_entries_for_config(&config, DEFAULT_VISIBLE_MODELS_PER_PROVIDER)
-                    .await;
+            let entries = provider_catalog_entries_for_config(&config).await;
             println!("\nAvailable providers:");
             if entries.is_empty() {
                 println!("  openai       — OpenAI (gpt-5.5, gpt-5.5-pro, ...)");
@@ -3043,34 +3041,38 @@ async fn run_gateway(
                         let deferred_queue = ctx.deferred_post_delivery_messages.clone();
                         let deferred_released = ctx.deferred_post_delivery_released.clone();
                         let gateway_for_review_cb = gateway_for_review.clone();
-                        let review_cb = Arc::new(move |text: &str| {
-                            if let (Some(queue), Some(released)) =
-                                (deferred_queue.as_ref(), deferred_released.as_ref())
-                            {
-                                if !released.load(Ordering::Acquire) {
-                                    if let Ok(mut guard) = queue.lock() {
-                                        guard.push(text.to_string());
-                                        return;
+                        let review_cb: Arc<dyn Fn(&str) + Send + Sync> =
+                            Arc::new(move |text: &str| {
+                                if let (Some(queue), Some(released)) =
+                                    (deferred_queue.as_ref(), deferred_released.as_ref())
+                                {
+                                    if !released.load(Ordering::Acquire) {
+                                        if let Ok(mut guard) = queue.lock() {
+                                            guard.push(text.to_string());
+                                            return;
+                                        }
                                     }
                                 }
-                            }
-                            let gw = gateway_for_review_cb.clone();
-                            let platform = platform_for_review.clone();
-                            let chat_id = chat_for_review.clone();
-                            let thread_id = thread_for_review.clone();
-                            let msg = text.to_string();
-                            tokio::spawn(async move {
-                                let _ = gw
-                                    .send_notify_message_threaded(
-                                        &platform,
-                                        &chat_id,
-                                        &msg,
-                                        None,
-                                        thread_id.as_deref(),
-                                    )
-                                    .await;
+                                let gw = gateway_for_review_cb.clone();
+                                let platform = platform_for_review.clone();
+                                let chat_id = chat_for_review.clone();
+                                let thread_id = thread_for_review.clone();
+                                let msg = text.to_string();
+                                tokio::spawn(async move {
+                                    let _ = gw
+                                        .send_notify_message_threaded(
+                                            &platform,
+                                            &chat_id,
+                                            &msg,
+                                            None,
+                                            thread_id.as_deref(),
+                                        )
+                                        .await;
+                                });
                             });
-                        });
+                        let background_review_callback =
+                            gateway_memory_notifications_enabled(config.as_ref())
+                                .then_some(review_cb);
                         let gateway_for_status = gateway_for_review.clone();
                         let gateway_for_status_hook = gateway_for_review.clone();
                         let platform_for_status = ctx.platform.clone();
@@ -3225,7 +3227,7 @@ async fn run_gateway(
                                 });
                             });
                         let callbacks = AgentCallbacks {
-                            background_review_callback: Some(review_cb),
+                            background_review_callback,
                             status_callback: Some(status_cb),
                             on_tool_start: Some(on_tool_start),
                             on_tool_complete: Some(on_tool_complete),
@@ -3322,34 +3324,38 @@ async fn run_gateway(
                         let deferred_queue = ctx.deferred_post_delivery_messages.clone();
                         let deferred_released = ctx.deferred_post_delivery_released.clone();
                         let gateway_for_review_cb = gateway_for_review.clone();
-                        let review_cb = Arc::new(move |text: &str| {
-                            if let (Some(queue), Some(released)) =
-                                (deferred_queue.as_ref(), deferred_released.as_ref())
-                            {
-                                if !released.load(Ordering::Acquire) {
-                                    if let Ok(mut guard) = queue.lock() {
-                                        guard.push(text.to_string());
-                                        return;
+                        let review_cb: Arc<dyn Fn(&str) + Send + Sync> =
+                            Arc::new(move |text: &str| {
+                                if let (Some(queue), Some(released)) =
+                                    (deferred_queue.as_ref(), deferred_released.as_ref())
+                                {
+                                    if !released.load(Ordering::Acquire) {
+                                        if let Ok(mut guard) = queue.lock() {
+                                            guard.push(text.to_string());
+                                            return;
+                                        }
                                     }
                                 }
-                            }
-                            let gw = gateway_for_review_cb.clone();
-                            let platform = platform_for_review.clone();
-                            let chat_id = chat_for_review.clone();
-                            let thread_id = thread_for_review.clone();
-                            let msg = text.to_string();
-                            tokio::spawn(async move {
-                                let _ = gw
-                                    .send_notify_message_threaded(
-                                        &platform,
-                                        &chat_id,
-                                        &msg,
-                                        None,
-                                        thread_id.as_deref(),
-                                    )
-                                    .await;
+                                let gw = gateway_for_review_cb.clone();
+                                let platform = platform_for_review.clone();
+                                let chat_id = chat_for_review.clone();
+                                let thread_id = thread_for_review.clone();
+                                let msg = text.to_string();
+                                tokio::spawn(async move {
+                                    let _ = gw
+                                        .send_notify_message_threaded(
+                                            &platform,
+                                            &chat_id,
+                                            &msg,
+                                            None,
+                                            thread_id.as_deref(),
+                                        )
+                                        .await;
+                                });
                             });
-                        });
+                        let background_review_callback =
+                            gateway_memory_notifications_enabled(config.as_ref())
+                                .then_some(review_cb);
                         let gateway_for_status = gateway_for_review.clone();
                         let gateway_for_status_hook = gateway_for_review.clone();
                         let platform_for_status = ctx.platform.clone();
@@ -3504,7 +3510,7 @@ async fn run_gateway(
                                 });
                             });
                         let callbacks = AgentCallbacks {
-                            background_review_callback: Some(review_cb),
+                            background_review_callback,
                             status_callback: Some(status_cb),
                             on_tool_start: Some(on_tool_start),
                             on_tool_complete: Some(on_tool_complete),
@@ -3780,6 +3786,10 @@ fn run_sessions_db_auto_maintenance(config: &GatewayConfig) {
             if result.vacuumed { " + vacuum" } else { "" }
         );
     }
+}
+
+fn gateway_memory_notifications_enabled(config: &GatewayConfig) -> bool {
+    config.display.memory_notifications_enabled()
 }
 
 async fn prompt_yes_no(question: &str, default_yes: bool) -> Result<bool, AgentError> {
@@ -15714,6 +15724,18 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
             .lock()
             .expect("env lock poisoned")
+    }
+
+    #[test]
+    fn gateway_memory_notifications_follow_display_config() {
+        let mut cfg = GatewayConfig::default();
+        assert!(gateway_memory_notifications_enabled(&cfg));
+
+        cfg.display.memory_notifications = Some(false);
+        assert!(!gateway_memory_notifications_enabled(&cfg));
+
+        cfg.display.memory_notifications = Some(true);
+        assert!(gateway_memory_notifications_enabled(&cfg));
     }
 
     fn cli_for_temp_state_root(temp_root: &std::path::Path) -> Cli {
