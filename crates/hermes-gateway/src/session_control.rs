@@ -358,9 +358,10 @@ impl BusySessionCoordinator {
             BusyInputMode::Interrupt => {
                 if let Some(control) = active.control.as_ref() {
                     control.interrupt(&event.text);
+                    self.queue_event(session_key, event);
                     BusyMessageDecision {
                         handled: true,
-                        queued: false,
+                        queued: true,
                         interrupted: true,
                         steered: false,
                         ack: self.should_ack_at(session_key, now).then(|| {
@@ -565,7 +566,8 @@ mod tests {
         );
         assert!(decision.handled);
         assert!(decision.interrupted);
-        assert!(!decision.queued);
+        assert!(decision.queued);
+        assert_eq!(coord.pending(&key).unwrap().text, "Are you working?");
         assert_eq!(
             control.interrupts.lock().unwrap().as_slice(),
             ["Are you working?"]

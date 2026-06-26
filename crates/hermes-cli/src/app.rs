@@ -3771,6 +3771,36 @@ impl App {
         active
     }
 
+    /// Count sub-agent lineage files still marked as started.
+    pub fn active_subagent_count(&self) -> usize {
+        let subagents_dir = hermes_config::hermes_home().join("subagents");
+        let mut active = 0usize;
+        let entries = match std::fs::read_dir(subagents_dir) {
+            Ok(entries) => entries,
+            Err(_) => return 0,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|v| v.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+                continue;
+            };
+            let status = value
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if matches!(status, "started" | "running" | "background_pending") {
+                active += 1;
+            }
+        }
+        active
+    }
+
     fn prune_session_snapshot_entry(
         entry: &SessionSnapshotEntry,
         total_bytes: &mut u64,
@@ -4936,6 +4966,39 @@ mod tests {
                 "hooked-force-quit".to_string()
             )]
         );
+    }
+
+    #[test]
+    fn active_subagent_count_reads_started_lineage_records() {
+        let _guard = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var("HERMES_HOME").ok();
+        // SAFETY: serialized by env_test_lock.
+        unsafe { std::env::set_var("HERMES_HOME", tmp.path()) };
+        let subagents = tmp.path().join("subagents");
+        std::fs::create_dir_all(&subagents).expect("subagents dir");
+        std::fs::write(
+            subagents.join("a.json"),
+            r#"{"sub_agent_id":"a","status":"started"}"#,
+        )
+        .expect("write active");
+        std::fs::write(
+            subagents.join("b.json"),
+            r#"{"sub_agent_id":"b","status":"completed"}"#,
+        )
+        .expect("write complete");
+        std::fs::write(subagents.join("bad.json"), "{not json").expect("write bad");
+
+        let app = build_minimal_test_app();
+        assert_eq!(app.active_subagent_count(), 1);
+
+        // SAFETY: serialized by env_test_lock.
+        unsafe {
+            match prev_home {
+                Some(value) => std::env::set_var("HERMES_HOME", value),
+                None => std::env::remove_var("HERMES_HOME"),
+            }
+        }
     }
 
     #[test]

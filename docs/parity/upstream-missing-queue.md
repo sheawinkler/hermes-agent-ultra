@@ -1,25 +1,25 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-25T22:03:06.847934+00:00`
+Generated: `2026-06-26T00:13:14.170796+00:00`
 
-- Range: `origin/main..upstream/main`; total commits tracked: `7021`.
+- Range: `HEAD..upstream/main`; total commits tracked: `7084`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3146 |
+| #20 | GPAR-01 tests+CI parity | 3182 |
 | #21 | GPAR-02 skills parity | 130 |
-| #22 | GPAR-03 UX parity | 957 |
+| #22 | GPAR-03 UX parity | 959 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
-| #24 | GPAR-05 environments+parsers+benchmarks | 22 |
+| #24 | GPAR-05 environments+parsers+benchmarks | 23 |
 | #25 | GPAR-06 packaging/docs/install parity | 146 |
-| #26 | GPAR-07 upstream queue backfill | 2132 |
+| #26 | GPAR-07 upstream queue backfill | 2156 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 143 |
-| ported | 433 |
-| superseded | 6369 |
+| pending | 144 |
+| ported | 439 |
+| superseded | 6425 |
 
 ## First 100 Pending Commits
 
@@ -27,37 +27,14 @@ Generated: `2026-06-25T22:03:06.847934+00:00`
 | --- | ---: | --- |
 | `cfb55de5ea49` | #21 | Update Stripe Projects skill docs (#48673) |
 | `9362ce2575e0` | #22 | feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899) |
-| `f9ffe0bc3f61` | #26 | fix(desktop): resume stored session id on notification click |
-| `069011dd0c8f` | #26 | test(desktop): cover runtime->stored notification id resolution |
 | `92451151c642` | #22 | Revert "feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899)" |
-| `9a2f2756f7e6` | #26 | fix(desktop): allow selecting slash output and shell logs in thread (#49063) |
-| `6cb04be779de` | #26 | feat(desktop): Keys tab groups by backend provider identity |
-| `ee0de638d719` | #26 | feat(desktop): add API-keys search; keep provider lists priority-sorted |
-| `d91b8d8368bb` | #26 | test(desktop): make keyVar a typed EnvVarInfo factory |
-| `b936f92b25b4` | #26 | fix(desktop): render send/prefill directive notices (/goal, /undo) (#49073) |
 | `db744e7d1e58` | #21 | feat(simplify-code): add risk-tiered application, Chesterton's Fence, slop + silent failure detection |
-| `6308d3416ab9` | #26 | fix(desktop): rename "Restart messaging" -> "Restart gateway" |
-| `553cf4f97757` | #26 | feat(desktop): restart the gateway from Cmd+K, with statusbar spinner feedback |
-| `a1639921ac44` | #26 | fix(desktop): offer a Restart gateway action on messaging save/toggle toasts |
-| `929dbf777801` | #26 | fix(desktop): make rendered logs selectable so they can be copied |
 | `f06508836dd4` | #26 | docs(security): enumerate cron job scripts in §2.3 credential scoping |
 | `2bd1977d8fad` | #26 | chore: release v0.17.0 (2026.6.19) |
 | `866f1d65c4aa` | #26 | chore(desktop): sync package.json version fallback to 0.17.0 (#49236) |
 | `7a7b56d49830` | #23 | fix(windows): prefer managed node for whatsapp and desktop |
 | `d4e7dd609da6` | #23 | refactor(windows): tidy managed-node resolver helpers |
 | `d799284b1554` | #21 | feat(optional-skills/creative-ideation): expand to v2.1.0 method library (#42402) |
-| `8ebe37f6ad2d` | #26 | feat(desktop): notify renderer when GPU acceleration is disabled due to remote display |
-| `1b7b4d138a67` | #26 | fix(desktop): handle slash exec dispatch payloads (#49358) |
-| `236f0597e562` | #26 | feat(desktop): pop the composer out into a draggable floating window |
-| `f697c97e02f0` | #26 | fix(desktop): keep floating composer radius consistent with docked |
-| `eed78d6ebb51` | #26 | fix(desktop): composer popout polish — peel-off placement, panels, chip editing |
-| `ae8db1ab531b` | #26 | fix(desktop): mute hidden link-title window so historical links don't autoplay audio |
-| `7eb9678c5470` | #26 | test(desktop): cover link-title window audio muting |
-| `404fe730b7a2` | #26 | fix: add tooltips to right sidebar header buttons |
-| `838daca9f4cf` | #26 | chore(desktop): format tooltip indentation + author map for #49697 |
-| `75b36a138f43` | #22 | feat(pets): TUI pet pane, picker + gateway RPCs |
-| `86b990fe0fac` | #26 | feat(desktop): floating pet, pop-out overlay + Cmd+K picker |
-| `6fd839ac84d0` | #22 | docs(pets): feature guide, petdex skill + catalog |
 | `37fa3c58b40e` | #21 | docs(kanban-worker): document kanban_complete artifacts deliverable param (#49854) |
 | `31bdb60013c9` | #22 | docs(skills): fix himalaya CLI arg order and download flag |
 | `2b08a4295a65` | #26 | docs(README.zh-CN): update Windows install from 'not supported' to native PowerShell |
@@ -121,7 +98,30 @@ Generated: `2026-06-25T22:03:06.847934+00:00`
 | `a0471e24648e` | #25 | fix(ci): only run supplychain checks in pr |
 | `9fd2b2cb9fab` | #26 | fix(desktop): replace native title tooltips with styled Tip component |
 | `97888fed483c` | #25 | fix(install): drop system-browser fallback + auto-repair stale snap override |
-| `72bfc48e63a1` | #22 | feat(tui): track background subagents in the status bar (#51485) |
 | `935f2bc48daa` | #26 | docs(relay): add §3.4 — obligations on a future scale-to-zero behaviour layer (#51633) |
 | `281a439ad483` | #26 | fix(desktop): guard composer mutations when the composer core isn't bound (#51728) |
 | `0ef86febe25f` | #20 | docs(sessions): clarify sessions.json is the gateway routing index, not the session list (#51726) |
+| `a911bcda18cf` | #22 | docs: stop recommending pip install; curl installer is the only supported path (#51743) |
+| `8446c1570683` | #26 | docs(chronos): pin hop-1 auth to the hosted-agent bootstrap token |
+| `66a0907c9566` | #26 | fix(desktop): keep configured onboarding state on fallback runtime probes |
+| `7243111c57bb` | #26 | test(desktop): cover fallback timeout onboarding downgrade regression |
+| `d398076c2117` | #26 | fix(desktop): show non-blocking notification on fallback runtime probe |
+| `a4a74ca9e9a0` | #26 | fix(desktop): use notify() with stable id for fallback notification |
+| `b85c46054036` | #20 | fix(tui): targeted save_config_value for model persistence (#48305) |
+| `6da615c77cf8` | #26 | fix(desktop): scope onboarding runtime check to connected provider |
+| `d8fe1c0b4195` | #20 | test(desktop): cover scoped onboarding runtime readiness checks |
+| `2de7549fe0fe` | #26 | feat(desktop): remember window size/position/maximized across launches (salvage #39154) |
+| `3faf768cdef0` | #20 | feat(pets): OpenRouter + Nous Portal image backend |
+| `aab49f6927cc` | #20 | feat(pets): generation RPCs, non-blocking gallery + gateway plumbing |
+| `743985bf1ec4` | #26 | feat(pets): Pokédex generate UI — overlay, animated egg, hatch FX, manage |
+| `b674f7ba28c4` | #26 | feat(pets): offer backend setup when generation is unavailable |
+| `489b85ee1e2b` | #20 | fix(ddgs): bound DuckDuckGo search with a wall-clock timeout (#36776) |
+| `a268dfff0a05` | #26 | fix(desktop): make Agents indicator match the Spawn-tree panel |
+| `8d1706ae5cb2` | #26 | fix(desktop): wire Ctrl+B voice, declutter voice settings, stop endless TTS hang |
+| `2a75c4a8cb4a` | #26 | fix(desktop): give the gateway reconnect loop an escape hatch |
+| `93192059c96c` | #26 | fix(desktop): let the session watchdog heal a stuck "looping" turn |
+| `1fe013ee16f1` | #20 | feat(pets): polish generate flow and reduce hatch CPU pressure |
+| `a6485bddb855` | #26 | fix(desktop): don't report a bogus update count for a shallow checkout |
+| `cb6edbf448e7` | #26 | fix(desktop): skip the rev-list count when it is discarded anyway |
+| `65b13e9dbc93` | #26 | fix(desktop): route gateway restart / status / update to the active profile |
+| `00779800f650` | #26 | fix(desktop): hide platform/internal toolsets from the Skills & Tools list |

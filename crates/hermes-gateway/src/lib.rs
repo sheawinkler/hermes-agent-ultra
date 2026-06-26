@@ -77,9 +77,10 @@ pub use dm::{DmDecision, DmManager};
 pub use mirror::MirrorManager;
 pub use pairing::{PairingManager, PairingState};
 pub use relay::{
-    relay_going_idle_frame, relay_inbound_ack_frame, relay_passthrough_forward_from_frame,
-    relay_policy_url, relay_relevance_policy, relay_wake_url_from_sources, RelayPassthroughForward,
-    RelayRelevancePolicy,
+    relay_close_disposition, relay_going_idle_frame, relay_inbound_ack_frame,
+    relay_passthrough_forward_from_frame, relay_platform_state_for_close, relay_policy_url,
+    relay_relevance_policy, relay_wake_url_from_sources, RelayCloseDisposition,
+    RelayPassthroughForward, RelayRelevancePolicy, RELAY_UNAUTHORIZED_CLOSE_CODE,
 };
 pub use sticker_cache::{StickerCache, StickerMeta};
 

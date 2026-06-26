@@ -153,11 +153,59 @@ pub fn atomic_yaml_write(
     value: &serde_yaml::Value,
     extra_content: Option<&str>,
 ) -> Result<(), ConfigError> {
-    let mut yaml = serde_yaml::to_string(value).map_err(yaml_to_config_error)?;
+    let mut yaml = serde_yaml::to_string(value)
+        .map(|yaml| normalize_yaml_sequence_indent(&yaml))
+        .map_err(yaml_to_config_error)?;
     if let Some(extra) = extra_content {
         yaml.push_str(extra);
     }
     atomic_write_bytes(path, yaml.as_bytes())
+}
+
+fn normalize_yaml_sequence_indent(yaml: &str) -> String {
+    let mut out = String::with_capacity(yaml.len());
+    let mut previous_mapping_indent: Option<usize> = None;
+    let mut active_sequence_shift: Option<(usize, usize, usize)> = None; // parent, original, shift
+    for line in yaml.lines() {
+        let trimmed = line.trim_start();
+        let indent = line.len().saturating_sub(trimmed.len());
+        let mut emitted = false;
+        if let Some((parent_indent, original_indent, shift)) = active_sequence_shift {
+            if trimmed.starts_with("- ") && indent == original_indent {
+                out.push_str(&" ".repeat(shift));
+                out.push_str(line);
+                emitted = true;
+            } else if !trimmed.is_empty() && indent <= parent_indent {
+                active_sequence_shift = None;
+            } else if indent > original_indent {
+                out.push_str(&" ".repeat(shift));
+                out.push_str(line);
+                emitted = true;
+            }
+        }
+        if trimmed.starts_with("- ") {
+            if let Some(parent_indent) = previous_mapping_indent {
+                if indent <= parent_indent {
+                    let target_indent = parent_indent + 2;
+                    let shift = target_indent.saturating_sub(indent);
+                    out.push_str(&" ".repeat(target_indent));
+                    out.push_str(trimmed);
+                    active_sequence_shift = Some((parent_indent, indent, shift));
+                    emitted = true;
+                }
+            }
+        }
+        if !emitted {
+            out.push_str(line);
+        }
+        out.push('\n');
+        if !trimmed.is_empty() && trimmed.ends_with(':') && !trimmed.starts_with("- ") {
+            previous_mapping_indent = Some(indent);
+        } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
+            previous_mapping_indent = None;
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1614,7 +1662,9 @@ pub fn save_config_yaml(path: &Path, config: &GatewayConfig) -> Result<(), Confi
     }
     let mut to_save = config.clone();
     to_save.home_dir = None;
-    let yaml = serde_yaml::to_string(&to_save).map_err(yaml_to_config_error)?;
+    let yaml = serde_yaml::to_string(&to_save)
+        .map(|yaml| normalize_yaml_sequence_indent(&yaml))
+        .map_err(yaml_to_config_error)?;
     atomic_write_bytes(path, yaml.as_bytes())?;
     secure_config_file(path)?;
     Ok(())
@@ -2998,6 +3048,32 @@ mod tests {
     }
 
     #[test]
+    fn atomic_yaml_write_indents_mapping_child_sequences() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        let value: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+custom_providers:
+  - name: provider-a
+    base_url: https://a.example.com
+fallback_providers:
+  - backup-a
+  - backup-b
+"#,
+        )
+        .unwrap();
+
+        atomic_yaml_write(&path, &value, None).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("custom_providers:\n  - "));
+        assert!(text.contains("fallback_providers:\n  - backup-a"));
+        serde_yaml::from_str::<serde_yaml::Value>(&text).expect("normalized yaml parses");
+    }
+
+    #[test]
     fn save_config_yaml_preserves_utf8_personality_and_prompt() {
         use tempfile::tempdir;
 
@@ -3817,6 +3893,8 @@ custom_providers:
             providers[0].get("base_url").and_then(|v| v.as_str()),
             Some("https://a.example.com")
         );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("custom_providers:\n  - "));
         assert_eq!(
             providers[1].get("api_key").and_then(|v| v.as_str()),
             Some("old-b")

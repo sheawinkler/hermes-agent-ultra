@@ -4818,6 +4818,146 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust Discord component authorization: discord_component_allows_with_pairing now allows explicitly approved PairingManager users after allowlist/role checks fail, while denied/unpaired users remain fail-closed. Focused Rust tests cover approved, denied, and unpaired component subjects."
+    },
+    "70319626a922": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust BusySessionCoordinator: interrupt mode now preserves a busy mid-turn prompt by queueing it before interrupting the active control, and finish drains the pending prompt on the next turn. Focused session_control tests cover queued interrupt status detail."
+    },
+    "72bfc48e63a1": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust TUI: App reads active subagent lineage records from HERMES_HOME/subagents, counts started/running/background_pending jobs, refreshes the TUI status tick, and renders the active subagent count in the status bar with focused App coverage."
+    },
+    "c93b9f9057e4": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust relay contracts: close code 4401 after a successful handshake maps to disabled instead of retrying, while pre-handshake 4401 and ordinary closes remain retryable. Focused relay tests cover the terminal opt-out mapping."
+    },
+    "ab9134bf16d2": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust OpenViking: synchronous current-query recall prefetch uses the search/search contract with find fallback, configurable recall policy knobs, threshold/ranking/dedup caps, L2 reads for empty abstracts, batched viking_read, and focused local HTTP tests."
+    },
+    "0aea0c365444": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust config writers: atomic_yaml_write and save_config_yaml share YAML sequence-indent normalization so mapping child lists and siblings round-trip consistently. Focused hermes-config tests cover atomic writes and indexed list updates."
+    },
+    "75b36a138f43": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as the Rust TUI pet surface: /pet is registered and completable, PetSettings persist to pet.json, the TUI renders species-specific frames with dock/tick behavior, and command/app/TUI tests cover catalog validation and persistence. Upstream gateway RPCs are not a separate Rust target because the native TUI owns pet settings directly."
+    },
+    "86b990fe0fac": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream floating desktop pet overlay and Cmd+K picker are Electron desktop-only surfaces. Hermes Agent Ultra has no apps/desktop tree; the shipped Rust pet UX is the CLI/TUI /pet command, persisted settings, and TUI frame rendering."
+    },
+    "6fd839ac84d0": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream pet feature-guide/petdex skill docs are superseded by the Rust-native /pet runtime catalog: /pet list exposes species and moods from PetSettings, and validation tests keep the catalog executable instead of relying on desktop docs assets."
+    },
+    "f9ffe0bc3f61": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Notification-click stored session-id recovery is Electron desktop route/resume behavior. Rust CLI/TUI/gateway sessions are not resumed through desktop notifications or renderer route state."
+    },
+    "069011dd0c8f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream test covers Electron runtime-to-stored notification id resolution, which is absent from the Rust CLI/TUI/gateway session model."
+    },
+    "9a2f2756f7e6": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Selecting slash output and shell logs in the thread is React desktop presentation behavior. Rust terminal/TUI output remains native terminal text, not Electron thread DOM selection."
+    },
+    "6cb04be779de": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Desktop Keys-tab provider grouping is React settings UI over Electron provider identity. Rust provider credentials are owned by config/auth/provider surfaces, not apps/desktop settings panes."
+    },
+    "ee0de638d719": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Desktop API-key search and priority-sorted provider lists are React settings UI behavior. Rust runtime provider configuration is handled through typed config/auth/provider paths instead."
+    },
+    "d91b8d8368bb": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "This is a TypeScript desktop unit-test factory cleanup for keyVar EnvVarInfo, with no Rust runtime target."
+    },
+    "b936f92b25b4": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Rendered send/prefill directive notices are desktop assistant-thread UI. Rust slash-command output and TUI command handling own the local runtime behavior."
+    },
+    "6308d3416ab9": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Renaming desktop Restart messaging to Restart gateway is Electron UI copy. Rust has no desktop statusbar/restart action surface to port."
+    },
+    "553cf4f97757": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Restart gateway from Cmd+K with statusbar spinner is Electron desktop command-palette behavior. Rust gateway lifecycle is controlled by CLI/process surfaces, not apps/desktop Cmd+K."
+    },
+    "a1639921ac44": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Desktop messaging save/toggle toasts offering Restart gateway are Electron settings UI. Rust config changes do not route through desktop toast actions."
+    },
+    "929dbf777801": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Selectable rendered logs are React desktop presentation behavior. Rust logs and command output remain terminal/TUI text surfaces."
+    },
+    "8ebe37f6ad2d": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "GPU-disabled remote-display notification is Electron desktop renderer behavior. Hermes Agent Ultra has no Electron GPU acceleration or desktop notification renderer."
+    },
+    "1b7b4d138a67": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Slash exec dispatch payload handling targets desktop renderer command dispatch. Rust slash execution is handled directly by CLI/TUI command routing."
+    },
+    "236f0597e562": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Floating composer pop-out is Electron desktop UI. Rust TUI composer remains the shipped terminal surface."
+    },
+    "f697c97e02f0": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Floating composer radius polish is Electron desktop CSS/UI behavior with no Rust TUI runtime equivalent."
+    },
+    "eed78d6ebb51": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Floating composer peel-off placement, panels, and chip editing are Electron desktop UI polish, outside the Rust terminal/TUI surface."
+    },
+    "ae8db1ab531b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Hidden link-title audio muting is Electron desktop hidden-window behavior. Rust has no link-title browser window or autoplay audio surface."
+    },
+    "7eb9678c5470": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream test covers Electron hidden link-title audio muting, a desktop-only surface absent from the Rust runtime."
+    },
+    "404fe730b7a2": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Right-sidebar header button tooltips are React desktop UI polish. Rust CLI/TUI/gateway has no matching right-sidebar tooltip surface."
+    },
+    "838daca9f4cf": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Tooltip indentation and author-map formatting are desktop/metadata polish with no Rust runtime behavior to port."
     }
   },
   "subject_patterns": [
