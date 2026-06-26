@@ -705,8 +705,25 @@ async fn exec_rpc(
     match method {
         "project.facts" => {
             let cwd = rpc_param_str(&params, "cwd").map(PathBuf::from);
-            let facts = hermes_agent::coding_context::project_facts_for(cwd.as_deref());
+            let facts =
+                hermes_tools::tools::project_workspace::project_facts_snapshot(cwd.as_deref());
             rpc_ok(id, serde_json::json!({ "facts": facts }))
+        }
+        "project.tree" => {
+            let cwd = rpc_param_str(&params, "cwd").map(PathBuf::from);
+            let max_depth = rpc_param_u32(&params, "max_depth", 3) as usize;
+            let max_entries = rpc_param_u32(&params, "max_entries", 200) as usize;
+            let include_hidden = params
+                .get("include_hidden")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let tree = hermes_tools::tools::project_workspace::project_tree_snapshot(
+                cwd.as_deref(),
+                max_depth,
+                max_entries,
+                include_hidden,
+            );
+            rpc_ok(id, serde_json::json!({ "tree": tree }))
         }
         "verification.status" => {
             let cwd = rpc_param_str(&params, "cwd").map(PathBuf::from);

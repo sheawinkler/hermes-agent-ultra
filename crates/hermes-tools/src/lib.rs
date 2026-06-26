@@ -84,6 +84,7 @@ pub use tools::mixture_of_agents::MixtureOfAgentsHandler;
 pub use tools::ops_snapshot::OpsSnapshotHandler;
 pub use tools::osv_check::OsvCheckHandler;
 pub use tools::process_registry::ProcessRegistryHandler;
+pub use tools::project_workspace::{ProjectFactsHandler, ProjectTreeHandler};
 pub use tools::raw_trace_control::RawTraceControlHandler;
 pub use tools::replay_trace_control::ReplayTraceControlHandler;
 pub use tools::rl_training::{

@@ -162,6 +162,52 @@ async fn rpc_project_facts_returns_structured_workspace_data() {
 }
 
 #[tokio::test]
+async fn rpc_project_tree_returns_bounded_entries() {
+    let _ = tracing_subscriber::fmt::try_init();
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::write(
+        repo.path().join("Cargo.toml"),
+        "[package]\nname='rpc-tree'\nversion='0.1.0'\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(repo.path().join("src")).unwrap();
+    std::fs::write(repo.path().join("src/lib.rs"), "pub fn rpc_tree() {}\n").unwrap();
+    std::fs::create_dir_all(repo.path().join("target/debug")).unwrap();
+    std::fs::write(repo.path().join("target/debug/ignored"), "ignored").unwrap();
+    std::fs::write(repo.path().join("z-extra-a.txt"), "extra").unwrap();
+    std::fs::write(repo.path().join("z-extra-b.txt"), "extra").unwrap();
+
+    let payload = serde_json::json!({
+        "id": "tree",
+        "method": "project.tree",
+        "params": {
+            "cwd": repo.path(),
+            "max_depth": 4,
+            "max_entries": 4
+        }
+    });
+
+    let v = post_rpc(payload).await;
+
+    assert_eq!(v["id"], "tree");
+    assert_eq!(v["error"], serde_json::Value::Null);
+    let tree = &v["result"]["tree"];
+    assert_eq!(tree["status"], "ok");
+    assert_eq!(tree["maxEntries"], 4);
+    assert_eq!(tree["truncated"], true);
+    let paths = tree["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value["path"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert!(paths.contains(&"Cargo.toml".to_string()));
+    assert!(paths.contains(&"src".to_string()));
+    assert!(paths.contains(&"src/lib.rs".to_string()));
+    assert!(!paths.iter().any(|path| path.starts_with("target")));
+}
+
+#[tokio::test]
 async fn rpc_verification_status_returns_passive_terminal_evidence() {
     let _ = tracing_subscriber::fmt::try_init();
     let _guard = ENV_LOCK.lock().await;

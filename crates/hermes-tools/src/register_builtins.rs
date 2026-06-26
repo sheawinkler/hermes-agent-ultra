@@ -171,6 +171,22 @@ fn register_builtin_tools_with_data_dir(
         vec![],
     );
 
+    // -- Project/workspace tools ----------------------------------------------
+    reg(
+        registry,
+        "project",
+        Arc::new(crate::tools::project_workspace::ProjectFactsHandler),
+        "🗂️",
+        vec![],
+    );
+    reg(
+        registry,
+        "project",
+        Arc::new(crate::tools::project_workspace::ProjectTreeHandler),
+        "🌳",
+        vec![],
+    );
+
     // -- Vision --------------------------------------------------------------
     {
         let backend =
@@ -1215,6 +1231,8 @@ mod tests {
             "terminal",
             "process",
             "process_registry",
+            "project_facts",
+            "project_tree",
             "todo",
             "text_to_speech",
             "tts_premium",

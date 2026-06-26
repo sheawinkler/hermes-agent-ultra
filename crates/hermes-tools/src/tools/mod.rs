@@ -26,6 +26,7 @@ pub mod mixture_of_agents;
 pub mod ops_snapshot;
 pub mod osv_check;
 pub mod process_registry;
+pub mod project_workspace;
 pub mod raw_trace_control;
 pub mod replay_trace_control;
 pub mod rl_training;
