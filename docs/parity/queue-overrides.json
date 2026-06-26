@@ -5048,6 +5048,11 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust image_generate now supports OpenRouter-compatible OpenRouter and Nous Portal backends with provider selection, env/config/auth-store credential resolution, /chat/completions image-output payloads, local reference-image data URI inlining, generated image cache saves for data URI/HTTP responses, and mocked tests for payload/header/auth/error paths."
+    },
+    "f44415e71a26": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust startup/gateway provider construction now applies init-time fallback selection before building the agent/provider when the primary model has no configured credentials, while preserving local no-key backends and OAuth auth-store resolver credentials. Covered by provider-runtime, CLI startup-model, and HTTP provider alias/config tests."
     }
   },
   "subject_patterns": [

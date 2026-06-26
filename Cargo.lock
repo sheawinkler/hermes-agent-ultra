@@ -1802,6 +1802,7 @@ dependencies = [
  "hermes-config",
  "hermes-core",
  "hermes-gateway",
+ "hermes-provider-runtime",
  "hermes-telemetry",
  "hermes-tools",
  "http-body-util",

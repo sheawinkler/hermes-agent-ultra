@@ -18,6 +18,7 @@ use hermes_auth::{
 };
 use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
+    provider_oauth_token_from_auth_state, select_startup_model_with_fallback_and_auth_resolver,
 };
 use hermes_cli::auth::{
     clear_provider_auth_state, discover_existing_anthropic_oauth, discover_existing_nous_oauth,
@@ -4594,6 +4595,12 @@ fn build_agent_for_gateway_context(
 ) -> AgentLoop {
     let effective_model =
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-5.5"), ctx);
+    let effective_model = select_startup_model_with_fallback_and_auth_resolver(
+        config,
+        &effective_model,
+        Some(&provider_oauth_token_from_auth_state),
+    )
+    .selected_model;
     let provider = build_provider(config, &effective_model);
     let mut agent_config = build_agent_config(config, &effective_model);
     if let Some(personality) = ctx.personality.clone() {
@@ -10089,6 +10096,12 @@ fn build_live_cron_scheduler(cli: &Cli, data_dir: &Path) -> Result<CronScheduler
         .model
         .clone()
         .unwrap_or_else(|| "gpt-5.5".to_string());
+    let current_model = select_startup_model_with_fallback_and_auth_resolver(
+        &config,
+        &current_model,
+        Some(&provider_oauth_token_from_auth_state),
+    )
+    .selected_model;
     let provider = build_provider(&config, &current_model);
 
     let tool_registry = Arc::new(ToolRegistry::new());

@@ -80,6 +80,26 @@ pub struct ProviderRuntimeDiagnostic {
     pub uses_openai_pro_backend: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupModelSelection {
+    pub requested_model: String,
+    pub selected_model: String,
+    pub fallback_used: bool,
+    pub skipped_unavailable_models: Vec<String>,
+}
+
+impl StartupModelSelection {
+    pub fn primary(model: impl Into<String>) -> Self {
+        let model = model.into();
+        Self {
+            requested_model: model.clone(),
+            selected_model: model,
+            fallback_used: false,
+            skipped_unavailable_models: Vec::new(),
+        }
+    }
+}
+
 pub fn local_backend_specs() -> &'static [LocalBackendSpec] {
     local_backends::local_backend_specs()
 }
@@ -110,6 +130,14 @@ pub fn provider_runtime_diagnostic(
     config: &GatewayConfig,
     model: &str,
 ) -> ProviderRuntimeDiagnostic {
+    provider_runtime_diagnostic_with_auth_resolver(config, model, None)
+}
+
+pub fn provider_runtime_diagnostic_with_auth_resolver(
+    config: &GatewayConfig,
+    model: &str,
+    oauth_token_resolver: Option<&OAuthTokenResolver<'_>>,
+) -> ProviderRuntimeDiagnostic {
     let (provider_name, model_name) = resolve_provider_and_model(config, model);
     let runtime_provider = normalize_runtime_provider_name(provider_name.as_str());
     let provider_config =
@@ -125,6 +153,7 @@ pub fn provider_runtime_diagnostic(
         provider_config,
         provider_name.as_str(),
         runtime_provider.as_str(),
+        oauth_token_resolver,
     );
     let local_no_key_allowed = allow_no_api_key(
         provider_name.as_str(),
@@ -135,7 +164,9 @@ pub fn provider_runtime_diagnostic(
         .and_then(|c| c.api_key.as_deref())
         .and_then(resolve_api_key_literal_or_env_ref)
         .or_else(|| provider_api_key_from_env(provider_name.as_str()))
-        .or_else(|| provider_api_key_from_env(runtime_provider.as_str()));
+        .or_else(|| provider_api_key_from_env(runtime_provider.as_str()))
+        .or_else(|| oauth_token_resolver.and_then(|resolver| resolver(provider_name.as_str())))
+        .or_else(|| oauth_token_resolver.and_then(|resolver| resolver(runtime_provider.as_str())));
     let uses_openai_pro_backend = matches!(runtime_provider.as_str(), "openai-codex" | "codex")
         || (runtime_provider == "openai"
             && api_key_for_backend_probe
@@ -157,6 +188,7 @@ fn provider_runtime_api_key_source(
     provider_config: Option<&LlmProviderConfig>,
     provider_name: &str,
     runtime_provider: &str,
+    oauth_token_resolver: Option<&OAuthTokenResolver<'_>>,
 ) -> (bool, Option<String>) {
     if let Some(config) = provider_config {
         if config
@@ -187,7 +219,122 @@ fn provider_runtime_api_key_source(
     if provider_api_key_from_env(runtime_provider).is_some() {
         return (true, Some(format!("provider_env:{runtime_provider}")));
     }
+    if oauth_token_resolver
+        .and_then(|resolver| resolver(provider_name))
+        .is_some()
+    {
+        return (true, Some(format!("oauth_resolver:{provider_name}")));
+    }
+    if oauth_token_resolver
+        .and_then(|resolver| resolver(runtime_provider))
+        .is_some()
+    {
+        return (true, Some(format!("oauth_resolver:{runtime_provider}")));
+    }
     (false, None)
+}
+
+fn model_has_startup_backend(
+    config: &GatewayConfig,
+    model: &str,
+    oauth_token_resolver: Option<&OAuthTokenResolver<'_>>,
+) -> bool {
+    let diag = provider_runtime_diagnostic_with_auth_resolver(config, model, oauth_token_resolver);
+    diag.api_key_present || diag.local_no_key_allowed
+}
+
+pub fn configured_model_fallback_chain(config: &GatewayConfig) -> Vec<String> {
+    if let Ok(raw) = std::env::var("HERMES_FALLBACK_MODELS") {
+        let parsed: Vec<String> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect();
+        if !parsed.is_empty() {
+            return dedupe_model_chain(parsed);
+        }
+    }
+
+    if let Ok(raw) = std::env::var("HERMES_FALLBACK_MODEL") {
+        let value = raw.trim();
+        if !value.is_empty() {
+            return vec![value.to_string()];
+        }
+    }
+
+    let mut chain = config.fallback_models.clone();
+    if let Some(model) = config.fallback_model.as_deref() {
+        chain.push(model.to_string());
+    }
+    dedupe_model_chain(chain)
+}
+
+fn dedupe_model_chain(chain: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for model in chain {
+        let trimmed = model.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if seen.insert(trimmed.to_ascii_lowercase()) {
+            out.push(trimmed.to_string());
+        }
+    }
+    out
+}
+
+pub fn select_startup_model_with_fallback(
+    config: &GatewayConfig,
+    requested_model: &str,
+) -> StartupModelSelection {
+    select_startup_model_with_fallback_and_auth_resolver(config, requested_model, None)
+}
+
+pub fn select_startup_model_with_fallback_and_auth_resolver(
+    config: &GatewayConfig,
+    requested_model: &str,
+    oauth_token_resolver: Option<&OAuthTokenResolver<'_>>,
+) -> StartupModelSelection {
+    let requested = requested_model.trim();
+    let requested = if requested.is_empty() {
+        "gpt-5.5"
+    } else {
+        requested
+    };
+
+    if model_has_startup_backend(config, requested, oauth_token_resolver) {
+        return StartupModelSelection::primary(requested.to_string());
+    }
+
+    let mut skipped = vec![requested.to_string()];
+    for fallback in configured_model_fallback_chain(config) {
+        if fallback.eq_ignore_ascii_case(requested) {
+            continue;
+        }
+        if model_has_startup_backend(config, &fallback, oauth_token_resolver) {
+            tracing::warn!(
+                "startup provider for '{}' has no configured credentials; using fallback model '{}'",
+                requested,
+                fallback
+            );
+            return StartupModelSelection {
+                requested_model: requested.to_string(),
+                selected_model: fallback,
+                fallback_used: true,
+                skipped_unavailable_models: skipped,
+            };
+        }
+        skipped.push(fallback);
+    }
+
+    StartupModelSelection {
+        requested_model: requested.to_string(),
+        selected_model: requested.to_string(),
+        fallback_used: false,
+        skipped_unavailable_models: skipped,
+    }
 }
 
 pub fn active_llm_provider_config<'a>(
@@ -1055,6 +1202,216 @@ mod tests {
         let (provider, model) = resolve_provider_and_model(&cfg, "my-model");
         assert_eq!(provider, "custom");
         assert_eq!(model, "my-model");
+    }
+
+    #[test]
+    fn startup_model_selector_keeps_primary_when_credentials_exist() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(&[
+            "HERMES_FALLBACK_MODELS",
+            "HERMES_FALLBACK_MODEL",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+        ]);
+        for key in [
+            "HERMES_FALLBACK_MODELS",
+            "HERMES_FALLBACK_MODEL",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+        ] {
+            std::env::remove_var(key);
+        }
+
+        let mut cfg = GatewayConfig {
+            fallback_models: vec!["anthropic:claude-sonnet-4-6".to_string()],
+            ..GatewayConfig::default()
+        };
+        cfg.llm_providers.insert(
+            "openai".to_string(),
+            LlmProviderConfig {
+                api_key: Some("primary-key".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let selection = select_startup_model_with_fallback(&cfg, "openai:dynamic");
+
+        assert_eq!(selection.selected_model, "openai:dynamic");
+        assert!(!selection.fallback_used);
+        assert!(selection.skipped_unavailable_models.is_empty());
+    }
+
+    #[test]
+    fn startup_model_selector_uses_first_credentialed_fallback() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(&[
+            "HERMES_FALLBACK_MODELS",
+            "HERMES_FALLBACK_MODEL",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "HERMES_OPENROUTER_API_KEY",
+            "OPENROUTER_API_KEY",
+            "HERMES_ANTHROPIC_API_KEY",
+            "ANTHROPIC_API_KEY",
+        ]);
+        for key in [
+            "HERMES_FALLBACK_MODELS",
+            "HERMES_FALLBACK_MODEL",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "HERMES_OPENROUTER_API_KEY",
+            "OPENROUTER_API_KEY",
+            "HERMES_ANTHROPIC_API_KEY",
+            "ANTHROPIC_API_KEY",
+        ] {
+            std::env::remove_var(key);
+        }
+
+        let mut cfg = GatewayConfig {
+            fallback_models: vec![
+                "openrouter:anthropic/claude-sonnet-4.6".to_string(),
+                "anthropic:claude-sonnet-4-6".to_string(),
+            ],
+            ..GatewayConfig::default()
+        };
+        cfg.llm_providers.insert(
+            "anthropic".to_string(),
+            LlmProviderConfig {
+                api_key: Some("fallback-key".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let selection = select_startup_model_with_fallback(&cfg, "openai:dynamic");
+
+        assert_eq!(selection.requested_model, "openai:dynamic");
+        assert_eq!(selection.selected_model, "anthropic:claude-sonnet-4-6");
+        assert!(selection.fallback_used);
+        assert_eq!(
+            selection.skipped_unavailable_models,
+            vec![
+                "openai:dynamic".to_string(),
+                "openrouter:anthropic/claude-sonnet-4.6".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn startup_model_selector_honors_env_fallback_override() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(&[
+            "HERMES_FALLBACK_MODELS",
+            "HERMES_FALLBACK_MODEL",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "HERMES_NOUS_API_KEY",
+            "NOUS_API_KEY",
+        ]);
+        for key in [
+            "HERMES_FALLBACK_MODEL",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "HERMES_NOUS_API_KEY",
+            "NOUS_API_KEY",
+        ] {
+            std::env::remove_var(key);
+        }
+        std::env::set_var("HERMES_FALLBACK_MODELS", "nous:Hermes-4");
+
+        let mut cfg = GatewayConfig {
+            fallback_models: vec!["anthropic:claude-sonnet-4-6".to_string()],
+            ..GatewayConfig::default()
+        };
+        cfg.llm_providers.insert(
+            "nous".to_string(),
+            LlmProviderConfig {
+                api_key: Some("nous-fallback-key".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let selection = select_startup_model_with_fallback(&cfg, "openai:dynamic");
+
+        assert_eq!(selection.selected_model, "nous:Hermes-4");
+        assert!(selection.fallback_used);
+    }
+
+    #[test]
+    fn startup_model_selector_keeps_local_no_key_backend() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(&[
+            "HERMES_FALLBACK_MODELS",
+            "HERMES_FALLBACK_MODEL",
+            "OLLAMA_API_KEY",
+            "OLLAMA_LOCAL_API_KEY",
+        ]);
+        for key in [
+            "HERMES_FALLBACK_MODELS",
+            "HERMES_FALLBACK_MODEL",
+            "OLLAMA_API_KEY",
+            "OLLAMA_LOCAL_API_KEY",
+        ] {
+            std::env::remove_var(key);
+        }
+
+        let cfg = GatewayConfig::default();
+        let selection = select_startup_model_with_fallback(&cfg, "ollama:llama3.3");
+
+        assert_eq!(selection.selected_model, "ollama:llama3.3");
+        assert!(!selection.fallback_used);
+    }
+
+    #[test]
+    fn startup_model_selector_uses_oauth_resolver_as_primary_credentials() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(&[
+            "HERMES_FALLBACK_MODELS",
+            "HERMES_FALLBACK_MODEL",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+        ]);
+        for key in [
+            "HERMES_FALLBACK_MODELS",
+            "HERMES_FALLBACK_MODEL",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+        ] {
+            std::env::remove_var(key);
+        }
+
+        let mut cfg = GatewayConfig {
+            fallback_models: vec!["anthropic:claude-sonnet-4-6".to_string()],
+            ..GatewayConfig::default()
+        };
+        cfg.llm_providers.insert(
+            "anthropic".to_string(),
+            LlmProviderConfig {
+                api_key: Some("fallback-key".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let resolver = |provider: &str| {
+            if provider == "openai" {
+                Some("oauth-token".to_string())
+            } else {
+                None
+            }
+        };
+        let diagnostic =
+            provider_runtime_diagnostic_with_auth_resolver(&cfg, "openai:dynamic", Some(&resolver));
+        let selection = select_startup_model_with_fallback_and_auth_resolver(
+            &cfg,
+            "openai:dynamic",
+            Some(&resolver),
+        );
+
+        assert_eq!(
+            diagnostic.api_key_source.as_deref(),
+            Some("oauth_resolver:openai")
+        );
+        assert_eq!(selection.selected_model, "openai:dynamic");
+        assert!(!selection.fallback_used);
     }
 
     #[test]
