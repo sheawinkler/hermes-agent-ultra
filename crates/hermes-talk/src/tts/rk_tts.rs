@@ -8,7 +8,6 @@ use tracing::{error, info, warn};
 
 use crate::config::RockchipTtsConfig;
 use crate::error::{DemoError, Result};
-use crate::orchestrator::normalize_tts_text;
 
 use super::TtsEngine;
 use super::bailian::TtsAudio;
@@ -167,34 +166,28 @@ async fn run_rktts_driver(
         config.speaker_id, config.alpha
     );
 
-    let mut text_buf = String::new();
-
     loop {
         tokio::select! {
             cmd = cmd_rx.recv() => {
                 let Some(cmd) = cmd else { break };
                 match cmd {
                     RkCommand::AppendText { text, done } => {
-                        text_buf.push_str(&text);
-                        let _ = done.send(Ok(()));
-                    }
-                    RkCommand::FinishTurn(done) => {
-                        if text_buf.is_empty() {
+                        let text = text.trim();
+                        if text.is_empty() {
                             let _ = done.send(Ok(()));
                             continue;
                         }
-
-                        let raw = std::mem::take(&mut text_buf);
-                        let text = normalize_tts_text(&raw);
-                        if text != raw {
-                            info!(raw = %raw, normalized = %text, "rktts text preprocessed");
-                        }
+                        info!(chars = text.chars().count(), %text, "rktts streaming inference");
                         let generation = infer_gen.load(Ordering::SeqCst);
-                        let infer_done = run_inference(&handle, &text, &infer_gen, generation).await;
-                        let _ = done.send(infer_done);
+                        let result =
+                            run_inference(&handle, text, &infer_gen, generation).await;
+                        let _ = done.send(result);
+                    }
+                    RkCommand::FinishTurn(done) => {
+                        // Chunks are synthesized incrementally on AppendText (SDK textsQueue).
+                        let _ = done.send(Ok(()));
                     }
                     RkCommand::InterruptTurn(done) => {
-                        text_buf.clear();
                         unsafe {
                             rktts_release(handle.0);
                         }
