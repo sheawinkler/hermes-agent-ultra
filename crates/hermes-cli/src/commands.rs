@@ -6562,14 +6562,6 @@ fn usage_token_line(label: &str, usage: &hermes_core::UsageStats) -> String {
     )
 }
 
-fn format_usage_cost_usd(cost: f64) -> String {
-    if cost > 0.0 && cost < 0.0001 {
-        format!("${cost:.6}")
-    } else {
-        format!("${cost:.4}")
-    }
-}
-
 async fn handle_billing_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     let output = crate::billing::handle_billing_slash_args(args).await?;
     emit_command_output(app, output);
@@ -6616,13 +6608,6 @@ fn handle_usage_command(app: &mut App) -> Result<CommandResult, AgentError> {
         }
         None => output
             .push_str("\n  Actual session: unavailable until a provider returns usage metadata"),
-    }
-
-    if app.session_cost_usd > 0.0 {
-        output.push_str(&format!(
-            "\n  Actual cost:   {}",
-            format_usage_cost_usd(app.session_cost_usd)
-        ));
     }
 
     let nous_credits = hermes_core::credits::render_last_nous_credits_lines();
@@ -30201,7 +30186,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn usage_command_reports_actual_session_usage_and_cost() {
+    async fn usage_command_reports_actual_session_usage_without_estimated_cost() {
         let _guard = env_test_lock();
         hermes_core::credits::clear_last_nous_credits_state();
         let tmp = tempdir().expect("tempdir");
@@ -30234,7 +30219,8 @@ mod tests {
         let output = latest_ui_assistant_text(&app);
         assert!(output.contains("Last response: 12 prompt / 3 completion / 15 total tokens"));
         assert!(output.contains("Actual session: 12 prompt / 3 completion / 15 total tokens"));
-        assert!(output.contains("Actual cost:   $0.0123"));
+        assert!(!output.contains("Actual cost"));
+        assert!(!output.contains("$0.0123"));
         hermes_core::credits::clear_last_nous_credits_state();
     }
 

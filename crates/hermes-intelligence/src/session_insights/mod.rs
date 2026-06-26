@@ -447,6 +447,10 @@ mod tests {
         assert!(out.contains("Top Tools"));
         assert!(out.contains("shell"));
         assert!(out.contains("Activity Patterns"));
+        assert!(!out.contains("Cache read"));
+        assert!(!out.contains("Cache write"));
+        assert!(!out.contains("Est. cost"));
+        assert!(!out.contains("Cost N/A"));
     }
 
     #[test]
@@ -473,6 +477,8 @@ mod tests {
         assert!(out.contains("**🔧 Top Tools:**"));
         // Multi-platform present in the fixture.
         assert!(out.contains("**📱 Platforms:**"));
+        assert!(!out.contains("cache:"));
+        assert!(!out.contains("**Est. cost:**"));
     }
 
     #[test]
