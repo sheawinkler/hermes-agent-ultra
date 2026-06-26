@@ -5078,6 +5078,11 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported/proven in Rust: the Telegram CLI poll loop calls deleteWebhook(drop_pending_updates=false), preserves Bot API queued updates across reconnects, advances getUpdates offsets only after successful responses, and keeps the poll sidecar resident so watcher start() can recover after outages."
+    },
+    "9d225fbf4eaf3cc8aa490e12ccf1145123793677": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram rich-message delivery: pipe-table-primary Markdown now auto-routes through sendRichMessage even when rich_messages is false, while task lists/details/math still require explicit rich opt-in; encoded topic chat IDs route through sendRichMessage without reply anchors and rich edit finalization forwards message_thread_id."
     }
   },
   "subject_patterns": [
