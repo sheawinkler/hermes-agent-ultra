@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T10:33:55.048190+00:00`
+Generated: `2026-06-26T11:06:17.942717+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7116`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-26T10:33:55.048190+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 145 |
-| ported | 459 |
+| pending | 144 |
+| ported | 460 |
 | superseded | 6436 |
 
 ## First 100 Pending Commits
@@ -97,7 +97,6 @@ Generated: `2026-06-26T10:33:55.048190+00:00`
 | `97888fed483c` | #25 | fix(install): drop system-browser fallback + auto-repair stale snap override |
 | `935f2bc48daa` | #26 | docs(relay): add §3.4 — obligations on a future scale-to-zero behaviour layer (#51633) |
 | `281a439ad483` | #26 | fix(desktop): guard composer mutations when the composer core isn't bound (#51728) |
-| `0ef86febe25f` | #20 | docs(sessions): clarify sessions.json is the gateway routing index, not the session list (#51726) |
 | `a911bcda18cf` | #22 | docs: stop recommending pip install; curl installer is the only supported path (#51743) |
 | `8446c1570683` | #26 | docs(chronos): pin hop-1 auth to the hosted-agent bootstrap token |
 | `66a0907c9566` | #26 | fix(desktop): keep configured onboarding state on fallback runtime probes |
@@ -125,3 +124,4 @@ Generated: `2026-06-26T10:33:55.048190+00:00`
 | `7e2db0a140db` | #26 | fix(desktop): stop refText crash on undefined composer attachment holes |
 | `4aeaba692251` | #26 | test(desktop): cover undefined/null attachment holes in ref helpers |
 | `cbe5c5689f9c` | #26 | perf(desktop): bound tool-result rendering so big /learn runs don't freeze (#52273) |
+| `f2c45e2c816d` | #26 | fix(desktop): limit pending tool shimmer to action verb |

@@ -5058,6 +5058,11 @@
       "disposition": "ported",
       "notes": "Rust email gateway now rejects spoofed From-header authorization when email/global allowlists are active unless allow-all or EMAIL_TRUST_FROM_HEADER opt-out is configured. The IMAP ingestion path fetches Authentication-Results, verifies DMARC/SPF/DKIM relaxed domain alignment with optional EMAIL_AUTHSERV_ID pinning, normalizes From addresses before emitting IncomingMessage identities, and has feature-gated email parser/auth tests.",
       "owner": "rust-runtime"
+    },
+    "0ef86febe25f": {
+      "disposition": "ported",
+      "notes": "Rust channel directory sessions.json reader now explicitly treats sessions/sessions.json as a gateway routing index, skips underscore-prefixed metadata/readme sentinel keys and non-session values, and has regression tests preserving real route entries while ignoring _README-style metadata. Rust has no Python SessionStore sessions.json writer; CLI/TUI session lists remain backed by Rust session persistence/state surfaces.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [
