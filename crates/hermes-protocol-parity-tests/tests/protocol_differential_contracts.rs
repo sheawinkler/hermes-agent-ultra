@@ -88,6 +88,7 @@ fn acp_method_label(method: &str) -> String {
         AcpMethod::SetSessionModel => "SetSessionModel",
         AcpMethod::SetSessionMode => "SetSessionMode",
         AcpMethod::SetConfigOption => "SetConfigOption",
+        AcpMethod::SessionTitle => "SessionTitle",
         AcpMethod::CreateConversation => "CreateConversation",
         AcpMethod::SendMessage => "SendMessage",
         AcpMethod::GetHistory => "GetHistory",

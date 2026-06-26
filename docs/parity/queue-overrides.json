@@ -172,6 +172,11 @@
       "disposition": "ported",
       "notes": "Rust Hindsight session-switch flushing routes through retain_hindsight_turns and the same document/update-mode targeting helper used by normal auto-retain batches."
     },
+    "0a7ae28ebc1a5e1c86cc43d78c215fb224b618a8": {
+      "disposition": "ported",
+      "notes": "Rust ContextCompressor is library-safe by construction: it only emits tracing events through caller-owned subscribers and does not initialize or replace global logging from the constructor. Added focused regression coverage proving logging-enabled compressor construction is reentrant, pinning the upstream root-logger regression class.",
+      "owner": "rust-runtime"
+    },
     "0a865e5948cb": {
       "disposition": "superseded",
       "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
