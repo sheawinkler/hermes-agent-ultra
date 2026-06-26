@@ -15,6 +15,8 @@
 //!    or `nous` uses OpenAI-style `/chat/completions` image output with
 //!    reference-image grounding and stores returned images under
 //!    `$HERMES_HOME/cache/images/`.
+//! 5. **Krea direct or managed**: `image_gen.provider: krea` routes to Krea 2
+//!    direct with `KREA_API_KEY` or to the Nous-managed Krea gateway.
 //!
 //! The active transport is reflected in the response JSON (`transport`
 //! field) for observability.
@@ -26,8 +28,9 @@ use base64::{
 };
 use reqwest::Client;
 use serde_json::{json, Map, Value};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::tools::image_gen::{ImageGenBackend, ImageGenCapabilities, ImageGenerateRequest};
 use hermes_config::managed_gateway::{
@@ -48,10 +51,47 @@ const CODEX_CLOUDFLARE_ORIGINATOR: &str = "codex_cli_rs";
 const DEFAULT_OPENROUTER_COMPAT_IMAGE_MODEL: &str = "google/gemini-2.5-flash-image";
 const DEFAULT_OPENROUTER_IMAGE_BASE_URL: &str = "https://openrouter.ai/api/v1";
 const DEFAULT_NOUS_IMAGE_BASE_URL: &str = "https://inference.nousresearch.com/v1";
+const DEFAULT_KREA_IMAGE_BASE_URL: &str = "https://api.krea.ai";
+const DEFAULT_KREA_IMAGE_MODEL: &str = "krea-2-medium";
+const DEFAULT_KREA_RESOLUTION: &str = "1K";
+const DEFAULT_KREA_CREATIVITY: &str = "medium";
+const DEFAULT_KREA_STYLE_REFERENCE_STRENGTH: f64 = 0.6;
 const OPENROUTER_COMPAT_MAX_REFERENCE_IMAGES: usize = 3;
 const OPENROUTER_COMPAT_TIMEOUT_SECS: u64 = 180;
 const OPENROUTER_COMPAT_HTTP_REFERER: &str = "https://github.com/NousResearch/hermes-agent";
 const OPENROUTER_COMPAT_X_TITLE: &str = "Hermes Agent";
+const KREA_MAX_REFERENCE_IMAGES: usize = 10;
+const KREA_SUBMIT_TIMEOUT_SECS: u64 = 30;
+const KREA_POLL_INITIAL_INTERVAL: Duration = Duration::from_secs(2);
+const KREA_POLL_MAX_INTERVAL: Duration = Duration::from_secs(5);
+const KREA_POLL_TIMEOUT: Duration = Duration::from_secs(180);
+const KREA_POLL_BACKOFF: f64 = 1.3;
+const KREA_RETRYABLE_POLL_STATUSES: &[u16] = &[408, 409, 425, 429, 500, 502, 503, 504];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KreaModelSpec {
+    id: &'static str,
+    display: &'static str,
+    path: &'static str,
+}
+
+const KREA_MODELS: &[KreaModelSpec] = &[
+    KreaModelSpec {
+        id: "krea-2-medium",
+        display: "Krea 2 Medium",
+        path: "medium",
+    },
+    KreaModelSpec {
+        id: "krea-2-large",
+        display: "Krea 2 Large",
+        path: "large",
+    },
+    KreaModelSpec {
+        id: "krea-2-medium-turbo",
+        display: "Krea 2 Medium Turbo",
+        path: "medium-turbo",
+    },
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FalSizeStyle {
@@ -203,6 +243,70 @@ pub struct OpenRouterCompatImageGenConfig {
     output_dir: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum KreaTransport {
+    Direct {
+        api_key: String,
+        base_url: String,
+    },
+    Managed {
+        gateway_origin: String,
+        nous_token: String,
+    },
+}
+
+impl KreaTransport {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Direct { .. } => "direct",
+            Self::Managed { .. } => "managed",
+        }
+    }
+
+    fn origin(&self) -> &str {
+        match self {
+            Self::Direct { base_url, .. } => base_url,
+            Self::Managed { gateway_origin, .. } => gateway_origin,
+        }
+    }
+
+    fn submit_url(&self, model: KreaModelSpec) -> String {
+        format!(
+            "{}/generate/image/krea/krea-2/{}",
+            self.origin().trim_end_matches('/'),
+            model.path
+        )
+    }
+
+    fn job_url(&self, job_id: &str) -> String {
+        format!("{}/jobs/{job_id}", self.origin().trim_end_matches('/'))
+    }
+
+    fn auth_token(&self) -> Option<&str> {
+        match self {
+            Self::Direct { api_key, .. } => Some(api_key.as_str()),
+            Self::Managed { nous_token, .. } => Some(nous_token.as_str()),
+        }
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    }
+
+    fn is_managed(&self) -> bool {
+        matches!(self, Self::Managed { .. })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct KreaImageGenConfig {
+    transport: KreaTransport,
+    model: String,
+    creativity: String,
+    output_dir: PathBuf,
+    poll_initial_interval: Duration,
+    poll_max_interval: Duration,
+    poll_timeout: Duration,
+}
+
 /// Image generation backend using ChatGPT/Codex OAuth and the Responses
 /// `image_generation` tool.
 #[derive(Debug)]
@@ -220,6 +324,15 @@ pub struct OpenAICodexImageGenBackend {
 pub struct OpenRouterCompatImageGenBackend {
     client: Client,
     config: OpenRouterCompatImageGenConfig,
+}
+
+/// Krea 2 image generation backend. Supports direct `KREA_API_KEY` and the
+/// Nous-managed Krea gateway, then hides Krea's submit/poll job lifecycle
+/// behind the synchronous `ImageGenBackend::generate` contract.
+#[derive(Debug)]
+pub struct KreaImageGenBackend {
+    client: Client,
+    config: KreaImageGenConfig,
 }
 
 /// Image generation backend using fal.ai (direct or via Nous-managed
@@ -508,12 +621,141 @@ impl OpenRouterCompatImageGenBackend {
     }
 }
 
+impl KreaImageGenConfig {
+    pub fn direct(api_key: String) -> Self {
+        Self {
+            transport: KreaTransport::Direct {
+                api_key,
+                base_url: resolve_krea_base_url(),
+            },
+            model: resolve_krea_model(None).id.to_string(),
+            creativity: resolve_krea_creativity(None),
+            output_dir: hermes_config::hermes_home().join("cache").join("images"),
+            poll_initial_interval: KREA_POLL_INITIAL_INTERVAL,
+            poll_max_interval: KREA_POLL_MAX_INTERVAL,
+            poll_timeout: KREA_POLL_TIMEOUT,
+        }
+    }
+
+    pub fn managed(cfg: &ManagedToolGatewayConfig) -> Self {
+        Self {
+            transport: KreaTransport::Managed {
+                gateway_origin: cfg.gateway_origin.trim_end_matches('/').to_string(),
+                nous_token: cfg.nous_user_token.clone(),
+            },
+            model: resolve_krea_model(None).id.to_string(),
+            creativity: resolve_krea_creativity(None),
+            output_dir: hermes_config::hermes_home().join("cache").join("images"),
+            poll_initial_interval: KREA_POLL_INITIAL_INTERVAL,
+            poll_max_interval: KREA_POLL_MAX_INTERVAL,
+            poll_timeout: KREA_POLL_TIMEOUT,
+        }
+    }
+
+    pub fn unconfigured() -> Self {
+        Self::direct(String::new())
+    }
+
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        let candidate = model.into();
+        if let Some(spec) = krea_model_spec(&candidate) {
+            self.model = spec.id.to_string();
+        }
+        self
+    }
+
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        if let KreaTransport::Direct {
+            base_url: current, ..
+        } = &mut self.transport
+        {
+            let value = base_url.into();
+            *current = value.trim_end_matches('/').to_string();
+        }
+        self
+    }
+
+    pub fn with_poll_timing(
+        mut self,
+        initial_interval: Duration,
+        max_interval: Duration,
+        timeout: Duration,
+    ) -> Self {
+        self.poll_initial_interval = initial_interval;
+        self.poll_max_interval = max_interval;
+        self.poll_timeout = timeout;
+        self
+    }
+
+    pub fn transport_label(&self) -> &'static str {
+        self.transport.label()
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    pub fn creativity(&self) -> &str {
+        &self.creativity
+    }
+}
+
+impl KreaImageGenBackend {
+    pub fn new(api_key: String) -> Self {
+        Self::from_config(KreaImageGenConfig::direct(api_key))
+    }
+
+    pub fn from_managed(cfg: &ManagedToolGatewayConfig) -> Self {
+        Self::from_config(KreaImageGenConfig::managed(cfg))
+    }
+
+    pub fn from_config(config: KreaImageGenConfig) -> Self {
+        Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(KREA_SUBMIT_TIMEOUT_SECS))
+                .build()
+                .unwrap_or_else(|err| {
+                    tracing::warn!("failed to build Krea image HTTP client: {}", err);
+                    Client::new()
+                }),
+            config,
+        }
+    }
+
+    pub fn from_env_or_managed() -> Result<Self, ToolError> {
+        let direct_key = resolve_krea_api_key();
+        if !krea_prefers_gateway() {
+            if let Some(key) = direct_key.as_ref() {
+                return Ok(Self::new(key.clone()));
+            }
+        }
+        if let Some(cfg) = resolve_managed_tool_gateway("krea", ResolveOptions::default()) {
+            return Ok(Self::from_managed(&cfg));
+        }
+        if let Some(key) = direct_key {
+            return Ok(Self::new(key));
+        }
+        Err(ToolError::ExecutionFailed(
+            "KREA_API_KEY not set and Nous-managed Krea gateway is not configured.".into(),
+        ))
+    }
+
+    pub fn unconfigured() -> Self {
+        Self::from_config(KreaImageGenConfig::unconfigured())
+    }
+
+    pub fn config(&self) -> &KreaImageGenConfig {
+        &self.config
+    }
+}
+
 /// Configured built-in image generation backend.
 #[derive(Debug)]
 pub enum ImageGenRuntimeBackend {
     Fal(FalImageGenBackend),
     OpenAICodex(OpenAICodexImageGenBackend),
     OpenRouterCompat(OpenRouterCompatImageGenBackend),
+    Krea(KreaImageGenBackend),
 }
 
 impl ImageGenRuntimeBackend {
@@ -540,6 +782,9 @@ impl ImageGenRuntimeBackend {
                 )
             })
             .into(),
+            Some("krea") => KreaImageGenBackend::from_env_or_managed()
+                .unwrap_or_else(|_| KreaImageGenBackend::unconfigured())
+                .into(),
             _ => FalImageGenBackend::from_env_or_managed()
                 .unwrap_or_else(|_| FalImageGenBackend::new(String::new()))
                 .into(),
@@ -551,6 +796,7 @@ impl ImageGenRuntimeBackend {
             Self::Fal(_) => "fal",
             Self::OpenAICodex(_) => "openai-codex",
             Self::OpenRouterCompat(backend) => backend.config.provider.provider_id(),
+            Self::Krea(_) => "krea",
         }
     }
 
@@ -565,6 +811,7 @@ impl ImageGenRuntimeBackend {
                 .iter()
                 .map(|name| (*name).to_string())
                 .collect(),
+            Self::Krea(_) => vec!["KREA_API_KEY".into()],
         }
     }
 }
@@ -584,6 +831,12 @@ impl From<OpenAICodexImageGenBackend> for ImageGenRuntimeBackend {
 impl From<OpenRouterCompatImageGenBackend> for ImageGenRuntimeBackend {
     fn from(value: OpenRouterCompatImageGenBackend) -> Self {
         Self::OpenRouterCompat(value)
+    }
+}
+
+impl From<KreaImageGenBackend> for ImageGenRuntimeBackend {
+    fn from(value: KreaImageGenBackend) -> Self {
+        Self::Krea(value)
     }
 }
 
@@ -908,12 +1161,271 @@ impl ImageGenBackend for OpenRouterCompatImageGenBackend {
 }
 
 #[async_trait]
+impl ImageGenBackend for KreaImageGenBackend {
+    async fn generate(&self, request: ImageGenerateRequest) -> Result<String, ToolError> {
+        let prompt = request.prompt.trim();
+        if prompt.is_empty() {
+            return Err(ToolError::InvalidParams(
+                "Prompt is required and must be a non-empty string.".into(),
+            ));
+        }
+        let token = self.config.transport.auth_token().ok_or_else(|| {
+            ToolError::ExecutionFailed(
+                "Krea image generation requires credentials. Set KREA_API_KEY or enable the Nous-managed Krea gateway.".into(),
+            )
+        })?;
+        let model = krea_model_spec(&self.config.model)
+            .unwrap_or_else(|| krea_model_spec(DEFAULT_KREA_IMAGE_MODEL).expect("default model"));
+        let krea_aspect = krea_aspect_from_tool_size(request.size.as_deref());
+        let references = krea_style_reference_objects(&request);
+        let body = krea_submit_payload(
+            prompt,
+            krea_aspect,
+            self.config.creativity.as_str(),
+            references.as_slice(),
+        );
+
+        let mut submit = self
+            .client
+            .post(self.config.transport.submit_url(model))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "Hermes-Agent/1.0 (krea-image-gen)")
+            .json(&body);
+        if self.config.transport.is_managed() {
+            submit = submit.header("x-idempotency-key", uuid::Uuid::new_v4().to_string());
+        }
+        let response = submit.send().await.map_err(|e| {
+            if e.is_timeout() {
+                ToolError::ExecutionFailed(format!(
+                    "Krea submit timed out ({}s)",
+                    KREA_SUBMIT_TIMEOUT_SECS
+                ))
+            } else if e.is_connect() {
+                ToolError::ExecutionFailed(format!("Krea connection error: {e}"))
+            } else {
+                ToolError::ExecutionFailed(format!("Krea image generation request failed: {e}"))
+            }
+        })?;
+        let status = response.status();
+        let text = response.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Krea submit response: {e}"))
+        })?;
+        if !status.is_success() {
+            let message = krea_error_message(&text);
+            let error = if self.config.transport.is_managed() && status.is_client_error() {
+                let hint = if status.as_u16() == 429 {
+                    "Krea's shared-key concurrency cap was hit; retry shortly.".to_string()
+                } else {
+                    format!(
+                        "Model '{}' may not be enabled/priced on the Nous Portal's Krea gateway. Set KREA_API_KEY to use Krea directly, or select a different Krea model.",
+                        model.id
+                    )
+                };
+                format!(
+                    "Nous Subscription Krea gateway rejected '{}' (HTTP {status}): {message}. {hint}",
+                    model.id
+                )
+            } else {
+                format!("Krea image generation failed ({status}): {message}")
+            };
+            return Err(ToolError::ExecutionFailed(error));
+        }
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Krea returned invalid JSON on submit: {e}"))
+        })?;
+        let job_id = data
+            .get("job_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed("Krea submit response missing job_id".into())
+            })?;
+
+        let job = self.poll_krea_job(job_id).await?;
+        let last_status = job
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        match last_status {
+            "failed" => {
+                let error = job
+                    .get("result")
+                    .and_then(|result| result.get("error"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown error");
+                return Err(ToolError::ExecutionFailed(format!(
+                    "Krea job {job_id} failed: {error}"
+                )));
+            }
+            "cancelled" => {
+                return Err(ToolError::ExecutionFailed(format!(
+                    "Krea job {job_id} was cancelled"
+                )));
+            }
+            _ => {}
+        }
+
+        let result_image_url = extract_krea_result_image_url(&job).ok_or_else(|| {
+            ToolError::ExecutionFailed("Krea result contained no image URL".into())
+        })?;
+        let image_ref = match save_openrouter_compat_generated_image(
+            &self.client,
+            result_image_url.as_str(),
+            &self.config.output_dir,
+            "krea",
+        )
+        .await
+        {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(err) => {
+                tracing::warn!(
+                    "Krea image URL {} could not be cached ({}); returning source URL",
+                    result_image_url,
+                    err
+                );
+                result_image_url.clone()
+            }
+        };
+        let modality = if references.is_empty() {
+            "text"
+        } else {
+            "image"
+        };
+        Ok(json!({
+            "success": true,
+            "image": image_ref,
+            "images": [{
+                "url": image_ref,
+                "source_url": result_image_url,
+                "width": 0,
+                "height": 0,
+            }],
+            "provider": "krea",
+            "transport": self.config.transport.label(),
+            "model": model.id,
+            "model_display": model.display,
+            "prompt": prompt,
+            "aspect_ratio": krea_tool_aspect_from_krea(krea_aspect),
+            "krea_aspect_ratio": krea_aspect,
+            "resolution": DEFAULT_KREA_RESOLUTION,
+            "creativity": self.config.creativity,
+            "modality": modality,
+            "source_images": references.len(),
+            "job_id": job_id,
+        })
+        .to_string())
+    }
+
+    fn capabilities(&self) -> ImageGenCapabilities {
+        let model = krea_model_spec(&self.config.model)
+            .unwrap_or_else(|| krea_model_spec(DEFAULT_KREA_IMAGE_MODEL).expect("default model"));
+        ImageGenCapabilities {
+            provider: Some("krea".to_string()),
+            model: Some(model.id.to_string()),
+            modalities: vec!["text".to_string(), "image".to_string()],
+            max_reference_images: KREA_MAX_REFERENCE_IMAGES,
+        }
+    }
+}
+
+impl KreaImageGenBackend {
+    async fn poll_krea_job(&self, job_id: &str) -> Result<Value, ToolError> {
+        let token = self.config.transport.auth_token().ok_or_else(|| {
+            ToolError::ExecutionFailed(
+                "Krea image generation requires credentials during poll.".into(),
+            )
+        })?;
+        let deadline = Instant::now() + self.config.poll_timeout;
+        let mut interval = self.config.poll_initial_interval;
+        let mut last_status: Option<String> = None;
+
+        loop {
+            if !interval.is_zero() {
+                tokio::time::sleep(interval).await;
+            }
+            interval = scale_duration(interval, KREA_POLL_BACKOFF, self.config.poll_max_interval);
+            let response = self
+                .client
+                .get(self.config.transport.job_url(job_id))
+                .header("Authorization", format!("Bearer {token}"))
+                .header("User-Agent", "Hermes-Agent/1.0 (krea-image-gen)")
+                .send()
+                .await;
+            let response = match response {
+                Ok(response) => response,
+                Err(err) if Instant::now() < deadline && (err.is_timeout() || err.is_connect()) => {
+                    continue;
+                }
+                Err(err) => {
+                    return Err(ToolError::ExecutionFailed(format!(
+                        "Krea poll timed out for job {job_id}: {err}"
+                    )));
+                }
+            };
+            let status = response.status();
+            let text = response.text().await.map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed to read Krea poll response: {e}"))
+            })?;
+            if !status.is_success() {
+                if KREA_RETRYABLE_POLL_STATUSES.contains(&status.as_u16())
+                    && Instant::now() < deadline
+                {
+                    continue;
+                }
+                return Err(ToolError::ExecutionFailed(format!(
+                    "Krea poll failed ({status}) for job {job_id}: {}",
+                    krea_error_message(&text)
+                )));
+            }
+            let job: Value = match serde_json::from_str(&text) {
+                Ok(job) => job,
+                Err(err) if Instant::now() < deadline => {
+                    tracing::warn!(
+                        "Krea poll returned invalid JSON for job {}: {}",
+                        job_id,
+                        err
+                    );
+                    continue;
+                }
+                Err(err) => {
+                    return Err(ToolError::ExecutionFailed(format!(
+                        "Krea poll returned invalid JSON: {err}"
+                    )));
+                }
+            };
+            if let Some(status) = job.get("status").and_then(Value::as_str) {
+                last_status = Some(status.to_string());
+                if matches!(status, "completed" | "failed" | "cancelled") {
+                    return Ok(job);
+                }
+            }
+            if job
+                .get("completed_at")
+                .is_some_and(|value| !value.is_null())
+            {
+                return Ok(job);
+            }
+            if Instant::now() >= deadline {
+                return Err(ToolError::ExecutionFailed(format!(
+                    "Krea job {job_id} did not complete within {}s (last status: {})",
+                    self.config.poll_timeout.as_secs(),
+                    last_status.unwrap_or_else(|| "unknown".to_string())
+                )));
+            }
+        }
+    }
+}
+
+#[async_trait]
 impl ImageGenBackend for ImageGenRuntimeBackend {
     async fn generate(&self, request: ImageGenerateRequest) -> Result<String, ToolError> {
         match self {
             Self::Fal(backend) => backend.generate(request).await,
             Self::OpenAICodex(backend) => backend.generate(request).await,
             Self::OpenRouterCompat(backend) => backend.generate(request).await,
+            Self::Krea(backend) => backend.generate(request).await,
         }
     }
 
@@ -922,6 +1434,7 @@ impl ImageGenBackend for ImageGenRuntimeBackend {
             Self::Fal(backend) => backend.capabilities(),
             Self::OpenAICodex(backend) => backend.capabilities(),
             Self::OpenRouterCompat(backend) => backend.capabilities(),
+            Self::Krea(backend) => backend.capabilities(),
         }
     }
 }
@@ -958,6 +1471,111 @@ fn resolve_fal_model_path() -> String {
         }
     }
     DEFAULT_FAL_MODEL_PATH.to_string()
+}
+
+fn resolve_krea_api_key() -> Option<String> {
+    if let Some(value) = scoped_krea_config()
+        .as_ref()
+        .and_then(resolve_api_key_from_yaml_provider_section)
+    {
+        return Some(value);
+    }
+    env_optional_nonempty("KREA_API_KEY")
+}
+
+fn resolve_krea_base_url() -> String {
+    if let Some(value) = scoped_krea_config()
+        .as_ref()
+        .and_then(|cfg| yaml_get_any_str(cfg, &["base_url", "api_base_url"]).map(ToOwned::to_owned))
+    {
+        return value.trim_end_matches('/').to_string();
+    }
+    for key in ["KREA_IMAGE_BASE_URL", "KREA_BASE_URL"] {
+        if let Some(value) = env_optional_nonempty(key) {
+            return value.trim_end_matches('/').to_string();
+        }
+    }
+    DEFAULT_KREA_IMAGE_BASE_URL.to_string()
+}
+
+fn resolve_krea_model(explicit: Option<&str>) -> KreaModelSpec {
+    if let Some(spec) = explicit.and_then(krea_model_spec) {
+        return spec;
+    }
+    if let Some(spec) = env_optional_nonempty("KREA_IMAGE_MODEL").and_then(|v| krea_model_spec(&v))
+    {
+        return spec;
+    }
+    if let Some(spec) = scoped_krea_config()
+        .as_ref()
+        .and_then(|cfg| yaml_get_str(cfg, "model"))
+        .and_then(krea_model_spec)
+    {
+        return spec;
+    }
+    if let Some(spec) = load_image_gen_config()
+        .as_ref()
+        .and_then(|cfg| yaml_get_str(cfg, "model"))
+        .and_then(krea_model_spec)
+    {
+        return spec;
+    }
+    krea_model_spec(DEFAULT_KREA_IMAGE_MODEL).expect("default Krea model")
+}
+
+fn resolve_krea_creativity(explicit: Option<&str>) -> String {
+    if let Some(value) = explicit.and_then(normalize_krea_creativity) {
+        return value.to_string();
+    }
+    if let Some(value) =
+        env_optional_nonempty("KREA_IMAGE_CREATIVITY").and_then(|v| normalize_krea_creativity(&v))
+    {
+        return value.to_string();
+    }
+    if let Some(value) = scoped_krea_config()
+        .as_ref()
+        .and_then(|cfg| yaml_get_str(cfg, "creativity"))
+        .and_then(normalize_krea_creativity)
+    {
+        return value.to_string();
+    }
+    DEFAULT_KREA_CREATIVITY.to_string()
+}
+
+fn scoped_krea_config() -> Option<serde_yaml::Value> {
+    let cfg = load_image_gen_config()?;
+    yaml_get(&cfg, "krea").cloned()
+}
+
+fn krea_prefers_gateway() -> bool {
+    for key in ["KREA_USE_GATEWAY", "HERMES_KREA_USE_GATEWAY"] {
+        if env_optional_nonempty(key).is_some_and(|value| truthy_or_managed(&value)) {
+            return true;
+        }
+    }
+    scoped_krea_config().as_ref().is_some_and(|cfg| {
+        yaml_get_boolish(cfg, &["use_gateway", "gateway", "managed"])
+            || yaml_get_any_str(cfg, &["backend", "mode", "transport"])
+                .is_some_and(truthy_or_managed)
+    })
+}
+
+fn krea_model_spec(value: &str) -> Option<KreaModelSpec> {
+    let normalized = value.trim().to_ascii_lowercase();
+    KREA_MODELS
+        .iter()
+        .copied()
+        .find(|spec| spec.id == normalized)
+}
+
+fn normalize_krea_creativity(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "raw" => Some("raw"),
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" => Some("high"),
+        _ => None,
+    }
 }
 
 fn normalize_fal_model_path(value: &str) -> Option<String> {
@@ -1074,6 +1692,22 @@ fn fal_aspect_from_tool_size(size: Option<&str>) -> &'static str {
         Some("portrait") | Some("9:16") | Some("1024x1536") => "portrait",
         Some("landscape") | Some("16:9") | Some("1536x1024") => "landscape",
         _ => DEFAULT_FAL_ASPECT_RATIO,
+    }
+}
+
+fn krea_aspect_from_tool_size(size: Option<&str>) -> &'static str {
+    match size.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("landscape") | Some("16:9") | Some("1536x1024") => "16:9",
+        Some("portrait") | Some("9:16") | Some("1024x1536") => "9:16",
+        _ => "1:1",
+    }
+}
+
+fn krea_tool_aspect_from_krea(aspect: &str) -> &'static str {
+    match aspect {
+        "16:9" => "landscape",
+        "9:16" => "portrait",
+        _ => "square",
     }
 }
 
@@ -1456,6 +2090,7 @@ fn normalize_image_provider(value: &str) -> Option<&'static str> {
         "fal" | "fal-ai" | "fal_ai" => Some("fal"),
         "openrouter" | "open-router" | "or" => Some("openrouter"),
         "nous" | "nous-portal" | "nous_api" | "nous-api" | "nousapi" => Some("nous"),
+        "krea" | "krea-ai" | "krea_ai" => Some("krea"),
         _ => None,
     }
 }
@@ -1495,6 +2130,23 @@ fn yaml_get_str<'a>(value: &'a serde_yaml::Value, key: &str) -> Option<&'a str> 
 
 fn yaml_get_any_str<'a>(value: &'a serde_yaml::Value, keys: &[&str]) -> Option<&'a str> {
     keys.iter().find_map(|key| yaml_get_str(value, key))
+}
+
+fn yaml_get_boolish(value: &serde_yaml::Value, keys: &[&str]) -> bool {
+    keys.iter().any(|key| {
+        yaml_get(value, key).is_some_and(|value| match value {
+            serde_yaml::Value::Bool(value) => *value,
+            serde_yaml::Value::String(value) => truthy_or_managed(value),
+            _ => false,
+        })
+    })
+}
+
+fn truthy_or_managed(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on" | "gateway" | "managed" | "nous"
+    )
 }
 
 fn yaml_provider_section(
@@ -1664,6 +2316,68 @@ fn openrouter_compat_reference_image_parts(
         .collect()
 }
 
+fn krea_style_reference_objects(request: &ImageGenerateRequest) -> Vec<Value> {
+    let mut seen = HashSet::new();
+    let mut refs = Vec::new();
+    for reference in request.source_image_urls() {
+        let reference = reference.trim();
+        if reference.is_empty() || !seen.insert(reference.to_string()) {
+            continue;
+        }
+        refs.push(json!({
+            "url": reference,
+            "strength": DEFAULT_KREA_STYLE_REFERENCE_STRENGTH,
+        }));
+        if refs.len() >= KREA_MAX_REFERENCE_IMAGES {
+            break;
+        }
+    }
+    refs
+}
+
+fn krea_submit_payload(
+    prompt: &str,
+    aspect_ratio: &str,
+    creativity: &str,
+    style_references: &[Value],
+) -> Value {
+    let mut payload = Map::new();
+    payload.insert("prompt".to_string(), json!(prompt));
+    payload.insert("aspect_ratio".to_string(), json!(aspect_ratio));
+    payload.insert("resolution".to_string(), json!(DEFAULT_KREA_RESOLUTION));
+    payload.insert("creativity".to_string(), json!(creativity));
+    if !style_references.is_empty() {
+        // Krea rejects bare URL strings here with a 422. The Rust surface only
+        // accepts URL/path references, so normalize them to Krea's object shape.
+        payload.insert(
+            "image_style_references".to_string(),
+            Value::Array(style_references.to_vec()),
+        );
+    }
+    Value::Object(payload)
+}
+
+fn extract_krea_result_image_url(job: &Value) -> Option<String> {
+    let result = job.get("result")?;
+    if let Some(url) = result
+        .get("urls")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .find(|url| !url.is_empty())
+    {
+        return Some(url.to_string());
+    }
+    result
+        .get("url")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 fn openrouter_compat_image_url_part(reference: &str) -> Result<Option<String>, ToolError> {
     let reference = reference.trim();
     if reference.is_empty() {
@@ -1755,6 +2469,40 @@ fn openrouter_compat_error_message(raw: &str) -> String {
                 .map(ToOwned::to_owned)
         })
         .unwrap_or_else(|| raw.chars().take(500).collect())
+}
+
+fn krea_error_message(raw: &str) -> String {
+    serde_json::from_str::<Value>(raw)
+        .ok()
+        .and_then(|value| {
+            if let Some(message) = value
+                .get("error")
+                .and_then(|error| error.get("message").or(Some(error)))
+                .and_then(Value::as_str)
+            {
+                return Some(message.trim().to_string());
+            }
+            value
+                .get("message")
+                .or_else(|| value.get("detail"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .map(ToOwned::to_owned)
+        })
+        .filter(|message| !message.is_empty())
+        .unwrap_or_else(|| raw.chars().take(500).collect())
+}
+
+fn scale_duration(value: Duration, factor: f64, max: Duration) -> Duration {
+    if value.is_zero() {
+        return value;
+    }
+    let scaled = value.mul_f64(factor);
+    if scaled > max {
+        max
+    } else {
+        scaled
+    }
 }
 
 async fn save_openrouter_compat_generated_image(
@@ -2289,6 +3037,14 @@ mod fal_managed_tests {
                 "NOUS_IMAGE_BASE_URL",
                 "NOUS_BASE_URL",
                 "HERMES_NOUS_OAUTH_FILE",
+                "KREA_API_KEY",
+                "KREA_IMAGE_MODEL",
+                "KREA_IMAGE_CREATIVITY",
+                "KREA_IMAGE_BASE_URL",
+                "KREA_BASE_URL",
+                "KREA_USE_GATEWAY",
+                "HERMES_KREA_USE_GATEWAY",
+                "KREA_GATEWAY_URL",
                 "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
                 "TOOL_GATEWAY_USER_TOKEN",
                 "TOOL_GATEWAY_DOMAIN",
@@ -2528,6 +3284,68 @@ mod fal_managed_tests {
 
         std::env::set_var("HERMES_IMAGE_GEN_PROVIDER", "nous-portal");
         assert_eq!(selected_image_provider(), Some("nous"));
+
+        std::env::set_var("HERMES_IMAGE_GEN_PROVIDER", "krea-ai");
+        assert_eq!(selected_image_provider(), Some("krea"));
+    }
+
+    #[test]
+    fn krea_config_resolves_model_creativity_and_gateway_preference() {
+        let _g = EnvScope::new();
+        std::env::set_var("KREA_API_KEY", "krea-env-key");
+        std::env::set_var("KREA_IMAGE_MODEL", "krea-2-large");
+        std::env::set_var("KREA_IMAGE_CREATIVITY", "HIGH");
+        let cfg = KreaImageGenConfig::direct(resolve_krea_api_key().unwrap());
+        assert_eq!(cfg.transport_label(), "direct");
+        assert_eq!(cfg.model(), "krea-2-large");
+        assert_eq!(cfg.creativity(), "high");
+
+        std::env::remove_var("KREA_IMAGE_MODEL");
+        std::env::remove_var("KREA_IMAGE_CREATIVITY");
+        std::fs::write(
+            hermes_config::paths::config_path(),
+            "image_gen:\n  provider: krea\n  krea:\n    model: krea-2-medium-turbo\n    creativity: raw\n    use_gateway: true\n",
+        )
+        .expect("write config");
+        let cfg = KreaImageGenConfig::direct("direct".into());
+        assert_eq!(cfg.model(), "krea-2-medium-turbo");
+        assert_eq!(cfg.creativity(), "raw");
+        assert!(krea_prefers_gateway());
+    }
+
+    #[test]
+    fn krea_payload_converts_reference_urls_to_style_objects() {
+        let _g = EnvScope::new();
+        let mut request = image_request("style-transfer pet");
+        request.size = Some("portrait".to_string());
+        request.image_url = Some("https://example.test/source.png".to_string());
+        request.reference_image_urls = vec![
+            "https://example.test/ref-a.png".to_string(),
+            "https://example.test/ref-a.png".to_string(),
+            "https://example.test/ref-b.png".to_string(),
+        ];
+
+        let refs = krea_style_reference_objects(&request);
+        assert_eq!(
+            refs,
+            vec![
+                json!({"url": "https://example.test/source.png", "strength": DEFAULT_KREA_STYLE_REFERENCE_STRENGTH}),
+                json!({"url": "https://example.test/ref-a.png", "strength": DEFAULT_KREA_STYLE_REFERENCE_STRENGTH}),
+                json!({"url": "https://example.test/ref-b.png", "strength": DEFAULT_KREA_STYLE_REFERENCE_STRENGTH}),
+            ]
+        );
+        let payload = krea_submit_payload(
+            request.prompt.as_str(),
+            krea_aspect_from_tool_size(request.size.as_deref()),
+            "medium",
+            refs.as_slice(),
+        );
+        assert_eq!(payload["aspect_ratio"], "9:16");
+        assert_eq!(payload["resolution"], DEFAULT_KREA_RESOLUTION);
+        assert_eq!(
+            payload["image_style_references"][0],
+            json!({"url": "https://example.test/source.png", "strength": DEFAULT_KREA_STYLE_REFERENCE_STRENGTH})
+        );
     }
 
     #[test]
@@ -2937,6 +3755,183 @@ mod fal_managed_tests {
         let image = payload["image"].as_str().expect("image path");
         assert!(image.contains("cache/images/nous_gen_"));
         assert_eq!(std::fs::read(image).unwrap(), b"downloaded-image");
+    }
+
+    #[tokio::test]
+    async fn krea_image_generate_submits_polls_and_saves_data_uri() {
+        use wiremock::matchers::{body_partial_json, header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _g = EnvScope::new();
+        let server = MockServer::start().await;
+        let image_b64 = STANDARD.encode(b"krea-image-data");
+
+        Mock::given(method("POST"))
+            .and(path("/generate/image/krea/krea-2/large"))
+            .and(header("Authorization", "Bearer krea-test-key"))
+            .and(header("Content-Type", "application/json"))
+            .and(body_partial_json(json!({
+                "prompt": "a cinematic lamp",
+                "aspect_ratio": "1:1",
+                "resolution": DEFAULT_KREA_RESOLUTION,
+                "creativity": "medium",
+                "image_style_references": [{
+                    "url": "https://example.test/source.png",
+                    "strength": DEFAULT_KREA_STYLE_REFERENCE_STRENGTH
+                }]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "job_id": "job-krea-123",
+                "status": "queued",
+                "result": null
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/jobs/job-krea-123"))
+            .and(header("Authorization", "Bearer krea-test-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "job_id": "job-krea-123",
+                "status": "completed",
+                "completed_at": "2026-05-27T00:00:30Z",
+                "result": {"urls": [format!("data:image/png;base64,{image_b64}")]}
+            })))
+            .mount(&server)
+            .await;
+
+        let cfg = KreaImageGenConfig::direct("krea-test-key".into())
+            .with_base_url(server.uri())
+            .with_model("krea-2-large")
+            .with_poll_timing(Duration::ZERO, Duration::ZERO, Duration::from_secs(5));
+        let backend = KreaImageGenBackend::from_config(cfg);
+        let mut request = image_request("a cinematic lamp");
+        request.size = Some("square".to_string());
+        request.image_url = Some("https://example.test/source.png".to_string());
+
+        let output = backend.generate(request).await.unwrap();
+        let payload: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(payload["success"], true);
+        assert_eq!(payload["provider"], "krea");
+        assert_eq!(payload["transport"], "direct");
+        assert_eq!(payload["model"], "krea-2-large");
+        assert_eq!(payload["aspect_ratio"], "square");
+        assert_eq!(payload["krea_aspect_ratio"], "1:1");
+        assert_eq!(payload["modality"], "image");
+        assert_eq!(payload["source_images"], 1);
+        let image = payload["image"].as_str().expect("image path");
+        assert!(image.contains("cache/images/krea_gen_"));
+        assert_eq!(std::fs::read(image).unwrap(), b"krea-image-data");
+    }
+
+    #[tokio::test]
+    async fn krea_managed_uses_gateway_token_and_idempotency_header() {
+        use wiremock::matchers::{body_partial_json, header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _g = EnvScope::new();
+        let server = MockServer::start().await;
+        let image_b64 = STANDARD.encode(b"managed-krea-image");
+
+        Mock::given(method("POST"))
+            .and(path("/generate/image/krea/krea-2/medium"))
+            .and(header("Authorization", "Bearer nous-krea-token"))
+            .and(body_partial_json(json!({
+                "prompt": "managed krea",
+                "aspect_ratio": "16:9"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "job_id": "job-managed",
+                "status": "queued"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/jobs/job-managed"))
+            .and(header("Authorization", "Bearer nous-krea-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "job_id": "job-managed",
+                "status": "completed",
+                "result": {"urls": [format!("data:image/png;base64,{image_b64}")]}
+            })))
+            .mount(&server)
+            .await;
+
+        let managed = ManagedToolGatewayConfig {
+            vendor: "krea".into(),
+            gateway_origin: server.uri(),
+            nous_user_token: "nous-krea-token".into(),
+            managed_mode: true,
+        };
+        let cfg = KreaImageGenConfig::managed(&managed).with_poll_timing(
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::from_secs(5),
+        );
+        let backend = KreaImageGenBackend::from_config(cfg);
+        let mut request = image_request("managed krea");
+        request.size = Some("landscape".to_string());
+
+        let output = backend.generate(request).await.unwrap();
+        let payload: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(payload["provider"], "krea");
+        assert_eq!(payload["transport"], "managed");
+        assert_eq!(payload["krea_aspect_ratio"], "16:9");
+
+        let requests = server.received_requests().await.unwrap();
+        let submit = requests
+            .iter()
+            .find(|request| request.method.as_str() == "POST")
+            .expect("submit request");
+        assert!(submit.headers.contains_key("x-idempotency-key"));
+    }
+
+    #[tokio::test]
+    async fn krea_poll_retries_transient_status_and_fails_fast_on_auth() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _g = EnvScope::new();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/jobs/retry-job"))
+            .respond_with(ResponseTemplate::new(503).set_body_json(json!({"error": "busy"})))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/jobs/retry-job"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "status": "completed",
+                "result": {"urls": ["https://krea.cdn/done.png"]}
+            })))
+            .mount(&server)
+            .await;
+        let cfg = KreaImageGenConfig::direct("krea-test-key".into())
+            .with_base_url(server.uri())
+            .with_poll_timing(Duration::ZERO, Duration::ZERO, Duration::from_secs(5));
+        let backend = KreaImageGenBackend::from_config(cfg);
+        let job = backend.poll_krea_job("retry-job").await.unwrap();
+        assert_eq!(
+            extract_krea_result_image_url(&job).as_deref(),
+            Some("https://krea.cdn/done.png")
+        );
+
+        let auth_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/jobs/auth-job"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+                "error": {"message": "invalid key"}
+            })))
+            .mount(&auth_server)
+            .await;
+        let auth_cfg = KreaImageGenConfig::direct("krea-test-key".into())
+            .with_base_url(auth_server.uri())
+            .with_poll_timing(Duration::ZERO, Duration::ZERO, Duration::from_secs(5));
+        let auth_backend = KreaImageGenBackend::from_config(auth_cfg);
+        let err = auth_backend.poll_krea_job("auth-job").await.unwrap_err();
+        assert!(err.to_string().contains("401"));
+        assert!(err.to_string().contains("invalid key"));
+        assert_eq!(auth_server.received_requests().await.unwrap().len(), 1);
     }
 
     #[tokio::test]
