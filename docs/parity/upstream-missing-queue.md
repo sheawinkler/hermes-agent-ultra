@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T20:52:20.955630+00:00`
+Generated: `2026-06-26T21:00:26.742687+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7116`.
 
@@ -17,9 +17,9 @@ Generated: `2026-06-26T20:52:20.955630+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 22 |
-| ported | 487 |
-| superseded | 6531 |
+| pending | 18 |
+| ported | 489 |
+| superseded | 6533 |
 
 ## First 100 Pending Commits
 
@@ -27,10 +27,6 @@ Generated: `2026-06-26T20:52:20.955630+00:00`
 | --- | ---: | --- |
 | `2609bcccca30` | #25 | feat(i18n): add complete Spanish translation |
 | `defeda8c559f` | #22 | docs: sync documentation with current implementation |
-| `98ecd0beeba9` | #26 | docs(mcp): fix stale ~0.75s discovery-wait reference in late-refresh docstring |
-| `b1ab5a8ae1d9` | #21 | docs(antigravity-cli): add delegation patterns + output/bounding caveats |
-| `37c37c9dc511` | #26 | fix(antigravity): register google-antigravity ProviderProfile + AUTHOR_MAP |
-| `84e1d31e5442` | #22 | refactor(kanban): fold worker/orchestrator skills into injected guidance (#50473) |
 | `7130d60861a9` | #22 | feat(providers): remove google-gemini-cli + google-antigravity OAuth providers (#50492) |
 | `ff08e60c63ad` | #21 | feat(skills): add cloudflare-temporary-deploy optional skill (#50849) |
 | `97888fed483c` | #25 | fix(install): drop system-browser fallback + auto-repair stale snap override |

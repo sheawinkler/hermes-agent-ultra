@@ -1,15 +1,33 @@
 ---
-name: antigravity-cli
-description: "Operate the Antigravity CLI (agy): plugins, auth, sandbox."
-version: 0.2.0
-author: Tony Simons (asimons81), Hermes Agent
-license: MIT
-platforms: [linux, macos, windows]
-metadata:
-  hermes:
-    tags: [Coding-Agent, Antigravity, CLI, Auth, Plugins, Sandbox]
-    related_skills: [grok, codex, claude-code, hermes-agent]
+title: "Antigravity Cli — Operate the Antigravity CLI (agy): plugins, auth, sandbox"
+sidebar_label: "Antigravity Cli"
+description: "Operate the Antigravity CLI (agy): plugins, auth, sandbox"
 ---
+
+{/* This page is auto-generated from the skill's SKILL.md by website/scripts/generate-skill-docs.py. Edit the source SKILL.md, not this page. */}
+
+# Antigravity Cli
+
+Operate the Antigravity CLI (agy): plugins, auth, sandbox.
+
+## Skill metadata
+
+| | |
+|---|---|
+| Source | Optional — install with `hermes skills install official/autonomous-ai-agents/antigravity-cli` |
+| Path | `optional-skills/autonomous-ai-agents/antigravity-cli` |
+| Version | `0.2.0` |
+| Author | Tony Simons (asimons81), Hermes Agent |
+| License | MIT |
+| Platforms | linux, macos, windows |
+| Tags | `Coding-Agent`, `Antigravity`, `CLI`, `Auth`, `Plugins`, `Sandbox` |
+| Related skills | [`grok`](/docs/user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-grok), [`codex`](/docs/user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-codex), [`claude-code`](/docs/user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-claude-code), [`hermes-agent`](/docs/user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-hermes-agent) |
+
+## Reference: full SKILL.md
+
+:::info
+The following is the complete skill definition that Hermes loads when this skill is triggered. This is what the agent sees as instructions when the skill is active.
+:::
 
 # Antigravity CLI (`agy`)
 
