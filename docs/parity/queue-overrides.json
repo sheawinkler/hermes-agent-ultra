@@ -5033,6 +5033,11 @@
       "disposition": "ported",
       "notes": "Rust shared CLI UI preview path now compacts terminal/execute_code/read_file previews for CLI, TUI, and gateway plain progress, and intelligence cute messages use the same compact labels. Focused tests cover shell plumbing, multi-command probes, execute_code, and read_file ranges.",
       "owner": "rust-runtime"
+    },
+    "b85c46054036": {
+      "disposition": "ported",
+      "notes": "Rust /model persistence now uses targeted raw-YAML config writes. Existing Python-style nested model blocks update model.default/provider/base_url without replacing sibling keys such as model_slots, while scalar Rust configs still update top-level model. Focused hermes-cli regression covers sibling preservation and runtime reload normalization.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [
