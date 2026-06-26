@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T20:14:21.352111+00:00`
+Generated: `2026-06-26T20:52:20.955630+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7116`.
 
@@ -17,24 +17,18 @@ Generated: `2026-06-26T20:14:21.352111+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 28 |
-| ported | 484 |
-| superseded | 6528 |
+| pending | 22 |
+| ported | 487 |
+| superseded | 6531 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `9362ce2575e0` | #22 | feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899) |
-| `92451151c642` | #22 | Revert "feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899)" |
-| `2bd1977d8fad` | #26 | chore: release v0.17.0 (2026.6.19) |
-| `d799284b1554` | #21 | feat(optional-skills/creative-ideation): expand to v2.1.0 method library (#42402) |
 | `2609bcccca30` | #25 | feat(i18n): add complete Spanish translation |
-| `242962e1f5a0` | #22 | docs(providers): clarify vllm qwen reasoning output |
 | `defeda8c559f` | #22 | docs: sync documentation with current implementation |
 | `98ecd0beeba9` | #26 | docs(mcp): fix stale ~0.75s discovery-wait reference in late-refresh docstring |
 | `b1ab5a8ae1d9` | #21 | docs(antigravity-cli): add delegation patterns + output/bounding caveats |
-| `72e4cca00ecc` | #26 | docs(config): correct MCP docs path in cli-config.yaml.example |
 | `37c37c9dc511` | #26 | fix(antigravity): register google-antigravity ProviderProfile + AUTHOR_MAP |
 | `84e1d31e5442` | #22 | refactor(kanban): fold worker/orchestrator skills into injected guidance (#50473) |
 | `7130d60861a9` | #22 | feat(providers): remove google-gemini-cli + google-antigravity OAuth providers (#50492) |

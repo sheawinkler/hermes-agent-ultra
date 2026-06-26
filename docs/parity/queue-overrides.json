@@ -5643,6 +5643,36 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream CI/workflow-only delta is superseded by Hermes Agent Ultra's local Rust-first deterministic gates and PR verification workflow; it does not add or change a shipped Rust runtime behavior. Runtime/install/docker changes remain pending for separate evidence."
+    },
+    "9362ce2575e00f5a795285b74e79d54c02e1326c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream html-artifact consolidation was later reverted by 92451151; Hermes Agent Ultra already matches the post-revert skill surface by retaining concept-diagrams, architecture-diagram, and sketch skill assets and not shipping html-artifact."
+    },
+    "92451151c6429e1d2774c5e7f43269ebcf8c64aa": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Post-revert final skill surface is present locally: optional concept-diagrams and bundled architecture-diagram/sketch skill assets remain available, and html-artifact is absent."
+    },
+    "2bd1977d8fad185c9b4be47884f7e87f1add0ce3": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python v0.17.0 release metadata is superseded by Hermes Agent Ultra Rust release train: workspace version is 0.18.1 and docs/releases/v0.17.0, v0.18.0, and v0.18.1 record the local Rust release lineage."
+    },
+    "d799284b1554f7b390ed27808e0b9af5eb435fef": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Creative ideation v2.1.0 method library is ported into the bundled Rust-loaded ideation skill, preserving the local skill identifier while adding routing rules, anti-slop guidance, method catalog, exercises, and all method reference files."
+    },
+    "242962e1f5a0d2a29db7683c01de907369eb2145": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "vLLM/Qwen reasoning guidance is ported to the local provider docs; the upstream cli-config.yaml.example hunk is non-applicable because this Rust repo does not ship that example file."
+    },
+    "72e4cca00ecc2a1d9bdef95575bb2c779a87150c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream only corrects a stale MCP comment in cli-config.yaml.example, a file not shipped by Hermes Agent Ultra. Local MCP configuration docs live under website/docs/reference/mcp-config-reference.md and website/docs/user-guide/features/tool-gateway.md."
     }
   },
   "subject_patterns": [
