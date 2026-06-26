@@ -20,6 +20,12 @@ pub fn sanitize_tool_parameters(params: &Value) -> Value {
     root
 }
 
+pub fn normalize_schema_definitions_refs(schema: &Value) -> Value {
+    let mut normalized = schema.clone();
+    normalize_schema_definitions_refs_node(&mut normalized);
+    normalized
+}
+
 pub fn strip_pattern_and_format(tools: Option<&mut Value>) -> usize {
     let Some(tools) = tools else {
         return 0;
@@ -40,6 +46,44 @@ pub fn strip_slash_enum(tools: Option<&mut Value>) -> usize {
         stripped += strip_slash_enum_in_schema(params);
     });
     stripped
+}
+
+fn normalize_schema_definitions_refs_node(node: &mut Value) {
+    match node {
+        Value::Object(obj) => {
+            if let Some(Value::String(reference)) = obj.get_mut("$ref") {
+                if let Some(tail) = reference.strip_prefix("#/definitions/") {
+                    *reference = format!("#/$defs/{tail}");
+                }
+            }
+
+            if let Some(definitions) = obj.remove("definitions") {
+                match obj.get_mut("$defs") {
+                    Some(Value::Object(existing)) => {
+                        if let Value::Object(incoming) = definitions {
+                            for (key, value) in incoming {
+                                existing.entry(key).or_insert(value);
+                            }
+                        }
+                    }
+                    Some(_) => {}
+                    None => {
+                        obj.insert("$defs".to_string(), definitions);
+                    }
+                }
+            }
+
+            for value in obj.values_mut() {
+                normalize_schema_definitions_refs_node(value);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                normalize_schema_definitions_refs_node(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn default_object_schema() -> Value {
@@ -468,6 +512,41 @@ mod tests {
     fn empty_and_none_tools_are_stable() {
         assert_eq!(sanitize_tool_schemas(Some(&json!([]))), Some(json!([])));
         assert_eq!(sanitize_tool_schemas(None), None);
+    }
+
+    #[test]
+    fn normalize_schema_definitions_refs_rewrites_draft7_refs() {
+        let normalized = normalize_schema_definitions_refs(&json!({
+            "type": "object",
+            "properties": {
+                "item": {"$ref": "#/definitions/Item"},
+                "items": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/Item"}
+                }
+            },
+            "definitions": {
+                "Item": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "child": {"$ref": "#/definitions/Child"}
+                    }
+                },
+                "Child": {"type": "string"}
+            }
+        }));
+
+        assert!(normalized.get("definitions").is_none());
+        assert_eq!(normalized["properties"]["item"]["$ref"], "#/$defs/Item");
+        assert_eq!(
+            normalized["properties"]["items"]["items"]["$ref"],
+            "#/$defs/Item"
+        );
+        assert_eq!(
+            normalized["$defs"]["Item"]["properties"]["child"]["$ref"],
+            "#/$defs/Child"
+        );
     }
 
     #[test]

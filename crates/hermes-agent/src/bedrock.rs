@@ -2333,6 +2333,7 @@ mod tests {
                 properties: None,
                 required: None,
                 additional_properties: None,
+                defs: None,
             },
         )];
         let converted = convert_tools_to_bedrock(&tools);

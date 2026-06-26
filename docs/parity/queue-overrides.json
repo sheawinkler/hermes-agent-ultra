@@ -4978,6 +4978,41 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust project workspace tools are first-class ToolHandler surfaces: project_facts and project_tree are registered in builtins, project/coding/main runtime toolsets, and covered by registry/toolset/unit tests."
+    },
+    "2f48c58b85b8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust gateway now normalizes iOS/mobile Unicode dash variants at the slash-argument boundary for quick, builtin, and skill slash routing; existing /model parser Unicode-dash coverage remains green."
+    },
+    "f5af6520d0bf": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust ToolCall includes extra_content and OpenAI-compatible response parsing preserves Gemini thought_signature payloads; provider test_parse_openai_response_with_tool_call_extra_content covers the behavior."
+    },
+    "1dfcda4e3c19": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust approval guard includes env/config overwrite detection for redirection, tee, and copy/move/install paths; test_sensitive_write_patterns_require_confirmation covers the guard."
+    },
+    "b848ce2c79bf": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust approval regexes cover absolute and project env/config writes, including absolute .env targets, with test_sensitive_write_patterns_require_confirmation exercising those cases."
+    },
+    "4a0c02b7dcb0": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust file tools resolve bookkeeping paths against live terminal cwd before TERMINAL_CWD/process cwd; resolve_tool_path_prefers_live_cwd_then_terminal_cwd covers the behavior."
+    },
+    "24f139e16a6f": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust MCP schema handling normalizes draft-07 definitions to $defs and rewrites #/definitions refs at client intake and server export, with core/client/server tests."
+    },
+    "3ccda2aa059f": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust MCP HTTP and SSE transports seed MCP-Protocol-Version before initialize; transport tests cover both request builders."
     }
   },
   "subject_patterns": [

@@ -33,7 +33,8 @@ pub use tool_schema::{tool_schema, JsonSchema, ToolSchema};
 
 // Re-export schema sanitizer helpers
 pub use schema_sanitizer::{
-    sanitize_tool_parameters, sanitize_tool_schemas, strip_pattern_and_format, strip_slash_enum,
+    normalize_schema_definitions_refs, sanitize_tool_parameters, sanitize_tool_schemas,
+    strip_pattern_and_format, strip_slash_enum,
 };
 
 // Re-export trait definitions

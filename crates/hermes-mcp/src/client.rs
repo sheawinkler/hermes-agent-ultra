@@ -14,7 +14,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema};
+use hermes_core::{
+    normalize_schema_definitions_refs, JsonSchema, ToolError, ToolHandler, ToolSchema,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info, warn};
@@ -507,13 +509,18 @@ struct McpToolDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(rename = "inputSchema")]
-    pub input_schema: JsonSchema,
+    pub input_schema: Value,
 }
 
 /// Response from tools/list method.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct ToolsListResponse {
     pub tools: Vec<McpToolDefinition>,
+}
+
+fn mcp_input_schema_to_json_schema(input_schema: Value) -> JsonSchema {
+    let normalized = normalize_schema_definitions_refs(&input_schema);
+    serde_json::from_value(normalized).unwrap_or_else(|_| JsonSchema::new("object"))
 }
 
 /// Response from resources/list method.
@@ -820,7 +827,7 @@ impl McpClient {
             .map(|t| ToolSchema {
                 name: t.name,
                 description: t.description.unwrap_or_default(),
-                parameters: t.input_schema,
+                parameters: mcp_input_schema_to_json_schema(t.input_schema),
             })
             .collect();
 
@@ -2471,9 +2478,9 @@ impl McpManager {
 mod tests {
     use super::{
         cache_mcp_image_block, is_stale_transport_error, mcp_call_timeout_duration,
-        mcp_keepalive_interval_duration, validate_mcp_server_config, LlmCallback, McpClient,
-        McpManager, McpServerConfig, SamplingConfig, DEFAULT_MCP_KEEPALIVE_INTERVAL_SECS,
-        MIN_MCP_KEEPALIVE_INTERVAL_SECS,
+        mcp_input_schema_to_json_schema, mcp_keepalive_interval_duration,
+        validate_mcp_server_config, LlmCallback, McpClient, McpManager, McpServerConfig,
+        SamplingConfig, DEFAULT_MCP_KEEPALIVE_INTERVAL_SECS, MIN_MCP_KEEPALIVE_INTERVAL_SECS,
     };
     use crate::transport::McpTransport;
     use crate::McpError;
@@ -2488,6 +2495,24 @@ mod tests {
         responses: VecDeque<serde_json::Value>,
         closed: Arc<AtomicBool>,
         sent: Arc<Mutex<Vec<serde_json::Value>>>,
+    }
+
+    #[test]
+    fn mcp_input_schema_normalizes_draft7_definitions() {
+        let schema = mcp_input_schema_to_json_schema(json!({
+            "type": "object",
+            "properties": {
+                "item": {"$ref": "#/definitions/Item"}
+            },
+            "definitions": {
+                "Item": {"type": "string"}
+            }
+        }));
+        let rendered = serde_json::to_value(schema).expect("schema json");
+
+        assert!(rendered.get("definitions").is_none());
+        assert_eq!(rendered["properties"]["item"]["$ref"], "#/$defs/Item");
+        assert_eq!(rendered["$defs"]["Item"]["type"], "string");
     }
 
     impl FakeTransport {

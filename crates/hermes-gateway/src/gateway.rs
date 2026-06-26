@@ -1377,8 +1377,30 @@ impl Gateway {
         let trimmed = input.trim();
         let mut parts = trimmed.splitn(2, char::is_whitespace);
         let cmd = parts.next().unwrap_or(trimmed).to_string();
-        let args = parts.next().unwrap_or_default().trim().to_string();
+        let args = Self::normalize_slash_command_arg_dashes(parts.next().unwrap_or_default())
+            .trim()
+            .to_string();
         (cmd, args)
+    }
+
+    fn normalize_slash_command_text(input: &str) -> String {
+        let (cmd, args) = Self::split_slash_command(input);
+        if args.is_empty() {
+            cmd
+        } else {
+            format!("{cmd} {args}")
+        }
+    }
+
+    fn normalize_slash_command_arg_dashes(args: &str) -> String {
+        let mut normalized = args.to_string();
+        for dash in ['\u{2012}', '\u{2013}', '\u{2014}', '\u{2015}', '\u{2212}'] {
+            normalized = normalized.replace(&format!("{dash}{dash}"), "--");
+        }
+        for dash in ['\u{2012}', '\u{2013}', '\u{2015}', '\u{2212}'] {
+            normalized = normalized.replace(dash, "-");
+        }
+        normalized.replace('\u{2014}', "--")
     }
 
     async fn run_quick_exec(
@@ -1562,17 +1584,18 @@ impl Gateway {
         incoming: &IncomingMessage,
         session_key: &str,
     ) -> Result<SlashCommandOutcome, GatewayError> {
-        if let Some(reply) = self.resolve_quick_command(&incoming.text).await? {
+        let command_text = Self::normalize_slash_command_text(&incoming.text);
+        if let Some(reply) = self.resolve_quick_command(&command_text).await? {
             self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                 .await?;
             return Ok(SlashCommandOutcome::Handled);
         }
 
-        let result = handle_command(&incoming.text);
+        let result = handle_command(&command_text);
         if matches!(result, GatewayCommandResult::Unknown(_)) {
-            match self.resolve_skill_slash_command(&incoming.text) {
+            match self.resolve_skill_slash_command(&command_text) {
                 Ok(Some(message)) => {
-                    if let Some(command_name) = Self::extract_command_name(&incoming.text) {
+                    if let Some(command_name) = Self::extract_command_name(&command_text) {
                         self.emit_hook_event(
                             &format!("command:{}", command_name),
                             serde_json::json!({
@@ -1602,7 +1625,7 @@ impl Gateway {
             }
         }
         if !matches!(result, GatewayCommandResult::Unknown(_)) {
-            if let Some(command_name) = Self::extract_command_name(&incoming.text) {
+            if let Some(command_name) = Self::extract_command_name(&command_text) {
                 self.emit_hook_event(
                     &format!("command:{}", command_name),
                     serde_json::json!({
@@ -1626,7 +1649,7 @@ impl Gateway {
             SlashCommandOutcome::Handled
         } else {
             SlashCommandOutcome::ForwardToAgent {
-                message: incoming.text.clone(),
+                message: command_text,
             }
         })
     }
@@ -4179,6 +4202,23 @@ mod tests {
             .expect("alias reply");
 
         assert!(reply.contains("Status information"));
+    }
+
+    #[test]
+    fn split_slash_command_normalizes_ios_dashes_in_args_only() {
+        let (cmd, args) =
+            Gateway::split_slash_command("  /queue  deploy —fast ——dry-run –target prod ‒scope −1");
+
+        assert_eq!(cmd, "/queue");
+        assert_eq!(args, "deploy --fast --dry-run -target prod -scope -1");
+
+        let (cmd, args) = Gateway::split_slash_command("/model glm-5.2 —provider zai —session");
+        assert_eq!(cmd, "/model");
+        assert_eq!(args, "glm-5.2 --provider zai --session");
+        assert_eq!(
+            Gateway::normalize_slash_command_text(" /model glm-5.2 —provider zai —session "),
+            "/model glm-5.2 --provider zai --session"
+        );
     }
 
     #[tokio::test]
