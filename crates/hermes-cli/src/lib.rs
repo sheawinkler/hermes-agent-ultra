@@ -18,6 +18,7 @@ pub mod billing;
 pub mod checklist;
 pub mod claw_migrate;
 pub mod cli;
+pub mod cloudflare;
 pub mod commands;
 pub mod config_env;
 pub mod copilot_auth;

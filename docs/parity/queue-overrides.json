@@ -5693,6 +5693,21 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Kanban injected-guidance refactor is represented locally by Rust Kanban command/runtime behavior plus v2 kanban-worker and kanban-orchestrator skills that explicitly state the lifecycle is auto-injected while retaining deeper playbooks. Rust Kanban tests cover command parsing, task state, attachments, and goal-loop behavior."
+    },
+    "ff08e60c63ada076aecc0c3243e2cfc9258db4f8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Cloudflare temporary deploy optional skill is ported as a Rust-loaded web-development skill. The upstream Python output parser is replaced by the Rust-native `hermes cloudflare parse-temporary-deploy-output` CLI helper with parser unit tests and generated docs."
+    },
+    "97888fed483c1e867666b6beb4eb03e409cc9481": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream fixes browser executable auto-detection in a Python-era installer. Hermes Agent Ultra install.sh is release-asset/source-build only, has no find_system_browser/AGENT_BROWSER_EXECUTABLE_PATH browser fallback, and scripts/install.ps1 is not shipped, so the Snap Chromium repair path is not applicable locally."
+    },
+    "233ef98afe2f156dd916c8f4e7f98d16676de4ee": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream hardens docker/stage2-hook.sh symlink chown behavior. This Rust checkout does not ship docker/stage2-hook.sh, so there is no local stage2 recursive chown surface to port."
     }
   },
   "subject_patterns": [

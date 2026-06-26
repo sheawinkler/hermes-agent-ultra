@@ -516,6 +516,15 @@ pub enum CliCommand {
         payload: Option<String>,
     },
 
+    /// Cloudflare workflow helpers.
+    Cloudflare {
+        /// Action: parse-temporary-deploy-output.
+        action: Option<String>,
+        /// Run parser self-test.
+        #[arg(long)]
+        selftest: bool,
+    },
+
     /// Microsoft Teams meeting summary pipeline.
     TeamsPipeline {
         /// Action: list/show/run/fetch/subscriptions/subscribe/renew-subscription/delete-subscription/maintain-subscriptions/token-health/validate.
@@ -1015,6 +1024,32 @@ mod tests {
                 assert!(!yes);
             }
             _ => panic!("Expected ACP command with --version"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_cloudflare_parser() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "cloudflare",
+            "parse-temporary-deploy-output",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::Cloudflare { action, selftest }) => {
+                assert_eq!(action.as_deref(), Some("parse-temporary-deploy-output"));
+                assert!(!selftest);
+            }
+            _ => panic!("Expected Cloudflare command"),
+        }
+
+        let selftest = Cli::try_parse_from(vec!["hermes", "cloudflare", "--selftest"]).unwrap();
+        match selftest.command {
+            Some(CliCommand::Cloudflare { action, selftest }) => {
+                assert!(action.is_none());
+                assert!(selftest);
+            }
+            _ => panic!("Expected Cloudflare command"),
         }
     }
 
