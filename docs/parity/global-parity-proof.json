@@ -196,7 +196,7 @@
         "status": "pass"
       },
       {
-        "actual": 147.0,
+        "actual": 146.0,
         "limit": 100,
         "metric": "max_queue_pending_commits",
         "status": "fail"
@@ -248,7 +248,7 @@
       "unverified_cases": 0
     }
   },
-  "generated_at_utc": "2026-06-26T02:09:56.508501+00:00",
+  "generated_at_utc": "2026-06-26T03:15:26.858931+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -274,7 +274,7 @@
     "max_deep_problem_solving_unverified_cases": 0.0,
     "max_divergence_review_overdue": 0.0,
     "max_files_only_upstream": 2309.0,
-    "max_queue_pending_commits": 147.0,
+    "max_queue_pending_commits": 146.0,
     "max_sota_harness_critical_gaps": 0.0,
     "max_sota_harness_missing_rust_refs": 0.0,
     "max_test_coverage_audit_critical_gaps": 0.0,
@@ -299,12 +299,12 @@
   "queue_summary": {
     "by_disposition": {
       "mirrored": 76,
-      "pending": 147,
-      "ported": 450,
-      "superseded": 6426
+      "pending": 146,
+      "ported": 452,
+      "superseded": 6427
     },
     "by_target_ticket": {
-      "20": 3189,
+      "20": 3191,
       "21": 130,
       "22": 960,
       "23": 488,
@@ -314,7 +314,7 @@
     },
     "overrides_path": "docs/parity/queue-overrides.json",
     "patch_equivalent_count": 6,
-    "total_commits": 7099
+    "total_commits": 7101
   },
   "release_gate": {
     "checks": [
@@ -451,7 +451,7 @@
         "status": "pass"
       },
       {
-        "actual": 147.0,
+        "actual": 146.0,
         "limit": 0,
         "metric": "max_queue_pending_commits",
         "status": "fail"

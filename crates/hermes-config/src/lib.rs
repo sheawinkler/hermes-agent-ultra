@@ -9,6 +9,7 @@
 pub mod config;
 pub mod loader;
 pub mod managed_gateway;
+pub mod managed_node;
 pub mod merge;
 pub mod paths;
 pub mod platform;
@@ -44,6 +45,11 @@ pub use managed_gateway::{
     resolve_openai_audio_api_key, GatewayBuilder, GatewaySchemeError, ManagedToolGatewayConfig,
     ModalBackendState, ModalMode, NousProviderState, ResolveOptions, SelectedBackend, TokenReader,
     DEFAULT_TOOL_GATEWAY_DOMAIN,
+};
+pub use managed_node::{
+    find_hermes_node_executable, find_hermes_node_executable_in, find_node_executable,
+    iter_hermes_node_dirs, iter_hermes_node_dirs_in, with_hermes_node_path_var,
+    with_hermes_node_path_var_for_home,
 };
 pub use merge::{deep_merge, merge_configs};
 pub use paths::{

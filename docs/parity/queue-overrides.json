@@ -5013,6 +5013,16 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust MCP HTTP and SSE transports seed MCP-Protocol-Version before initialize; transport tests cover both request builders."
+    },
+    "7a7b56d49830": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust hermes-config exposes a managed Node/npm/npx resolver that prefers Hermes-managed portable Node before PATH, and CLI dependency checks plus WhatsApp bridge-start guidance use it; managed-node and CLI tests cover the behavior."
+    },
+    "d4e7dd609da6": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust managed-node resolver computes candidate command names once, mirrors platform-specific node/bin ordering, and prepends existing managed Node dirs without duplicate PATH entries; tests cover Windows and POSIX ordering."
     }
   },
   "subject_patterns": [
