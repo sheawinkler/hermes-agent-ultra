@@ -89,6 +89,28 @@ pub struct SchemaRepairReport {
 static SCHEMA_REPAIR_ATTEMPTS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 
 impl SessionPersistence {
+    fn model_config_has_non_null_marker(model_config: Option<&str>, key: &str) -> bool {
+        let Some(raw) = model_config
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return false;
+        };
+        serde_json::from_str::<serde_json::Value>(raw)
+            .ok()
+            .and_then(|value| value.get(key).cloned())
+            .is_some_and(|marker| !marker.is_null())
+    }
+
+    fn is_explicit_non_compression_child(
+        model_config: Option<&str>,
+        platform: Option<&str>,
+    ) -> bool {
+        Self::model_config_has_non_null_marker(model_config, "_branched_from")
+            || Self::model_config_has_non_null_marker(model_config, "_delegate_from")
+            || platform.map(str::trim) == Some("tool")
+    }
+
     const FTS_TABLES: &'static [&'static str] = &["messages_fts", "messages_fts_trigram"];
 
     pub fn is_malformed_db_error_message(message: &str) -> bool {
@@ -1109,15 +1131,24 @@ impl SessionPersistence {
                 break;
             }
             let mut stmt = match conn.prepare(
-                "SELECT c.id
+                "SELECT c.id, c.model_config, c.platform
                  FROM sessions c
                  JOIN sessions p ON p.id = c.parent_session_id
                  WHERE c.parent_session_id = ?1
                    AND p.end_reason = 'compression'
-                   AND NULLIF(TRIM(p.ended_at), '') IS NOT NULL
-                   AND c.created_at >= p.ended_at
-                 ORDER BY c.created_at DESC, c.updated_at DESC, c.id DESC
-                 LIMIT 1",
+                 ORDER BY
+                   CASE
+                     WHEN c.end_reason = 'compression' THEN 0
+                     WHEN NULLIF(TRIM(c.ended_at), '') IS NULL THEN 1
+                     ELSE 2
+                   END,
+                   COALESCE(
+                     (SELECT MAX(m.created_at) FROM messages m WHERE m.session_id = c.id),
+                     c.updated_at,
+                     c.created_at
+                   ) DESC,
+                   c.created_at DESC,
+                   c.id DESC",
             ) {
                 Ok(stmt) => stmt,
                 Err(rusqlite::Error::SqliteFailure(_, Some(message)))
@@ -1131,18 +1162,41 @@ impl SessionPersistence {
                     )));
                 }
             };
-            let next = match stmt.query_row(rusqlite::params![current.as_str()], |row| {
-                row.get::<_, String>(0)
+            let candidates = match stmt.query_map(rusqlite::params![current.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
             }) {
-                Ok(next) => next,
-                Err(rusqlite::Error::QueryReturnedNoRows) => break,
+                Ok(candidates) => candidates,
                 Err(e) => {
                     return Err(AgentError::Io(format!(
                         "Failed to resolve compression tip: {e}"
                     )));
                 }
             };
-            if next.trim().is_empty() || next == current {
+            let mut next = None;
+            for candidate in candidates {
+                let (child_id, model_config, platform) = candidate.map_err(|e| {
+                    AgentError::Io(format!("Failed to read compression-tip candidate: {e}"))
+                })?;
+                let child_id = child_id.trim().to_string();
+                if child_id.is_empty()
+                    || Self::is_explicit_non_compression_child(
+                        model_config.as_deref(),
+                        platform.as_deref(),
+                    )
+                {
+                    continue;
+                }
+                next = Some(child_id);
+                break;
+            }
+            let Some(next) = next else {
+                break;
+            };
+            if next == current {
                 break;
             }
             current = next;
@@ -1584,6 +1638,33 @@ mod tests {
             ],
         )
         .expect("update session lineage");
+    }
+
+    fn set_session_model_config(sp: &SessionPersistence, session_id: &str, model_config: &str) {
+        let conn = rusqlite::Connection::open(&sp.db_path).expect("open db");
+        conn.execute(
+            "UPDATE sessions SET model_config = ?1 WHERE id = ?2",
+            params![model_config, session_id],
+        )
+        .expect("update model config");
+    }
+
+    fn set_session_platform(sp: &SessionPersistence, session_id: &str, platform: &str) {
+        let conn = rusqlite::Connection::open(&sp.db_path).expect("open db");
+        conn.execute(
+            "UPDATE sessions SET platform = ?1 WHERE id = ?2",
+            params![platform, session_id],
+        )
+        .expect("update platform");
+    }
+
+    fn set_message_created_at(sp: &SessionPersistence, session_id: &str, created_at: &str) {
+        let conn = rusqlite::Connection::open(&sp.db_path).expect("open db");
+        conn.execute(
+            "UPDATE messages SET created_at = ?1 WHERE session_id = ?2",
+            params![created_at, session_id],
+        )
+        .expect("update message timestamp");
     }
 
     fn grow_sessions_wal(
@@ -2079,7 +2160,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_resume_session_id_ignores_child_created_before_parent_end() {
+    fn resolve_resume_session_id_follows_child_created_before_parent_end() {
         let tmp = tempfile::tempdir().unwrap();
         let sp = SessionPersistence::new(tmp.path());
         sp.persist_session(
@@ -2114,7 +2195,96 @@ mod tests {
         );
         set_session_lineage(&sp, "early", Some("root"), None, &early_created, None);
 
-        assert_eq!(sp.resolve_resume_session_id("root").unwrap(), "root");
+        assert_eq!(sp.resolve_resume_session_id("root").unwrap(), "early");
+    }
+
+    #[test]
+    fn resolve_resume_session_id_prefers_live_race_continuation_over_closed_stale_sibling() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        for (id, content) in [
+            ("root", "parent turn"),
+            ("real", "real continuation"),
+            ("stale", "stale websocket sibling"),
+        ] {
+            sp.persist_session(
+                id,
+                &[Message::assistant(content)],
+                None,
+                Some("cli"),
+                None,
+                None,
+            )
+            .unwrap();
+        }
+        let base = Utc::now() - ChronoDuration::hours(1);
+        let root_created = base.to_rfc3339();
+        let real_created = (base + ChronoDuration::seconds(10)).to_rfc3339();
+        let root_ended = (base + ChronoDuration::seconds(30)).to_rfc3339();
+        let stale_created = (base + ChronoDuration::seconds(40)).to_rfc3339();
+        let stale_ended = (base + ChronoDuration::seconds(50)).to_rfc3339();
+        let real_message_at = (base + ChronoDuration::seconds(60)).to_rfc3339();
+        let stale_message_at = (base + ChronoDuration::seconds(70)).to_rfc3339();
+        set_session_lineage(
+            &sp,
+            "root",
+            None,
+            Some("compression"),
+            &root_created,
+            Some(&root_ended),
+        );
+        set_session_lineage(&sp, "real", Some("root"), None, &real_created, None);
+        set_session_lineage(
+            &sp,
+            "stale",
+            Some("root"),
+            None,
+            &stale_created,
+            Some(&stale_ended),
+        );
+        set_message_created_at(&sp, "real", &real_message_at);
+        set_message_created_at(&sp, "stale", &stale_message_at);
+
+        assert_eq!(sp.resolve_resume_session_id("root").unwrap(), "real");
+    }
+
+    #[test]
+    fn resolve_resume_session_id_excludes_branch_delegate_and_tool_children() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        for id in ["root", "branch", "delegate", "tool", "cont"] {
+            sp.persist_session(
+                id,
+                &[Message::assistant(format!("{id} message"))],
+                None,
+                Some("cli"),
+                None,
+                None,
+            )
+            .unwrap();
+        }
+        let base = Utc::now() - ChronoDuration::hours(1);
+        let root_created = base.to_rfc3339();
+        let root_ended = (base + ChronoDuration::seconds(10)).to_rfc3339();
+        set_session_lineage(
+            &sp,
+            "root",
+            None,
+            Some("compression"),
+            &root_created,
+            Some(&root_ended),
+        );
+        for (offset, id) in [(20, "cont"), (30, "branch"), (40, "delegate"), (50, "tool")] {
+            let created = (base + ChronoDuration::seconds(offset)).to_rfc3339();
+            set_session_lineage(&sp, id, Some("root"), None, &created, None);
+            let msg_created = (base + ChronoDuration::seconds(offset + 100)).to_rfc3339();
+            set_message_created_at(&sp, id, &msg_created);
+        }
+        set_session_model_config(&sp, "branch", r#"{"_branched_from":"root"}"#);
+        set_session_model_config(&sp, "delegate", r#"{"_delegate_from":"root"}"#);
+        set_session_platform(&sp, "tool", "tool");
+
+        assert_eq!(sp.resolve_resume_session_id("root").unwrap(), "cont");
     }
 
     #[test]

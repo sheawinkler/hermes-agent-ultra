@@ -4759,6 +4759,11 @@
       "owner": "rust-runtime",
       "notes": "Ported as a first-class Rust relay protocol contract: crates/hermes-gateway/src/relay.rs decodes passthrough_forward frames, preserves bodyB64 byte parity, carries ordered headers and bufferId, and tolerates malformed base64 without killing the caller. The experimental relay adapter remains unregistered by Rust platform policy."
     },
+    "6d9ca0457464": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust session runtime: SessionPersistence and session_search now follow compression continuations even when the child row predates parent ended_at, prefer compression/live continuations over stale closed siblings, and exclude explicit branch/delegate/tool children with focused regression tests."
+    },
     "45bc4fb37fa8": {
       "disposition": "ported",
       "owner": "rust-runtime",
