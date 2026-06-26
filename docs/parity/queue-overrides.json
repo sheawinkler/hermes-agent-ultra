@@ -5148,6 +5148,376 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust Krea payload construction: image_url/reference_image_urls are deduplicated, capped at 10, and converted to Krea image_style_references objects with {url, strength: 0.6} instead of invalid bare URL strings; regression tests assert the exact request shape."
+    },
+    "866f1d65c4aa7b8589f03b0810ef24464bf86965": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "8666fd7635bab1f66d82d180e5afffa89a57e8ba": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "461fcc096479f548a1990fe26f329649fe40c371": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "fb3d31ba8b772bbca130f829423df7e61afd7820": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "65a477f12e3581fb1771019672385ce011a94929": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "6bbacc2238997718026c7868f4b76092fe602ed8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "f72690825e76fd205b3f475bdac75643e42bcf49": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "745c4db235bdb09beb19564f66727dc1f43e4fe2": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "7785655b4ece4deb7e8bbeeaa2a6a8342746d465": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "16aeba17078d5470f21eedb504142554169e748c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "bef1d3e4ff6aaf8b6143ce66d7a5e6169a08a86f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "13ce8119067ead38cde7ec262f265af6f1c1551f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "e5e25836350a7041e58bb4ecfd55cba893630df4": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "a61baa96157241c2e422fd85b3527bee14b41c62": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "c6fbd5a10494541ec3f29b77bc639e6ce3441c18": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "ac128af1cec30238f21376273ce4f96088a800bd": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "61c266b0dc75562a97dc0a377a7dc141d0b0a5ac": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "d4fa2db1c5dfd961776c77a619767e9ef17abce9": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "17dfc6bec4a8b7fd840d479c33e9a7b2449f805d": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "79f270f5496267ca9713d40af277e8453e528d8f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "aff5ae692fb2e09a68344c841f5a6a461fb33f3f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "ea5fa505d9743d1f6e0036480a36eaebc60d79af": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "de7ad8b78eaeab96324b9800e28f12d8b92e83a7": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "a6b670d4a251f98ca3bac91a867bb469f7ce4e93": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "3fffecbdafec0bcb08a7335da4e15181bc6ff5d6": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "cb17a9efb2dffb35ab5f827f0766d17b94fab91f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "d0af7fc954fe61c030a29be38d5c63f67f0bf7b2": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "48a8f8416937dc3168903a89d0e34f8416c24965": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "7daa6d83fcaa4822f5a6f878c5e78f0d94ff1d26": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "9fd2b2cb9fab9e5d7a49b4102ad028fa430ede1e": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "281a439ad483e6f130c2305a5e932c652778cb3b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "66a0907c9566016b4d8f295c176e6917f67f0f04": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "7243111c57bb6fad870e2eee7eda4cfcada4d7af": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "d398076c21175458003fed2d64c8339ed8861293": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "a4a74ca9e9a0f7d7d8e731d927139ccba0a588ec": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "2de7549fe0fe06954dd7b72528ca37953d62ada1": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "743985bf1ec4c911cd5af7bec705a419d8cdd61b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "a268dfff0a055dad7d73d45ede53a5687159a65c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "8d1706ae5cb2e0bcffd6496d45e3c7f10e4b0cc1": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "2a75c4a8cb4aaa1f08c0a4fda9a192e52e89cec2": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "93192059c96c5ba56c28c6c41255bc63af4c95fa": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "a6485bddb855536e60baa7074573a820d3d1ee76": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "cb6edbf448e7878fd25bf6db20df4c18ed8755a7": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "65b13e9dbc9330fe34cba2d44f915b05fe4b1f33": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "00779800f650c8b875f0f9ab6f08fa33531e6494": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "9a4600c5fb9bdd21e5d035181bfc7fbdb9340497": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "2ea94c6c45814862e9ebacf80d8051b58da980f7": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "284be6cc247c46aa6e2bf2b1b271a5e7fafb5558": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "7e2db0a140dbdbcf32035f9174c3e189317f8168": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "4aeaba69225151b36ab7c23803eefb99ae140f8f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "cbe5c5689f9cb0e86903431c6337e0d87abf4b9b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "f2c45e2c816d6e9e51416fa22436f29bcf97dc06": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "281b333cc5f048cc37e7b2075bde9c353b9a0496": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "25c31cab624e6556af09f8fe693c535578c5e8e5": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "5196575d40caa367395c5535da1c99caecef072c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "6b3ea2cea6889d24a67fbd973868c8cca2d8a615": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "da73223f4aba9beee9c020a5fee02f243414a3d7": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "2e3efce66ebd0a144a0733333e1c0d31d9f65c5d": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "e2b801872992867c3e48630f22f939fcf0d807c9": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "344415892f5d1de80fe4141e4ba3dfb76d167124": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "74352a1e61361daa87f7ec5dfe9eed41777d79cd": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "488ae376dbef8e411f30e844e8b40ba55fc97e19": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "7a7f9a5b3d1af1bab4f7d50484b836c5dceb7a50": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "68680db10d1744bcff4fd2fbc519cccc8447e0e3": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "a391523bccc35af2bdee558734600a496da02420": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "19ca295a846a8a032a01ba5da3d74c827e2e26d4": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "df514654ba5d7359fc3484ca2396892c054889fe": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "1f950e189ce7e68696298dc14ccbcf15a44eb213": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "09623b4527351b46c326c998b603d078ee87eb6c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "6e096a850a2c82bdad4e4caa8e2d739ae34086f4": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "563d347e4d420e233a2ed77274e949d93598057f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "da5484b61ff75ac1727136ede9fbd3189935ae08": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "3b1344c18c3dc485d5d89f7a9b061d32e76e9bf9": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "76074b214517109f4816ea6e83042ea65712b131": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
     }
   },
   "subject_patterns": [
