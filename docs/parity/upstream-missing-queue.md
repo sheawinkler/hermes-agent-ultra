@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T18:55:29.765911+00:00`
+Generated: `2026-06-26T19:01:29.777273+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7116`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-26T18:55:29.765911+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 37 |
-| ported | 475 |
+| pending | 36 |
+| ported | 476 |
 | superseded | 6528 |
 
 ## First 100 Pending Commits
@@ -46,7 +46,6 @@ Generated: `2026-06-26T18:55:29.765911+00:00`
 | `84e1d31e5442` | #22 | refactor(kanban): fold worker/orchestrator skills into injected guidance (#50473) |
 | `0a7ae28ebc1a` | #26 | fix(compressor): remove logging.basicConfig from library class __init__ |
 | `7130d60861a9` | #22 | feat(providers): remove google-gemini-cli + google-antigravity OAuth providers (#50492) |
-| `b9b4756ab480` | #22 | fix dashboard chat session titles |
 | `ff08e60c63ad` | #21 | feat(skills): add cloudflare-temporary-deploy optional skill (#50849) |
 | `97888fed483c` | #25 | fix(install): drop system-browser fallback + auto-repair stale snap override |
 | `a911bcda18cf` | #22 | docs: stop recommending pip install; curl installer is the only supported path (#51743) |

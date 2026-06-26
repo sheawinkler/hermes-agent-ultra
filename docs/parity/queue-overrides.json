@@ -3164,6 +3164,11 @@
       "disposition": "superseded",
       "notes": "Opening chats in separate Electron windows is desktop-only and not part of the Rust CLI/gateway runtime."
     },
+    "b9b4756ab4805437003b55127c369dc18ce22b3b": {
+      "disposition": "ported",
+      "notes": "Rust ACP/gateway already port the dashboard session-title contract: session.title/session-title normalizes and persists explicit titles, emits session_info_update with title payloads, and session/list, /status, and /sessions prefer explicit titles over history-derived fallbacks. Focused ACP and gateway tests cover live runtime-only title updates, event propagation, persistence, and title surfacing.",
+      "owner": "rust-runtime"
+    },
     "b9f1ac8c1022": {
       "disposition": "superseded",
       "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
