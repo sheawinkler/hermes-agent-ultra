@@ -9,6 +9,8 @@
 //! - **Tool implementations**: Concrete handlers for web, terminal, file, browser, and more
 //! - **Approval system**: Dangerous command pattern detection for terminal safety
 
+#[cfg(feature = "trading-research")]
+pub mod analyze_stock_cache;
 pub mod approval;
 pub mod backends;
 pub mod checkpoint_manager;
@@ -18,6 +20,8 @@ pub mod code_execution_stubs;
 pub mod concurrency;
 pub mod dispatch;
 pub mod equity_research_seed;
+#[cfg(feature = "trading-research")]
+pub mod equity_slash_delivery;
 pub mod kanban;
 pub mod kanban_failure;
 pub mod media_extract;
@@ -56,6 +60,13 @@ pub use toolset::{Toolset, ToolsetError, ToolsetManager};
 pub use checkpoint_manager::{CheckpointManager, checkpoint_shadow_dir_id};
 pub use dispatch::{DispatchedResult, dispatch_single, dispatch_tools};
 pub use equity_research_seed::try_resolve_a_share_from_user_message;
+#[cfg(feature = "trading-research")]
+pub use equity_slash_delivery::{
+    EquitySlashDeliveryOutcome, EquitySlashMode, EquitySlashSession, EquitySlashStallAction,
+    detect_equity_slash_mode, handle_slash_text_stall, needs_web_fill,
+    slash_turn_start_system_hint, slash_web_fill_system_hint, try_equity_slash_delivery,
+    wants_md_only_attachment,
+};
 pub use kanban::{KANBAN_TASK_ENV, kanban_block_reason, kanban_task_from_env};
 pub use kanban_failure::{
     KanbanFailureOptions, KanbanFailureOutcome, record_iteration_budget_exhausted,

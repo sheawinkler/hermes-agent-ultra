@@ -281,6 +281,80 @@ fn skill_description(skill: &SkillInfo) -> String {
         .to_string()
 }
 
+/// Parsed frontmatter `commands[]` entry.
+#[derive(Debug, Clone)]
+struct FrontmatterCommand {
+    name: String,
+    description: String,
+    template: String,
+}
+
+fn parse_skill_frontmatter_commands(skill: &SkillInfo) -> Vec<FrontmatterCommand> {
+    let Some(commands_arr) = skill.frontmatter.get("commands").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for cmd_val in commands_arr {
+        let Some(obj) = cmd_val.as_object() else {
+            continue;
+        };
+        let name = obj
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let description = obj
+            .get("description")
+            .or_else(|| obj.get("desc"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let template = obj
+            .get("template")
+            .and_then(|v| v.as_str())
+            .unwrap_or("{args}")
+            .to_string();
+        out.push(FrontmatterCommand {
+            name,
+            description,
+            template,
+        });
+    }
+    out
+}
+
+/// Agent message for a frontmatter-declared slash command (`/quick-scan`, etc.).
+pub fn build_frontmatter_slash_invocation_message(
+    command_slug: &str,
+    skill_name: &str,
+    skill_body: &str,
+    template: &str,
+    user_args: &str,
+) -> String {
+    let instruction = template.replace("{args}", user_args.trim());
+    let mut parts = vec![
+        format!(
+            "[SYSTEM: The user invoked /{command_slug} from skill \"{skill_name}\". \
+             Follow the mode block below; the full skill reference is appended.]"
+        ),
+        String::new(),
+        instruction,
+    ];
+    if !user_args.trim().is_empty() && !template.contains("{args}") {
+        parts.push(String::new());
+        parts.push(format!("User args: {}", user_args.trim()));
+    }
+    parts.push(String::new());
+    parts.push("---".into());
+    parts.push(String::new());
+    parts.push(skill_body.trim().to_string());
+    parts.join("\n")
+}
+
 fn skill_command_entry(
     skill: &SkillInfo,
     slug: &str,
@@ -325,7 +399,27 @@ pub fn installed_skill_slash_command_snapshot(
             continue;
         }
         match security_gate_skill_content(&skill.name, &skill.body) {
-            Ok(()) => available.push(skill_command_entry(&skill, &slug, None)),
+            Ok(()) => {
+                available.push(skill_command_entry(&skill, &slug, None));
+                for cmd in parse_skill_frontmatter_commands(&skill) {
+                    let cmd_slug = slugify_skill_command_name(&cmd.name);
+                    if cmd_slug.is_empty() || !seen_slugs.insert(cmd_slug.clone()) {
+                        skipped = skipped.saturating_add(1);
+                        continue;
+                    }
+                    available.push(SkillSlashCommandEntry {
+                        command: format!("/{cmd_slug}"),
+                        skill_name: skill.name.clone(),
+                        description: if cmd.description.is_empty() {
+                            skill_description(&skill)
+                        } else {
+                            cmd.description.clone()
+                        },
+                        skill_md_path: skill.path.join("SKILL.md"),
+                        blocked_reason: None,
+                    });
+                }
+            }
             Err(err) => blocked.push(skill_command_entry(&skill, &slug, Some(err))),
         }
     }
@@ -442,8 +536,8 @@ pub fn resolve_installed_skill_slash_command(
     }
 
     let skills = discover_skills(&config.roots);
-    for skill in skills {
-        if !skill_matches_platform(&skill, config.platform.as_deref()) {
+    for skill in &skills {
+        if !skill_matches_platform(skill, config.platform.as_deref()) {
             continue;
         }
         let slug = slugify_skill_command_name(&skill.name);
@@ -455,15 +549,51 @@ pub fn resolve_installed_skill_slash_command(
         }
         security_gate_skill_content(&skill.name, &skill.body)?;
         let skill_md_path = skill.path.join("SKILL.md");
-        let description = skill_description(&skill);
+        let description = skill_description(skill);
         let message = build_skill_slash_invocation_message(&skill.name, &skill.body, args);
         return Ok(Some(SkillSlashInvocation {
             command: format!("/{slug}"),
-            skill_name: skill.name,
+            skill_name: skill.name.clone(),
             description,
             skill_md_path,
             message,
         }));
+    }
+
+    for skill in skills {
+        if !skill_matches_platform(&skill, config.platform.as_deref()) {
+            continue;
+        }
+        for cmd in parse_skill_frontmatter_commands(&skill) {
+            let cmd_slug = slugify_skill_command_name(&cmd.name);
+            if cmd_slug.is_empty() || cmd_slug != requested {
+                continue;
+            }
+            if !skill_allowed(&skill.name, &cmd_slug, &config.enabled, &config.disabled) {
+                return Ok(None);
+            }
+            security_gate_skill_content(&skill.name, &skill.body)?;
+            let skill_md_path = skill.path.join("SKILL.md");
+            let description = if cmd.description.is_empty() {
+                skill_description(&skill)
+            } else {
+                cmd.description.clone()
+            };
+            let message = build_frontmatter_slash_invocation_message(
+                &cmd_slug,
+                &skill.name,
+                &skill.body,
+                &cmd.template,
+                args,
+            );
+            return Ok(Some(SkillSlashInvocation {
+                command: format!("/{cmd_slug}"),
+                skill_name: skill.name.clone(),
+                description,
+                skill_md_path,
+                message,
+            }));
+        }
     }
 
     Ok(None)
@@ -835,6 +965,37 @@ mod tests {
         assert!(note.contains("/reload-skills"));
         assert!(note.contains("/release-captain"));
         assert!(note.contains("/danger"));
+    }
+
+    #[test]
+    fn resolve_quick_scan_and_analyze_stock_from_equity_research() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let skills_root = manifest_dir.join("../../skills");
+        if !skills_root
+            .join("finance/equity-research/SKILL.md")
+            .exists()
+        {
+            return;
+        }
+        let config = SkillCommandResolverConfig {
+            roots: vec![skills_root],
+            ..SkillCommandResolverConfig::default()
+        };
+
+        let quick = resolve_installed_skill_slash_command("/quick-scan", "688126", &config)
+            .unwrap()
+            .expect("quick-scan");
+        assert_eq!(quick.command, "/quick-scan");
+        assert_eq!(quick.skill_name, "equity-research");
+        assert!(quick.message.contains("depth=lite"));
+        assert!(quick.message.contains("688126"));
+
+        let analyze = resolve_installed_skill_slash_command("/analyze-stock", "600519", &config)
+            .unwrap()
+            .expect("analyze-stock");
+        assert_eq!(analyze.command, "/analyze-stock");
+        assert!(analyze.message.contains("depth=medium"));
+        assert!(analyze.message.contains("600519"));
     }
 
     #[test]

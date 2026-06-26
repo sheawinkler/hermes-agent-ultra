@@ -3405,6 +3405,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "flate2",
+ "futures",
  "hermes-config",
  "reqwest 0.13.4",
  "serde",

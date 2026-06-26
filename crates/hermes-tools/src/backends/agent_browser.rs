@@ -230,6 +230,118 @@ impl AgentBrowserBackend {
             .and_then(|v| v.parse().ok())
             .unwrap_or(COMMAND_TIMEOUT_SECS)
     }
+
+    /// Compact snapshot after navigate (Python `browser_navigate` auto-snapshot path).
+    /// Uses `user_task = None` so oversized pages truncate only — no LLM summarization.
+    async fn compact_snapshot_after_open(&self, task: &str) -> Option<(String, usize)> {
+        let result = match self
+            .run_command(
+                task,
+                "snapshot",
+                &[("-c".to_string())],
+                Self::command_timeout_secs(),
+            )
+            .await
+        {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::debug!(
+                    task_id = task,
+                    error = %err,
+                    "auto snapshot after navigate failed"
+                );
+                return None;
+            }
+        };
+
+        if result.get("success").and_then(|v| v.as_bool()) == Some(false) {
+            tracing::debug!(
+                task_id = task,
+                "auto snapshot after navigate returned success=false"
+            );
+            return None;
+        }
+
+        let (raw, count) = compact_snapshot_from_command_result(&result)?;
+        let processed = if raw.is_empty() {
+            raw
+        } else {
+            process_snapshot_text(&raw, None).await
+        };
+        Some((processed, count))
+    }
+}
+
+/// Parse agent-browser `snapshot -c` JSON into (text, element_count).
+fn compact_snapshot_from_command_result(result: &Value) -> Option<(String, usize)> {
+    let data = result.get("data").unwrap_or(result);
+    let snapshot_text = data
+        .get("snapshot")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
+    let element_count = data
+        .get("refs")
+        .and_then(|r| r.as_object())
+        .map(|m| m.len())
+        .unwrap_or(0);
+    Some((snapshot_text, element_count))
+}
+
+fn navigate_open_succeeded(open_result: &Value) -> bool {
+    open_result
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+fn navigate_failure_json(open_result: &Value) -> String {
+    let error = open_result
+        .get("error")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Navigation failed");
+    json!({
+        "success": false,
+        "error": error,
+    })
+    .to_string()
+}
+
+fn build_navigate_success_json(
+    url_input: &str,
+    open_result: &Value,
+    task: &str,
+    auth: Value,
+    elapsed_ms: u64,
+    snapshot: Option<(String, usize)>,
+) -> String {
+    let data = open_result.get("data").unwrap_or(open_result);
+    let final_url = data
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or(url_input);
+    let title = data.get("title").and_then(|v| v.as_str()).unwrap_or("");
+
+    let mut response = json!({
+        "success": true,
+        "status": "navigated",
+        "url": final_url,
+        "title": title,
+        "task_id": task,
+        "elapsed_ms": elapsed_ms,
+        "backend": "agent-browser",
+        "auth": auth,
+        "data": data,
+    });
+
+    if let Some((snapshot_text, element_count)) = snapshot {
+        if let Some(obj) = response.as_object_mut() {
+            obj.insert("snapshot".into(), json!(snapshot_text));
+            obj.insert("element_count".into(), json!(element_count));
+        }
+    }
+
+    response.to_string()
 }
 
 #[async_trait]
@@ -245,17 +357,20 @@ impl BrowserBackend for AgentBrowserBackend {
                 Self::command_timeout_secs().max(60),
             )
             .await?;
-        Ok(json!({
-            "success": result.get("success").and_then(|v| v.as_bool()).unwrap_or(true),
-            "status": "navigated",
-            "url": url,
-            "task_id": task,
-            "elapsed_ms": started.elapsed().as_millis() as u64,
-            "backend": "agent-browser",
-            "auth": self.auth_context_for(&task).metadata(),
-            "data": result.get("data").cloned().unwrap_or(result),
-        })
-        .to_string())
+
+        if !navigate_open_succeeded(&result) {
+            return Ok(navigate_failure_json(&result));
+        }
+
+        let snapshot = self.compact_snapshot_after_open(&task).await;
+        Ok(build_navigate_success_json(
+            url,
+            &result,
+            &task,
+            self.auth_context_for(&task).metadata(),
+            started.elapsed().as_millis() as u64,
+            snapshot,
+        ))
     }
 
     async fn snapshot(
@@ -501,8 +616,59 @@ mod tests {
     }
 
     #[test]
-    fn effective_task_id_defaults() {
-        assert_eq!(effective_task_id(None), "default");
-        assert_eq!(effective_task_id(Some("abc")), "abc");
+    fn compact_snapshot_from_command_result_parses_data() {
+        let result = json!({
+            "success": true,
+            "data": {
+                "snapshot": "- button [ref=e1]",
+                "refs": { "e1": {}, "e2": {} }
+            }
+        });
+        let (text, count) = compact_snapshot_from_command_result(&result).unwrap();
+        assert!(text.contains("button"));
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn build_navigate_success_json_includes_auto_snapshot() {
+        let open = json!({
+            "success": true,
+            "data": {
+                "url": "https://example.com/final",
+                "title": "Example"
+            }
+        });
+        let body = build_navigate_success_json(
+            "https://example.com",
+            &open,
+            "task-1",
+            json!({}),
+            42,
+            Some(("snap".into(), 3)),
+        );
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["success"], true);
+        assert_eq!(parsed["url"], "https://example.com/final");
+        assert_eq!(parsed["title"], "Example");
+        assert_eq!(parsed["snapshot"], "snap");
+        assert_eq!(parsed["element_count"], 3);
+    }
+
+    #[test]
+    fn build_navigate_success_json_omits_snapshot_when_none() {
+        let open = json!({ "success": true, "data": { "url": "https://a.test", "title": "" } });
+        let body = build_navigate_success_json("https://a.test", &open, "t", json!({}), 1, None);
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert!(parsed.get("snapshot").is_none());
+        assert!(parsed.get("element_count").is_none());
+    }
+
+    #[test]
+    fn navigate_failure_json_from_open_result() {
+        let open = json!({ "success": false, "error": "timeout" });
+        let body = navigate_failure_json(&open);
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["success"], false);
+        assert_eq!(parsed["error"], "timeout");
     }
 }

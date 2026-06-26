@@ -80,6 +80,11 @@ impl RingBuffer {
         }
     }
 
+    /// Total bytes ever written (including overwritten).
+    fn total_bytes(&self) -> usize {
+        self.total_written
+    }
+
     /// Read as UTF-8 string, replacing invalid sequences.
     fn read_string(&self) -> String {
         String::from_utf8_lossy(&self.read_all()).to_string()

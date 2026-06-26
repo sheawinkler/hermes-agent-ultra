@@ -90,7 +90,7 @@ pub fn discover_skills(dirs: &[PathBuf]) -> Vec<SkillInfo> {
     let mut seen_paths = HashSet::new();
 
     for dir in dirs {
-        discover_skills_recursive(dir, &mut skills, &mut seen_paths);
+        discover_skills_recursive(dir, &mut skills, &mut seen_paths, true);
     }
 
     skills
@@ -128,14 +128,16 @@ fn discover_skills_recursive(
     dir: &Path,
     out: &mut Vec<SkillInfo>,
     seen_paths: &mut HashSet<PathBuf>,
+    is_explicit_root: bool,
 ) {
     if !dir.is_dir() {
         return;
     }
-    if dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| n.starts_with('.'))
+    if !is_explicit_root
+        && dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with('.'))
     {
         return;
     }
@@ -155,7 +157,7 @@ fn discover_skills_recursive(
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
         if path.is_dir() {
-            discover_skills_recursive(&path, out, seen_paths);
+            discover_skills_recursive(&path, out, seen_paths, false);
         }
     }
 }

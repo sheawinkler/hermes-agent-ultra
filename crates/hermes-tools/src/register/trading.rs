@@ -2,7 +2,7 @@
 //!
 //! Requires the `trading-research` Cargo feature.
 
-use super::{RegistryContext, reg};
+use super::{RegistryContext, reg, reg_with_max};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -74,12 +74,14 @@ pub fn register(ctx: &RegistryContext<'_>) {
             "🔍",
             vec![],
         );
-        reg(
+        reg_with_max(
             ctx,
             "trading",
             Arc::new(crate::tools::trading_analyze_stock::AnalyzeStockHandler::new()),
             "📋",
             vec![],
+            // Medium depth JSON suffix + 66-judge panel exceeds default 50k after registry wrap.
+            Some(120_000),
         );
     }
 }

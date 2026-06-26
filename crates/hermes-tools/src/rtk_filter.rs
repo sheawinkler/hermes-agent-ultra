@@ -143,6 +143,9 @@ impl RtkFilterEngine {
         if stripped.is_empty() {
             return stripped;
         }
+        if tool_name == "analyze_stock" {
+            return redact_secrets(&normalize_newlines(&stripped));
+        }
         // Normalize line endings and redact secrets in a single owned string.
         let text = redact_secrets(&normalize_newlines(&stripped));
 
@@ -522,6 +525,28 @@ mod tests {
             rewritten["command"].as_str().unwrap_or(""),
             "echo hello\\nworld"
         );
+    }
+
+    #[test]
+    fn analyze_stock_bypasses_head_tail_summarization() {
+        let engine = RtkFilterEngine {
+            log_dir: std::env::temp_dir().join("hermes-rtk-analyze-stock"),
+            head_lines: 4,
+            tail_lines: 3,
+            repeat_keep: 2,
+        };
+        let mut raw = String::new();
+        for i in 0..300 {
+            raw.push_str(&format!("dim line {i}\n"));
+        }
+        raw.push_str("<!-- full JSON below -->\n{\"symbol\":\"600522.SH\"}\n");
+        let out = engine.filter_output("analyze_stock", &json!({}), &raw);
+        assert!(
+            !out.contains("omitted"),
+            "analyze_stock must not be head/tail summarized: {}",
+            out.chars().take(200).collect::<String>()
+        );
+        assert!(out.contains("600522.SH"));
     }
 
     #[test]
