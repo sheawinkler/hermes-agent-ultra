@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T05:58:24.709736+00:00`
+Generated: `2026-06-26T07:48:22.730388+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7116`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-26T05:58:24.709736+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 148 |
-| ported | 456 |
+| pending | 147 |
+| ported | 457 |
 | superseded | 6436 |
 
 ## First 100 Pending Commits
@@ -107,7 +107,6 @@ Generated: `2026-06-26T05:58:24.709736+00:00`
 | `6da615c77cf8` | #26 | fix(desktop): scope onboarding runtime check to connected provider |
 | `d8fe1c0b4195` | #20 | test(desktop): cover scoped onboarding runtime readiness checks |
 | `2de7549fe0fe` | #26 | feat(desktop): remember window size/position/maximized across launches (salvage #39154) |
-| `3faf768cdef0` | #20 | feat(pets): OpenRouter + Nous Portal image backend |
 | `aab49f6927cc` | #20 | feat(pets): generation RPCs, non-blocking gallery + gateway plumbing |
 | `743985bf1ec4` | #26 | feat(pets): Pokédex generate UI — overlay, animated egg, hatch FX, manage |
 | `b674f7ba28c4` | #26 | feat(pets): offer backend setup when generation is unavailable |
@@ -125,3 +124,4 @@ Generated: `2026-06-26T05:58:24.709736+00:00`
 | `284be6cc247c` | #26 | Merge pull request #52210 from helix4u/fix/desktop-update-progress-visibility |
 | `7e2db0a140db` | #26 | fix(desktop): stop refText crash on undefined composer attachment holes |
 | `4aeaba692251` | #26 | test(desktop): cover undefined/null attachment holes in ref helpers |
+| `cbe5c5689f9c` | #26 | perf(desktop): bound tool-result rendering so big /learn runs don't freeze (#52273) |

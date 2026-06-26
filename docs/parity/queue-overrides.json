@@ -5043,6 +5043,11 @@
       "disposition": "ported",
       "notes": "Rust Honcho now parses host-scoped OAuth grants, refreshes near-expiry hch-at access tokens with the stored refresh token, serializes rotation with process and best-effort file locks, persists rotated apiKey/oauth metadata owner-only while preserving unrelated config, sends refreshed Authorization/X-API-Key headers, and lets memory setup preserve existing OAuth grants without requiring a pasted cloud API key. Desktop Electron connect UI is intentionally absent from the Rust-first surface.",
       "owner": "rust-runtime"
+    },
+    "3faf768cdef0": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust image_generate now supports OpenRouter-compatible OpenRouter and Nous Portal backends with provider selection, env/config/auth-store credential resolution, /chat/completions image-output payloads, local reference-image data URI inlining, generated image cache saves for data URI/HTTP responses, and mocked tests for payload/header/auth/error paths."
     }
   },
   "subject_patterns": [
