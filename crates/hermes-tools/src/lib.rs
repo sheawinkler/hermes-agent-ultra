@@ -134,6 +134,8 @@ pub use backends::file::{LocalPatchBackend, LocalSearchBackend};
 pub use backends::homeassistant::HaRestBackend;
 pub use backends::image_gen::{
     FalImageGenBackend, ImageGenRuntimeBackend, OpenAICodexImageGenBackend,
+    OpenRouterCompatImageGenBackend, OpenRouterCompatImageGenConfig,
+    OpenRouterCompatImageProviderKind,
 };
 pub use backends::memory::FileMemoryBackend;
 pub use backends::messaging::SignalMessagingBackend;
