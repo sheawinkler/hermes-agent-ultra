@@ -16,6 +16,12 @@
       "expected": { "canonical": "SendMessage" }
     },
     {
+      "id": "acp-session-title-canonical",
+      "kind": "acp_method_alias",
+      "input": { "method": "session.title" },
+      "expected": { "canonical": "SessionTitle" }
+    },
+    {
       "id": "acp-success-response-envelope",
       "kind": "acp_success_response",
       "input": {

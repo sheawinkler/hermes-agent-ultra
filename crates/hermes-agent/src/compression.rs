@@ -1338,6 +1338,21 @@ mod tests {
     }
 
     #[test]
+    fn constructor_with_logging_enabled_is_reentrant() {
+        let cfg = CompressorConfig {
+            quiet_mode: false,
+            ..CompressorConfig::default()
+        };
+        let aux = aux_with_provider(CannedSummaryProvider::new("x"));
+
+        let first = ContextCompressor::new(cfg.clone(), aux.clone());
+        let second = ContextCompressor::new(cfg, aux);
+
+        assert_eq!(first.compression_count(), 0);
+        assert_eq!(second.compression_count(), 0);
+    }
+
+    #[test]
     fn budget_clamped_between_min_and_ceiling() {
         let cfg = CompressorConfig {
             context_length: 1_000_000,

@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T19:01:29.777273+00:00`
+Generated: `2026-06-26T19:15:01.247235+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7116`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-26T19:01:29.777273+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 36 |
-| ported | 476 |
+| pending | 35 |
+| ported | 477 |
 | superseded | 6528 |
 
 ## First 100 Pending Commits
@@ -44,7 +44,6 @@ Generated: `2026-06-26T19:01:29.777273+00:00`
 | `72e4cca00ecc` | #26 | docs(config): correct MCP docs path in cli-config.yaml.example |
 | `37c37c9dc511` | #26 | fix(antigravity): register google-antigravity ProviderProfile + AUTHOR_MAP |
 | `84e1d31e5442` | #22 | refactor(kanban): fold worker/orchestrator skills into injected guidance (#50473) |
-| `0a7ae28ebc1a` | #26 | fix(compressor): remove logging.basicConfig from library class __init__ |
 | `7130d60861a9` | #22 | feat(providers): remove google-gemini-cli + google-antigravity OAuth providers (#50492) |
 | `ff08e60c63ad` | #21 | feat(skills): add cloudflare-temporary-deploy optional skill (#50849) |
 | `97888fed483c` | #25 | fix(install): drop system-browser fallback + auto-repair stale snap override |
