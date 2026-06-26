@@ -5144,6 +5144,23 @@ where
         .collect()
 }
 
+#[cfg(feature = "gateway-email")]
+fn env_email_identity_vec(key: &str) -> Vec<String> {
+    std::env::var(key)
+        .ok()
+        .into_iter()
+        .flat_map(|value| {
+            value
+                .replace('\n', ",")
+                .split(',')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 fn env_truthy_from_lookup<F>(lookup: &mut F, key: &str) -> bool
 where
     F: FnMut(&str) -> Option<String>,
@@ -6298,6 +6315,29 @@ async fn register_gateway_adapters(
                         .and_then(|v| v.as_u64())
                         .unwrap_or(60),
                     proxy: Default::default(),
+                    require_authenticated_sender: extra_bool_loose(
+                        platform_cfg,
+                        "require_authenticated_sender",
+                    )
+                    .unwrap_or(true),
+                    authserv_id: extra_string(platform_cfg, "authserv_id"),
+                    allowed_users: {
+                        let mut users = platform_cfg.allowed_users.clone();
+                        for key in GATEWAY_CONFIG_DIRECT_USER_ALLOWLIST_EXTRA_KEYS {
+                            users.extend(extra_string_set(platform_cfg, key));
+                        }
+                        users.extend(env_email_identity_vec("EMAIL_ALLOWED_USERS"));
+                        users.extend(env_email_identity_vec("GATEWAY_ALLOWED_USERS"));
+                        users
+                    },
+                    admin_users: platform_cfg.admin_users.clone(),
+                    allow_all_users: gateway_platform_config_allows_all_users(platform_cfg)
+                        || std::env::var("EMAIL_ALLOW_ALL_USERS")
+                            .ok()
+                            .is_some_and(|value| env_value_truthy(&value))
+                        || std::env::var("GATEWAY_ALLOW_ALL_USERS")
+                            .ok()
+                            .is_some_and(|value| env_value_truthy(&value)),
                 };
                 match EmailAdapter::new(email_cfg) {
                     Ok(adapter) => gateway.register_adapter("email", Arc::new(adapter)).await,
