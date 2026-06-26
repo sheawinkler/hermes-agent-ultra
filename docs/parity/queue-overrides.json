@@ -5518,6 +5518,86 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "f06508836dd4e5c56ffc14912725c12c6d941291": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "2b08a4295a650d27fc354573ef2dde87dd211103": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "9e4348f28ac114c3f88d68e2df1fb915f1c2d3b9": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "f6275a59e790477092e6c70b06ba4a5d1d882615": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "df4015bbc176535e9bf58d5541186563365a2275": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "eec9c1d84ebdfd5117de0084c0b1c7bcc3ba4cb3": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "f80088f035de303d6e8c1e59764d2008571ca01a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "0768ed3b33e43df7de05c59017c997bb5e2960f5": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "45540cfb5ef1e30c71d46166a171d88101e8fcb7": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream CI/workflow-only delta is superseded by Hermes Agent Ultra's local Rust-first deterministic gates and PR verification workflow; it does not add or change a shipped Rust runtime behavior. Runtime/install/docker changes remain pending for separate evidence."
+    },
+    "2977e7454377bdb9cb101e4d387e1df7720af8a7": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream CI/workflow-only delta is superseded by Hermes Agent Ultra's local Rust-first deterministic gates and PR verification workflow; it does not add or change a shipped Rust runtime behavior. Runtime/install/docker changes remain pending for separate evidence."
+    },
+    "56b4ef74a631bdca0bd5cc58bd43369fc227ea83": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream CI/workflow-only delta is superseded by Hermes Agent Ultra's local Rust-first deterministic gates and PR verification workflow; it does not add or change a shipped Rust runtime behavior. Runtime/install/docker changes remain pending for separate evidence."
+    },
+    "05c896cf524991f95c34ce73d2cbe985b5e0558f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream CI/workflow-only delta is superseded by Hermes Agent Ultra's local Rust-first deterministic gates and PR verification workflow; it does not add or change a shipped Rust runtime behavior. Runtime/install/docker changes remain pending for separate evidence."
+    },
+    "a0471e24648ef29ef6a3c681eb5b9917ae910258": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream CI/workflow-only delta is superseded by Hermes Agent Ultra's local Rust-first deterministic gates and PR verification workflow; it does not add or change a shipped Rust runtime behavior. Runtime/install/docker changes remain pending for separate evidence."
+    },
+    "935f2bc48daa9c7fad73f80c95d4375da18a39c1": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "8446c1570683d99859f53b27002f21f4d19c1955": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "a6a28ce3e2174c0be494f553ab5fd79b7039190f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream CI/workflow-only delta is superseded by Hermes Agent Ultra's local Rust-first deterministic gates and PR verification workflow; it does not add or change a shipped Rust runtime behavior. Runtime/install/docker changes remain pending for separate evidence."
     }
   },
   "subject_patterns": [
