@@ -210,58 +210,72 @@ unsafe extern "C" fn asr_result_callback(
     let full_for_event = full_txt.filter(|t| !t.is_empty());
     let new_for_emit = new_txt.filter(|t| !t.is_empty());
 
-    let emit_text = if is_sdk_finish && sealing {
-        if let Some(full) = full_for_event.clone() {
+    let event = if is_sdk_finish && sealing {
+        let emit_text = if let Some(full) = full_for_event.clone() {
             full
         } else if let Some(new) = new_for_emit {
             new
         } else {
             return;
-        }
-    } else if let Some(full) = full_for_event.clone() {
-        full
-    } else if let Some(new) = new_for_emit {
-        new
-    } else {
-        return;
-    };
-
-    if is_sdk_finish && !sealing {
-        debug!(
-            %emit_text,
-            "rkasr internal segment FINISH -> partial (not end of utterance)"
-        );
-    }
-
-    if let Ok(last) = ctx.last_emitted.lock() {
-        if *last == emit_text {
-            debug!(
-                state = state_name,
-                %emit_text,
-                "rkasr callback: skip duplicate text"
-            );
-            if state == ffi::ASR_STATE_FINISH {
+        };
+        if let Ok(last) = ctx.last_emitted.lock() {
+            if *last == emit_text {
+                debug!(
+                    state = state_name,
+                    %emit_text,
+                    "rkasr callback: skip duplicate final text"
+                );
                 ctx.frame_done.store(true, Ordering::SeqCst);
+                return;
             }
-            return;
         }
-    }
-
-    let event = if is_sdk_finish && sealing {
         info!(%emit_text, "rkasr final result (utterance flush)");
-        AsrEvent::Final {
-            text: emit_text.clone(),
+        if let Ok(mut last) = ctx.last_emitted.lock() {
+            *last = emit_text.clone();
         }
+        AsrEvent::Final { text: emit_text }
+    } else if is_sdk_finish {
+        let sentence = if let Some(full) = full_for_event.clone() {
+            full
+        } else if let Some(new) = new_for_emit {
+            new
+        } else {
+            return;
+        };
+        debug!(%sentence, "rkasr segment FINISH (sentence boundary)");
+        if let Ok(mut last) = ctx.last_emitted.lock() {
+            *last = sentence.clone();
+        }
+        AsrEvent::SegmentFinish { text: sentence }
     } else {
-        info!(%emit_text, "rkasr partial result");
+        let piece = if let Some(new) = new_for_emit.clone() {
+            new
+        } else if let Some(full) = full_for_event.clone() {
+            full
+        } else {
+            return;
+        };
+        let dedup_key = full_for_event.as_deref().unwrap_or(&piece);
+        if let Ok(last) = ctx.last_emitted.lock() {
+            if *last == dedup_key {
+                debug!(
+                    state = state_name,
+                    %dedup_key,
+                    "rkasr callback: skip duplicate partial"
+                );
+                return;
+            }
+        }
+        info!(piece = %piece, full = ?full_for_event, "rkasr partial result");
+        if let Ok(mut last) = ctx.last_emitted.lock() {
+            *last = dedup_key.to_string();
+        }
         AsrEvent::Partial {
-            text: emit_text.clone(),
+            text: piece,
             full: full_for_event,
         }
     };
-    if let Ok(mut last) = ctx.last_emitted.lock() {
-        *last = emit_text.clone();
-    }
+
     let _ = ctx.event_tx.try_send(event);
     if is_sdk_finish && sealing {
         ctx.frame_done.store(true, Ordering::SeqCst);

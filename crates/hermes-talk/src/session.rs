@@ -1225,7 +1225,7 @@ impl Session {
                                         &mut utterance_transcript,
                                     );
                                     utterance_transcript.append_hypothesis(&text, full.as_deref());
-                                    let assembled = utterance_transcript.concat();
+                                    let assembled = utterance_transcript.concat_transcript();
                                     let prev_len = last_partial.chars().count();
                                     bump_longest_transcript(
                                         &mut last_partial,
@@ -1413,6 +1413,41 @@ impl Session {
                                             )
                                             .await;
                                         }
+                                    }
+                                }
+                            }
+                            AsrEvent::SegmentFinish { text } => {
+                                last_asr_event_at = Some(Instant::now());
+                                #[cfg(all(feature = "rockchip", not(feature = "sherpa-asr-tts")))]
+                                {
+                                    if asr_echo_cooldown_until
+                                        .is_some_and(|t| Instant::now() < t)
+                                    {
+                                        continue;
+                                    }
+                                    if !utterance_pipeline.is_open() {
+                                        continue;
+                                    }
+                                    debug!(
+                                        segment = %text,
+                                        state = ?state,
+                                        wake_phase = ?wake_phase,
+                                        "asr segment finish"
+                                    );
+                                    drain_feed_acks(
+                                        &mut feed_ack_rx,
+                                        &utterance_pipeline,
+                                        &mut utterance_transcript,
+                                    );
+                                    utterance_transcript.commit_segment(&text);
+                                    let assembled = utterance_transcript.concat_transcript();
+                                    let prev_len = last_partial.chars().count();
+                                    bump_longest_transcript(
+                                        &mut last_partial,
+                                        &[&text, &assembled],
+                                    );
+                                    if last_partial.chars().count() != prev_len {
+                                        partial_stable_since = Some(Instant::now());
                                     }
                                 }
                             }
@@ -2199,6 +2234,9 @@ async fn wait_rockchip_asr_final(
             Ok(Some(AsrEvent::Partial { text, .. })) => {
                 debug!(partial = %text, "asr partial while waiting for final");
             }
+            Ok(Some(AsrEvent::SegmentFinish { text })) => {
+                debug!(segment = %text, "asr segment finish while waiting for final");
+            }
             Ok(Some(AsrEvent::TaskFailed { message })) => {
                 warn!(%message, "asr failed while waiting for final");
                 return None;
@@ -2240,6 +2278,11 @@ async fn settle_asr_after_flush(
             }
             Ok(Some(AsrEvent::Partial { text, .. })) => {
                 debug!(partial = %text, "asr partial (post-flush settle)");
+                *last_partial = text;
+                *last_asr_event_at = Some(Instant::now());
+            }
+            Ok(Some(AsrEvent::SegmentFinish { text })) => {
+                debug!(segment = %text, "asr segment finish (post-flush settle)");
                 *last_partial = text;
                 *last_asr_event_at = Some(Instant::now());
             }

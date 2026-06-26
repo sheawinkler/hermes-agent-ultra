@@ -138,7 +138,10 @@ pub struct UtteranceTranscript {
     utterance_id: u64,
     last_fed_seq: u64,
     by_seq: BTreeMap<u64, String>,
-    assembled: String,
+    /// Finalized SDK segments (`ASR_STATE_FINISH` append per ROCKASR2 demo).
+    committed: String,
+    /// In-progress sentence hypothesis (`result` while `ASR_STATE_RUNNING`).
+    current: String,
     best_full: String,
 }
 
@@ -147,7 +150,8 @@ impl UtteranceTranscript {
         self.utterance_id = utterance_id;
         self.last_fed_seq = 0;
         self.by_seq.clear();
-        self.assembled.clear();
+        self.committed.clear();
+        self.current.clear();
         self.best_full.clear();
     }
 
@@ -162,23 +166,56 @@ impl UtteranceTranscript {
         if let Some(full) = full {
             self.record_peak(full);
         }
-        let before = self.assembled.clone();
+        let before = self.concat();
         self.record_peak(&before);
-        merge_hypothesis(&mut self.assembled, piece, full);
-        let after = self.assembled.clone();
+        merge_hypothesis(&mut self.current, piece, full);
+        let after = self.concat();
         self.record_peak(&after);
-        if self.assembled == before {
+        if after == before {
             return;
         }
-        let delta = if self.assembled.starts_with(&before) {
-            &self.assembled[before.len()..]
+        let delta = if after.starts_with(&before) {
+            &after[before.len()..]
         } else {
-            self.assembled.as_str()
+            after.as_str()
         };
         self.by_seq
             .entry(self.last_fed_seq)
             .or_default()
             .push_str(delta);
+    }
+
+    /// Commit a finalized SDK sentence (`ASR_STATE_FINISH`) into the multi-segment transcript.
+    pub fn commit_segment(&mut self, sentence: &str) {
+        let s = sentence.trim();
+        if s.is_empty() {
+            return;
+        }
+        self.record_peak(s);
+
+        let seg = if self.current.chars().count() >= s.chars().count() {
+            std::mem::take(&mut self.current)
+        } else {
+            self.current.clear();
+            s.to_string()
+        };
+        if seg.is_empty() {
+            return;
+        }
+        if self.committed.ends_with(&seg) {
+            return;
+        }
+        self.committed.push_str(&seg);
+        let committed = self.committed.clone();
+        self.record_peak(&committed);
+        self.by_seq
+            .entry(self.last_fed_seq)
+            .or_default()
+            .push_str(&seg);
+    }
+
+    fn concat(&self) -> String {
+        format!("{}{}", self.committed, self.current)
     }
 
     fn record_peak(&mut self, text: &str) {
@@ -198,21 +235,23 @@ impl UtteranceTranscript {
 
     /// Best transcript for flush: longest of tracked full vs assembled merge.
     pub fn best_transcript(&self) -> String {
-        if self.best_full.chars().count() >= self.assembled.chars().count() {
+        let assembled = self.concat();
+        if self.best_full.chars().count() >= assembled.chars().count() {
             self.best_full.clone()
         } else {
-            self.assembled.clone()
+            assembled
         }
     }
 
-    /// Concatenate all slice texts in ascending `seq` order.
-    pub fn concat(&self) -> String {
-        self.assembled.clone()
+    /// Concatenate committed segments plus the in-progress sentence.
+    pub fn concat_transcript(&self) -> String {
+        self.concat()
     }
 
     pub fn clear(&mut self) {
         self.by_seq.clear();
-        self.assembled.clear();
+        self.committed.clear();
+        self.current.clear();
         self.best_full.clear();
     }
 }
@@ -398,7 +437,7 @@ mod tests {
         t.append_hypothesis("我查一下", Some("帮我查一下"));
         t.append_hypothesis("查一下明天的", Some("帮我查一下明天的"));
         t.append_hypothesis("查一下明天的天气。", Some("帮我查一下明天的天气。"));
-        assert_eq!(t.concat(), "帮我查一下明天的天气。");
+        assert_eq!(t.concat_transcript(), "帮我查一下明天的天气。");
     }
 
     #[test]
@@ -410,7 +449,7 @@ mod tests {
         t.append_hypothesis("现在几点", Some("现在几点"));
         t.append_hypothesis("现在", Some("现在"));
         t.append_hypothesis("了。", None);
-        assert_eq!(t.concat(), "现在几点了。");
+        assert_eq!(t.concat_transcript(), "现在几点了。");
     }
 
     #[test]
@@ -423,6 +462,32 @@ mod tests {
         t.append_hypothesis("的关于蚂蚁的那个笑话", Some("的关于蚂蚁的那个笑话"));
         t.append_hypothesis("是啥意思？", Some("你刚才说的关于蚂蚁的那个笑话是啥意思？"));
         assert_eq!(t.best_full(), "你刚才说的关于蚂蚁的那个笑话是啥意思？");
+    }
+
+    #[test]
+    fn transcript_commits_sdk_segment_finish() {
+        let mut t = UtteranceTranscript::default();
+        t.reset(1);
+        t.on_slice_fed(1, 0);
+        t.append_hypothesis("你好", Some("你好。"));
+        t.commit_segment("你好。");
+        t.on_slice_fed(1, 1);
+        t.append_hypothesis("世界", Some("世界"));
+        t.append_hypothesis("。", Some("世界。"));
+        t.commit_segment("世界。");
+        assert_eq!(t.concat_transcript(), "你好。世界。");
+    }
+
+    #[test]
+    fn transcript_segment_finish_without_duplicate() {
+        let mut t = UtteranceTranscript::default();
+        t.reset(1);
+        t.on_slice_fed(1, 0);
+        t.append_hypothesis("现在几点", Some("现在几点"));
+        t.append_hypothesis("了。", Some("现在几点了。"));
+        t.commit_segment("现在几点了。");
+        t.commit_segment("现在几点了。");
+        assert_eq!(t.concat_transcript(), "现在几点了。");
     }
 
     #[test]
