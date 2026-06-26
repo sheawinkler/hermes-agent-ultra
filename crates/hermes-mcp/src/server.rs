@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use hermes_core::ToolSchema;
+use hermes_core::{normalize_schema_definitions_refs, ToolSchema};
 use hermes_tools::ToolRegistry;
 
 use crate::client::ResourceInfo;
@@ -155,6 +155,7 @@ impl McpServer {
         // Convert hermes-core JsonSchema to a JSON Value for MCP
         let input_schema = serde_json::to_value(&schema.parameters)
             .unwrap_or_else(|_| serde_json::json!({"type": "object"}));
+        let input_schema = normalize_schema_definitions_refs(&input_schema);
 
         McpToolInfo {
             name: schema.name.clone(),
@@ -485,7 +486,7 @@ mod tests {
     use crate::client::ResourceInfo;
     use crate::coerce_mcp_tool_arguments_for_schema;
     use async_trait::async_trait;
-    use hermes_core::{tool_schema, ToolError, ToolHandler, ToolSchema};
+    use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
     use hermes_tools::ToolRegistry;
     use serde_json::{json, Value};
     use std::sync::Arc;
@@ -559,6 +560,33 @@ mod tests {
             None,
         );
         Arc::new(registry)
+    }
+
+    #[test]
+    fn tool_schema_to_mcp_preserves_normalized_defs() {
+        let schema = ToolSchema::new(
+            "with_defs",
+            "Schema with defs",
+            serde_json::from_value::<JsonSchema>(json!({
+                "type": "object",
+                "properties": {
+                    "item": {"$ref": "#/definitions/Item"}
+                },
+                "$defs": {
+                    "Item": {"type": "string"}
+                }
+            }))
+            .expect("schema"),
+        );
+
+        let mcp = McpServer::tool_schema_to_mcp(&schema);
+
+        assert_eq!(
+            mcp.input_schema["properties"]["item"]["$ref"],
+            "#/$defs/Item"
+        );
+        assert_eq!(mcp.input_schema["$defs"]["Item"]["type"], "string");
+        assert!(mcp.input_schema.get("definitions").is_none());
     }
 
     #[test]

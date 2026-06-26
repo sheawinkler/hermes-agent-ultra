@@ -15,6 +15,8 @@ pub struct JsonSchema {
         skip_serializing_if = "Option::is_none"
     )]
     pub additional_properties: Option<bool>,
+    #[serde(rename = "$defs", skip_serializing_if = "Option::is_none")]
+    pub defs: Option<IndexMap<String, serde_json::Value>>,
 }
 
 impl JsonSchema {
@@ -25,6 +27,7 @@ impl JsonSchema {
             properties: None,
             required: None,
             additional_properties: None,
+            defs: None,
         }
     }
 
@@ -35,6 +38,7 @@ impl JsonSchema {
             properties: Some(properties),
             required: Some(required),
             additional_properties: Some(false),
+            defs: None,
         }
     }
 }
