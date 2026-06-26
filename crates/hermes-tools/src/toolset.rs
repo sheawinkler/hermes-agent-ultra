@@ -56,6 +56,8 @@ pub const TOOLSET_SKILLS: &[&str] = &["skills_list", "skill_view", "skill_manage
 pub const TOOLSET_MEMORY: &[&str] = &["memory"];
 /// Session search tools.
 pub const TOOLSET_SESSION_SEARCH: &[&str] = &["session_search"];
+/// Project/workspace inspection tools.
+pub const TOOLSET_PROJECT: &[&str] = &["project_facts", "project_tree"];
 /// Todo/task management tools.
 pub const TOOLSET_TODO: &[&str] = &["todo"];
 /// Clarification/question tools.
@@ -138,6 +140,8 @@ pub const TOOLSET_CODING: &[&str] = &[
     "browser_vision",
     "browser_console",
     "todo",
+    "project_facts",
+    "project_tree",
     "memory",
     "session_search",
     "clarify",
@@ -262,6 +266,10 @@ impl ToolsetManager {
                 .collect(),
         ));
         self.register(Toolset::new(
+            "project",
+            TOOLSET_PROJECT.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
             "todo",
             TOOLSET_TODO.iter().map(|s| s.to_string()).collect(),
         ));
@@ -343,6 +351,7 @@ impl ToolsetManager {
                 "skills",
                 "memory",
                 "session_search",
+                "project",
                 "todo",
                 "clarify",
                 "code_execution",
@@ -368,6 +377,7 @@ impl ToolsetManager {
                 "image_gen",
                 "memory",
                 "session_search",
+                "project",
                 "todo",
                 "code_execution",
                 "delegation",
@@ -390,6 +400,7 @@ impl ToolsetManager {
                 "skills",
                 "memory",
                 "session_search",
+                "project",
                 "todo",
                 "code_execution",
                 "delegation",
@@ -802,6 +813,8 @@ mod tests {
         assert!(tools.contains(&"video_generate".to_string()));
         assert!(tools.contains(&"spotify_playback".to_string()));
         assert!(tools.contains(&"session_search".to_string()));
+        assert!(tools.contains(&"project_facts".to_string()));
+        assert!(tools.contains(&"project_tree".to_string()));
         assert!(tools.contains(&"text_to_speech".to_string()));
         assert!(!tools.contains(&"send_message".to_string()));
         assert!(tools.contains(&"ha_call_service".to_string()));
@@ -849,6 +862,8 @@ mod tests {
             "todo",
             "memory",
             "session_search",
+            "project_facts",
+            "project_tree",
             "cronjob",
             "rl_start_training",
             "rl_test_inference",
@@ -883,6 +898,8 @@ mod tests {
             "skill_view",
             "skill_manage",
             "todo",
+            "project_facts",
+            "project_tree",
             "memory",
             "session_search",
             "clarify",

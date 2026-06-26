@@ -6,6 +6,7 @@ use regex::Regex;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
+use std::time::Duration;
 use url::Url;
 use uuid::Uuid;
 
@@ -111,6 +112,7 @@ const TAVILY_BASE_URL_DEFAULT: &str = "https://api.tavily.com";
 const SEARXNG_SEARCH_PATH: &str = "/search";
 const BRAVE_SEARCH_URL_DEFAULT: &str = "https://api.search.brave.com/res/v1/web/search";
 const DDG_INSTANT_ANSWER_URL_DEFAULT: &str = "https://api.duckduckgo.com/";
+const DDG_SEARCH_TIMEOUT_SECS_DEFAULT: u64 = 15;
 const PARALLEL_BASE_URL_DEFAULT: &str = "https://api.parallel.ai";
 const PARALLEL_USER_AGENT: &str = "hermes-agent-web/1.0.0";
 const FIRECRAWL_BASE_URL_DEFAULT: &str = "https://api.firecrawl.dev";
@@ -1333,24 +1335,43 @@ fn normalize_brave_results(response: &Value, limit: usize) -> Vec<Value> {
 pub struct DuckDuckGoSearchBackend {
     client: Client,
     endpoint: String,
+    timeout: Duration,
 }
 
 impl DuckDuckGoSearchBackend {
     pub fn new(endpoint: String) -> Self {
+        Self::with_timeout(
+            endpoint,
+            Duration::from_secs(DDG_SEARCH_TIMEOUT_SECS_DEFAULT),
+        )
+    }
+
+    pub fn with_timeout(endpoint: String, timeout: Duration) -> Self {
         Self {
             client: Client::new(),
             endpoint,
+            timeout: timeout.max(Duration::from_millis(50)),
         }
     }
 
     pub fn from_env() -> Result<Self, ToolError> {
-        Ok(Self::new(std::env::var("DDG_SEARCH_URL").unwrap_or_else(
-            |_| DDG_INSTANT_ANSWER_URL_DEFAULT.to_string(),
-        )))
+        let endpoint = std::env::var("DDG_SEARCH_URL")
+            .unwrap_or_else(|_| DDG_INSTANT_ANSWER_URL_DEFAULT.to_string());
+        let timeout = env_optional_nonempty("DDG_SEARCH_TIMEOUT_SECONDS")
+            .or_else(|| env_optional_nonempty("HERMES_DDGS_TIMEOUT_SECONDS"))
+            .and_then(|raw| raw.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .map(Duration::from_secs_f64)
+            .unwrap_or_else(|| Duration::from_secs(DDG_SEARCH_TIMEOUT_SECS_DEFAULT));
+        Ok(Self::with_timeout(endpoint, timeout))
     }
 
     pub fn endpoint(&self) -> &str {
         &self.endpoint
+    }
+
+    pub fn timeout(&self) -> Duration {
+        self.timeout
     }
 }
 
@@ -1371,6 +1392,7 @@ impl WebSearchBackend for DuckDuckGoSearchBackend {
                 ("no_html", "1"),
                 ("skip_disambig", "1"),
             ])
+            .timeout(self.timeout)
             .send()
             .await
             .map_err(|e| {
@@ -2680,6 +2702,8 @@ mod web_search_env_tests {
                 "BRAVE_SEARCH_API_KEY",
                 "BRAVE_SEARCH_URL",
                 "DDG_SEARCH_URL",
+                "DDG_SEARCH_TIMEOUT_SECONDS",
+                "HERMES_DDGS_TIMEOUT_SECONDS",
                 "XAI_API_KEY",
                 "XAI_BASE_URL",
                 "HERMES_WEB_BACKEND",
@@ -2931,6 +2955,48 @@ mod web_search_env_tests {
         let _scope = EnvScope::new();
         std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "ddgs");
         assert_eq!(search_backend_choice_from_env(), "ddgs");
+    }
+
+    #[test]
+    fn duckduckgo_from_env_applies_bounded_timeout() {
+        let _scope = EnvScope::new();
+        std::env::set_var("DDG_SEARCH_TIMEOUT_SECONDS", "0.25");
+        let backend = DuckDuckGoSearchBackend::from_env().expect("ddg backend");
+        assert_eq!(backend.timeout(), std::time::Duration::from_millis(250));
+
+        std::env::set_var("DDG_SEARCH_TIMEOUT_SECONDS", "0");
+        let backend = DuckDuckGoSearchBackend::from_env().expect("ddg backend");
+        assert_eq!(
+            backend.timeout(),
+            std::time::Duration::from_secs(DDG_SEARCH_TIMEOUT_SECS_DEFAULT)
+        );
+    }
+
+    #[tokio::test]
+    async fn duckduckgo_search_times_out_slow_response() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(std::time::Duration::from_millis(200))
+                    .set_body_json(json!({"RelatedTopics": []})),
+            )
+            .mount(&server)
+            .await;
+
+        let backend = DuckDuckGoSearchBackend::with_timeout(
+            server.uri(),
+            std::time::Duration::from_millis(50),
+        );
+        let err = backend
+            .search("slow query", 3, None)
+            .await
+            .expect_err("slow ddg response should time out");
+        assert!(err.to_string().contains("DuckDuckGo search request failed"));
     }
 
     #[test]

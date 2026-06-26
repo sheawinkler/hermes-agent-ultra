@@ -4958,6 +4958,26 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Tooltip indentation and author-map formatting are desktop/metadata polish with no Rust runtime behavior to port."
+    },
+    "489b85ee1e2b": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust DuckDuckGo web-search backend now applies a bounded wall-clock request timeout with DDG_SEARCH_TIMEOUT_SECONDS/HERMES_DDGS_TIMEOUT_SECONDS env knobs, minimum clamp, and slow-response timeout tests."
+    },
+    "4cdd1a3230b8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust project_facts records authoritative workspace metadata including detected root/cwd, manifests, package managers, verification commands, context files, and git branch/head/dirty status; exposed through tool and HTTP RPC tests."
+    },
+    "4e023f5bc990": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust HTTP project.tree RPC builds a deterministic bounded project tree from the detected workspace root, skips heavy dependency/build directories, reports truncation, and is covered by rpc_project_tree_returns_bounded_entries."
+    },
+    "4ffdedd369c1": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Rust project workspace tools are first-class ToolHandler surfaces: project_facts and project_tree are registered in builtins, project/coding/main runtime toolsets, and covered by registry/toolset/unit tests."
     }
   },
   "subject_patterns": [

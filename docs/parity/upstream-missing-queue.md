@@ -1,12 +1,12 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T00:13:14.170796+00:00`
+Generated: `2026-06-26T01:04:29.327488+00:00`
 
-- Range: `HEAD..upstream/main`; total commits tracked: `7084`.
+- Range: `HEAD..upstream/main`; total commits tracked: `7085`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3182 |
+| #20 | GPAR-01 tests+CI parity | 3183 |
 | #21 | GPAR-02 skills parity | 130 |
 | #22 | GPAR-03 UX parity | 959 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
@@ -17,9 +17,9 @@ Generated: `2026-06-26T00:13:14.170796+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 144 |
-| ported | 439 |
-| superseded | 6425 |
+| pending | 140 |
+| ported | 443 |
+| superseded | 6426 |
 
 ## First 100 Pending Commits
 
@@ -115,7 +115,6 @@ Generated: `2026-06-26T00:13:14.170796+00:00`
 | `aab49f6927cc` | #20 | feat(pets): generation RPCs, non-blocking gallery + gateway plumbing |
 | `743985bf1ec4` | #26 | feat(pets): Pokédex generate UI — overlay, animated egg, hatch FX, manage |
 | `b674f7ba28c4` | #26 | feat(pets): offer backend setup when generation is unavailable |
-| `489b85ee1e2b` | #20 | fix(ddgs): bound DuckDuckGo search with a wall-clock timeout (#36776) |
 | `a268dfff0a05` | #26 | fix(desktop): make Agents indicator match the Spawn-tree panel |
 | `8d1706ae5cb2` | #26 | fix(desktop): wire Ctrl+B voice, declutter voice settings, stop endless TTS hang |
 | `2a75c4a8cb4a` | #26 | fix(desktop): give the gateway reconnect loop an escape hatch |
@@ -125,3 +124,4 @@ Generated: `2026-06-26T00:13:14.170796+00:00`
 | `cb6edbf448e7` | #26 | fix(desktop): skip the rev-list count when it is discarded anyway |
 | `65b13e9dbc93` | #26 | fix(desktop): route gateway restart / status / update to the active profile |
 | `00779800f650` | #26 | fix(desktop): hide platform/internal toolsets from the Skills & Tools list |
+| `9a4600c5fb9b` | #26 | fix(desktop): stop the update overlay looking frozen while it works |
