@@ -1,25 +1,25 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T04:15:25.650694+00:00`
+Generated: `2026-06-26T05:06:31.353327+00:00`
 
-- Range: `HEAD..upstream/main`; total commits tracked: `7103`.
+- Range: `HEAD..upstream/main`; total commits tracked: `7116`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3193 |
+| #20 | GPAR-01 tests+CI parity | 3202 |
 | #21 | GPAR-02 skills parity | 130 |
 | #22 | GPAR-03 UX parity | 960 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 23 |
 | #25 | GPAR-06 packaging/docs/install parity | 146 |
-| #26 | GPAR-07 upstream queue backfill | 2163 |
+| #26 | GPAR-07 upstream queue backfill | 2167 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 145 |
-| ported | 454 |
-| superseded | 6428 |
+| pending | 149 |
+| ported | 455 |
+| superseded | 6436 |
 
 ## First 100 Pending Commits
 
@@ -105,7 +105,6 @@ Generated: `2026-06-26T04:15:25.650694+00:00`
 | `7243111c57bb` | #26 | test(desktop): cover fallback timeout onboarding downgrade regression |
 | `d398076c2117` | #26 | fix(desktop): show non-blocking notification on fallback runtime probe |
 | `a4a74ca9e9a0` | #26 | fix(desktop): use notify() with stable id for fallback notification |
-| `b85c46054036` | #20 | fix(tui): targeted save_config_value for model persistence (#48305) |
 | `6da615c77cf8` | #26 | fix(desktop): scope onboarding runtime check to connected provider |
 | `d8fe1c0b4195` | #20 | test(desktop): cover scoped onboarding runtime readiness checks |
 | `2de7549fe0fe` | #26 | feat(desktop): remember window size/position/maximized across launches (salvage #39154) |
@@ -125,3 +124,4 @@ Generated: `2026-06-26T04:15:25.650694+00:00`
 | `9a4600c5fb9b` | #26 | fix(desktop): stop the update overlay looking frozen while it works |
 | `2ea94c6c4581` | #26 | fix(pets): make inline generate cancel discard draft flow |
 | `284be6cc247c` | #26 | Merge pull request #52210 from helix4u/fix/desktop-update-progress-visibility |
+| `7e2db0a140db` | #26 | fix(desktop): stop refText crash on undefined composer attachment holes |

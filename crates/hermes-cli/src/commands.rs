@@ -82,7 +82,9 @@ use crate::model_switch::{
 use crate::pairing_store::{PairingStatus, PairingStore};
 use crate::providers::canonical_provider_id;
 use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
-use hermes_config::{find_node_executable, GatewayConfig, LlmProviderConfig};
+use hermes_config::{
+    find_node_executable, set_user_config_value, GatewayConfig, LlmProviderConfig,
+};
 
 // ---------------------------------------------------------------------------
 // CommandResult
@@ -4297,12 +4299,51 @@ fn run_model_picker_select(
 
 fn persist_current_model_selection(app: &App) -> Result<PathBuf, AgentError> {
     let cfg_path = app.state_root.join("config.yaml");
-    let mut disk = hermes_config::load_user_config_file(&cfg_path)
-        .map_err(|e| AgentError::Config(e.to_string()))?;
-    disk.model = Some(app.current_model.clone());
-    hermes_config::save_config_yaml(&cfg_path, &disk)
-        .map_err(|e| AgentError::Config(e.to_string()))?;
+    if config_uses_nested_model_block(&cfg_path)? {
+        let (provider, model_id) = split_provider_model(&app.current_model);
+        let model_id = model_id.trim();
+        let provider = provider.trim();
+        set_user_config_value(&app.state_root, "model.default", model_id)
+            .map_err(|e| AgentError::Config(e.to_string()))?;
+        if !provider.is_empty() {
+            set_user_config_value(&app.state_root, "model.provider", provider)
+                .map_err(|e| AgentError::Config(e.to_string()))?;
+        }
+        if let Some(base_url) = app
+            .config
+            .llm_providers
+            .get(provider)
+            .and_then(|cfg| cfg.base_url.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            set_user_config_value(&app.state_root, "model.base_url", base_url)
+                .map_err(|e| AgentError::Config(e.to_string()))?;
+        }
+    } else {
+        set_user_config_value(&app.state_root, "model", &app.current_model)
+            .map_err(|e| AgentError::Config(e.to_string()))?;
+    }
     Ok(cfg_path)
+}
+
+fn config_uses_nested_model_block(path: &Path) -> Result<bool, AgentError> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+    if text.trim().is_empty() {
+        return Ok(false);
+    }
+    let value: serde_yaml::Value =
+        serde_yaml::from_str(&text).map_err(|e| AgentError::Config(e.to_string()))?;
+    let Some(root) = value.as_mapping() else {
+        return Ok(false);
+    };
+    Ok(root
+        .get(serde_yaml::Value::String("model".to_string()))
+        .is_some_and(serde_yaml::Value::is_mapping))
 }
 
 fn format_model_persistence_note(app: &App) -> String {
@@ -32337,6 +32378,83 @@ install_command: "uv pip install -r requirements.txt"
         assert!(out.contains("cache_cleared: no"));
         assert!(out.contains("catalog_total: 2"));
         assert!(out.contains("models_sample: model-a, model-b"));
+    }
+
+    #[tokio::test]
+    async fn model_persistence_preserves_nested_model_siblings() {
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        let config_path = app.state_root.join("config.yaml");
+        std::fs::write(
+            &config_path,
+            r#"
+model:
+  default: old-model
+  provider: old-provider
+  base_url: https://old.example.com/v1
+  model_slots:
+    primary: keep-me
+llm_providers:
+  anthropic:
+    base_url: https://api.anthropic.com
+"#,
+        )
+        .expect("write nested model config");
+
+        let mut cfg = (*app.config).clone();
+        cfg.llm_providers.insert(
+            "anthropic".to_string(),
+            LlmProviderConfig {
+                base_url: Some("https://api.anthropic.com".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+        app.config = Arc::new(cfg);
+        app.current_model = "anthropic:claude-sonnet-4-6".to_string();
+
+        let persisted_path =
+            persist_current_model_selection(&app).expect("persist model selection");
+        assert_eq!(persisted_path, config_path);
+
+        let raw: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        let model = raw
+            .get("model")
+            .and_then(serde_yaml::Value::as_mapping)
+            .expect("model block preserved");
+        assert_eq!(
+            model
+                .get(serde_yaml::Value::String("default".to_string()))
+                .and_then(serde_yaml::Value::as_str),
+            Some("claude-sonnet-4-6")
+        );
+        assert_eq!(
+            model
+                .get(serde_yaml::Value::String("provider".to_string()))
+                .and_then(serde_yaml::Value::as_str),
+            Some("anthropic")
+        );
+        assert_eq!(
+            model
+                .get(serde_yaml::Value::String("base_url".to_string()))
+                .and_then(serde_yaml::Value::as_str),
+            Some("https://api.anthropic.com")
+        );
+        assert_eq!(
+            model
+                .get(serde_yaml::Value::String("model_slots".to_string()))
+                .and_then(serde_yaml::Value::as_mapping)
+                .and_then(|slots| {
+                    slots
+                        .get(serde_yaml::Value::String("primary".to_string()))
+                        .and_then(serde_yaml::Value::as_str)
+                }),
+            Some("keep-me")
+        );
+
+        let loaded = hermes_config::load_user_config_file(&config_path).expect("load config");
+        assert_eq!(loaded.model.as_deref(), Some("anthropic:claude-sonnet-4-6"));
     }
 
     #[tokio::test]
