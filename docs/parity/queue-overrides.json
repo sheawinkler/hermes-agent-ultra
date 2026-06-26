@@ -5673,6 +5673,26 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream only corrects a stale MCP comment in cli-config.yaml.example, a file not shipped by Hermes Agent Ultra. Local MCP configuration docs live under website/docs/reference/mcp-config-reference.md and website/docs/user-guide/features/tool-gateway.md."
+    },
+    "98ecd0beeba9f4f1b62df73b9c6e03dd4126f3d2": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream only fixes a stale Python tui_gateway/server.py MCP late-refresh docstring. Hermes Agent Ultra does not ship tui_gateway/server.py; Rust MCP late-refresh behavior and documentation are owned by the Rust CLI/tool snapshot surfaces and existing parity checkpoints."
+    },
+    "b1ab5a8ae1d93d863ce3418f7abdb4fc8fee2c1d": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Antigravity CLI delegation, output-format, and timeout/bounding guidance is ported into the optional Rust-loaded antigravity-cli skill, with version bumped to 0.2.0."
+    },
+    "37c37c9dc51118b75bbd3eec9b689e540683a13a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream google-antigravity provider-profile registration was transient and later removed upstream. Hermes Agent Ultra never ships a Rust google-antigravity provider alias; the optional antigravity-cli skill remains an operator guide, not an OAuth provider registration."
+    },
+    "84e1d31e5442eeff0bfcf1c2ffab6acf7fe95f45": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Kanban injected-guidance refactor is represented locally by Rust Kanban command/runtime behavior plus v2 kanban-worker and kanban-orchestrator skills that explicitly state the lifecycle is auto-injected while retaining deeper playbooks. Rust Kanban tests cover command parsing, task state, attachments, and goal-loop behavior."
     }
   },
   "subject_patterns": [
