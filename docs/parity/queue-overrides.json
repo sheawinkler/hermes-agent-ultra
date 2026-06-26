@@ -5138,6 +5138,16 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust as a first-class virtual MoA provider: model/provider catalogs expose moa:default, provider identity/startup diagnostics treat MoA as a no-key virtual provider instead of a generic API backend, CLI model switching persists moa:default without rebuilding a fake agent, and selected MoA turns automatically route through Rust quorum fan-out with upstream-style reference voters and a concrete aggregator model before restoring the visible virtual selection."
+    },
+    "525ee58b43f53b99a0858cfdb1fbf3991f08b8fe": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust image_generate as a first-class Krea 2 backend: provider selection accepts krea/krea-ai, model/config resolution supports krea-2-medium, krea-2-large, and krea-2-medium-turbo, direct KREA_API_KEY and Nous-managed Krea gateway transports submit to /generate/image/krea/krea-2/{model}, async jobs are polled through /jobs/{job_id}, generated URLs are materialized into the Rust image cache when possible, and hermetic wiremock tests cover direct, managed, retry, auth, config, and capability behavior."
+    },
+    "2c02583c2b19f72b3904481c9d219e325b35ef10": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Krea payload construction: image_url/reference_image_urls are deduplicated, capped at 10, and converted to Krea image_style_references objects with {url, strength: 0.6} instead of invalid bare URL strings; regression tests assert the exact request shape."
     }
   },
   "subject_patterns": [

@@ -1,6 +1,6 @@
 # Global Parity Proof
 
-Generated: `2026-06-26T11:06:18.269413+00:00`
+Generated: `2026-06-26T18:34:05.584299+00:00`
 
 ## Gate Status
 
@@ -38,7 +38,7 @@ Generated: `2026-06-26T11:06:18.269413+00:00`
 | `max_deep_problem_solving_gaps` | 0.0 |
 | `max_deep_problem_solving_unverified_cases` | 0.0 |
 | `max_deep_problem_solving_missing_rust_refs` | 0.0 |
-| `max_queue_pending_commits` | 144.0 |
+| `max_queue_pending_commits` | 127.0 |
 
 ## GPAR Ticket Completion
 
