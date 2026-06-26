@@ -89,6 +89,7 @@ pub enum AcpMethod {
     SetSessionModel,
     SetSessionMode,
     SetConfigOption,
+    SessionTitle,
 
     // -- Legacy / compatibility --
     CreateConversation,
@@ -119,6 +120,9 @@ impl From<&str> for AcpMethod {
             "session/set_mode" | "set_session_mode" => Self::SetSessionMode,
             "session/set_config" | "session/set_config_option" | "set_config_option" => {
                 Self::SetConfigOption
+            }
+            "session.title" | "session/title" | "session/set_title" | "set_session_title" => {
+                Self::SessionTitle
             }
 
             // Legacy methods
@@ -459,6 +463,8 @@ mod tests {
             AcpMethod::from("session/set_config_option"),
             AcpMethod::SetConfigOption
         );
+        assert_eq!(AcpMethod::from("session.title"), AcpMethod::SessionTitle);
+        assert_eq!(AcpMethod::from("session/title"), AcpMethod::SessionTitle);
         assert_eq!(
             AcpMethod::from("conversation.create"),
             AcpMethod::CreateConversation

@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T14:50:33.227123+00:00`
+Generated: `2026-06-26T16:17:41.023197+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7116`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-26T14:50:33.227123+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 138 |
-| ported | 466 |
+| pending | 135 |
+| ported | 469 |
 | superseded | 6436 |
 
 ## First 100 Pending Commits
@@ -53,9 +53,6 @@ Generated: `2026-06-26T14:50:33.227123+00:00`
 | `8666fd7635ba` | #26 | fix(desktop): preserve other providers' hide-all in model visibility dialog |
 | `461fcc096479` | #26 | test(desktop): harden model-visibility toggle + dedupe default expansion |
 | `fb3d31ba8b77` | #26 | feat(desktop): add Update now button to About panel |
-| `0e47f68a479a` | #26 | fix(desktop): rename branched session via session.title RPC |
-| `7f43378931f3` | #26 | test(desktop): cover renameSessionPreferringRpc routing |
-| `ed81f0b633c7` | #26 | fix(desktop): log session.title RPC failure before REST fallback |
 | `65a477f12e35` | #26 | feat(desktop): add Update now button to About panel (#50186) |
 | `6bbacc223899` | #26 | fix(desktop): make cold-start port-announcement deadline tolerant |
 | `f72690825e76` | #26 | fix(desktop/windows): stop in-app update from cascading into a backend restart loop (#50381) |
@@ -125,3 +122,6 @@ Generated: `2026-06-26T14:50:33.227123+00:00`
 | `4aeaba692251` | #26 | test(desktop): cover undefined/null attachment holes in ref helpers |
 | `cbe5c5689f9c` | #26 | perf(desktop): bound tool-result rendering so big /learn runs don't freeze (#52273) |
 | `f2c45e2c816d` | #26 | fix(desktop): limit pending tool shimmer to action verb |
+| `281b333cc5f0` | #26 | test(desktop): cover localized tool title shimmer |
+| `e92b5c6af8be` | #20 | feat(pets): quality-first OpenRouter model chain + stronger atlas gates + global pet-gen notifications |
+| `7078d9d1e29d` | #26 | fix(pets): raise generation timeouts for the slow quality-first model path |

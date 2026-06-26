@@ -14,10 +14,11 @@ use serde_json::Value;
 // ---------------------------------------------------------------------------
 
 /// Lifecycle phase of an ACP session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionPhase {
     /// Session created, awaiting first prompt.
+    #[default]
     Created,
     /// Session is actively processing a prompt.
     Active,
@@ -29,12 +30,6 @@ pub enum SessionPhase {
     Cancelled,
     /// Session encountered an unrecoverable error.
     Failed,
-}
-
-impl Default for SessionPhase {
-    fn default() -> Self {
-        Self::Created
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -52,6 +47,7 @@ pub struct SessionState {
     pub base_url: Option<String>,
     pub profile: Option<String>,
     pub home: Option<String>,
+    pub title: Option<String>,
     pub phase: SessionPhase,
     pub history: Vec<Value>,
     pub mode: Option<String>,
@@ -82,6 +78,7 @@ pub struct SessionMetaUpdate {
     pub base_url: Option<String>,
     pub profile: Option<String>,
     pub home: Option<String>,
+    pub title: Option<String>,
     pub config_options: HashMap<String, String>,
 }
 
@@ -100,6 +97,7 @@ impl SessionState {
             base_url: None,
             profile: None,
             home: None,
+            title: None,
             phase: SessionPhase::Created,
             history: Vec::new(),
             mode: None,
@@ -165,9 +163,11 @@ impl From<&SessionState> for SessionInfo {
 ///
 /// Sessions are held in-memory for fast access. A persistence callback can be
 /// provided to sync state to a database or disk.
+type PersistCallback = dyn Fn(&SessionState) + Send + Sync;
+
 pub struct SessionManager {
     sessions: Mutex<HashMap<String, SessionState>>,
-    on_persist: Option<Box<dyn Fn(&SessionState) + Send + Sync>>,
+    on_persist: Option<Box<PersistCallback>>,
 }
 
 impl SessionManager {
@@ -388,6 +388,7 @@ impl SessionManager {
         new_state.base_url = original.base_url.clone();
         new_state.profile = original.profile.clone();
         new_state.home = original.home.clone();
+        new_state.title = original.title.clone();
         new_state.mode = original.mode.clone();
         new_state.config_options = original.config_options.clone();
         new_state.history = original.history.clone();
@@ -469,6 +470,9 @@ fn apply_session_meta(state: &mut SessionState, update: SessionMetaUpdate) {
     }
     if let Some(home) = update.home.and_then(normalize_meta_string) {
         state.home = Some(home);
+    }
+    if let Some(title) = update.title.and_then(normalize_meta_string) {
+        state.title = Some(title);
     }
     for (key, value) in update.config_options {
         let key = key.trim();
@@ -633,6 +637,41 @@ mod tests {
     }
 
     #[test]
+    fn update_session_meta_sets_title_and_persists_once() {
+        use std::sync::{Arc, Mutex};
+
+        let persisted = Arc::new(Mutex::new(Vec::<SessionState>::new()));
+        let persisted_for_cb = persisted.clone();
+        let mgr = SessionManager::new().with_persist_callback(move |state| {
+            persisted_for_cb
+                .lock()
+                .expect("persisted lock")
+                .push(state.clone());
+        });
+        let state = mgr.create_session("/tmp");
+        let sid = state.session_id;
+        persisted.lock().expect("persisted lock").clear();
+
+        let updated = mgr
+            .update_session_meta(
+                &sid,
+                SessionMetaUpdate {
+                    title: Some("  My branch  ".to_string()),
+                    ..SessionMetaUpdate::default()
+                },
+            )
+            .expect("session exists");
+
+        assert_eq!(updated.title.as_deref(), Some("My branch"));
+        let stored = mgr.get_session(&sid).expect("session exists");
+        assert_eq!(stored.title.as_deref(), Some("My branch"));
+
+        let persisted = persisted.lock().expect("persisted lock");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].title.as_deref(), Some("My branch"));
+    }
+
+    #[test]
     fn profile_home_metadata_flows_through_create_update_and_fork() {
         let mgr = SessionManager::new();
         let state = mgr.create_session_with_meta(
@@ -640,12 +679,14 @@ mod tests {
             SessionMetaUpdate {
                 profile: Some("work".to_string()),
                 home: Some("/profiles/work".to_string()),
+                title: Some("Original title".to_string()),
                 provider: Some("openrouter".to_string()),
                 ..SessionMetaUpdate::default()
             },
         );
         assert_eq!(state.profile.as_deref(), Some("work"));
         assert_eq!(state.home.as_deref(), Some("/profiles/work"));
+        assert_eq!(state.title.as_deref(), Some("Original title"));
 
         let updated = mgr
             .update_session_meta(
@@ -678,6 +719,7 @@ mod tests {
         assert_eq!(forked.profile.as_deref(), Some("scratch"));
         assert_eq!(forked.home.as_deref(), Some("/profiles/scratch"));
         assert_eq!(forked.provider.as_deref(), Some("openrouter"));
+        assert_eq!(forked.title.as_deref(), Some("Original title"));
     }
 
     #[test]

@@ -5093,6 +5093,21 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust display surfaces: CLI /usage, generic usage stats, and session-insights terminal/gateway renderers keep provider-agnostic token counts while hiding unreliable estimated cost and cache-read/write reporting; Nous credits/billing and internal cost guards remain intact."
+    },
+    "0e47f68a479aa4de70f588b6bf40f3f5ac3470e0": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust ACP: session.title/session-title RPC updates the live in-memory SessionState title via SessionManager, persists through the existing callback path, emits session_info_update, and makes session/list prefer explicit titles over history-derived titles. This covers runtime-only branched/new sessions before any stored DB row exists."
+    },
+    "7f43378931f3f3ed619588ba50d08779c82ea1eb": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as Rust ACP regression coverage: tests prove session.title renames a live runtime-only session without REST, persists exactly once, updates session_info_update/list surfaces, maps session.title and session/title method aliases, and rejects empty-title or missing-session RPC calls."
+    },
+    "ed81f0b633c7c2ee9526b63be34fe0e5b13ab701": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by eliminating the silent fallback path in Rust: session.title returns an explicit JSON-RPC error for missing sessions and empty titles, while successful live-session title updates emit an observable session_info_update event and persist through the Rust manager callback."
     }
   },
   "subject_patterns": [
