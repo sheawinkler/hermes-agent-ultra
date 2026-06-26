@@ -9,6 +9,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use url::Url;
 
+pub const RELAY_UNAUTHORIZED_CLOSE_CODE: u16 = 4401;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayCloseDisposition {
+    Retryable,
+    Disabled,
+}
+
 /// Connector-forwarded passthrough-plane request (`passthrough_forward`).
 ///
 /// The connector edge already verified provider signatures and stripped shared
@@ -104,6 +112,32 @@ pub fn relay_going_idle_frame() -> Value {
 pub fn relay_inbound_ack_frame(buffer_id: &str) -> Option<Value> {
     let buffer_id = buffer_id.trim();
     (!buffer_id.is_empty()).then(|| json!({"type": "inbound_ack", "bufferId": buffer_id}))
+}
+
+/// Classify relay socket close events.
+///
+/// A connector `4401` before the first successful descriptor/handshake remains
+/// retryable because provisioning may still be racing. The same close code after
+/// a successful handshake is a terminal opt-out/credential-revocation signal.
+pub fn relay_close_disposition(
+    close_code: Option<u16>,
+    handshake_succeeded: bool,
+) -> RelayCloseDisposition {
+    if close_code == Some(RELAY_UNAUTHORIZED_CLOSE_CODE) && handshake_succeeded {
+        RelayCloseDisposition::Disabled
+    } else {
+        RelayCloseDisposition::Retryable
+    }
+}
+
+pub fn relay_platform_state_for_close(
+    close_code: Option<u16>,
+    handshake_succeeded: bool,
+) -> &'static str {
+    match relay_close_disposition(close_code, handshake_succeeded) {
+        RelayCloseDisposition::Disabled => "disabled",
+        RelayCloseDisposition::Retryable => "retrying",
+    }
 }
 
 /// Convert a relay dial URL to the management-plane `/relay/policy` URL.
@@ -237,6 +271,23 @@ mod tests {
             json!({"type": "inbound_ack", "bufferId": "buf-9"})
         );
         assert!(relay_inbound_ack_frame("   ").is_none());
+    }
+
+    #[test]
+    fn terminal_4401_after_handshake_maps_to_disabled_not_retrying() {
+        assert_eq!(
+            relay_close_disposition(Some(RELAY_UNAUTHORIZED_CLOSE_CODE), true),
+            RelayCloseDisposition::Disabled
+        );
+        assert_eq!(
+            relay_platform_state_for_close(Some(RELAY_UNAUTHORIZED_CLOSE_CODE), true),
+            "disabled"
+        );
+        assert_eq!(
+            relay_close_disposition(Some(RELAY_UNAUTHORIZED_CLOSE_CODE), false),
+            RelayCloseDisposition::Retryable
+        );
+        assert_eq!(relay_platform_state_for_close(Some(1006), true), "retrying");
     }
 
     #[test]

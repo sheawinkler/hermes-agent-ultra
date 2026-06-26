@@ -491,6 +491,8 @@ pub struct TuiState {
     pub sticky_prompt: String,
     /// Number of queued/running background jobs.
     pub background_jobs_running: usize,
+    /// Number of active in-process sub-agents from lineage records.
+    pub active_subagents_running: usize,
     /// Whether the right-side live activity lane is open.
     pub activity_lane_open: bool,
     /// Right-side lane mode.
@@ -604,6 +606,7 @@ impl Default for TuiState {
             timeline_seq: 0,
             sticky_prompt: String::new(),
             background_jobs_running: 0,
+            active_subagents_running: 0,
             activity_lane_open: true,
             activity_lane_mode: ActivityLaneMode::Live,
             show_timestamps: false,
@@ -4093,6 +4096,9 @@ fn render_status(
     if state.background_jobs_running > 0 {
         status_text.push_str(&format!(" | bg:{}", state.background_jobs_running));
     }
+    if state.active_subagents_running > 0 {
+        status_text.push_str(&format!(" | ⛓:{}", state.active_subagents_running));
+    }
     if let Some(credits_notice) = hermes_core::credits::last_nous_credits_notice_line() {
         status_text.push_str(" | ");
         status_text.push_str(&credits_notice);
@@ -5786,8 +5792,10 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
             }
             _ = frame_tick.tick() => {
                 let previous_jobs = state.background_jobs_running;
+                let previous_subagents = state.active_subagents_running;
                 if last_jobs_refresh.elapsed() >= Duration::from_secs(1) {
                     state.background_jobs_running = app.running_background_job_count();
+                    state.active_subagents_running = app.active_subagent_count();
                     last_jobs_refresh = Instant::now();
                 }
                 if state.processing {
@@ -5803,7 +5811,9 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                     last_pet_tick = Instant::now();
                     needs_redraw = true;
                 }
-                if previous_jobs != state.background_jobs_running {
+                if previous_jobs != state.background_jobs_running
+                    || previous_subagents != state.active_subagents_running
+                {
                     needs_redraw = true;
                 }
             }
@@ -5913,6 +5923,7 @@ mod tests {
         assert_eq!(state.cursor_position, 0);
         assert!(state.completions.is_empty());
         assert!(!state.processing);
+        assert_eq!(state.active_subagents_running, 0);
         assert!(state.selection_anchor.is_none());
         assert!(!state.history_search_active);
     }
