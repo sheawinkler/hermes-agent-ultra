@@ -970,6 +970,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         code_index_max_symbols: config.agent.code_index_max_symbols,
         lsp_context_enabled: config.agent.lsp_context_enabled,
         lsp_context_max_chars: config.agent.lsp_context_max_chars,
+        preflight_context_compress: config.agent.preflight_context_compress,
         ..AgentConfig::default()
     }
 }
