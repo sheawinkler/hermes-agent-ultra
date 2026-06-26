@@ -116,6 +116,21 @@ pub fn build_tool_preview(
         };
     }
 
+    if matches!(tool_name, "terminal" | "execute_code") {
+        let key = if tool_name == "execute_code" {
+            "code"
+        } else {
+            "command"
+        };
+        let command = obj.get(key).and_then(value_to_preview_string)?;
+        let preview = summarize_shell_command(&command);
+        return (!preview.trim().is_empty()).then(|| truncate(&preview, max_len));
+    }
+
+    if tool_name == "read_file" {
+        return read_file_preview(obj).map(|preview| truncate(&preview, max_len));
+    }
+
     // Look up the primary argument for this tool
     let key = primary_args.get(tool_name).copied().or_else(|| {
         for fallback in &[
@@ -213,13 +228,19 @@ pub fn get_cute_tool_message(
         "terminal" => format!(
             "{} 💻 $         {}  {}",
             prefix,
-            trunc(&get_str("command"), 42),
+            trunc(
+                &build_tool_preview(tool_name, args, 0).unwrap_or_else(|| get_str("command")),
+                42
+            ),
             dur
         ),
         "read_file" => format!(
             "{} 📖 read      {}  {}",
             prefix,
-            path_trunc(&get_str("path"), 35),
+            trunc(
+                &build_tool_preview(tool_name, args, 0).unwrap_or_else(|| get_str("path")),
+                42
+            ),
             dur
         ),
         "write_file" => format!(
@@ -252,9 +273,11 @@ pub fn get_cute_tool_message(
             format!("{} 🌐 navigate  {}  {}", prefix, trunc(&domain, 35), dur)
         }
         "execute_code" => {
-            let code = get_str("code");
-            let first_line = code.lines().next().unwrap_or("").trim();
-            format!("{} 🐍 exec      {}  {}", prefix, trunc(first_line, 35), dur)
+            let preview = build_tool_preview(tool_name, args, 0).unwrap_or_else(|| {
+                let code = get_str("code");
+                code.lines().next().unwrap_or("").trim().to_string()
+            });
+            format!("{} 🐍 exec      {}  {}", prefix, trunc(&preview, 35), dur)
         }
         _ => {
             let preview = build_tool_preview(tool_name, args, 35).unwrap_or_default();
@@ -581,11 +604,328 @@ fn oneline(text: &str) -> String {
 }
 
 fn truncate(text: &str, max: usize) -> String {
-    if text.len() > max {
+    if max > 0 && text.len() > max {
         format!("{}...", &text[..max.saturating_sub(3)])
     } else {
         text.to_string()
     }
+}
+
+fn value_to_preview_string(value: &serde_json::Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        Some(s.to_string())
+    } else if let Some(n) = value.as_i64() {
+        Some(n.to_string())
+    } else if let Some(n) = value.as_u64() {
+        Some(n.to_string())
+    } else if let Some(b) = value.as_bool() {
+        Some(b.to_string())
+    } else if let Some(arr) = value.as_array() {
+        arr.first().and_then(value_to_preview_string)
+    } else {
+        None
+    }
+}
+
+fn shell_basename(head: &str) -> &str {
+    head.rsplit_once('/').map(|(_, tail)| tail).unwrap_or(head)
+}
+
+fn is_shell_silent_head(head: &str) -> bool {
+    matches!(
+        head,
+        "cd" | "pushd"
+            | "popd"
+            | "export"
+            | "set"
+            | "unset"
+            | "source"
+            | "."
+            | "true"
+            | "false"
+            | ":"
+    )
+}
+
+fn is_shell_pipe_tail_head(head: &str) -> bool {
+    matches!(head, "head" | "tail" | "wc" | "sort" | "uniq")
+}
+
+fn is_env_assignment(word: &str) -> bool {
+    let Some((name, _)) = word.split_once('=') else {
+        return false;
+    };
+    let mut chars = name.chars();
+    matches!(chars.next(), Some('_') | Some('A'..='Z') | Some('a'..='z'))
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn split_shell_words(segment: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut buf = String::new();
+    let mut quote: Option<char> = None;
+    let mut prev = '\0';
+
+    for ch in segment.chars() {
+        if let Some(active_quote) = quote {
+            buf.push(ch);
+            if ch == active_quote && prev != '\\' {
+                quote = None;
+            }
+            prev = ch;
+            continue;
+        }
+
+        if matches!(ch, '\'' | '"') {
+            quote = Some(ch);
+            buf.push(ch);
+        } else if ch.is_whitespace() {
+            if !buf.is_empty() {
+                words.push(std::mem::take(&mut buf));
+            }
+        } else {
+            buf.push(ch);
+        }
+        prev = ch;
+    }
+
+    if !buf.is_empty() {
+        words.push(buf);
+    }
+    words
+}
+
+fn strip_shell_pipe_tail(segment: &str) -> String {
+    let words = split_shell_words(segment);
+    let mut out = Vec::new();
+
+    for (index, word) in words.iter().enumerate() {
+        if word == "|"
+            && words
+                .get(index + 1)
+                .map(|head| is_shell_pipe_tail_head(shell_basename(head)))
+                .unwrap_or(false)
+        {
+            break;
+        }
+        out.push(word.as_str());
+    }
+
+    out.join(" ").trim().to_string()
+}
+
+fn split_shell_compound(command: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut buf = String::new();
+    let mut quote: Option<char> = None;
+    let mut prev = '\0';
+    let mut chars = command.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if let Some(active_quote) = quote {
+            buf.push(ch);
+            if ch == active_quote && prev != '\\' {
+                quote = None;
+            }
+            prev = ch;
+            continue;
+        }
+
+        if matches!(ch, '\'' | '"') {
+            quote = Some(ch);
+            buf.push(ch);
+            prev = ch;
+            continue;
+        }
+
+        let compound_separator = match ch {
+            '&' if chars.peek() == Some(&'&') => {
+                chars.next();
+                true
+            }
+            '|' if chars.peek() == Some(&'|') => {
+                chars.next();
+                true
+            }
+            ';' | '\n' => true,
+            _ => false,
+        };
+
+        if compound_separator {
+            let segment = strip_shell_pipe_tail(buf.trim());
+            if !segment.is_empty() {
+                segments.push(segment);
+            }
+            buf.clear();
+        } else {
+            buf.push(ch);
+        }
+        prev = ch;
+    }
+
+    let segment = strip_shell_pipe_tail(buf.trim());
+    if !segment.is_empty() {
+        segments.push(segment);
+    }
+    segments
+}
+
+fn shell_head_word(segment: &str) -> String {
+    split_shell_words(segment)
+        .into_iter()
+        .find(|word| !is_env_assignment(word))
+        .map(|word| shell_basename(&word).to_string())
+        .unwrap_or_default()
+}
+
+fn is_redirect_operator(word: &str) -> bool {
+    let stripped = word.trim_start_matches(|ch: char| ch.is_ascii_digit());
+    matches!(stripped, ">" | ">>" | "<")
+}
+
+fn is_redirect_dup(word: &str) -> bool {
+    let stripped = word.trim_start_matches(|ch: char| ch.is_ascii_digit());
+    let Some((op, fd)) = stripped.split_once('&') else {
+        return false;
+    };
+    matches!(op, ">" | "<") && fd.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn clean_shell_segment(segment: &str) -> String {
+    let words = split_shell_words(segment);
+    let mut out = Vec::new();
+    let mut index = 0;
+
+    while index < words.len() {
+        let word = &words[index];
+        if is_redirect_operator(word) {
+            index += 2;
+            continue;
+        }
+        if is_redirect_dup(word) {
+            index += 1;
+            continue;
+        }
+        out.push(word.as_str());
+        index += 1;
+    }
+
+    out.join(" ").trim().to_string()
+}
+
+fn is_shell_boundary_echo(segment: &str) -> bool {
+    let words = split_shell_words(segment);
+    if words
+        .first()
+        .map(|word| shell_basename(word) == "echo")
+        .unwrap_or(false)
+    {
+        let rest = words
+            .iter()
+            .skip(1)
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(" ");
+        return rest.contains("--")
+            || rest.contains("_exit=")
+            || rest.contains("exit=")
+            || rest.contains("$?")
+            || rest.contains("${PIPESTATUS")
+            || rest.contains("PIPESTATUS");
+    }
+    false
+}
+
+fn summarize_shell_command(command: &str) -> String {
+    let original = oneline(command);
+    if original.is_empty() {
+        return String::new();
+    }
+
+    let segments = split_shell_compound(&original);
+    if segments.len() <= 1 {
+        let cleaned =
+            clean_shell_segment(segments.first().map(String::as_str).unwrap_or(&original));
+        return if cleaned.is_empty() {
+            original
+        } else {
+            cleaned
+        };
+    }
+
+    let core = segments
+        .iter()
+        .filter_map(|segment| {
+            let cleaned = clean_shell_segment(segment);
+            let head = shell_head_word(&cleaned);
+            if cleaned.is_empty() || is_shell_silent_head(&head) || is_shell_boundary_echo(&cleaned)
+            {
+                None
+            } else {
+                Some(cleaned)
+            }
+        })
+        .collect::<Vec<_>>();
+
+    match core.as_slice() {
+        [] => original,
+        [single] => single.clone(),
+        [first, rest @ ..] => format!(
+            "{} + {} {}",
+            first,
+            rest.len(),
+            if rest.len() == 1 {
+                "command"
+            } else {
+                "commands"
+            }
+        ),
+    }
+}
+
+fn path_basename(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    normalized
+        .rsplit('/')
+        .find(|part| !part.is_empty())
+        .unwrap_or(normalized.as_str())
+        .to_string()
+}
+
+fn value_to_i64(value: &serde_json::Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|n| i64::try_from(n).ok()))
+        .or_else(|| value.as_str().and_then(|s| s.trim().parse::<i64>().ok()))
+}
+
+fn read_file_line_label(map: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    let offset = map.get("offset").and_then(value_to_i64)?;
+    if offset <= 0 {
+        return None;
+    }
+    let limit = map.get("limit").and_then(value_to_i64).unwrap_or(0);
+    if limit <= 1 {
+        Some(format!("L{offset}"))
+    } else {
+        Some(format!("L{}-{}", offset, offset + limit - 1))
+    }
+}
+
+fn read_file_preview(map: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    let path = map
+        .get("path")
+        .or_else(|| map.get("file"))
+        .or_else(|| map.get("filepath"))
+        .and_then(value_to_preview_string)?;
+    let label = path_basename(path.trim());
+    if label.is_empty() {
+        return None;
+    }
+    Some(match read_file_line_label(map) {
+        Some(line_label) => format!("{label} {line_label}"),
+        None => label,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -631,6 +971,66 @@ mod tests {
         let args = serde_json::json!({"command": "ls -la"});
         let preview = build_tool_preview("terminal", &args, 0);
         assert_eq!(preview, Some("ls -la".to_string()));
+    }
+
+    #[test]
+    fn test_terminal_preview_compacts_shell_plumbing() {
+        let args = serde_json::json!({
+            "command": "cd /Users/brooklyn/www/bb-rainbows && pnpm run lint 2>&1 | tail -20; echo \"lint_exit=${PIPESTATUS[0]}\""
+        });
+        let preview = build_tool_preview("terminal", &args, 0);
+        assert_eq!(preview, Some("pnpm run lint".to_string()));
+    }
+
+    #[test]
+    fn test_terminal_preview_compacts_multi_command_probe() {
+        let args = serde_json::json!({
+            "command": "which node pnpm corepack; node -v; echo \"---\"; corepack --version 2>&1; echo \"---pnpm via corepack---\"; pnpm --version 2>&1 | tail -5"
+        });
+        let preview = build_tool_preview("terminal", &args, 0);
+        assert_eq!(
+            preview,
+            Some("which node pnpm corepack + 3 commands".to_string())
+        );
+    }
+
+    #[test]
+    fn test_execute_code_preview_uses_shell_summary() {
+        let args = serde_json::json!({
+            "code": "cd /tmp/demo && python -m pytest -q 2>&1 | tail -5; echo \"exit=$?\""
+        });
+        let preview = build_tool_preview("execute_code", &args, 0);
+        assert_eq!(preview, Some("python -m pytest -q".to_string()));
+    }
+
+    #[test]
+    fn test_read_file_preview_uses_basename_and_line_range() {
+        let args = serde_json::json!({"path":"./src/main.ts", "offset":25, "limit":10});
+        let preview = build_tool_preview("read_file", &args, 0);
+        assert_eq!(preview, Some("main.ts L25-34".to_string()));
+    }
+
+    #[test]
+    fn test_cute_tool_messages_use_compact_previews() {
+        let terminal = get_cute_tool_message(
+            "terminal",
+            &serde_json::json!({
+                "command": "cd /repo && cargo test -p hermes-cli-ui 2>&1 | tail -20; echo \"exit=$?\""
+            }),
+            0.1,
+            None,
+        );
+        assert!(terminal.contains("cargo test -p hermes-cli-ui"));
+        assert!(!terminal.contains("tail -20"));
+
+        let read = get_cute_tool_message(
+            "read_file",
+            &serde_json::json!({"path":"/tmp/work/src/lib.rs", "offset": 7, "limit": 2}),
+            0.1,
+            None,
+        );
+        assert!(read.contains("lib.rs L7-8"));
+        assert!(!read.contains("/tmp/work"));
     }
 
     #[test]

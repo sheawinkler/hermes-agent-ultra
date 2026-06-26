@@ -5023,6 +5023,16 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust managed-node resolver computes candidate command names once, mirrors platform-specific node/bin ordering, and prepends existing managed Node dirs without duplicate PATH entries; tests cover Windows and POSIX ordering."
+    },
+    "41f302fa73f5": {
+      "disposition": "ported",
+      "notes": "Rust CLI/TUI/gateway and intelligence display now render compact tool row titles/previews for terminal and execute_code shell wrappers plus read_file basename/line ranges, matching the desktop compact-title behavior while preserving raw args for details/copy.",
+      "owner": "rust-runtime"
+    },
+    "f3d6d9bbd335": {
+      "disposition": "ported",
+      "notes": "Rust shared CLI UI preview path now compacts terminal/execute_code/read_file previews for CLI, TUI, and gateway plain progress, and intelligence cute messages use the same compact labels. Focused tests cover shell plumbing, multi-command probes, execute_code, and read_file ranges.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [

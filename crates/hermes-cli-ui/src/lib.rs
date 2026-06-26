@@ -261,7 +261,7 @@ fn command_catalog_matches_filter(command: &str, description: &str, query: &str)
     }
     let cmd = command.to_ascii_lowercase();
     let desc = description.to_ascii_lowercase();
-    cmd.contains(&q) || desc.contains(&q.trim_start_matches('/'))
+    cmd.contains(&q) || desc.contains(q.trim_start_matches('/'))
 }
 
 fn command_match_score(query: &str, cmd: &str, desc: &str) -> Option<i32> {
