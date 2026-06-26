@@ -989,7 +989,7 @@ impl HermesAcpHandler {
         };
         self.event_sink.push(AcpEvent::session_info_update(
             session_id,
-            session_title_from_history(&state.history),
+            session_display_title(&state),
             session_info_refresh_timestamp(),
         ));
     }
@@ -1440,9 +1440,14 @@ fn session_meta_from_params(
     .map(str::trim)
     .filter(|home| !home.is_empty())
     .map(ToOwned::to_owned);
+    let title = param_str(p, "title")
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(ToOwned::to_owned);
     Ok(SessionMetaUpdate {
         profile,
         home,
+        title,
         ..SessionMetaUpdate::default()
     })
 }
@@ -1648,6 +1653,16 @@ fn session_title_from_history(history: &[Value]) -> Option<String> {
     })
 }
 
+fn session_display_title(session: &SessionState) -> Option<String> {
+    session
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| session_title_from_history(&session.history))
+}
+
 fn session_info_value(session: &SessionState) -> Value {
     json!({
         "sessionId": session.session_id,
@@ -1659,7 +1674,7 @@ fn session_info_value(session: &SessionState) -> Value {
         "historyLen": session.history.len(),
         "createdAt": session.created_at.to_string(),
         "updatedAt": session.updated_at.to_string(),
-        "title": session_title_from_history(&session.history),
+        "title": session_display_title(session),
     })
 }
 
@@ -2125,6 +2140,55 @@ impl AcpHandler for HermesAcpHandler {
                         request.id,
                         json!({"configOptions": [{"configId": key, "value": value}]}),
                     ),
+                    None => AcpResponse::error(
+                        request.id,
+                        -32602,
+                        format!("Session not found: {}", session_id),
+                    ),
+                }
+            }
+
+            AcpMethod::SessionTitle => {
+                let Some(p) = params_obj(&request.params) else {
+                    return AcpResponse::error(request.id, -32602, "Missing params");
+                };
+                let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
+                let title = param_str(p, "title").map(str::trim).unwrap_or("");
+
+                if session_id.trim().is_empty() {
+                    return AcpResponse::error(
+                        request.id,
+                        -32602,
+                        "Missing session_id/sessionId for session.title",
+                    );
+                }
+                if title.is_empty() {
+                    return AcpResponse::error(
+                        request.id,
+                        -32602,
+                        "Missing non-empty title for session.title",
+                    );
+                }
+
+                match self.session_manager.update_session_meta(
+                    session_id,
+                    SessionMetaUpdate {
+                        title: Some(title.to_string()),
+                        ..SessionMetaUpdate::default()
+                    },
+                ) {
+                    Some(state) => {
+                        self.emit_session_info_update(session_id);
+                        let title = state.title.clone().unwrap_or_else(|| title.to_string());
+                        AcpResponse::success(
+                            request.id,
+                            json!({
+                                "sessionId": state.session_id,
+                                "session_id": state.session_id,
+                                "title": title,
+                            }),
+                        )
+                    }
                     None => AcpResponse::error(
                         request.id,
                         -32602,
@@ -2848,6 +2912,118 @@ mod tests {
             state.config_options.get("sandbox").map(String::as_str),
             Some("workspace-write")
         );
+    }
+
+    #[tokio::test]
+    async fn test_session_title_rpc_updates_live_session_and_persists() {
+        let persisted = Arc::new(std::sync::Mutex::new(Vec::<SessionState>::new()));
+        let persisted_for_cb = persisted.clone();
+        let session_manager = Arc::new(SessionManager::new().with_persist_callback(move |state| {
+            persisted_for_cb
+                .lock()
+                .expect("persisted lock")
+                .push(state.clone());
+        }));
+        let handler = HermesAcpHandler::new(
+            session_manager,
+            Arc::new(EventSink::default()),
+            Arc::new(PermissionStore::new()),
+        );
+        let state = handler.session_manager.create_session("/runtime-only");
+        let session_id = state.session_id;
+        handler.session_manager.set_history(
+            &session_id,
+            vec![json!({"role": "user", "content": "fallback history title"})],
+        );
+        persisted.lock().expect("persisted lock").clear();
+
+        let response = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session.title".into(),
+                params: Some(json!({
+                    "session_id": session_id,
+                    "title": "  My branch  "
+                })),
+            })
+            .await;
+
+        assert!(response.error.is_none());
+        let result = response.result.expect("title result");
+        assert_eq!(result["sessionId"], session_id);
+        assert_eq!(result["session_id"], session_id);
+        assert_eq!(result["title"], "My branch");
+
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.title.as_deref(), Some("My branch"));
+
+        {
+            let persisted = persisted.lock().expect("persisted lock");
+            assert_eq!(persisted.len(), 1);
+            assert_eq!(persisted[0].session_id, session_id);
+            assert_eq!(persisted[0].title.as_deref(), Some("My branch"));
+        }
+
+        let events = handler.event_sink.drain_for_session(&session_id);
+        let info_updates = events
+            .iter()
+            .filter(|event| event.kind == AcpEventKind::SessionInfoUpdate)
+            .collect::<Vec<_>>();
+        assert_eq!(info_updates.len(), 1);
+        assert_eq!(info_updates[0].title.as_deref(), Some("My branch"));
+
+        let listed = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "session/list".into(),
+                params: Some(json!({"cwd": "/runtime-only"})),
+            })
+            .await
+            .result
+            .expect("list result");
+        let sessions = listed["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["title"], "My branch");
+    }
+
+    #[tokio::test]
+    async fn test_session_title_rpc_rejects_empty_and_missing_session() {
+        let handler = make_handler();
+        let session_id = create_session(&handler).await;
+
+        let empty = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/title".into(),
+                params: Some(json!({"sessionId": session_id, "title": "   "})),
+            })
+            .await;
+        assert_eq!(empty.error.as_ref().map(|err| err.code), Some(-32602));
+        assert_eq!(
+            handler
+                .session_manager
+                .get_session(&session_id)
+                .unwrap()
+                .title,
+            None
+        );
+
+        let missing = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "session.title".into(),
+                params: Some(json!({"sessionId": "missing", "title": "Name"})),
+            })
+            .await;
+        assert_eq!(missing.error.as_ref().map(|err| err.code), Some(-32602));
+        assert!(missing
+            .error
+            .as_ref()
+            .is_some_and(|err| err.message.contains("Session not found")));
     }
 
     #[tokio::test]
