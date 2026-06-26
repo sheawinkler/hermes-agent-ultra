@@ -49,7 +49,7 @@ use crate::auth::{
 };
 use crate::cli::Cli;
 use crate::commands::recover_queued_background_jobs;
-use crate::model_switch::provider_model_ids;
+use crate::model_switch::{provider_model_ids, MOA_DEFAULT_PRESET, MOA_PROVIDER};
 use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
 use crate::terminal_backend::build_terminal_backend;
 use crate::tui::StreamHandle;
@@ -62,8 +62,22 @@ const QUORUM_MAX_VOTER_OUTPUT_CHARS: usize = 120_000;
 const QUORUM_DEFAULT_VOTER_PASSES: usize = 6;
 const QUORUM_AGENT_CONTRACT_DEFAULT_PATH: &str =
     "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/QUORUM_AGENTS.md";
+const MOA_DEFAULT_REFERENCE_MODELS: &[&str] = &[
+    "openai-codex:gpt-5.5",
+    "openrouter:deepseek/deepseek-v4-pro",
+];
+const MOA_DEFAULT_AGGREGATOR_MODEL: &str = "openrouter:anthropic/claude-opus-4.7";
 const COMPOSER_DRAFTS_FILE: &str = "composer-drafts.json";
 const MAX_COMPOSER_DRAFTS: usize = 50;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MoaRuntimePreset {
+    name: &'static str,
+    reference_models: &'static [&'static str],
+    aggregator_model: &'static str,
+    voters: usize,
+    mode: &'static str,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct ComposerDraftStore {
@@ -1533,7 +1547,94 @@ impl App {
         messages
     }
 
+    fn moa_provider_is_virtual(provider: &str) -> bool {
+        normalize_runtime_provider_name(provider) == MOA_PROVIDER
+    }
+
+    fn moa_preset_name_for_model(provider_model: &str) -> Option<String> {
+        let trimmed = provider_model.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let (provider, preset) = trimmed
+            .split_once(':')
+            .map(|(provider, preset)| (provider.trim(), preset.trim()))
+            .unwrap_or((trimmed, MOA_DEFAULT_PRESET));
+        if !Self::moa_provider_is_virtual(provider) {
+            return None;
+        }
+        let preset = if preset.is_empty() {
+            MOA_DEFAULT_PRESET
+        } else {
+            preset
+        };
+        Some(preset.to_ascii_lowercase())
+    }
+
+    fn moa_virtual_model_name(provider_model: &str) -> Option<String> {
+        let preset = Self::moa_preset_name_for_model(provider_model)?;
+        let canonical = format!("{MOA_PROVIDER}:{preset}");
+        Self::moa_runtime_preset_for_model(&canonical)?;
+        Some(canonical)
+    }
+
+    fn moa_runtime_preset_for_model(provider_model: &str) -> Option<MoaRuntimePreset> {
+        match Self::moa_preset_name_for_model(provider_model)?.as_str() {
+            MOA_DEFAULT_PRESET => Some(MoaRuntimePreset {
+                name: MOA_DEFAULT_PRESET,
+                reference_models: MOA_DEFAULT_REFERENCE_MODELS,
+                aggregator_model: MOA_DEFAULT_AGGREGATOR_MODEL,
+                voters: MOA_DEFAULT_REFERENCE_MODELS.len(),
+                mode: "moa",
+            }),
+            _ => None,
+        }
+    }
+
+    fn moa_quorum_policy_for_current_model(&self) -> Option<QuorumPolicy> {
+        let preset = Self::moa_runtime_preset_for_model(&self.current_model)?;
+        Some(QuorumPolicy {
+            enabled: true,
+            voters: preset.voters,
+            models: preset
+                .reference_models
+                .iter()
+                .map(|model| (*model).to_string())
+                .collect(),
+            mode: format!("{}-{}", preset.mode, preset.name),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        })
+    }
+
+    fn quorum_synthesis_model_for_original(original_model: &str) -> String {
+        Self::moa_runtime_preset_for_model(original_model)
+            .map(|preset| preset.aggregator_model.to_string())
+            .unwrap_or_else(|| original_model.trim().to_string())
+    }
+
     fn quorum_mode_armed_for_turn(&self) -> Option<QuorumPolicy> {
+        let has_user_turn = self
+            .messages
+            .iter()
+            .any(|m| m.role == hermes_core::MessageRole::User);
+        if let Some(policy) = self.moa_quorum_policy_for_current_model() {
+            if !has_user_turn {
+                Self::emit_lifecycle_event(
+                    &self.stream_handle_shared,
+                    "moa virtual model selected but no user turn present yet; waiting for next user prompt",
+                );
+                return None;
+            }
+            Self::emit_lifecycle_event(
+                &self.stream_handle_shared,
+                format!(
+                    "moa virtual model {} routes this turn through {} reference voters",
+                    self.current_model, policy.voters
+                ),
+            );
+            return Some(policy);
+        }
+
         let policy = match load_quorum_policy() {
             Ok(policy) => policy,
             Err(err) => {
@@ -1561,10 +1662,6 @@ impl App {
                     .unwrap_or_default()
                     .starts_with(QUORUM_HINT_PREFIX)
         });
-        let has_user_turn = self
-            .messages
-            .iter()
-            .any(|m| m.role == hermes_core::MessageRole::User);
         if !has_user_turn {
             if self.quorum_armed_once || has_hint {
                 Self::emit_lifecycle_event(
@@ -2877,6 +2974,36 @@ impl App {
         if next_model.is_empty() {
             return Err(AgentError::Config("model cannot be empty".to_string()));
         }
+        if let Some(preset) = Self::moa_preset_name_for_model(next_model) {
+            let Some(next_model) = Self::moa_virtual_model_name(next_model) else {
+                return Err(AgentError::Config(format!(
+                    "unsupported MoA preset '{preset}'; supported presets: {MOA_DEFAULT_PRESET}"
+                )));
+            };
+            self.current_model = next_model;
+            sync_runtime_model_env(&self.config, &self.current_model);
+            match SessionPersistence::new(&self.state_root)
+                .update_session_model(&self.session_id, &self.current_model)
+            {
+                Ok(true) => tracing::debug!(
+                    "Persisted virtual MoA model switch for session {} to {}",
+                    self.session_id,
+                    self.current_model
+                ),
+                Ok(false) => {}
+                Err(err) => {
+                    tracing::debug!(
+                        "Failed to persist virtual MoA model switch to session DB: {}",
+                        err
+                    )
+                }
+            }
+            tracing::info!(
+                "Switched model to virtual MoA preset: {}",
+                self.current_model
+            );
+            return Ok(());
+        }
 
         let next_agent = self.build_agent_for_model(next_model)?;
         self.current_model = next_model.to_string();
@@ -3327,6 +3454,7 @@ impl App {
         if self.current_model != original_model {
             self.switch_model(&original_model);
         }
+        let synthesis_model = Self::quorum_synthesis_model_for_original(&original_model);
         let artifact_path = self.persist_quorum_artifact(&policy, &outcomes)?;
         Self::emit_lifecycle_event(
             &self.stream_handle_shared,
@@ -3357,6 +3485,9 @@ impl App {
             )));
         }
 
+        if self.current_model != synthesis_model {
+            self.try_switch_model(&synthesis_model)?;
+        }
         let synthesis_system = Self::build_quorum_synthesis_prompt(&policy, &outcomes);
         let mut synthesis_system_sections = Vec::new();
         if let Some((contract_path, contract_text)) = quorum_contract.as_ref() {
@@ -3376,13 +3507,30 @@ impl App {
             "quorum synthesis from voter outputs",
             75,
         );
-        let result = self
+        let synthesis_result = self
             .run_messages_with_current_agent_tools(
                 synthesis_messages,
                 true,
                 Self::quorum_synthesis_tools_enabled(),
             )
-            .await?;
+            .await;
+        if self.current_model != original_model {
+            if let Err(err) = self.try_switch_model(&original_model) {
+                tracing::warn!(
+                    model = %original_model,
+                    error = %err,
+                    "Failed to restore original model after quorum synthesis"
+                );
+                Self::emit_lifecycle_event(
+                    &self.stream_handle_shared,
+                    format!(
+                        "warning: failed to restore original model after quorum synthesis: {}",
+                        err
+                    ),
+                );
+            }
+        }
+        let result = synthesis_result?;
         let total_turns = result.total_turns;
         let synthesis_text = Self::extract_last_assistant_output(&result.messages);
         if let Err(err) =
@@ -4660,6 +4808,70 @@ mod tests {
     }
 
     #[test]
+    fn moa_virtual_model_switch_updates_session_without_rebuilding_agent() {
+        let _guard = env_test_lock();
+        let env_keys = [
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "HERMES_TUI_PROVIDER",
+        ];
+        let saved_env: Vec<(&str, Option<String>)> = env_keys
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());
+        let original_agent_model = app.agent.config.model.clone();
+        let persistence = SessionPersistence::new(tmp.path());
+        persistence
+            .persist_session(
+                &app.session_id,
+                &[hermes_core::Message::user("hello")],
+                Some(&app.current_model),
+                Some("cli"),
+                None,
+                None,
+            )
+            .unwrap();
+
+        app.try_switch_model("mixture-of-agents:default")
+            .expect("virtual moa switch");
+
+        assert_eq!(app.current_model, "moa:default");
+        assert_eq!(
+            app.agent.config.model, original_agent_model,
+            "virtual model selection should not rebuild the current concrete agent"
+        );
+        assert_eq!(
+            persistence.get_session_model(&app.session_id).unwrap(),
+            Some("moa:default".to_string())
+        );
+        assert_eq!(
+            std::env::var("HERMES_MODEL").ok().as_deref(),
+            Some("moa:default")
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_PROVIDER").ok().as_deref(),
+            Some("moa")
+        );
+
+        let err = app
+            .try_switch_model("moa:unknown")
+            .expect_err("unsupported preset should fail closed");
+        assert!(err.to_string().contains("unsupported MoA preset"));
+        assert_eq!(app.current_model, "moa:default");
+
+        for (key, value) in saved_env {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
     fn model_switch_preflight_warning_is_ui_only_and_keeps_messages_clean() {
         let mut app = build_minimal_test_app();
         app.current_model = "anthropic:claude-sonnet-4-6".to_string();
@@ -5118,6 +5330,36 @@ mod tests {
             Some(v) => std::env::set_var("HERMES_HOME", v),
             None => std::env::remove_var("HERMES_HOME"),
         }
+    }
+
+    #[test]
+    fn moa_virtual_model_arms_quorum_without_global_policy() {
+        let mut app = build_minimal_test_app();
+        app.current_model = "moa:default".to_string();
+        app.messages = vec![hermes_core::Message::user("solve with moa")];
+
+        let policy = app
+            .quorum_mode_armed_for_turn()
+            .expect("moa model should arm quorum fan-out");
+
+        assert!(policy.enabled);
+        assert_eq!(policy.voters, 2);
+        assert_eq!(
+            policy.models,
+            vec![
+                "openai-codex:gpt-5.5".to_string(),
+                "openrouter:deepseek/deepseek-v4-pro".to_string()
+            ]
+        );
+        assert_eq!(policy.mode, "moa-default");
+        assert_eq!(
+            App::quorum_synthesis_model_for_original("moa:default"),
+            "openrouter:anthropic/claude-opus-4.7"
+        );
+        assert_eq!(
+            App::quorum_synthesis_model_for_original("anthropic:claude-sonnet-4-6"),
+            "anthropic:claude-sonnet-4-6"
+        );
     }
 
     #[test]

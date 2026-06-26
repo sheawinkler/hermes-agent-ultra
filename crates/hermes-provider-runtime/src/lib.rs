@@ -364,6 +364,7 @@ pub fn normalize_runtime_provider_name(provider: &str) -> String {
     match normalized.as_str() {
         "codex" => "openai-codex".to_string(),
         "claude" | "claude-code" => "anthropic".to_string(),
+        "mixture" | "mixture-of-agents" | "mixture_of_agents" => "moa".to_string(),
         "nous_api" | "nousapi" | "nous-portal-api" => "nous-api".to_string(),
         "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
@@ -525,6 +526,8 @@ pub fn allow_no_api_key(
 ) -> bool {
     local_backends::is_local_backend_provider(runtime_provider)
         || local_backends::is_local_backend_provider(provider_name)
+        || runtime_provider == "moa"
+        || provider_name == "moa"
         || runtime_provider == "bedrock"
         || provider_name == "bedrock"
         || base_url.is_some_and(local_backends::is_local_or_private_base_url)
@@ -699,6 +702,11 @@ pub fn build_provider_with_auth_resolver(
 ) -> Arc<dyn LlmProvider> {
     let (provider_name, model_name) = resolve_provider_and_model(config, model);
     let runtime_provider = normalize_runtime_provider_name(provider_name.as_str());
+    if runtime_provider == "moa" {
+        return Arc::new(NoBackendProvider {
+            model: model.to_string(),
+        });
+    }
     let model_name = hermes_agent::model_normalize::normalize_model_for_provider(
         model_name.as_str(),
         runtime_provider.as_str(),
@@ -1175,6 +1183,13 @@ mod tests {
         assert_eq!(local.base_url.as_deref(), Some("http://127.0.0.1:8080/v1"));
         assert!(!local.api_key_present);
         assert!(local.local_no_key_allowed);
+
+        let moa = provider_runtime_diagnostic(&local_cfg, "moa:default");
+        assert_eq!(moa.runtime_provider, "moa");
+        assert_eq!(moa.model, "default");
+        assert!(moa.base_url.is_none());
+        assert!(!moa.api_key_present);
+        assert!(moa.local_no_key_allowed);
     }
 
     #[test]
@@ -1664,6 +1679,9 @@ mod tests {
             normalize_runtime_provider_name("nous-portal-api"),
             "nous-api"
         );
+        assert_eq!(normalize_runtime_provider_name("mixture"), "moa");
+        assert_eq!(normalize_runtime_provider_name("mixture-of-agents"), "moa");
+        assert_eq!(normalize_runtime_provider_name("mixture_of_agents"), "moa");
         assert_eq!(normalize_runtime_provider_name("moonshot"), "kimi");
         assert_eq!(normalize_runtime_provider_name("novita-ai"), "novita");
         assert_eq!(
@@ -1943,6 +1961,7 @@ mod tests {
         assert!(allow_no_api_key("ollama-local", "ollama-local", None));
         assert!(allow_no_api_key("lmstudio", "lmstudio", None));
         assert!(allow_no_api_key("koboldcpp", "koboldcpp", None));
+        assert!(allow_no_api_key("moa", "moa", None));
         assert!(allow_no_api_key(
             "text-generation-webui",
             "text-generation-webui",

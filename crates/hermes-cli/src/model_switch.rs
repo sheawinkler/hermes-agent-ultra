@@ -17,6 +17,8 @@ use sha2::{Digest, Sha256};
 use crate::providers::{canonical_provider_id, provider_capability_for};
 const NOUS_DEFAULT_INFERENCE_BASE_URL: &str = "https://inference-api.nousresearch.com/v1";
 const PROVIDER_CATALOG_CACHE_VERSION: u32 = 2;
+pub const MOA_PROVIDER: &str = "moa";
+pub const MOA_DEFAULT_PRESET: &str = "default";
 const OLLAMA_LOCAL_DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434/v1";
 const LLAMA_CPP_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 const VLLM_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8000/v1";
@@ -45,6 +47,7 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
             "tencent/hy3-preview",
         ],
     ),
+    (MOA_PROVIDER, &[MOA_DEFAULT_PRESET]),
     (
         "novita",
         &[
@@ -547,13 +550,15 @@ pub fn normalize_provider_model(input: &str) -> Result<String, AgentError> {
                 .to_string(),
         ));
     }
+    let canonical_provider = canonical_provider_id(trimmed);
     if !trimmed.contains(':')
-        && curated_provider_slugs()
-            .iter()
-            .any(|provider| provider.eq_ignore_ascii_case(trimmed))
+        && curated_provider_slugs().iter().any(|provider| {
+            provider.eq_ignore_ascii_case(trimmed)
+                || provider.eq_ignore_ascii_case(canonical_provider.as_str())
+        })
     {
         return Err(AgentError::Config(format!(
-            "`{trimmed}` is a provider, not a model. Use `{trimmed}:<model-id>`."
+            "`{trimmed}` is a provider, not a model. Use `{canonical_provider}:<model-id>`."
         )));
     }
     if trimmed.contains(':') {
@@ -645,6 +650,7 @@ pub fn provider_picker_description(provider: &str) -> &'static str {
                 "Nous Portal (Everything your agent needs, 300+ models with bundled tool use)"
             }
             "openrouter" => "OpenRouter (Pay-per-use API aggregator)",
+            "moa" => "Mixture of Agents (virtual provider backed by Rust quorum fan-out)",
             "novita" => "NovitaAI (Cloud: Model API, Agent Sandbox, GPU Cloud)",
             "anthropic" => "Anthropic (Claude models via API key or Claude Code)",
             "openai-codex" => "OpenAI Codex (Codex CLI via ChatGPT subscription or API key)",
@@ -1235,6 +1241,9 @@ pub async fn provider_model_ids_with_client(
     if curated.is_empty() {
         return Vec::new();
     }
+    if catalog_provider == MOA_PROVIDER {
+        return curated.iter().map(|model| model.to_string()).collect();
+    }
     if let Some(cached) = load_provider_catalog_cache(catalog_provider) {
         if !cached.is_empty() {
             return cached;
@@ -1430,7 +1439,7 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        cached_provider_catalog_status, clear_provider_catalog_cache,
+        cached_provider_catalog_status, clear_provider_catalog_cache, curated_provider_slugs,
         is_models_dev_preferred_provider, load_provider_catalog_cache, merge_with_models_dev,
         normalize_provider_model, persist_provider_catalog_cache, provider_catalog_cache_path,
         provider_catalog_entries, provider_catalog_entries_for_config,
@@ -1498,6 +1507,8 @@ mod tests {
     fn normalize_provider_model_rejects_list_and_bare_provider_names() {
         assert!(normalize_provider_model("list").is_err());
         assert!(normalize_provider_model("nous").is_err());
+        assert!(normalize_provider_model("mixture").is_err());
+        assert!(normalize_provider_model("mixture-of-agents").is_err());
         assert_eq!(
             normalize_provider_model("nous:openai/gpt-5.5-pro").expect("valid provider model"),
             "nous:openai/gpt-5.5-pro"
@@ -1596,6 +1607,14 @@ mod tests {
         assert!(provider_curated_models("koboldcpp").contains(&"koboldcpp"));
         assert!(provider_curated_models("text-generation-webui").contains(&"oobabooga"));
         assert!(provider_curated_models("tabbyapi").contains(&"exllamav2"));
+    }
+
+    #[test]
+    fn moa_virtual_provider_is_listed_as_static_preset_catalog() {
+        assert_eq!(provider_curated_models("moa"), &["default"]);
+        assert_eq!(provider_curated_models("mixture-of-agents"), &["default"]);
+        assert!(provider_picker_description("moa").contains("virtual provider"));
+        assert!(curated_provider_slugs().contains(&"moa"));
     }
 
     #[test]
@@ -1899,6 +1918,27 @@ mod tests {
         // Smoke-test the function shape with unknown providers only, avoiding network use.
         let entries = provider_catalog_entries(&["unknown-provider"]).await;
         assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn moa_provider_model_ids_bypass_dynamic_catalog_cache() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _env = ScopedCatalogEnv::new(tmp.path());
+        let client = seeded_client(json!({
+            "moa": {
+                "models": {
+                    "shadow": {"tool_call": true}
+                }
+            }
+        }));
+
+        let out = provider_model_ids_with_client("mixture", &client).await;
+
+        assert_eq!(out, vec!["default".to_string()]);
+        assert!(
+            !provider_catalog_cache_path("moa").exists(),
+            "virtual provider catalog should not be persisted to dynamic cache"
+        );
     }
 
     #[tokio::test]
