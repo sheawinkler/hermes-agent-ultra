@@ -534,6 +534,11 @@
       "disposition": "ported",
       "notes": "Rust build_agent_config now honors HERMES_MAX_TOKENS as the highest-precedence output-token override and falls back to active provider config caps for CLI and gateway-created agents, with focused precedence tests."
     },
+    "1ca1f9f2c7a1": {
+      "disposition": "superseded",
+      "notes": "Upstream DRYs Python tui_gateway deferred-session scaffolding only. Ultra's Rust ACP resume path is handled by typed SessionManager/handler code and now has focused non-building resume metadata tests, so the Python refactor has no Rust runtime port target.",
+      "owner": "rust-runtime"
+    },
     "1ca29723f0ea": {
       "disposition": "ported",
       "notes": "Ported in Rust: preflight-warning generation is no longer swallowed silently; warning/persistence outcomes are built after actual config-write evidence, config-save failures are logged with tracing::warn and surfaced in replies, and CLI/gateway/TUI switch responses consistently surface warning text through UI-only channels where applicable.",
@@ -1049,6 +1054,11 @@
     "3be9fb73173e": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "3bf00e459af7": {
+      "disposition": "ported",
+      "notes": "Rust ACP resume is non-building by default: session/resume updates typed metadata, emits a session_info_update payload, replays history, and never invokes the prompt executor on the response path. Resume now accepts runtime identity fields and focused tests prove deferred/non-executing behavior.",
+      "owner": "rust-runtime"
     },
     "3bfbb3f2a025": {
       "disposition": "superseded",
@@ -1734,6 +1744,11 @@
     "628f9040df43": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "62af32efe7c0": {
+      "disposition": "ported",
+      "notes": "Rust ACP keeps active session metadata backend-authoritative: resume accepts cwd/profile/home/title plus runtime identity fields, emits session_info_update with cwd/model/provider/apiMode/baseUrl/profile/home/title, and tests prove clients can realign from Rust session state without invoking prompt execution.",
+      "owner": "rust-runtime"
     },
     "62c2f5d8d2a6": {
       "disposition": "superseded",
@@ -3374,6 +3389,11 @@
       "disposition": "superseded",
       "notes": "Electron desktop icon padding changes do not affect the Rust CLI/gateway runtime or local parity gates."
     },
+    "c4c590e4a14a": {
+      "disposition": "ported",
+      "notes": "Rust ACP avoids the upstream slow cold-resume class by design and now pins it with tests: session/resume returns after metadata update/history replay without prompt-agent execution, restores runtime identity fields, and emits session_info_update before command/usage events. Rust GatewayAgentCache already provides active-aware LRU/idle eviction for cached agents where that cache abstraction is used.",
+      "owner": "rust-runtime"
+    },
     "c4b8f5efee8c": {
       "disposition": "ported",
       "notes": "Rust corrupt-store backup derives the backup filename from the canonical store basename and writes only within the original store parent directory, matching the upstream path-injection hardening intent."
@@ -4272,6 +4292,11 @@
     "f764b0400ad7": {
       "disposition": "superseded",
       "notes": "Deleting the active profile fallback is a desktop profile-switcher/delete-dialog behavior. Rust CLI profile delete already clears the active marker when deleting the active profile and does not maintain an Electron active-profile rail."
+    },
+    "f7bf740640e4": {
+      "disposition": "superseded",
+      "notes": "Upstream fixes a recycled Electron runtimeId warm-cache mismatch in apps/desktop. Ultra has no desktop ClientSessionState runtime-id cache; Rust ACP emits backend session_id/session metadata directly on resume/title updates, so there is no cross-wired runtime-id fast path to port.",
+      "owner": "rust-runtime"
     },
     "f7c1cbe66ffa": {
       "disposition": "superseded",
