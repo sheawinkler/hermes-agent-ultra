@@ -30,7 +30,7 @@ use hermes_intelligence::{build_model_switch_preflight_warning, estimate_message
 pub use hermes_provider_runtime::{
     active_llm_provider_config, allow_no_api_key, normalize_runtime_provider_name,
     provider_api_key_from_env, provider_base_url_from_env, provider_default_base_url,
-    resolve_provider_and_model,
+    resolve_provider_and_model, select_startup_model_with_fallback_and_auth_resolver,
 };
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
@@ -2187,6 +2187,12 @@ impl App {
             .clone()
             .unwrap_or_else(|| "gpt-5.5".to_string());
         let current_model = resolve_startup_model(&config, &configured_model);
+        let current_model = select_startup_model_with_fallback_and_auth_resolver(
+            &config,
+            &current_model,
+            Some(&provider_oauth_token_from_auth_state),
+        )
+        .selected_model;
         let current_personality = config.personality.clone();
 
         sync_runtime_model_env(&config, &current_model);
@@ -6504,7 +6510,13 @@ pub fn build_runtime_cron_scheduler(
     tools: &ToolRegistry,
 ) -> CronScheduler {
     let persistence = Arc::new(FileJobPersistence::with_dir(data_dir));
-    let provider = build_provider(config, model);
+    let model = select_startup_model_with_fallback_and_auth_resolver(
+        config,
+        model,
+        Some(&provider_oauth_token_from_auth_state),
+    )
+    .selected_model;
+    let provider = build_provider(config, &model);
     let runner = Arc::new(CronRunner::new(
         provider,
         Arc::new(bridge_tool_registry_excluding(tools, &["cronjob"])),
@@ -6648,7 +6660,7 @@ fn default_rtk_raw_mode() -> bool {
     }
 }
 
-fn provider_oauth_token_from_auth_state(provider: &str) -> Option<String> {
+pub fn provider_oauth_token_from_auth_state(provider: &str) -> Option<String> {
     let provider_key = match normalize_runtime_provider_name(provider).as_str() {
         "openai" => "openai",
         "openai-codex" | "codex" => "openai-codex",

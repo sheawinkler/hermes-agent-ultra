@@ -304,8 +304,10 @@ mod tests {
 
     #[test]
     fn policy_guard_admin_header() {
-        let mut p = PolicyGuardConfig::default();
-        p.admin_key = Some(Arc::from("secret-token"));
+        let p = PolicyGuardConfig {
+            admin_key: Some(Arc::from("secret-token")),
+            ..PolicyGuardConfig::default()
+        };
         let mut ok = HeaderMap::new();
         ok.insert(
             axum::http::HeaderName::from_static("x-hermes-policy-admin"),

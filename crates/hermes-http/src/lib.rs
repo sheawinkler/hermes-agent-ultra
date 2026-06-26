@@ -2,6 +2,7 @@
 //!
 //! Environment (see also `security` module):
 //! - `HERMES_HTTP_MAX_BODY_BYTES` — max JSON body size for POST routes (default 2 MiB).
+//!
 //! Policy HTTP routes are intentionally omitted (Hermes Python does not expose them).
 
 mod security;
@@ -29,12 +30,6 @@ use axum::{Json, Router};
 use chrono::Utc;
 use futures::StreamExt;
 use hermes_agent::agent_loop::ToolRegistry as AgentToolRegistry;
-use hermes_agent::provider::{
-    AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
-};
-use hermes_agent::providers_extra::{
-    CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
-};
 use hermes_agent::session_persistence::SessionPersistence;
 use hermes_agent::smart_model_routing::ApiMode;
 use hermes_agent::{
@@ -48,19 +43,15 @@ use hermes_core::traits::{ParseMode, PlatformAdapter};
 use hermes_core::{AgentError, LlmProvider, Message, MessageRole, StreamChunk};
 use hermes_gateway::gateway::{GatewayConfig as RuntimeGatewayConfig, IncomingMessage};
 use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
+use hermes_provider_runtime::{
+    build_provider as build_runtime_provider, select_startup_model_with_fallback,
+};
 use hermes_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 pub const HTTP_PLATFORM: &str = "http";
 const SESSION_KEY_HEADER: &str = "x-hermes-session-key";
-const COPILOT_BASE_URL: &str = "https://api.githubcopilot.com";
-const GEMINI_OPENAI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
-const GMI_BASE_URL: &str = "https://api.gmi-serving.com/v1";
-const ARCEE_BASE_URL: &str = "https://api.arcee.ai/api/v1";
-const XIAOMI_BASE_URL: &str = "https://api.xiaomimimo.com/v1";
-const TENCENT_TOKENHUB_BASE_URL: &str = "https://tokenhub.tencentmaas.com/v1";
-
 #[derive(Clone, Default)]
 pub struct ChatOutboundBuffer {
     inner: Arc<Mutex<HashMap<String, Vec<String>>>>,
@@ -1002,80 +993,7 @@ pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
 }
 
 pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvider> {
-    let (raw_provider_name, model_name) = model.split_once(':').unwrap_or(("openai", model));
-    let provider_name = canonical_gateway_provider_name(raw_provider_name);
-    let provider_config = config
-        .llm_providers
-        .get(raw_provider_name)
-        .or_else(|| config.llm_providers.get(provider_name));
-    let api_key = provider_config
-        .and_then(|c| c.api_key.clone())
-        .unwrap_or_default();
-    if api_key.is_empty() {
-        return Arc::new(GenericProvider::new(
-            "https://api.openai.com/v1".to_string(),
-            "missing-api-key",
-            model_name,
-        ));
-    }
-
-    let base_url = provider_config.and_then(|c| c.base_url.clone());
-    match provider_name {
-        "openai" => {
-            let mut p = OpenAiProvider::new(&api_key).with_model(model_name);
-            if let Some(url) = base_url {
-                p = p.with_base_url(url);
-            }
-            Arc::new(p)
-        }
-        "anthropic" => {
-            let mut p = AnthropicProvider::new(&api_key).with_model(model_name);
-            if let Some(url) = base_url {
-                p = p.with_base_url(url);
-            }
-            Arc::new(p)
-        }
-        "openrouter" => Arc::new(OpenRouterProvider::new(&api_key).with_model(model_name)),
-        "qwen" => Arc::new(QwenProvider::new(&api_key).with_model(model_name)),
-        "kimi" | "moonshot" => Arc::new(KimiProvider::new(&api_key).with_model(model_name)),
-        "minimax" => Arc::new(MiniMaxProvider::new(&api_key).with_model(model_name)),
-        "nous" => Arc::new(NousProvider::new(&api_key).with_model(model_name)),
-        "copilot" => Arc::new(
-            CopilotProvider::new(
-                base_url.unwrap_or_else(|| COPILOT_BASE_URL.to_string()),
-                &api_key,
-            )
-            .with_model(model_name),
-        ),
-        _ => {
-            let url = base_url
-                .or_else(|| default_gateway_base_url(provider_name).map(str::to_string))
-                .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-            Arc::new(GenericProvider::new(url, &api_key, model_name))
-        }
-    }
-}
-
-fn canonical_gateway_provider_name(provider: &str) -> &str {
-    match provider.trim().to_ascii_lowercase().as_str() {
-        "google" | "google-gemini" | "google-ai-studio" => "gemini",
-        "gmi-cloud" | "gmicloud" => "gmi",
-        "arcee-ai" | "arceeai" => "arcee",
-        "mimo" | "xiaomi-mimo" => "xiaomi",
-        "tencent" | "tokenhub" | "tencent-cloud" | "tencentmaas" => "tencent-tokenhub",
-        _ => provider,
-    }
-}
-
-fn default_gateway_base_url(provider: &str) -> Option<&'static str> {
-    match provider {
-        "gemini" => Some(GEMINI_OPENAI_BASE_URL),
-        "gmi" => Some(GMI_BASE_URL),
-        "arcee" => Some(ARCEE_BASE_URL),
-        "xiaomi" => Some(XIAOMI_BASE_URL),
-        "tencent-tokenhub" => Some(TENCENT_TOKENHUB_BASE_URL),
-        _ => None,
-    }
+    build_runtime_provider(config, model)
 }
 
 fn resolve_model_for_gateway(default_model: &str, ctx: &GatewayRuntimeContext) -> String {
@@ -1108,6 +1026,8 @@ fn build_agent_for_gateway_context(
 ) -> AgentLoop {
     let effective_model =
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("dynamic"), ctx);
+    let effective_model =
+        select_startup_model_with_fallback(config, &effective_model).selected_model;
     let provider = build_provider(config, &effective_model);
     let mut agent_config = build_agent_config(config, &effective_model);
     if let Some(personality) = ctx.personality.clone() {
@@ -1165,11 +1085,15 @@ fn resolve_model(default_model: &str, provider: Option<&str>, model: Option<&str
 mod tests {
     use super::*;
     use hermes_config::LlmProviderConfig;
+    use hermes_provider_runtime::{
+        normalize_runtime_provider_name, provider_default_base_url, ARCEE_BASE_URL,
+        GEMINI_BASE_URL, GMI_BASE_URL, TENCENT_TOKENHUB_BASE_URL, XIAOMI_BASE_URL,
+    };
 
     #[test]
     fn gateway_provider_aliases_resolve_to_direct_provider_defaults() {
         let cases = [
-            ("google-ai-studio", "gemini", GEMINI_OPENAI_BASE_URL),
+            ("google-ai-studio", "gemini", GEMINI_BASE_URL),
             ("gmicloud", "gmi", GMI_BASE_URL),
             ("arcee-ai", "arcee", ARCEE_BASE_URL),
             ("mimo", "xiaomi", XIAOMI_BASE_URL),
@@ -1177,8 +1101,8 @@ mod tests {
         ];
 
         for (alias, canonical, base_url) in cases {
-            assert_eq!(canonical_gateway_provider_name(alias), canonical);
-            assert_eq!(default_gateway_base_url(canonical), Some(base_url));
+            assert_eq!(normalize_runtime_provider_name(alias), canonical);
+            assert_eq!(provider_default_base_url(canonical), Some(base_url));
         }
     }
 
