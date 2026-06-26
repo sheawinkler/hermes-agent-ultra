@@ -1,12 +1,12 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T02:09:56.382205+00:00`
+Generated: `2026-06-26T03:15:26.708571+00:00`
 
-- Range: `HEAD..upstream/main`; total commits tracked: `7099`.
+- Range: `HEAD..upstream/main`; total commits tracked: `7101`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3189 |
+| #20 | GPAR-01 tests+CI parity | 3191 |
 | #21 | GPAR-02 skills parity | 130 |
 | #22 | GPAR-03 UX parity | 960 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 488 |
@@ -17,9 +17,9 @@ Generated: `2026-06-26T02:09:56.382205+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 147 |
-| ported | 450 |
-| superseded | 6426 |
+| pending | 146 |
+| ported | 452 |
+| superseded | 6427 |
 
 ## First 100 Pending Commits
 
@@ -32,8 +32,6 @@ Generated: `2026-06-26T02:09:56.382205+00:00`
 | `f06508836dd4` | #26 | docs(security): enumerate cron job scripts in §2.3 credential scoping |
 | `2bd1977d8fad` | #26 | chore: release v0.17.0 (2026.6.19) |
 | `866f1d65c4aa` | #26 | chore(desktop): sync package.json version fallback to 0.17.0 (#49236) |
-| `7a7b56d49830` | #23 | fix(windows): prefer managed node for whatsapp and desktop |
-| `d4e7dd609da6` | #23 | refactor(windows): tidy managed-node resolver helpers |
 | `d799284b1554` | #21 | feat(optional-skills/creative-ideation): expand to v2.1.0 method library (#42402) |
 | `37fa3c58b40e` | #21 | docs(kanban-worker): document kanban_complete artifacts deliverable param (#49854) |
 | `31bdb60013c9` | #22 | docs(skills): fix himalaya CLI arg order and download flag |
@@ -125,3 +123,5 @@ Generated: `2026-06-26T02:09:56.382205+00:00`
 | `65b13e9dbc93` | #26 | fix(desktop): route gateway restart / status / update to the active profile |
 | `00779800f650` | #26 | fix(desktop): hide platform/internal toolsets from the Skills & Tools list |
 | `9a4600c5fb9b` | #26 | fix(desktop): stop the update overlay looking frozen while it works |
+| `2ea94c6c4581` | #26 | fix(pets): make inline generate cancel discard draft flow |
+| `284be6cc247c` | #26 | Merge pull request #52210 from helix4u/fix/desktop-update-progress-visibility |

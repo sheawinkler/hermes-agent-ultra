@@ -82,7 +82,7 @@ use crate::model_switch::{
 use crate::pairing_store::{PairingStatus, PairingStore};
 use crate::providers::canonical_provider_id;
 use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
-use hermes_config::{GatewayConfig, LlmProviderConfig};
+use hermes_config::{find_node_executable, GatewayConfig, LlmProviderConfig};
 
 // ---------------------------------------------------------------------------
 // CommandResult
@@ -26130,6 +26130,9 @@ fn command_on_path(command: &str) -> bool {
     if command.trim().is_empty() {
         return false;
     }
+    if is_node_family_command(command) && find_node_executable(command).is_some() {
+        return true;
+    }
     let candidate = Path::new(command);
     if candidate.components().count() > 1 {
         return candidate.exists();
@@ -26139,6 +26142,19 @@ fn command_on_path(command: &str) -> bool {
             .map(|p| p.join(command))
             .any(|p| p.exists())
     })
+}
+
+fn is_node_family_command(command: &str) -> bool {
+    let base = command
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(command)
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        base.as_str(),
+        "node" | "node.exe" | "npm" | "npm.cmd" | "npm.exe" | "npx" | "npx.cmd" | "npx.exe"
+    )
 }
 
 fn sentrux_entry() -> serde_json::Value {
@@ -27224,16 +27240,35 @@ async fn whatsapp_qr() -> Result<(), hermes_core::AgentError> {
                 "Bridge returned HTTP {}. Is the bridge server running?",
                 resp.status()
             );
-            println!("Start it with: npx hermes-whatsapp-bridge");
+            println!("Start it with: {}", whatsapp_bridge_start_command());
         }
         Err(e) => {
             println!("Could not connect to bridge at {}: {}", bridge_url, e);
             println!("\nMake sure the WhatsApp Web bridge is running:");
-            println!("  npx hermes-whatsapp-bridge");
+            println!("  {}", whatsapp_bridge_start_command());
             println!("  # or: docker run -p 3000:3000 hermes/whatsapp-bridge");
         }
     }
     Ok(())
+}
+
+fn whatsapp_bridge_start_command() -> String {
+    find_node_executable("npx")
+        .map(|path| format!("{} hermes-whatsapp-bridge", quote_shell_arg(&path)))
+        .unwrap_or_else(|| "npx hermes-whatsapp-bridge".to_string())
+}
+
+fn quote_shell_arg(path: &Path) -> String {
+    let value = path.display().to_string();
+    if !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "@%_+=:,./-\\".contains(c))
+    {
+        value
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
 }
 
 /// Render QR data as Unicode block art in the terminal.
@@ -28034,13 +28069,7 @@ struct AcpSetupDependencyCheck {
 }
 
 fn acp_command_exists(command: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(command)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    command_on_path(command)
 }
 
 fn acp_setup_browser_dependency_checks<F>(
@@ -28568,6 +28597,17 @@ mod tests {
                 Some(value) => std::env::set_var(self.key, value),
                 None => std::env::remove_var(self.key),
             }
+        }
+    }
+
+    fn write_test_executable(path: &Path) {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        std::fs::write(path, b"#!/bin/sh\n").expect("write executable");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod executable");
         }
     }
 
@@ -30134,6 +30174,33 @@ mod tests {
         assert_eq!(checks[1].dependency, "browser");
         assert!(checks.iter().all(|check| check.available));
         assert!(checks.iter().all(|check| !check.interactive));
+    }
+
+    #[test]
+    fn command_on_path_prefers_managed_node_before_path() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let _path_guard = EnvVarGuard::set("PATH", "");
+        write_test_executable(&tmp.path().join("node").join("bin").join("node"));
+
+        assert!(command_on_path("node"));
+    }
+
+    #[test]
+    fn whatsapp_bridge_start_command_prefers_managed_npx() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let _path_guard = EnvVarGuard::set("PATH", "");
+        let npx = tmp.path().join("node").join("bin").join("npx");
+        write_test_executable(&npx);
+
+        let command = whatsapp_bridge_start_command();
+
+        assert_ne!(command, "npx hermes-whatsapp-bridge");
+        assert!(command.contains("npx"));
+        assert!(command.contains("hermes-whatsapp-bridge"));
     }
 
     #[test]
