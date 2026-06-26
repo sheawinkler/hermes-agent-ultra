@@ -1228,6 +1228,31 @@ impl TelegramAdapter {
         content.contains("$$")
     }
 
+    fn content_is_pipe_table_primary(content: &str) -> bool {
+        if content.trim().is_empty()
+            || !content
+                .lines()
+                .any(Self::looks_like_markdown_table_separator)
+        {
+            return false;
+        }
+        if regex::Regex::new(r"(?m)^\s*[-*]\s+\[[ xX]\]\s+")
+            .map(|re| re.is_match(content))
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        if regex::RegexBuilder::new(r"(?m)^</?details\b|^</?summary\b")
+            .case_insensitive(true)
+            .build()
+            .map(|re| re.is_match(content))
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        !content.contains("$$")
+    }
+
     fn looks_like_markdown_table_separator(line: &str) -> bool {
         let trimmed = line.trim();
         if !trimmed.contains('|') || !trimmed.contains('-') {
@@ -1244,7 +1269,7 @@ impl TelegramAdapter {
     }
 
     fn rich_eligible_text(&self, text: &str) -> bool {
-        self.config.rich_messages
+        (self.config.rich_messages || Self::content_is_pipe_table_primary(text))
             && !self.rich_send_is_disabled()
             && !text.trim().is_empty()
             && Self::needs_rich_rendering(text)
@@ -1287,7 +1312,13 @@ impl TelegramAdapter {
         body
     }
 
-    fn rich_edit_body(&self, chat_id: &str, message_id: &str, text: &str) -> serde_json::Value {
+    fn rich_edit_body(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        text: &str,
+        message_thread_id: Option<i64>,
+    ) -> serde_json::Value {
         let markdown = Self::rich_normalize_linebreaks(text);
         let mut body = serde_json::json!({
             "chat_id": chat_id,
@@ -1296,6 +1327,9 @@ impl TelegramAdapter {
                 "markdown": markdown,
             },
         });
+        if let Some(thread_id) = message_thread_id {
+            body["message_thread_id"] = serde_json::Value::Number(thread_id.into());
+        }
         if self.config.disable_link_previews {
             body["link_preview_options"] = serde_json::json!({ "is_disabled": true });
         }
@@ -1864,8 +1898,9 @@ impl TelegramAdapter {
         chat_id: &str,
         message_id: &str,
         text: &str,
+        message_thread_id: Option<i64>,
     ) -> Result<Option<()>, GatewayError> {
-        let body = self.rich_edit_body(chat_id, message_id, text);
+        let body = self.rich_edit_body(chat_id, message_id, text, message_thread_id);
         match self
             .send_json_with_thread_fallback::<serde_json::Value>("editMessageText", body)
             .await
@@ -1890,8 +1925,12 @@ impl TelegramAdapter {
         text: &str,
         parse_mode: Option<&str>,
     ) -> Result<(), GatewayError> {
+        let (chat_id, message_thread_id) = Self::split_gateway_chat_thread(chat_id);
         if self.rich_eligible_text(text) {
-            if let Some(()) = self.try_edit_rich_text(chat_id, message_id, text).await? {
+            if let Some(()) = self
+                .try_edit_rich_text(chat_id, message_id, text, message_thread_id)
+                .await?
+            {
                 return Ok(());
             }
         }
@@ -1904,6 +1943,10 @@ impl TelegramAdapter {
             "message_id": message_id.parse::<i64>().unwrap_or(0),
             "text": rendered_text,
         });
+
+        if let Some(thread_id) = message_thread_id {
+            body["message_thread_id"] = serde_json::Value::Number(thread_id.into());
+        }
 
         if let Some(pm) = parse_mode {
             body["parse_mode"] = serde_json::Value::String(pm.to_string());
@@ -3898,13 +3941,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn telegram_rich_messages_default_off_even_for_eligible_content() {
+    async fn telegram_pipe_tables_auto_use_rich_messages_when_default_off() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/botfake_token_12345/sendMessage"))
+            .and(path("/botfake_token_12345/sendRichMessage"))
             .and(body_partial_json(serde_json::json!({
                 "chat_id": "123",
-                "text": "| A | B |\n|---|---|\n| 1 | 2 |"
+                "rich_message": { "markdown": "| A | B |\n|---|---|\n| 1 | 2 |" }
             })))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "ok": true,
@@ -3927,7 +3970,99 @@ mod tests {
 
         let requests = server.received_requests().await.expect("requests");
         assert_eq!(requests.len(), 1);
+        assert!(requests[0].url.path().ends_with("/sendRichMessage"));
+    }
+
+    #[tokio::test]
+    async fn telegram_pipe_table_auto_rich_routes_encoded_topic_without_reply_anchor() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/sendRichMessage"))
+            .and(body_partial_json(serde_json::json!({
+                "chat_id": "-1001",
+                "message_thread_id": 42,
+                "rich_message": { "markdown": "| A | B |\n|---|---|\n| 1 | 2 |" }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": { "message_id": 95 }
+            })))
+            .mount(&server)
+            .await;
+
+        let cfg: TelegramConfig =
+            serde_json::from_str(r#"{"token":"fake_token_12345"}"#).expect("config");
+        assert!(!cfg.rich_messages);
+        let mut adapter = test_adapter(cfg);
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        let ids = adapter
+            .send_text("-1001:42", "| A | B |\n|---|---|\n| 1 | 2 |", None, None)
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![95]);
+
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 1);
+        let body: Value = requests[0].body_json().expect("json body");
+        assert!(body.get("reply_parameters").is_none());
+        assert_eq!(
+            body.pointer("/chat_id").and_then(|v| v.as_str()),
+            Some("-1001")
+        );
+        assert_eq!(
+            body.pointer("/message_thread_id").and_then(|v| v.as_i64()),
+            Some(42)
+        );
+    }
+
+    #[tokio::test]
+    async fn telegram_non_table_rich_constructs_stay_legacy_when_default_off() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/sendMessage"))
+            .and(body_partial_json(serde_json::json!({
+                "chat_id": "123",
+                "text": "- [ ] one\n- [x] two"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": { "message_id": 95 }
+            })))
+            .mount(&server)
+            .await;
+
+        let cfg: TelegramConfig =
+            serde_json::from_str(r#"{"token":"fake_token_12345"}"#).expect("config");
+        assert!(!cfg.rich_messages);
+        let mut adapter = test_adapter(cfg);
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        let ids = adapter
+            .send_text("123", "- [ ] one\n- [x] two", None, None)
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![95]);
+
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 1);
         assert!(requests[0].url.path().ends_with("/sendMessage"));
+    }
+
+    #[test]
+    fn telegram_pipe_table_primary_excludes_other_rich_constructs() {
+        assert!(TelegramAdapter::content_is_pipe_table_primary(
+            "| A | B |\n|---|---|\n| 1 | 2 |"
+        ));
+        assert!(!TelegramAdapter::content_is_pipe_table_primary(
+            "| A | B |\n|---|---|\n- [ ] task"
+        ));
+        assert!(!TelegramAdapter::content_is_pipe_table_primary(
+            "| A | B |\n|---|---|\n<details>extra</details>"
+        ));
+        assert!(!TelegramAdapter::content_is_pipe_table_primary(
+            "| A | B |\n|---|---|\n$$x$$"
+        ));
     }
 
     #[tokio::test]
@@ -4090,6 +4225,47 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("| A | B |\n|---|---|\n| 1 | 2 |")
         );
+    }
+
+    #[tokio::test]
+    async fn telegram_rich_edit_routes_encoded_topic_thread() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/editMessageText"))
+            .and(body_partial_json(serde_json::json!({
+                "chat_id": "-1001",
+                "message_id": 555,
+                "message_thread_id": 42,
+                "rich_message": { "markdown": "| A | B |\n|---|---|\n| 1 | 2 |" }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": { "message_id": 555 }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut adapter = test_adapter(test_config());
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        adapter
+            .edit_text("-1001:42", "555", "| A | B |\n|---|---|\n| 1 | 2 |", None)
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 1);
+        let body: Value = requests[0].body_json().expect("json body");
+        assert_eq!(
+            body.pointer("/chat_id").and_then(|v| v.as_str()),
+            Some("-1001")
+        );
+        assert_eq!(
+            body.pointer("/message_thread_id").and_then(|v| v.as_i64()),
+            Some(42)
+        );
+        assert!(body.get("text").is_none());
+        assert!(body.get("parse_mode").is_none());
     }
 
     #[tokio::test]
