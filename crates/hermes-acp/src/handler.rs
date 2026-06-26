@@ -991,6 +991,7 @@ impl HermesAcpHandler {
             session_id,
             session_display_title(&state),
             session_info_refresh_timestamp(),
+            Some(session_info_value(&state)),
         ));
     }
 
@@ -1423,6 +1424,22 @@ fn param_str_any<'a>(p: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Op
 fn session_meta_from_params(
     p: &serde_json::Map<String, Value>,
 ) -> Result<SessionMetaUpdate, String> {
+    let model = param_str_any(p, &["model", "modelId", "model_id"])
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .map(ToOwned::to_owned);
+    let provider = param_str(p, "provider")
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+        .map(ToOwned::to_owned);
+    let api_mode = param_str_any(p, &["apiMode", "api_mode"])
+        .map(str::trim)
+        .filter(|mode| !mode.is_empty())
+        .map(ToOwned::to_owned);
+    let base_url = param_str_any(p, &["baseUrl", "base_url"])
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .map(ToOwned::to_owned);
     let profile = match param_str(p, "profile").map(str::trim) {
         Some("") | None => None,
         Some(profile) if valid_session_profile(profile) => Some(profile.to_string()),
@@ -1444,10 +1461,30 @@ fn session_meta_from_params(
         .map(str::trim)
         .filter(|title| !title.is_empty())
         .map(ToOwned::to_owned);
+    let mut config_options = HashMap::new();
+    for (key, aliases) in [
+        (
+            "reasoning_effort",
+            &["reasoningEffort", "reasoning_effort"][..],
+        ),
+        ("service_tier", &["serviceTier", "service_tier"][..]),
+    ] {
+        if let Some(value) = param_str_any(p, aliases)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            config_options.insert(key.to_string(), value.to_string());
+        }
+    }
     Ok(SessionMetaUpdate {
+        model,
+        provider,
+        api_mode,
+        base_url,
         profile,
         home,
         title,
+        config_options,
         ..SessionMetaUpdate::default()
     })
 }
@@ -1666,8 +1703,12 @@ fn session_display_title(session: &SessionState) -> Option<String> {
 fn session_info_value(session: &SessionState) -> Value {
     json!({
         "sessionId": session.session_id,
+        "session_id": session.session_id,
         "cwd": session.cwd,
         "model": session.model,
+        "provider": session.provider,
+        "apiMode": session.api_mode,
+        "baseUrl": session.base_url,
         "profile": session.profile,
         "home": session.home,
         "phase": session.phase,
@@ -1795,6 +1836,7 @@ impl AcpHandler for HermesAcpHandler {
 
                 if let Some(state) = self.session_manager.update_session_meta(session_id, meta) {
                     self.register_session_mcp_servers(&state, mcp_servers).await;
+                    self.emit_session_info_update(&state.session_id);
                     self.replay_session_history(&state);
                     self.advertise_available_commands(&state.session_id);
                     self.emit_usage_update(&state.session_id);
@@ -2471,6 +2513,20 @@ mod tests {
         }
     }
 
+    struct ForbiddenPromptExecutor;
+
+    #[async_trait::async_trait]
+    impl AcpPromptExecutor for ForbiddenPromptExecutor {
+        async fn execute_prompt(
+            &self,
+            _session: &SessionState,
+            _user_text: &str,
+            _history: &[Value],
+        ) -> Result<PromptExecutionOutput, String> {
+            panic!("session resume must not execute or build a prompt executor");
+        }
+    }
+
     #[derive(Default)]
     struct SteeringPromptExecutor {
         steers: std::sync::Mutex<Vec<String>>,
@@ -2972,6 +3028,14 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(info_updates.len(), 1);
         assert_eq!(info_updates[0].title.as_deref(), Some("My branch"));
+        let content = info_updates[0]
+            .content
+            .as_ref()
+            .expect("session info content");
+        assert_eq!(content["sessionId"], session_id);
+        assert_eq!(content["session_id"], session_id);
+        assert_eq!(content["cwd"], "/runtime-only");
+        assert_eq!(content["title"], "My branch");
 
         let listed = handler
             .handle_request(AcpRequest {
@@ -3215,10 +3279,13 @@ mod tests {
             })
             .await;
         assert!(resumed.error.is_none());
-        assert_available_commands_update(
-            handler.event_sink.drain_for_session(&session_id),
-            &session_id,
+        let resume_events = handler.event_sink.drain_for_session(&session_id);
+        assert_eq!(resume_events[0].kind, AcpEventKind::SessionInfoUpdate);
+        assert_eq!(
+            resume_events[0].content.as_ref().expect("session info")["cwd"],
+            "/work"
         );
+        assert_available_commands_update(resume_events[1..].to_vec(), &session_id);
 
         let forked = handler
             .handle_request(AcpRequest {
@@ -3345,9 +3412,14 @@ mod tests {
         assert!(resumed.error.is_none());
 
         let events = handler.event_sink.drain_for_session(&session_id);
-        assert_eq!(events[0].kind, AcpEventKind::AgentThoughtChunk);
+        assert_eq!(events[0].kind, AcpEventKind::SessionInfoUpdate);
         assert_eq!(
-            events[0].content.as_ref().unwrap()["text"],
+            events[0].content.as_ref().expect("session info")["cwd"],
+            "/tmp"
+        );
+        assert_eq!(events[1].kind, AcpEventKind::AgentThoughtChunk);
+        assert_eq!(
+            events[1].content.as_ref().unwrap()["text"],
             "Reasoning persisted without assistant text."
         );
         assert_eq!(
@@ -3355,6 +3427,98 @@ mod tests {
             AcpEventKind::AvailableCommandsUpdate
         );
         assert_eq!(events.last().unwrap().kind, AcpEventKind::UsageUpdate);
+    }
+
+    #[tokio::test]
+    async fn test_resume_session_updates_runtime_metadata_without_prompt_execution() {
+        let handler = HermesAcpHandler::new(
+            Arc::new(SessionManager::new()),
+            Arc::new(EventSink::default()),
+            Arc::new(PermissionStore::new()),
+        )
+        .with_prompt_executor(Arc::new(ForbiddenPromptExecutor));
+        let state = handler.session_manager.create_session_with_meta(
+            "/old",
+            SessionMetaUpdate {
+                model: Some("dynamic".to_string()),
+                provider: Some("openrouter".to_string()),
+                api_mode: Some("chat".to_string()),
+                base_url: Some("https://old.example/v1".to_string()),
+                profile: Some("work".to_string()),
+                home: Some("/profiles/work".to_string()),
+                title: Some("Old workspace".to_string()),
+                ..SessionMetaUpdate::default()
+            },
+        );
+        let session_id = state.session_id;
+        handler.session_manager.set_history(
+            &session_id,
+            vec![json!({"role": "user", "content": "replay me"})],
+        );
+
+        let resumed = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/resume".into(),
+                params: Some(json!({
+                    "sessionId": session_id,
+                    "cwd": "/workspace/repo",
+                    "modelId": "dynamic",
+                    "provider": "openrouter",
+                    "apiMode": "responses",
+                    "baseUrl": "https://router.example/v1",
+                    "profile": "research",
+                    "homeDir": "/profiles/research",
+                    "title": "  Active workspace  ",
+                    "reasoningEffort": "medium",
+                    "serviceTier": "auto"
+                })),
+            })
+            .await;
+        assert!(resumed.error.is_none());
+
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.cwd, "/workspace/repo");
+        assert_eq!(state.model.as_deref(), Some("dynamic"));
+        assert_eq!(state.provider.as_deref(), Some("openrouter"));
+        assert_eq!(state.api_mode.as_deref(), Some("responses"));
+        assert_eq!(state.base_url.as_deref(), Some("https://router.example/v1"));
+        assert_eq!(state.profile.as_deref(), Some("research"));
+        assert_eq!(state.home.as_deref(), Some("/profiles/research"));
+        assert_eq!(state.title.as_deref(), Some("Active workspace"));
+        assert_eq!(
+            state
+                .config_options
+                .get("reasoning_effort")
+                .map(String::as_str),
+            Some("medium")
+        );
+        assert_eq!(
+            state.config_options.get("service_tier").map(String::as_str),
+            Some("auto")
+        );
+
+        let events = handler.event_sink.drain_for_session(&session_id);
+        assert_eq!(events[0].kind, AcpEventKind::SessionInfoUpdate);
+        assert_eq!(events[0].title.as_deref(), Some("Active workspace"));
+        let info = events[0].content.as_ref().expect("session info content");
+        assert_eq!(info["sessionId"], session_id);
+        assert_eq!(info["session_id"], session_id);
+        assert_eq!(info["cwd"], "/workspace/repo");
+        assert_eq!(info["model"], "dynamic");
+        assert_eq!(info["provider"], "openrouter");
+        assert_eq!(info["apiMode"], "responses");
+        assert_eq!(info["baseUrl"], "https://router.example/v1");
+        assert_eq!(info["profile"], "research");
+        assert_eq!(info["home"], "/profiles/research");
+        assert_eq!(info["title"], "Active workspace");
+        assert!(events
+            .iter()
+            .any(|event| event.kind == AcpEventKind::UserMessageChunk));
+        assert!(events
+            .iter()
+            .any(|event| event.kind == AcpEventKind::AvailableCommandsUpdate));
     }
 
     #[tokio::test]

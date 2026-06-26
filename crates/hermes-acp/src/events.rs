@@ -435,6 +435,7 @@ impl AcpEvent {
         session_id: &str,
         title: Option<String>,
         updated_at: String,
+        content: Option<Value>,
     ) -> Self {
         Self {
             kind: AcpEventKind::SessionInfoUpdate,
@@ -449,7 +450,7 @@ impl AcpEvent {
             arguments: None,
             result: None,
             status: None,
-            content: None,
+            content,
             text: None,
             api_call_count: None,
             error: None,
