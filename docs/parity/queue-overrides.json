@@ -5053,6 +5053,11 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust startup/gateway provider construction now applies init-time fallback selection before building the agent/provider when the primary model has no configured credentials, while preserving local no-key backends and OAuth auth-store resolver credentials. Covered by provider-runtime, CLI startup-model, and HTTP provider alias/config tests."
+    },
+    "85e084d60d57": {
+      "disposition": "ported",
+      "notes": "Rust email gateway now rejects spoofed From-header authorization when email/global allowlists are active unless allow-all or EMAIL_TRUST_FROM_HEADER opt-out is configured. The IMAP ingestion path fetches Authentication-Results, verifies DMARC/SPF/DKIM relaxed domain alignment with optional EMAIL_AUTHSERV_ID pinning, normalizes From addresses before emitting IncomingMessage identities, and has feature-gated email parser/auth tests.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [

@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T08:50:22.801292+00:00`
+Generated: `2026-06-26T10:33:55.048190+00:00`
 
 - Range: `origin/main..upstream/main`; total commits tracked: `7116`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-26T08:50:22.801292+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 146 |
-| ported | 458 |
+| pending | 145 |
+| ported | 459 |
 | superseded | 6436 |
 
 ## First 100 Pending Commits
