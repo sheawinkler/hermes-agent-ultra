@@ -5038,6 +5038,11 @@
       "disposition": "ported",
       "notes": "Rust /model persistence now uses targeted raw-YAML config writes. Existing Python-style nested model blocks update model.default/provider/base_url without replacing sibling keys such as model_slots, while scalar Rust configs still update top-level model. Focused hermes-cli regression covers sibling preservation and runtime reload normalization.",
       "owner": "rust-runtime"
+    },
+    "ba9e3a491bfa": {
+      "disposition": "ported",
+      "notes": "Rust Honcho now parses host-scoped OAuth grants, refreshes near-expiry hch-at access tokens with the stored refresh token, serializes rotation with process and best-effort file locks, persists rotated apiKey/oauth metadata owner-only while preserving unrelated config, sends refreshed Authorization/X-API-Key headers, and lets memory setup preserve existing OAuth grants without requiring a pasted cloud API key. Desktop Electron connect UI is intentionally absent from the Rust-first surface.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [

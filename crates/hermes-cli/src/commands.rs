@@ -25189,6 +25189,55 @@ fn active_honcho_host_key_for_cli() -> String {
     }
 }
 
+fn legacy_honcho_host_key_for_cli(host: &str) -> Option<String> {
+    let suffix = host.strip_prefix("hermes_")?;
+    if suffix.trim().is_empty() {
+        None
+    } else {
+        Some(format!("hermes.{suffix}"))
+    }
+}
+
+fn honcho_host_value_has_oauth_grant(block: &serde_json::Value) -> bool {
+    let Some(api_key) = block.get("apiKey").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    if !api_key.starts_with("hch-at-") {
+        return false;
+    }
+    let Some(oauth) = block.get("oauth").and_then(serde_json::Value::as_object) else {
+        return false;
+    };
+    ["refreshToken", "clientId", "tokenEndpoint"]
+        .iter()
+        .all(|key| {
+            oauth
+                .get(*key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        })
+}
+
+fn honcho_config_has_oauth_grant(path: &Path, host: &str) -> bool {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    let Some(hosts) = parsed.get("hosts").and_then(serde_json::Value::as_object) else {
+        return honcho_host_value_has_oauth_grant(&parsed);
+    };
+    hosts
+        .get(host)
+        .or_else(|| {
+            legacy_honcho_host_key_for_cli(host)
+                .as_deref()
+                .and_then(|legacy| hosts.get(legacy))
+        })
+        .is_some_and(honcho_host_value_has_oauth_grant)
+}
+
 fn honcho_ai_peer_for_host(host: &str) -> String {
     host.strip_prefix("hermes.")
         .or_else(|| host.strip_prefix("hermes_"))
@@ -25355,6 +25404,9 @@ fn setup_honcho_provider(yes: bool) -> Result<PathBuf, AgentError> {
     } else {
         "cloud"
     };
+    let host = active_honcho_host_key_for_cli();
+    let existing_oauth_grant =
+        honcho_config_has_oauth_grant(&hermes_config::hermes_home().join("honcho.json"), &host);
 
     let base_url_default = if deployment == "local" {
         if env_base_url.trim().is_empty() {
@@ -25376,14 +25428,13 @@ fn setup_honcho_provider(yes: bool) -> Result<PathBuf, AgentError> {
         "Honcho API key"
     };
     let api_key = prompt_memory_setup_value(api_label, Some(&env_api_key), yes)?;
-    if deployment == "cloud" && api_key.trim().is_empty() {
+    if deployment == "cloud" && api_key.trim().is_empty() && !existing_oauth_grant {
         return Err(AgentError::Config(
             "Honcho cloud setup requires HONCHO_API_KEY or an API key entered at the prompt."
                 .into(),
         ));
     }
 
-    let host = active_honcho_host_key_for_cli();
     let peer_default = std::env::var("HERMES_USER").unwrap_or_default();
     let peer_name = prompt_memory_setup_value("Honcho peerName", Some(&peer_default), yes)?;
     let shape_input = prompt_memory_setup_value(
@@ -28906,6 +28957,49 @@ mod tests {
             Some(value) => std::env::set_var("HERMES_HONCHO_HOST", value),
             None => std::env::remove_var("HERMES_HONCHO_HOST"),
         }
+    }
+
+    #[test]
+    fn memory_honcho_setup_accepts_and_preserves_existing_oauth_grant() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home = TempHomeGuard::new(tmp.path());
+        let _profile = EnvVarGuard::remove("HERMES_PROFILE");
+        let _host = EnvVarGuard::remove("HERMES_HONCHO_HOST");
+        let _api_key = EnvVarGuard::remove("HONCHO_API_KEY");
+        let _base_url = EnvVarGuard::remove("HONCHO_BASE_URL");
+        let path = tmp.path().join("honcho.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "enabled": true,
+                "hosts": {
+                    "hermes": {
+                        "apiKey": "hch-at-existing",
+                        "oauth": {
+                            "refreshToken": "hch-rt-existing",
+                            "expiresAt": 9999999999,
+                            "clientId": "hermes-agent",
+                            "tokenEndpoint": "https://api.honcho.dev/oauth/token"
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("write config");
+
+        let saved_path = setup_memory_provider_target("honcho", true).expect("setup honcho");
+
+        assert_eq!(saved_path, path);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&saved_path).expect("read config"))
+                .expect("json");
+        assert_eq!(parsed["hosts"]["hermes"]["apiKey"], "hch-at-existing");
+        assert_eq!(
+            parsed["hosts"]["hermes"]["oauth"]["refreshToken"],
+            "hch-rt-existing"
+        );
+        assert_eq!(parsed["hosts"]["hermes"]["pinUserPeer"], true);
     }
 
     #[test]
