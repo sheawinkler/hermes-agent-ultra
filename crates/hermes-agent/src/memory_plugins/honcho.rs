@@ -13,11 +13,13 @@
 //!   3. Defaults
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::Method;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::memory_manager::MemoryProviderPlugin;
@@ -27,6 +29,9 @@ const HOST: &str = "hermes";
 const DEFAULT_BASE_URL: &str = "https://api.honcho.dev";
 const DEFAULT_TIMEOUT_SECS: f64 = 30.0;
 const PEER_ID_HASH_ESCALATION_LENGTHS: &[usize] = &[8, 12, 16, 24, 32, 64];
+const OAUTH_ACCESS_TOKEN_PREFIX: &str = "hch-at-";
+const OAUTH_REFRESH_SKEW_SECONDS: f64 = 120.0;
+const OAUTH_REFRESH_TIMEOUT_SECS: f64 = 15.0;
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -107,6 +112,84 @@ struct HonchoConfig {
     timeout_secs: f64,
     endpoints: HashMap<String, String>,
     host_had_explicit_api_key: bool,
+    host: String,
+    config_path: PathBuf,
+    oauth: Option<HonchoOAuthCredential>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct HonchoOAuthCredential {
+    access_token: String,
+    refresh_token: String,
+    expires_at: f64,
+    client_id: String,
+    token_endpoint: String,
+    scope: String,
+    token_type: String,
+}
+
+impl HonchoOAuthCredential {
+    fn from_host_block(block: &Value) -> Option<Self> {
+        let oauth = block.get("oauth").and_then(Value::as_object)?;
+        let access_token = block.get("apiKey").and_then(Value::as_str)?;
+        if !is_honcho_oauth_access_token(access_token) {
+            return None;
+        }
+        let refresh_token = oauth.get("refreshToken").and_then(Value::as_str)?;
+        let token_endpoint = oauth.get("tokenEndpoint").and_then(Value::as_str)?;
+        let client_id = oauth.get("clientId").and_then(Value::as_str)?;
+        if refresh_token.trim().is_empty()
+            || token_endpoint.trim().is_empty()
+            || client_id.trim().is_empty()
+        {
+            return None;
+        }
+
+        Some(Self {
+            access_token: access_token.to_string(),
+            refresh_token: refresh_token.to_string(),
+            expires_at: json_number_or_string_as_f64(oauth.get("expiresAt")).unwrap_or(0.0),
+            client_id: client_id.to_string(),
+            token_endpoint: token_endpoint.to_string(),
+            scope: oauth
+                .get("scope")
+                .and_then(Value::as_str)
+                .unwrap_or("write")
+                .to_string(),
+            token_type: oauth
+                .get("tokenType")
+                .and_then(Value::as_str)
+                .unwrap_or("Bearer")
+                .to_string(),
+        })
+    }
+
+    fn oauth_block(&self) -> Map<String, Value> {
+        let mut block = Map::new();
+        block.insert(
+            "refreshToken".to_string(),
+            Value::String(self.refresh_token.clone()),
+        );
+        block.insert("expiresAt".to_string(), json!(self.expires_at as i64));
+        block.insert(
+            "clientId".to_string(),
+            Value::String(self.client_id.clone()),
+        );
+        block.insert(
+            "tokenEndpoint".to_string(),
+            Value::String(self.token_endpoint.clone()),
+        );
+        block.insert("scope".to_string(), Value::String(self.scope.clone()));
+        block.insert(
+            "tokenType".to_string(),
+            Value::String(self.token_type.clone()),
+        );
+        block
+    }
+
+    fn is_expired(&self, now: f64) -> bool {
+        now >= self.expires_at - OAUTH_REFRESH_SKEW_SECONDS
+    }
 }
 
 impl HonchoConfig {
@@ -156,12 +239,17 @@ impl HonchoConfig {
             timeout_secs,
             endpoints,
             host_had_explicit_api_key: false,
+            host: active_host(),
+            config_path: Self::default_config_path(),
+            oauth: None,
         }
     }
 
     fn from_config_file(hermes_home: &str) -> Self {
         let mut config = Self::from_env();
         let host = active_host();
+        config.host = host.clone();
+        config.config_path = Self::config_path(hermes_home);
         config.workspace_id = host.clone();
         config.ai_peer = host.clone();
         for config_path in honcho_config_load_paths(hermes_home) {
@@ -170,9 +258,17 @@ impl HonchoConfig {
             };
             if let Ok(raw) = serde_json::from_str::<Value>(&content) {
                 Self::apply_config_value(&mut config, &raw);
+                if let Some(credential) = HonchoOAuthCredential::from_host_block(&raw) {
+                    config.oauth = Some(credential);
+                    config.config_path = config_path.clone();
+                }
                 if let Some(host_block) = honcho_host_block(&raw, &host) {
                     config.host_had_explicit_api_key = value_has_nonempty_api_key(host_block);
                     Self::apply_config_value(&mut config, host_block);
+                    if let Some(credential) = HonchoOAuthCredential::from_host_block(host_block) {
+                        config.oauth = Some(credential);
+                        config.config_path = config_path.clone();
+                    }
                 }
             }
         }
@@ -194,6 +290,75 @@ impl HonchoConfig {
             .get(key)
             .cloned()
             .unwrap_or_else(|| default.to_string())
+    }
+
+    fn refresh_oauth_if_needed(&mut self) -> Result<bool, String> {
+        let Some(mut current) = self.oauth.clone() else {
+            return Ok(false);
+        };
+        if !is_honcho_oauth_access_token(&self.api_key) {
+            return Ok(false);
+        }
+
+        let now = epoch_seconds();
+        let cache_key = oauth_cache_key(&self.config_path, &self.host);
+        if let Some((expires_at, token)) = honcho_oauth_expiry_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&cache_key)
+            .cloned()
+        {
+            if now < expires_at - OAUTH_REFRESH_SKEW_SECONDS {
+                self.api_key = token;
+                return Ok(false);
+            }
+        }
+
+        if let Some(on_disk) = read_oauth_credential(&self.config_path, &self.host) {
+            current = on_disk;
+        }
+        seed_oauth_cache(&self.config_path, &self.host, &current);
+        if !current.is_expired(now) {
+            self.api_key = current.access_token.clone();
+            self.oauth = Some(current);
+            return Ok(false);
+        }
+
+        let _process_guard = honcho_oauth_refresh_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _file_guard = ConfigRefreshLock::acquire(&self.config_path);
+
+        if let Some(on_disk) = read_oauth_credential(&self.config_path, &self.host) {
+            current = on_disk;
+        }
+        if !current.is_expired(now) {
+            self.api_key = current.access_token.clone();
+            self.oauth = Some(current);
+            seed_oauth_cache(&self.config_path, &self.host, self.oauth.as_ref().unwrap());
+            return Ok(false);
+        }
+
+        match exchange_oauth_refresh_token(&current, now) {
+            Ok(rotated) => {
+                persist_oauth_credential(&self.config_path, &self.host, &rotated)?;
+                seed_oauth_cache(&self.config_path, &self.host, &rotated);
+                self.api_key = rotated.access_token.clone();
+                self.oauth = Some(rotated);
+                tracing::info!("Honcho OAuth token refreshed for host {}", self.host);
+                Ok(true)
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "Honcho OAuth refresh failed for host {}: {}",
+                    self.host,
+                    err
+                );
+                self.api_key = current.access_token.clone();
+                self.oauth = Some(current);
+                Ok(false)
+            }
+        }
     }
 
     fn apply_config_value(config: &mut Self, raw: &Value) {
@@ -400,6 +565,230 @@ fn honcho_base_url_is_loopback(base_url: &str) -> bool {
         || normalized.contains("://::1")
 }
 
+fn is_honcho_oauth_access_token(value: &str) -> bool {
+    value.starts_with(OAUTH_ACCESS_TOKEN_PREFIX)
+}
+
+fn json_number_or_string_as_f64(value: Option<&Value>) -> Option<f64> {
+    match value? {
+        Value::Number(number) => number.as_f64(),
+        Value::String(raw) => raw.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn epoch_seconds() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or_default()
+}
+
+type OAuthCacheKey = (String, String);
+type OAuthExpiryCache = HashMap<OAuthCacheKey, (f64, String)>;
+
+fn oauth_cache_key(path: &Path, host: &str) -> OAuthCacheKey {
+    (path.to_string_lossy().to_string(), host.to_string())
+}
+
+fn honcho_oauth_expiry_cache() -> &'static Mutex<OAuthExpiryCache> {
+    static CACHE: OnceLock<Mutex<OAuthExpiryCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn honcho_oauth_refresh_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn seed_oauth_cache(path: &Path, host: &str, credential: &HonchoOAuthCredential) {
+    honcho_oauth_expiry_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(
+            oauth_cache_key(path, host),
+            (credential.expires_at, credential.access_token.clone()),
+        );
+}
+
+fn read_oauth_credential(path: &Path, host: &str) -> Option<HonchoOAuthCredential> {
+    let raw = Value::Object(config_io::read_json_object(path));
+    honcho_host_block(&raw, host).and_then(HonchoOAuthCredential::from_host_block)
+}
+
+fn persist_oauth_credential(
+    path: &Path,
+    host: &str,
+    credential: &HonchoOAuthCredential,
+) -> Result<(), String> {
+    let mut root = config_io::read_json_object(path);
+    let hosts = root
+        .entry("hosts".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !hosts.is_object() {
+        *hosts = Value::Object(Map::new());
+    }
+    let hosts = hosts
+        .as_object_mut()
+        .ok_or_else(|| "honcho hosts block must be an object".to_string())?;
+    let block = hosts
+        .entry(host.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !block.is_object() {
+        *block = Value::Object(Map::new());
+    }
+    let block = block
+        .as_object_mut()
+        .ok_or_else(|| "honcho host block must be an object".to_string())?;
+    block.insert(
+        "apiKey".to_string(),
+        Value::String(credential.access_token.clone()),
+    );
+    block.insert("oauth".to_string(), Value::Object(credential.oauth_block()));
+    config_io::write_owner_only_atomic(path, &Value::Object(root))
+}
+
+fn exchange_oauth_refresh_token(
+    credential: &HonchoOAuthCredential,
+    now: f64,
+) -> Result<HonchoOAuthCredential, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs_f64(OAUTH_REFRESH_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("Honcho OAuth refresh client build failed: {e}"))?;
+    let form = [
+        ("grant_type", "refresh_token"),
+        ("client_id", credential.client_id.as_str()),
+        ("refresh_token", credential.refresh_token.as_str()),
+    ];
+    let resp = client
+        .post(&credential.token_endpoint)
+        .form(&form)
+        .send()
+        .map_err(|e| format!("Honcho OAuth refresh request failed: {e}"))?;
+    let status = resp.status();
+    let body_text = resp.text().unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "Honcho OAuth refresh returned {}: {}",
+            status, body_text
+        ));
+    }
+    let body = serde_json::from_str::<Value>(&body_text)
+        .map_err(|e| format!("Honcho OAuth refresh response parse failed: {e}"))?;
+    let access_token = body
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|token| is_honcho_oauth_access_token(token))
+        .ok_or_else(|| "Honcho OAuth refresh missing OAuth access_token".to_string())?;
+    let refresh_token = body
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| "Honcho OAuth refresh missing refresh_token".to_string())?;
+    let expires_in = json_number_or_string_as_f64(body.get("expires_in")).unwrap_or(0.0);
+    Ok(HonchoOAuthCredential {
+        access_token: access_token.to_string(),
+        refresh_token: refresh_token.to_string(),
+        expires_at: now + expires_in,
+        client_id: credential.client_id.clone(),
+        token_endpoint: credential.token_endpoint.clone(),
+        scope: body
+            .get("scope")
+            .and_then(Value::as_str)
+            .unwrap_or(&credential.scope)
+            .to_string(),
+        token_type: body
+            .get("token_type")
+            .or_else(|| body.get("tokenType"))
+            .and_then(Value::as_str)
+            .unwrap_or(&credential.token_type)
+            .to_string(),
+    })
+}
+
+struct ConfigRefreshLock {
+    file: Option<File>,
+}
+
+impl ConfigRefreshLock {
+    fn acquire(config_path: &Path) -> Self {
+        let lock_path = PathBuf::from(format!("{}.lock", config_path.display()));
+        let file = (|| -> Result<File, String> {
+            if let Some(parent) = lock_path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+            }
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&lock_path)
+                .map_err(|e| format!("open {}: {e}", lock_path.display()))?;
+            lock_file_exclusive(&file)?;
+            Ok(file)
+        })();
+        match file {
+            Ok(file) => Self { file: Some(file) },
+            Err(err) => {
+                tracing::debug!("Honcho OAuth cross-process lock unavailable: {}", err);
+                Self { file: None }
+            }
+        }
+    }
+}
+
+impl Drop for ConfigRefreshLock {
+    fn drop(&mut self) {
+        if let Some(file) = self.file.as_ref() {
+            let _ = unlock_file(file);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn lock_file_exclusive(file: &File) -> Result<(), String> {
+    use std::os::fd::AsRawFd;
+
+    unsafe extern "C" {
+        fn flock(fd: std::os::raw::c_int, operation: std::os::raw::c_int) -> std::os::raw::c_int;
+    }
+
+    const LOCK_EX: std::os::raw::c_int = 2;
+    let rc = unsafe { flock(file.as_raw_fd(), LOCK_EX) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().to_string())
+    }
+}
+
+#[cfg(unix)]
+fn unlock_file(file: &File) -> Result<(), String> {
+    use std::os::fd::AsRawFd;
+
+    unsafe extern "C" {
+        fn flock(fd: std::os::raw::c_int, operation: std::os::raw::c_int) -> std::os::raw::c_int;
+    }
+
+    const LOCK_UN: std::os::raw::c_int = 8;
+    let rc = unsafe { flock(file.as_raw_fd(), LOCK_UN) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().to_string())
+    }
+}
+
+#[cfg(not(unix))]
+fn lock_file_exclusive(_file: &File) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn unlock_file(_file: &File) -> Result<(), String> {
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // HonchoMemoryPlugin
 // ---------------------------------------------------------------------------
@@ -515,15 +904,20 @@ impl HonchoMemoryPlugin {
         body: Option<&Value>,
         query: Option<&[(&str, String)]>,
     ) -> Result<Value, String> {
-        let client = Self::client(config)?;
-        let url = Self::build_url(config, path);
+        let mut effective_config = config.clone();
+        effective_config.refresh_oauth_if_needed()?;
+        let client = Self::client(&effective_config)?;
+        let url = Self::build_url(&effective_config, path);
         let mut req = client
             .request(method.clone(), &url)
             .header("Content-Type", "application/json");
-        if !config.api_key.is_empty() {
+        if !effective_config.api_key.is_empty() {
             req = req
-                .header("Authorization", format!("Bearer {}", config.api_key))
-                .header("X-API-Key", &config.api_key);
+                .header(
+                    "Authorization",
+                    format!("Bearer {}", effective_config.api_key),
+                )
+                .header("X-API-Key", &effective_config.api_key);
         }
         if let Some(items) = query {
             req = req.query(items);
@@ -980,7 +1374,8 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
 
     fn get_config_schema(&self) -> Option<Value> {
         Some(json!([
-            {"key": "api_key", "description": "Honcho API key", "secret": true, "env_var": "HONCHO_API_KEY", "url": "https://app.honcho.dev"},
+            {"key": "api_key", "description": "Honcho API key or OAuth access token", "secret": true, "env_var": "HONCHO_API_KEY", "url": "https://app.honcho.dev"},
+            {"key": "oauth", "description": "Honcho OAuth grant metadata stored under hosts.<profile>.oauth", "secret": true},
             {"key": "baseUrl", "description": "Honcho base URL (for self-hosted)"},
             {"key": "timeout", "description": "HTTP timeout seconds", "default": DEFAULT_TIMEOUT_SECS},
             {"key": "pinUserPeer", "description": "Pin gateway runtime users to peerName", "default": false},
@@ -1109,6 +1504,10 @@ fn honcho_empty_profile_hint(peer: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::time::Duration as StdDuration;
 
     struct EnvGuard {
         key: &'static str,
@@ -1136,6 +1535,89 @@ mod tests {
                 None => std::env::remove_var(self.key),
             }
         }
+    }
+
+    fn oauth_host_block(
+        access: &str,
+        refresh: &str,
+        expires_at: i64,
+        token_endpoint: &str,
+    ) -> Value {
+        json!({
+            "apiKey": access,
+            "oauth": {
+                "refreshToken": refresh,
+                "expiresAt": expires_at,
+                "clientId": "hermes-agent",
+                "tokenEndpoint": token_endpoint,
+                "scope": "write",
+                "tokenType": "Bearer"
+            }
+        })
+    }
+
+    fn http_request_complete(raw: &[u8]) -> bool {
+        let Some(header_end) = raw.windows(4).position(|window| window == b"\r\n\r\n") else {
+            return false;
+        };
+        let headers = String::from_utf8_lossy(&raw[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                if name.eq_ignore_ascii_case("content-length") {
+                    value.trim().parse::<usize>().ok()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+        raw.len() >= header_end + 4 + content_length
+    }
+
+    fn one_shot_http_server(
+        status: &'static str,
+        body: &'static str,
+    ) -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            stream
+                .set_read_timeout(Some(StdDuration::from_secs(2)))
+                .expect("timeout");
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        request.extend_from_slice(&buf[..n]);
+                        if http_request_complete(&request) {
+                            break;
+                        }
+                    }
+                    Err(err)
+                        if matches!(
+                            err.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        ) =>
+                    {
+                        break;
+                    }
+                    Err(err) => panic!("read request: {err}"),
+                }
+            }
+            tx.send(String::from_utf8_lossy(&request).to_string())
+                .expect("send request");
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).expect("write");
+        });
+        (format!("http://{addr}"), rx)
     }
 
     #[test]
@@ -1292,6 +1774,9 @@ mod tests {
             timeout_secs: DEFAULT_TIMEOUT_SECS,
             endpoints: HashMap::new(),
             host_had_explicit_api_key: false,
+            host: HOST.to_string(),
+            config_path: HonchoConfig::default_config_path(),
+            oauth: None,
         }
     }
 
@@ -1390,6 +1875,200 @@ mod tests {
         assert_eq!(cfg.base_url, "http://localhost:8000");
         assert_eq!(cfg.api_key, "");
         assert!(!cfg.host_had_explicit_api_key);
+    }
+
+    #[test]
+    fn test_honcho_oauth_config_loads_host_grant() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _profile = EnvGuard::remove("HERMES_PROFILE");
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+        std::fs::write(
+            tmp.path().join("honcho.json"),
+            json!({
+                "enabled": true,
+                "hosts": {
+                    "hermes": oauth_host_block(
+                        "hch-at-old",
+                        "hch-rt-old",
+                        9_999_999_999,
+                        "http://127.0.0.1:1/oauth/token"
+                    )
+                }
+            })
+            .to_string(),
+        )
+        .expect("write config");
+
+        let cfg = HonchoConfig::from_config_file(&tmp.path().to_string_lossy());
+
+        assert_eq!(cfg.api_key, "hch-at-old");
+        assert!(cfg.host_had_explicit_api_key);
+        let oauth = cfg.oauth.expect("oauth credential");
+        assert_eq!(oauth.refresh_token, "hch-rt-old");
+        assert_eq!(oauth.client_id, "hermes-agent");
+        assert_eq!(cfg.config_path, tmp.path().join("honcho.json"));
+    }
+
+    #[test]
+    fn test_honcho_oauth_fresh_token_skips_refresh() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _profile = EnvGuard::remove("HERMES_PROFILE");
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+        let token_endpoint = "http://127.0.0.1:9/oauth/token";
+        std::fs::write(
+            tmp.path().join("honcho.json"),
+            json!({
+                "enabled": true,
+                "hosts": {
+                    "hermes": oauth_host_block(
+                        "hch-at-fresh",
+                        "hch-rt-fresh",
+                        (epoch_seconds() + 3600.0) as i64,
+                        token_endpoint
+                    )
+                }
+            })
+            .to_string(),
+        )
+        .expect("write config");
+        let mut cfg = HonchoConfig::from_config_file(&tmp.path().to_string_lossy());
+
+        let refreshed = cfg.refresh_oauth_if_needed().expect("refresh check");
+
+        assert!(!refreshed);
+        assert_eq!(cfg.api_key, "hch-at-fresh");
+    }
+
+    #[test]
+    fn test_honcho_oauth_expired_token_refreshes_and_persists_rotation() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _profile = EnvGuard::remove("HERMES_PROFILE");
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+        let (token_endpoint, rx) = one_shot_http_server(
+            "200 OK",
+            r#"{"access_token":"hch-at-new","refresh_token":"hch-rt-new","expires_in":3600,"scope":"write","token_type":"Bearer"}"#,
+        );
+        let config_path = tmp.path().join("honcho.json");
+        std::fs::write(
+            &config_path,
+            json!({
+                "apiKey": "hch-v3-root",
+                "enabled": true,
+                "hosts": {
+                    "obsidian": {"workspace": "obsidian"},
+                    "hermes": oauth_host_block("hch-at-old", "hch-rt-old", 100, &token_endpoint)
+                }
+            })
+            .to_string(),
+        )
+        .expect("write config");
+        let mut cfg = HonchoConfig::from_config_file(&tmp.path().to_string_lossy());
+
+        let refreshed = cfg.refresh_oauth_if_needed().expect("refresh");
+
+        assert!(refreshed);
+        assert_eq!(cfg.api_key, "hch-at-new");
+        let request = rx.recv_timeout(StdDuration::from_secs(2)).expect("request");
+        assert!(request.starts_with("POST / HTTP/1.1"));
+        assert!(request.contains("grant_type=refresh_token"));
+        assert!(request.contains("client_id=hermes-agent"));
+        assert!(request.contains("refresh_token=hch-rt-old"));
+        let saved: Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).expect("read config"))
+                .expect("json");
+        assert_eq!(saved["apiKey"], "hch-v3-root");
+        assert_eq!(saved["hosts"]["obsidian"]["workspace"], "obsidian");
+        assert_eq!(saved["hosts"]["hermes"]["apiKey"], "hch-at-new");
+        assert_eq!(
+            saved["hosts"]["hermes"]["oauth"]["refreshToken"],
+            "hch-rt-new"
+        );
+    }
+
+    #[test]
+    fn test_honcho_oauth_refresh_failure_fails_open() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _profile = EnvGuard::remove("HERMES_PROFILE");
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+        let (token_endpoint, _rx) = one_shot_http_server("500 Internal Server Error", "{}");
+        let config_path = tmp.path().join("honcho.json");
+        std::fs::write(
+            &config_path,
+            json!({
+                "enabled": true,
+                "hosts": {
+                    "hermes": oauth_host_block("hch-at-old", "hch-rt-old", 100, &token_endpoint)
+                }
+            })
+            .to_string(),
+        )
+        .expect("write config");
+        let mut cfg = HonchoConfig::from_config_file(&tmp.path().to_string_lossy());
+
+        let refreshed = cfg.refresh_oauth_if_needed().expect("fail open");
+
+        assert!(!refreshed);
+        assert_eq!(cfg.api_key, "hch-at-old");
+        let saved: Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).expect("read config"))
+                .expect("json");
+        assert_eq!(saved["hosts"]["hermes"]["apiKey"], "hch-at-old");
+        assert_eq!(
+            saved["hosts"]["hermes"]["oauth"]["refreshToken"],
+            "hch-rt-old"
+        );
+    }
+
+    #[test]
+    fn test_honcho_send_json_uses_refreshed_oauth_token() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _profile = EnvGuard::remove("HERMES_PROFILE");
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+        let (token_endpoint, _token_rx) = one_shot_http_server(
+            "200 OK",
+            r#"{"access_token":"hch-at-new","refresh_token":"hch-rt-new","expires_in":3600}"#,
+        );
+        let (api_base, api_rx) = one_shot_http_server("200 OK", r#"{"ok":true}"#);
+        std::fs::write(
+            tmp.path().join("honcho.json"),
+            json!({
+                "enabled": true,
+                "baseUrl": api_base,
+                "hosts": {
+                    "hermes": oauth_host_block("hch-at-old", "hch-rt-old", 100, &token_endpoint)
+                }
+            })
+            .to_string(),
+        )
+        .expect("write config");
+        let cfg = HonchoConfig::from_config_file(&tmp.path().to_string_lossy());
+
+        let response =
+            HonchoMemoryPlugin::send_json(&cfg, Method::GET, "/ping", None, None).expect("send");
+
+        assert_eq!(response["ok"], true);
+        let api_request = api_rx
+            .recv_timeout(StdDuration::from_secs(2))
+            .expect("api request");
+        assert!(api_request.starts_with("GET /ping HTTP/1.1"));
+        let api_request_lower = api_request.to_ascii_lowercase();
+        assert!(api_request_lower.contains("authorization: bearer hch-at-new"));
+        assert!(api_request_lower.contains("x-api-key: hch-at-new"));
     }
 
     #[test]

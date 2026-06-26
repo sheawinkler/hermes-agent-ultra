@@ -1,8 +1,8 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T05:06:31.353327+00:00`
+Generated: `2026-06-26T05:58:24.709736+00:00`
 
-- Range: `HEAD..upstream/main`; total commits tracked: `7116`.
+- Range: `origin/main..upstream/main`; total commits tracked: `7116`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
@@ -17,8 +17,8 @@ Generated: `2026-06-26T05:06:31.353327+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 149 |
-| ported | 455 |
+| pending | 148 |
+| ported | 456 |
 | superseded | 6436 |
 
 ## First 100 Pending Commits
@@ -84,7 +84,6 @@ Generated: `2026-06-26T05:06:31.353327+00:00`
 | `ff08e60c63ad` | #21 | feat(skills): add cloudflare-temporary-deploy optional skill (#50849) |
 | `a6b670d4a251` | #26 | fix(desktop): avoid stack overflow on embedded image replay |
 | `3fffecbdafec` | #26 | feat(desktop): add timeline rail for long chat threads |
-| `ba9e3a491bfa` | #23 | feat(memory): Honcho OAuth connect — desktop and CLI flows + token refresh (#44335) |
 | `cb17a9efb2df` | #26 | fix(desktop): stop auto-opening tool previews |
 | `d0af7fc954fe` | #26 | feat(desktop): detect tool previews into composer status stack |
 | `48a8f8416937` | #26 | fix(desktop): toggle preview rail and open in browser |
@@ -125,3 +124,4 @@ Generated: `2026-06-26T05:06:31.353327+00:00`
 | `2ea94c6c4581` | #26 | fix(pets): make inline generate cancel discard draft flow |
 | `284be6cc247c` | #26 | Merge pull request #52210 from helix4u/fix/desktop-update-progress-visibility |
 | `7e2db0a140db` | #26 | fix(desktop): stop refText crash on undefined composer attachment holes |
+| `4aeaba692251` | #26 | test(desktop): cover undefined/null attachment holes in ref helpers |
