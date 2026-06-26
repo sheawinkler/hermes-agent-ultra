@@ -72,20 +72,8 @@ pub fn format_terminal(report: &InsightsReport) -> String {
         format_with_commas(o.total_input_tokens),
         format_with_commas(o.total_output_tokens)
     ));
-    let cache_total = o.total_cache_read_tokens + o.total_cache_write_tokens;
-    if cache_total > 0 {
-        lines.push(format!(
-            "  Cache read:        {:<12}  Cache write:     {}",
-            format_with_commas(o.total_cache_read_tokens),
-            format_with_commas(o.total_cache_write_tokens)
-        ));
-    }
-    let mut cost_str = format!("${:.2}", o.estimated_cost);
-    if !o.models_without_pricing.is_empty() {
-        cost_str.push_str(" *");
-    }
     lines.push(format!(
-        "  Total tokens:      {:<12}  Est. cost:       {cost_str}",
+        "  Total tokens:      {}",
         format_with_commas(o.total_tokens)
     ));
     if o.total_hours > 0.0 {
@@ -106,27 +94,18 @@ pub fn format_terminal(report: &InsightsReport) -> String {
         lines.push("  🤖 Models Used".into());
         lines.push(format!("  {}", "─".repeat(56)));
         lines.push(format!(
-            "  {:<30} {:>8} {:>12} {:>8}",
-            "Model", "Sessions", "Tokens", "Cost"
+            "  {:<30} {:>8} {:>12}",
+            "Model", "Sessions", "Tokens"
         ));
         for m in &report.models {
             let mut name = m.model.clone();
             name.truncate(28);
-            let cost_cell = if m.has_pricing {
-                format!("${:>6.2}", m.cost)
-            } else {
-                "     N/A".into()
-            };
             lines.push(format!(
-                "  {:<30} {:>8} {:>12} {}",
+                "  {:<30} {:>8} {:>12}",
                 name,
                 m.sessions,
-                format_with_commas(m.total_tokens),
-                cost_cell
+                format_with_commas(m.total_tokens)
             ));
-        }
-        if !o.models_without_pricing.is_empty() {
-            lines.push("  * Cost N/A for custom/self-hosted models".into());
         }
         lines.push(String::new());
     }
@@ -248,31 +227,11 @@ pub fn format_gateway(report: &InsightsReport) -> String {
         format_with_commas(o.total_messages),
         format_with_commas(o.total_tool_calls)
     ));
-    let cache_total = o.total_cache_read_tokens + o.total_cache_write_tokens;
-    if cache_total > 0 {
-        lines.push(format!(
-            "**Tokens:** {} (in: {} / out: {} / cache: {})",
-            format_with_commas(o.total_tokens),
-            format_with_commas(o.total_input_tokens),
-            format_with_commas(o.total_output_tokens),
-            format_with_commas(cache_total)
-        ));
-    } else {
-        lines.push(format!(
-            "**Tokens:** {} (in: {} / out: {})",
-            format_with_commas(o.total_tokens),
-            format_with_commas(o.total_input_tokens),
-            format_with_commas(o.total_output_tokens)
-        ));
-    }
-    let cost_note = if !o.models_without_pricing.is_empty() {
-        " _(excludes custom/self-hosted models)_"
-    } else {
-        ""
-    };
     lines.push(format!(
-        "**Est. cost:** ${:.2}{cost_note}",
-        o.estimated_cost
+        "**Tokens:** {} (in: {} / out: {})",
+        format_with_commas(o.total_tokens),
+        format_with_commas(o.total_input_tokens),
+        format_with_commas(o.total_output_tokens)
     ));
     if o.total_hours > 0.0 {
         lines.push(format!(
@@ -287,19 +246,13 @@ pub fn format_gateway(report: &InsightsReport) -> String {
     if !report.models.is_empty() {
         lines.push("**🤖 Models:**".into());
         for m in report.models.iter().take(5) {
-            let cost_str = if m.has_pricing {
-                format!("${:.2}", m.cost)
-            } else {
-                "N/A".into()
-            };
             let mut name = m.model.clone();
             name.truncate(25);
             lines.push(format!(
-                "  {} — {} sessions, {} tokens, {}",
+                "  {} — {} sessions, {} tokens",
                 name,
                 m.sessions,
-                format_with_commas(m.total_tokens),
-                cost_str
+                format_with_commas(m.total_tokens)
             ));
         }
         lines.push(String::new());

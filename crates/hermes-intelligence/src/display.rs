@@ -336,7 +336,7 @@ pub fn format_usage_stats(
     model: &str,
     input_tokens: u64,
     output_tokens: u64,
-    cost_usd: Option<f64>,
+    _cost_usd: Option<f64>,
     duration_secs: Option<f64>,
 ) -> String {
     let mut out = String::new();
@@ -352,9 +352,6 @@ pub fn format_usage_stats(
         "  Total tokens:  {}",
         format_token_count(input_tokens + output_tokens)
     );
-    if let Some(cost) = cost_usd {
-        let _ = writeln!(out, "  Cost: {}", format_cost(cost));
-    }
     if let Some(dur) = duration_secs {
         let _ = writeln!(out, "  Duration: {}", format_duration_compact(dur));
     }
@@ -958,6 +955,17 @@ mod tests {
         assert_eq!(format_duration_compact(30.0), "30s");
         assert_eq!(format_duration_compact(120.0), "2m");
         assert_eq!(format_duration_compact(7200.0), "2h");
+    }
+
+    #[test]
+    fn test_format_usage_stats_hides_estimated_cost() {
+        let out = format_usage_stats("test-model", 123, 45, Some(0.0123), Some(2.0));
+
+        assert!(out.contains("Model: test-model"));
+        assert!(out.contains("Total tokens:"));
+        assert!(out.contains("Duration: 2s"));
+        assert!(!out.contains("Cost:"));
+        assert!(!out.contains("$0.0123"));
     }
 
     #[test]

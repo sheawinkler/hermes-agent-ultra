@@ -5083,6 +5083,11 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust Telegram rich-message delivery: pipe-table-primary Markdown now auto-routes through sendRichMessage even when rich_messages is false, while task lists/details/math still require explicit rich opt-in; encoded topic chat IDs route through sendRichMessage without reply anchors and rich edit finalization forwards message_thread_id."
+    },
+    "fd2a35b1691138b79b606e7961d3c78f7019722b": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust display surfaces: CLI /usage, generic usage stats, and session-insights terminal/gateway renderers keep provider-agnostic token counts while hiding unreliable estimated cost and cache-read/write reporting; Nous credits/billing and internal cost guards remain intact."
     }
   },
   "subject_patterns": [
