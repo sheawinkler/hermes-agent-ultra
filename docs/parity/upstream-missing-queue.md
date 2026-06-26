@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-26T19:15:01.247235+00:00`
+Generated: `2026-06-26T20:14:21.352111+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7116`.
 
@@ -17,27 +17,20 @@ Generated: `2026-06-26T19:15:01.247235+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 76 |
-| pending | 35 |
-| ported | 477 |
+| pending | 28 |
+| ported | 484 |
 | superseded | 6528 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `cfb55de5ea49` | #21 | Update Stripe Projects skill docs (#48673) |
 | `9362ce2575e0` | #22 | feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899) |
 | `92451151c642` | #22 | Revert "feat(skills): add html-artifact skill, fold in sketch + architecture-diagram + concept-diagrams (#48899)" |
-| `db744e7d1e58` | #21 | feat(simplify-code): add risk-tiered application, Chesterton's Fence, slop + silent failure detection |
 | `2bd1977d8fad` | #26 | chore: release v0.17.0 (2026.6.19) |
 | `d799284b1554` | #21 | feat(optional-skills/creative-ideation): expand to v2.1.0 method library (#42402) |
-| `37fa3c58b40e` | #21 | docs(kanban-worker): document kanban_complete artifacts deliverable param (#49854) |
-| `31bdb60013c9` | #22 | docs(skills): fix himalaya CLI arg order and download flag |
-| `46cc0345ae8a` | #21 | docs(skills): add hermes-agent verification rule |
-| `5eb158e3173d` | #21 | docs(hermes-agent skill): document project context files and their discovery rules |
 | `2609bcccca30` | #25 | feat(i18n): add complete Spanish translation |
 | `242962e1f5a0` | #22 | docs(providers): clarify vllm qwen reasoning output |
-| `95d970a7521c` | #21 | docs: sharpen software-development skills |
 | `defeda8c559f` | #22 | docs: sync documentation with current implementation |
 | `98ecd0beeba9` | #26 | docs(mcp): fix stale ~0.75s discovery-wait reference in late-refresh docstring |
 | `b1ab5a8ae1d9` | #21 | docs(antigravity-cli): add delegation patterns + output/bounding caveats |

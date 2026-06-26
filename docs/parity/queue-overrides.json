@@ -904,6 +904,11 @@
       "notes": "Rust OpenViking does not autostart openviking-server from the agent runtime; local setup can use no-key config, while runtime initialization is health-gated and fail-closed.",
       "owner": "rust-runtime"
     },
+    "31bdb60013c98d033dac3c0475be6e24773b5bf9": {
+      "disposition": "ported",
+      "notes": "Ported the Himalaya command-order/runtime guidance into the Rust-loaded bundled email skill and local website docs: move/copy now put the target folder before IDs and attachment downloads use --downloads-dir. The zh-Hans website mirror path is absent in this repo.",
+      "owner": "rust-skill-assets"
+    },
     "31c40c72c03c": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
@@ -986,6 +991,11 @@
     "37d717054ef6": {
       "disposition": "superseded",
       "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "37fa3c58b40e240974c0b3d1eb9e8f78d53892b1": {
+      "disposition": "ported",
+      "notes": "Ported the kanban worker artifacts deliverable guidance into the Rust-loaded devops kanban-worker skill, documenting top-level kanban_complete artifacts paths, native gateway uploads, attachment types, and metadata pitfalls.",
+      "owner": "rust-skill-assets"
     },
     "3824b0323793": {
       "disposition": "superseded",
@@ -1267,6 +1277,11 @@
     "46b2afc56b79": {
       "disposition": "ported",
       "notes": "Rust session persistence now runs PRAGMA wal_checkpoint(TRUNCATE) after startup auto-maintenance and exposes truncate_wal_checkpoint(); regression tests force WAL growth and assert the sessions.db-wal sidecar shrinks to zero."
+    },
+    "46cc0345ae8ac2972dc9052bea4a3154013ac00a": {
+      "disposition": "ported",
+      "notes": "Ported the hermes-agent skill verification rule into the Rust-loaded autonomous-ai-agents/hermes-agent skill so agent users are instructed to verify shell transcripts with current working directory and command evidence.",
+      "owner": "rust-skill-assets"
     },
     "46d758bb3e07": {
       "disposition": "superseded",
@@ -1675,6 +1690,11 @@
     "5e9d7a766107": {
       "disposition": "superseded",
       "notes": "Upstream skills-hub degenerate-index fix applies to website catalog generation; this Rust fork tracks skill source trees directly and treats website skills pages as approved divergence."
+    },
+    "5eb158e3173dee2c07e1458dc972b7aa95083196": {
+      "disposition": "ported",
+      "notes": "Ported the project-context discovery guidance into the Rust-loaded hermes-agent skill. The upstream Python agent_init comment tweak is a Python runtime docstring path and remains non-runtime for this Rust fork.",
+      "owner": "rust-skill-assets"
     },
     "5f4b93c20f41": {
       "disposition": "ported",
@@ -2541,6 +2561,11 @@
     "95a0955e19f8": {
       "disposition": "ported",
       "notes": "Rust /new resets only the current encoded Telegram topic session key and keeps sibling topic lanes intact; telegram_topic_new_resets_only_current_topic_lane proves the topic thread identity survives session reset/split."
+    },
+    "95d970a7521c8fe1244544b666bf05a0f43fadbd": {
+      "disposition": "ported",
+      "notes": "Ported the sharpened software-development skill guidance into the Rust-loaded hermes-agent-skill-authoring, systematic-debugging, and test-driven-development skills, including stronger verification and failure-mode instructions.",
+      "owner": "rust-skill-assets"
     },
     "9627ee70e57a": {
       "disposition": "superseded",
@@ -3608,6 +3633,11 @@
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
     },
+    "cfb55de5ea49ef60268bf5a6924e25c1701943ec": {
+      "disposition": "ported",
+      "notes": "Ported the Stripe Projects skill wording updates into the optional Stripe Projects skill and matching local website docs, preserving the Rust skill-store asset surface.",
+      "owner": "rust-skill-assets"
+    },
     "cfbc47d8937c": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
@@ -3806,6 +3836,11 @@
     "db22efbe88bd": {
       "disposition": "ported",
       "notes": "Optional and bundled local skills declare platforms frontmatter and Rust skill loading honors platform aliases/filters during command discovery."
+    },
+    "db744e7d1e58b64fdb8dfdb62cdba228081f9eca": {
+      "disposition": "ported",
+      "notes": "Ported the risk-tiered simplify-code guidance into the Rust-loaded software-development/simplify-code skill: Chesterton's Fence, slop/silent-failure detection, confidence/risk output, and safe/careful/risky application tiers.",
+      "owner": "rust-skill-assets"
     },
     "db79e90130fe": {
       "disposition": "superseded",
