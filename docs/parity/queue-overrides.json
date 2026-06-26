@@ -5063,6 +5063,21 @@
       "disposition": "ported",
       "notes": "Rust channel directory sessions.json reader now explicitly treats sessions/sessions.json as a gateway routing index, skips underscore-prefixed metadata/readme sentinel keys and non-session values, and has regression tests preserving real route entries while ignoring _README-style metadata. Rust has no Python SessionStore sessions.json writer; CLI/TUI session lists remain backed by Rust session persistence/state surfaces.",
       "owner": "rust-runtime"
+    },
+    "8501caf51f6d0ff5782a0a00c85a319a449d781b": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram gateway polling: getUpdates requests now have bounded poll-window-plus-grace timeouts, polling errors flow through exponential backoff counters, and sustained failures mark the adapter unhealthy so the gateway reconnect watcher can restart it without losing the resident poll task."
+    },
+    "ce802e932c645304badf0112e175e77f23b86a5b": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust resident polling lifecycle: the Telegram poll task stays alive while the adapter is stopped instead of exiting or busy-spinning, then resumes after start() marks the adapter running again. The Python test-double get_me spin failure is not present in Rust."
+    },
+    "43b8ba41816b6790e3bae852eb32277dc4dc6915": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported/proven in Rust: the Telegram CLI poll loop calls deleteWebhook(drop_pending_updates=false), preserves Bot API queued updates across reconnects, advances getUpdates offsets only after successful responses, and keeps the poll sidecar resident so watcher start() can recover after outages."
     }
   },
   "subject_patterns": [

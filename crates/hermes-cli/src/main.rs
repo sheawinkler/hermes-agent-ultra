@@ -112,8 +112,8 @@ use hermes_gateway::platforms::slack::{SlackAdapter, SlackConfig};
 use hermes_gateway::platforms::sms::{SmsAdapter, SmsConfig};
 #[cfg(feature = "gateway-telegram")]
 use hermes_gateway::platforms::telegram::{
-    IncomingMessage as TelegramIncomingMessage, TelegramAdapter, TelegramConfig,
-    TelegramTextBatcher,
+    IncomingMessage as TelegramIncomingMessage, PollResult as TelegramPollResult, TelegramAdapter,
+    TelegramConfig, TelegramTextBatcher,
 };
 #[cfg(feature = "gateway-webhook")]
 use hermes_gateway::platforms::webhook::{WebhookAdapter, WebhookConfig, WebhookPayload};
@@ -6495,6 +6495,17 @@ fn telegram_routable_topic_thread(thread_id: Option<i64>) -> Option<i64> {
 }
 
 #[cfg(feature = "gateway-telegram")]
+const TELEGRAM_POLLING_RECONNECT_ERROR_THRESHOLD: u64 = 3;
+
+#[cfg(feature = "gateway-telegram")]
+const TELEGRAM_POLLING_STOPPED_RECHECK_MS: u64 = 500;
+
+#[cfg(feature = "gateway-telegram")]
+fn telegram_polling_should_pause_for_reconnect(consecutive_errors: u64) -> bool {
+    consecutive_errors >= TELEGRAM_POLLING_RECONNECT_ERROR_THRESHOLD
+}
+
+#[cfg(feature = "gateway-telegram")]
 fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMessage {
     let text = msg.text.unwrap_or_else(|| {
         if msg.is_voice {
@@ -6538,26 +6549,41 @@ async fn route_telegram_message(gateway: &Gateway, msg: TelegramIncomingMessage)
 
 #[cfg(feature = "gateway-telegram")]
 async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdapter>) {
-    if adapter.config().polling {
-        if let Err(err) = adapter.delete_webhook(false).await {
-            tracing::warn!("Telegram deleteWebhook before polling failed: {}", err);
-        }
-    }
-
     let batch_delay = std::time::Duration::from_millis(adapter.config().text_batch_delay_ms);
     let mut text_batcher = TelegramTextBatcher::new(batch_delay);
+    let mut webhook_cleared = false;
 
     loop {
         if !adapter.is_running() {
-            break;
+            webhook_cleared = false;
+            tokio::time::sleep(std::time::Duration::from_millis(
+                TELEGRAM_POLLING_STOPPED_RECHECK_MS,
+            ))
+            .await;
+            continue;
+        }
+
+        if !adapter.config().polling {
+            tokio::time::sleep(std::time::Duration::from_millis(
+                TELEGRAM_POLLING_STOPPED_RECHECK_MS,
+            ))
+            .await;
+            continue;
+        }
+
+        if !webhook_cleared {
+            if let Err(err) = adapter.delete_webhook(false).await {
+                tracing::warn!("Telegram deleteWebhook before polling failed: {}", err);
+            }
+            webhook_cleared = true;
         }
 
         for msg in text_batcher.drain_ready() {
             route_telegram_message(&gateway, msg).await;
         }
 
-        match adapter.get_updates().await {
-            Ok(updates) => {
+        match adapter.poll_with_backoff().await {
+            TelegramPollResult::Updates(updates) => {
                 for update in updates {
                     if !adapter.should_process_update(&update) {
                         continue;
@@ -6596,9 +6622,29 @@ async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdap
                     }
                 }
             }
-            Err(err) => {
-                tracing::warn!("Telegram polling error: {}", err);
-                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+            TelegramPollResult::Backoff { error, delay_ms } => {
+                let consecutive_errors = adapter.consecutive_error_count();
+                if telegram_polling_should_pause_for_reconnect(consecutive_errors)
+                    && adapter.polling_reconnect_threshold_reached(
+                        TELEGRAM_POLLING_RECONNECT_ERROR_THRESHOLD,
+                    )
+                {
+                    tracing::warn!(
+                        consecutive_errors,
+                        error = %error,
+                        "Telegram polling exceeded reconnect threshold; pausing poll loop until gateway watcher restarts adapter"
+                    );
+                    adapter.mark_polling_unhealthy();
+                    continue;
+                }
+
+                tracing::warn!(
+                    consecutive_errors,
+                    delay_ms,
+                    error = %error,
+                    "Telegram polling error; backing off"
+                );
+                adapter.sleep_backoff().await;
             }
         }
     }
@@ -16448,6 +16494,21 @@ mod tests {
         let routed = telegram_gateway_message(incoming);
         assert_eq!(routed.chat_id, "208214988");
         assert!(routed.is_dm);
+    }
+
+    #[cfg(feature = "gateway-telegram")]
+    #[test]
+    fn telegram_polling_pause_threshold_matches_reconnect_policy() {
+        assert!(!telegram_polling_should_pause_for_reconnect(0));
+        assert!(!telegram_polling_should_pause_for_reconnect(
+            TELEGRAM_POLLING_RECONNECT_ERROR_THRESHOLD - 1
+        ));
+        assert!(telegram_polling_should_pause_for_reconnect(
+            TELEGRAM_POLLING_RECONNECT_ERROR_THRESHOLD
+        ));
+        assert!(telegram_polling_should_pause_for_reconnect(
+            TELEGRAM_POLLING_RECONNECT_ERROR_THRESHOLD + 1
+        ));
     }
 
     #[test]

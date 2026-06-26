@@ -37,6 +37,10 @@ const RICH_MESSAGE_MAX_CHARS: usize = 32_768;
 /// Default long-polling timeout in seconds.
 const DEFAULT_POLL_TIMEOUT: u64 = 30;
 
+/// Extra time allowed beyond Telegram's long-poll window before treating a
+/// getUpdates request as wedged and handing it to the reconnect ladder.
+const DEFAULT_POLL_STALL_GRACE_SECONDS: u64 = 15;
+
 /// Initial backoff delay for reconnection (in milliseconds).
 const INITIAL_BACKOFF_MS: u64 = 1000;
 
@@ -223,6 +227,14 @@ fn default_true() -> bool {
 
 fn default_poll_timeout() -> u64 {
     DEFAULT_POLL_TIMEOUT
+}
+
+fn poll_stall_grace_seconds() -> u64 {
+    std::env::var("TELEGRAM_POLL_STALL_GRACE_SECONDS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(DEFAULT_POLL_STALL_GRACE_SECONDS)
 }
 
 fn default_reply_to_mode() -> String {
@@ -521,7 +533,7 @@ pub enum ChatKind {
 }
 
 impl ChatKind {
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_telegram_type(s: &str) -> Self {
         match s {
             "private" => ChatKind::Private,
             "group" => ChatKind::Group,
@@ -1529,7 +1541,7 @@ impl TelegramAdapter {
     }
 
     pub fn should_process_message(&self, msg: &TelegramMessage, is_command: bool) -> bool {
-        let chat_kind = ChatKind::from_str(&msg.chat.chat_type);
+        let chat_kind = ChatKind::from_telegram_type(&msg.chat.chat_type);
         if !chat_kind.is_group_like() {
             return true;
         }
@@ -2310,7 +2322,9 @@ impl TelegramAdapter {
             "allowed_updates": ["message", "callback_query"],
         });
 
-        let resp: TelegramResponse<Vec<Update>> = self.post_json(&url, &body).await?;
+        let resp: TelegramResponse<Vec<Update>> = self
+            .post_json_with_request_timeout(&url, &body, Some(self.poll_request_timeout()))
+            .await?;
 
         if let Some(updates) = resp.result {
             if let Some(last) = updates.last() {
@@ -2389,6 +2403,23 @@ impl TelegramAdapter {
         self.consecutive_errors.load(Ordering::SeqCst)
     }
 
+    pub fn polling_reconnect_threshold_reached(&self, threshold: u64) -> bool {
+        threshold > 0 && self.consecutive_error_count() >= threshold
+    }
+
+    pub fn mark_polling_unhealthy(&self) {
+        self.base.mark_stopped();
+    }
+
+    pub fn poll_request_timeout(&self) -> Duration {
+        Duration::from_secs(
+            self.config
+                .poll_timeout
+                .saturating_add(poll_stall_grace_seconds())
+                .max(1),
+        )
+    }
+
     pub fn is_polling_conflict_error(err: &GatewayError) -> bool {
         let message = err.to_string().to_ascii_lowercase();
         message.contains("409")
@@ -2460,7 +2491,7 @@ impl TelegramAdapter {
 
         let reply_to_message_id = msg.reply_to_message.as_ref().map(|r| r.message_id);
 
-        let chat_type = ChatKind::from_str(&msg.chat.chat_type);
+        let chat_type = ChatKind::from_telegram_type(&msg.chat.chat_type);
         let is_group = chat_type.is_group_like();
 
         let (cb_id, cb_data) = match callback {
@@ -2501,7 +2532,7 @@ impl TelegramAdapter {
         let message_id = msg.map(|m| m.message_id).unwrap_or(0);
 
         let chat_type = msg
-            .map(|m| ChatKind::from_str(&m.chat.chat_type))
+            .map(|m| ChatKind::from_telegram_type(&m.chat.chat_type))
             .unwrap_or(ChatKind::Private);
         let is_group = chat_type.is_group_like();
 
@@ -2849,10 +2880,23 @@ impl TelegramAdapter {
         url: &str,
         body: &serde_json::Value,
     ) -> Result<TelegramResponse<T>, GatewayError> {
+        self.post_json_with_request_timeout(url, body, None).await
+    }
+
+    async fn post_json_with_request_timeout<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+        request_timeout: Option<Duration>,
+    ) -> Result<TelegramResponse<T>, GatewayError> {
         let mut retries = 0u32;
 
         loop {
-            let resp = self.client.post(url).json(body).send().await.map_err(|e| {
+            let mut request = self.client.post(url).json(body);
+            if let Some(timeout) = request_timeout {
+                request = request.timeout(timeout);
+            }
+            let resp = request.send().await.map_err(|e| {
                 GatewayError::ConnectionFailed(format!("Telegram API request failed: {}", e))
             })?;
 
@@ -3177,8 +3221,11 @@ fn parse_approval_callback(data: &str) -> Option<(ApprovalChoice, u64)> {
 mod tests {
     use super::*;
     use serde_json::Value;
+    use std::sync::Mutex;
     use wiremock::matchers::{body_partial_json, method, path};
     use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     struct JsonFieldAbsent(&'static str);
 
@@ -4693,12 +4740,15 @@ mod tests {
 
     #[test]
     fn chat_kind_from_str_variants() {
-        assert_eq!(ChatKind::from_str("private"), ChatKind::Private);
-        assert_eq!(ChatKind::from_str("group"), ChatKind::Group);
-        assert_eq!(ChatKind::from_str("supergroup"), ChatKind::Supergroup);
-        assert_eq!(ChatKind::from_str("channel"), ChatKind::Channel);
+        assert_eq!(ChatKind::from_telegram_type("private"), ChatKind::Private);
+        assert_eq!(ChatKind::from_telegram_type("group"), ChatKind::Group);
         assert_eq!(
-            ChatKind::from_str("something"),
+            ChatKind::from_telegram_type("supergroup"),
+            ChatKind::Supergroup
+        );
+        assert_eq!(ChatKind::from_telegram_type("channel"), ChatKind::Channel);
+        assert_eq!(
+            ChatKind::from_telegram_type("something"),
             ChatKind::Unknown("something".into())
         );
     }
@@ -5064,6 +5114,93 @@ mod tests {
         assert_eq!(vals[5], 32_000);
         assert_eq!(vals[6], 60_000);
         assert_eq!(vals[7], 60_000);
+    }
+
+    #[test]
+    fn telegram_poll_request_timeout_adds_stall_grace() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var("TELEGRAM_POLL_STALL_GRACE_SECONDS").ok();
+        std::env::set_var("TELEGRAM_POLL_STALL_GRACE_SECONDS", "4");
+
+        let mut cfg = test_config();
+        cfg.poll_timeout = 7;
+        let adapter = test_adapter(cfg);
+
+        assert_eq!(adapter.poll_request_timeout(), Duration::from_secs(11));
+
+        match previous {
+            Some(value) => std::env::set_var("TELEGRAM_POLL_STALL_GRACE_SECONDS", value),
+            None => std::env::remove_var("TELEGRAM_POLL_STALL_GRACE_SECONDS"),
+        }
+    }
+
+    #[test]
+    fn telegram_polling_threshold_marks_adapter_unhealthy() {
+        let adapter = test_adapter(test_config());
+        adapter.base.mark_running();
+        adapter.consecutive_errors.store(3, Ordering::SeqCst);
+
+        assert!(adapter.is_running());
+        assert!(adapter.polling_reconnect_threshold_reached(3));
+
+        adapter.mark_polling_unhealthy();
+
+        assert!(!adapter.is_running());
+    }
+
+    #[tokio::test]
+    async fn telegram_delete_webhook_can_preserve_pending_updates() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/deleteWebhook"))
+            .and(body_partial_json(serde_json::json!({
+                "drop_pending_updates": false
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": true
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut adapter = test_adapter(test_config());
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        adapter
+            .delete_webhook(false)
+            .await
+            .expect("deleteWebhook should preserve pending updates when requested");
+    }
+
+    #[tokio::test]
+    async fn telegram_get_updates_advances_offset_after_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/getUpdates"))
+            .and(body_partial_json(serde_json::json!({
+                "offset": 0,
+                "timeout": 30,
+                "allowed_updates": ["message", "callback_query"]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": [
+                    {"update_id": 41},
+                    {"update_id": 42}
+                ]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut adapter = test_adapter(test_config());
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        let updates = adapter.get_updates().await.expect("updates");
+
+        assert_eq!(updates.len(), 2);
+        assert_eq!(adapter.poll_offset.load(Ordering::SeqCst), 43);
     }
 
     #[test]
