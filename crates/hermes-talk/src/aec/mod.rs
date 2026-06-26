@@ -31,6 +31,8 @@ pub struct AecEngine {
     mic_buf: Vec<i16>,
     ref_buf_shared: AecRefBuf,
     max_ref_samples: usize,
+    /// Playback-to-mic delay in samples (@16 kHz); ref is read this many samples earlier.
+    ref_delay_samples: usize,
     enabled: bool,
 }
 
@@ -54,12 +56,14 @@ impl AecEngine {
         } else {
             None
         };
+        let ref_delay_samples = (cfg.delay_ms as usize).saturating_mul(16000) / 1000;
         Self {
             inner,
             frame_size: cfg.frame_size,
             mic_buf: Vec::new(),
             ref_buf_shared: ref_buf,
             max_ref_samples: cfg.filter_length as usize + cfg.frame_size,
+            ref_delay_samples,
             enabled,
         }
     }
@@ -87,12 +91,13 @@ impl AecEngine {
             // Get reference frame from ring buffer
             let ref_frame: Vec<i16> = {
                 let buf = self.ref_buf_shared.lock().unwrap();
-                if buf.len() < self.frame_size {
+                let tail = self.frame_size + self.ref_delay_samples;
+                if buf.len() < tail {
                     // Not enough reference history; pass through raw mic
                     out_f32.extend(mic_frame.iter().map(|&s| s as f32 / i16::MAX as f32));
                     continue;
                 }
-                let start = buf.len().saturating_sub(self.frame_size);
+                let start = buf.len().saturating_sub(tail);
                 buf.iter()
                     .skip(start)
                     .take(self.frame_size)

@@ -540,6 +540,15 @@ impl Session {
                                 "wake: accepted, now in AwakeGrace; speak within grace period"
                             );
                             if !wake_cfg.ack_reply.trim().is_empty() {
+                                #[cfg(all(feature = "rockchip", not(feature = "sherpa-asr-tts")))]
+                                {
+                                    asr_echo_cooldown_until = Some(
+                                        Instant::now()
+                                            + Duration::from_millis(
+                                                stream_turn::ROCKCHIP_WAKE_ACK_ASR_COOLDOWN_MS,
+                                            ),
+                                    );
+                                }
                                 spawn_wake_ack(
                                     wake_cfg.ack_reply.clone(),
                                     tts.clone(),
@@ -664,6 +673,12 @@ impl Session {
                     }
 
                     if !input_gated && wake_phase.allows_asr() {
+                        #[cfg(all(feature = "rockchip", not(feature = "sherpa-asr-tts")))]
+                        let rockchip_feed_asr =
+                            !is_output_busy(state, &playback, &active_turn);
+                        #[cfg(not(all(feature = "rockchip", not(feature = "sherpa-asr-tts"))))]
+                        let rockchip_feed_asr = true;
+                        if rockchip_feed_asr {
                         let do_send = match speaker_gate {
                             SpeakerGate::Idle => false,
                             SpeakerGate::Verifying => {
@@ -729,6 +744,7 @@ impl Session {
                             {
                                 let _ = asr.send_audio(i16_bytes).await;
                             }
+                        }
                         }
                     }
 
@@ -1198,6 +1214,15 @@ impl Session {
                                 {
                                     continue;
                                 }
+                                #[cfg(all(feature = "rockchip", not(feature = "sherpa-asr-tts")))]
+                                if is_output_busy(state, &playback, &active_turn) {
+                                    debug!(
+                                        partial = %text,
+                                        state = ?state,
+                                        "asr partial ignored (assistant output busy, likely echo)"
+                                    );
+                                    continue;
+                                }
                                 if utterance_active && wake_phase.allows_asr() {
                                     info!(
                                         partial = %text,
@@ -1423,6 +1448,14 @@ impl Session {
                                     if asr_echo_cooldown_until
                                         .is_some_and(|t| Instant::now() < t)
                                     {
+                                        continue;
+                                    }
+                                    if is_output_busy(state, &playback, &active_turn) {
+                                        debug!(
+                                            segment = %text,
+                                            state = ?state,
+                                            "asr segment finish ignored (assistant output busy)"
+                                        );
                                         continue;
                                     }
                                     if !utterance_pipeline.is_open() {
@@ -3606,6 +3639,11 @@ async fn start_reply_turn(
     });
 
     *state = SessionState::Speaking;
+    #[cfg(all(feature = "rockchip", not(feature = "sherpa-asr-tts")))]
+    {
+        let _ = asr.set_gate(false).await;
+    }
+    #[cfg(not(all(feature = "rockchip", not(feature = "sherpa-asr-tts"))))]
     if wake_enabled {
         let _ = asr.set_gate(false).await;
     }

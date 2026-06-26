@@ -351,7 +351,8 @@ impl AsrEngine for RockchipAsr {
             // Gate on = unpause (same as resume), ensures audio flows after barge-in
             self.resume().await
         } else {
-            Ok(())
+            // Gate off = pause so TTS playback is not streamed into ASR
+            self.pause().await
         }
     }
     async fn reconnect(&self) -> Result<()> {

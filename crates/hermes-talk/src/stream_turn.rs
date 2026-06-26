@@ -444,6 +444,9 @@ pub fn rockchip_asr_flush_wait_ms(assembled: &str, min_final_chars: usize) -> u6
 /// Ignore mic/ASR triggers briefly after TTS ends (speaker echo often contains 「现在」).
 pub const ROCKCHIP_POST_TURN_ASR_COOLDOWN_MS: u64 = 1800;
 
+/// Drop ASR while wake ack TTS is playing (mic picks up「哎，我在！」).
+pub const ROCKCHIP_WAKE_ACK_ASR_COOLDOWN_MS: u64 = 2800;
+
 /// TTS pump drains stale PCM for up to 200ms after `turn_epoch` bumps; wait slightly longer.
 pub const TTS_PUMP_STALE_DRAIN_MS: u64 = 220;
 

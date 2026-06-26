@@ -156,7 +156,8 @@ enabled = true
 frame_size = 256
 filter_length = 2048
 enable_preprocess = true
-delay_ms = 0
+# Speaker-to-mic delay (ms). Tune on board if echo remains: try 80–200.
+delay_ms = 120
 
 # ============================================================
 # 声纹（可选，需先 hermes talk enroll）
