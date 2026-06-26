@@ -227,6 +227,9 @@ pub fn build_from_sessions_in(
     hermes_home_path: impl AsRef<Path>,
     platform_name: &str,
 ) -> Vec<ChannelEntry> {
+    // `sessions/sessions.json` is a gateway routing index, not the CLI/TUI
+    // session list. Python Hermes may include `_` metadata sentinels there so
+    // humans who inspect it directly do not confuse it with state.db.
     let platform_name = normalize_platform(platform_name);
     let sessions_path = hermes_home_path
         .as_ref()
@@ -242,7 +245,13 @@ pub fn build_from_sessions_in(
 
     let mut seen = BTreeSet::new();
     let mut entries = Vec::new();
-    for session in sessions.values() {
+    for (key, session) in &sessions {
+        if is_sessions_index_metadata_key(key) {
+            continue;
+        }
+        let Some(session) = session.as_object() else {
+            continue;
+        };
         let Some(origin) = session.get("origin").and_then(Value::as_object) else {
             continue;
         };
@@ -265,6 +274,10 @@ pub fn build_from_sessions_in(
         entries.push(entry);
     }
     entries
+}
+
+fn is_sessions_index_metadata_key(key: &str) -> bool {
+    key.trim_start().starts_with('_')
 }
 
 pub fn resolve_channel_name(platform_name: &str, name: &str) -> Option<String> {
@@ -726,9 +739,11 @@ mod tests {
         std::fs::write(
             sessions_dir.join("sessions.json"),
             serde_json::json!({
+                "_README": "Gateway routing index only; full sessions live in state.db.",
                 "group_root": {"origin": {"platform": "telegram", "chat_id": "-1001", "chat_name": "Coaching Chat"}, "chat_type": "group"},
                 "topic_a": {"origin": {"platform": "telegram", "chat_id": "-1001", "chat_name": "Coaching Chat", "thread_id": "17585"}, "chat_type": "group"},
                 "topic_b": {"origin": {"platform": "telegram", "chat_id": "-1001", "chat_name": "Coaching Chat", "thread_id": "17587"}, "chat_type": "group"},
+                "_metadata": {"origin": {"platform": "telegram", "chat_id": "should-not-load"}},
                 "dup": {"origin": {"platform": "telegram", "chat_id": "-1001", "chat_name": "Coaching Chat"}, "chat_type": "group"},
                 "discord": {"origin": {"platform": "discord", "chat_id": "999"}}
             })
@@ -746,6 +761,30 @@ mod tests {
         assert!(names.contains("Coaching Chat"));
         assert!(names.contains("Coaching Chat / topic 17585"));
         assert!(names.contains("Coaching Chat / topic 17587"));
+    }
+
+    #[test]
+    fn build_from_sessions_skips_readme_sentinel_and_non_session_values() {
+        let tmp = tempdir().expect("tmp");
+        let sessions_dir = tmp.path().join("sessions");
+        std::fs::create_dir_all(&sessions_dir).expect("sessions dir");
+        std::fs::write(
+            sessions_dir.join("sessions.json"),
+            serde_json::json!({
+                "_README": "Gateway routing index ONLY; all sessions live in state.db.",
+                "_README_OBJECT": {"origin": {"platform": "slack", "chat_id": "bad"}},
+                "not_an_object": true,
+                "slack_dm": {"origin": {"platform": "slack", "chat_id": "D123", "chat_name": "Ada"}, "chat_type": "dm"}
+            })
+            .to_string(),
+        )
+        .expect("write sessions");
+
+        let entries = build_from_sessions_in(tmp.path(), "slack");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "D123");
+        assert_eq!(entries[0].name, "Ada");
+        assert_eq!(entries[0].kind.as_deref(), Some("dm"));
     }
 
     #[test]
