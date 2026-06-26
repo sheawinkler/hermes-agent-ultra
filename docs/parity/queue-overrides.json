@@ -5133,6 +5133,11 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported by eliminating the silent fallback path in Rust: session.title returns an explicit JSON-RPC error for missing sessions and empty titles, while successful live-session title updates emit an observable session_info_update event and persist through the Rust manager callback."
+    },
+    "c6575df92781a5b6859845b39ee59d7f07a8cf31": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust as a first-class virtual MoA provider: model/provider catalogs expose moa:default, provider identity/startup diagnostics treat MoA as a no-key virtual provider instead of a generic API backend, CLI model switching persists moa:default without rebuilding a fake agent, and selected MoA turns automatically route through Rust quorum fan-out with upstream-style reference voters and a concrete aggregator model before restoring the visible virtual selection."
     }
   },
   "subject_patterns": [

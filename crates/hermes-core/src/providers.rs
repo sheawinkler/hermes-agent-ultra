@@ -2,6 +2,7 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "openai",
     "anthropic",
     "openrouter",
+    "moa",
     "codex",
     "openai-codex",
     "custom",
@@ -103,6 +104,7 @@ pub fn canonical_provider_id(provider: &str) -> String {
     match normalized.as_str() {
         "codex" => "openai-codex".to_string(),
         "claude" | "claude-code" => "anthropic".to_string(),
+        "mixture" | "mixture-of-agents" | "mixture_of_agents" => "moa".to_string(),
         "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
         "nous_api" | "nousapi" | "nous-portal-api" => "nous-api".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
@@ -311,6 +313,9 @@ mod tests {
     #[test]
     fn canonical_provider_id_normalizes_common_aliases() {
         assert_eq!(canonical_provider_id("moonshot"), "kimi");
+        assert_eq!(canonical_provider_id("mixture"), "moa");
+        assert_eq!(canonical_provider_id("mixture-of-agents"), "moa");
+        assert_eq!(canonical_provider_id("mixture_of_agents"), "moa");
         assert_eq!(canonical_provider_id("gemini-cli"), "google-gemini-cli");
         assert_eq!(canonical_provider_id("ollama"), "ollama-local");
         assert_eq!(canonical_provider_id("llama.cpp"), "llama-cpp");
