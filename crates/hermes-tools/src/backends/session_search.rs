@@ -45,6 +45,7 @@ struct SessionRowContext {
     created_at: Option<String>,
     parent_session_id: Option<String>,
     model_config: Option<String>,
+    source: Option<String>,
     parent_end_reason: Option<String>,
     parent_ended_at: Option<String>,
     updated_at: Option<String>,
@@ -181,6 +182,19 @@ impl SqliteSessionSearchBackend {
         Ok(())
     }
 
+    fn model_config_marker_is_non_null(model_config: Option<&str>, key: &str) -> bool {
+        let Some(raw) = model_config
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return false;
+        };
+        serde_json::from_str::<Value>(raw)
+            .ok()
+            .and_then(|v| v.get(key).cloned())
+            .is_some_and(|marker| !marker.is_null())
+    }
+
     fn branch_marker_from_model_config(model_config: Option<&str>) -> Option<String> {
         let raw = model_config?.trim();
         if raw.is_empty() {
@@ -193,6 +207,12 @@ impl SqliteSessionSearchBackend {
                 .filter(|marker| !marker.is_empty())
                 .map(ToString::to_string)
         })
+    }
+
+    fn is_explicit_non_compression_child(model_config: Option<&str>, source: Option<&str>) -> bool {
+        Self::model_config_marker_is_non_null(model_config, "_branched_from")
+            || Self::model_config_marker_is_non_null(model_config, "_delegate_from")
+            || source.map(str::trim) == Some("tool")
     }
 
     fn parse_timestamp_utc(raw: Option<&str>) -> Option<DateTime<Utc>> {
@@ -252,26 +272,18 @@ impl SqliteSessionSearchBackend {
     }
 
     fn is_compression_child(
-        created_at: Option<&str>,
+        model_config: Option<&str>,
+        source: Option<&str>,
         parent_end_reason: Option<&str>,
-        parent_ended_at: Option<&str>,
     ) -> bool {
-        if parent_end_reason.map(str::trim) != Some("compression") {
-            return false;
-        }
-        match (
-            Self::parse_timestamp_utc(created_at),
-            Self::parse_timestamp_utc(parent_ended_at),
-        ) {
-            (Some(child_started), Some(parent_ended)) => child_started >= parent_ended,
-            _ => false,
-        }
+        parent_end_reason.map(str::trim) == Some("compression")
+            && !Self::is_explicit_non_compression_child(model_config, source)
     }
 
     fn session_row_context(conn: &Connection, session_id: &str) -> Option<SessionRowContext> {
         conn.query_row(
             "SELECT s.id, s.created_at, s.parent_session_id, s.model_config,
-                    p.end_reason, p.ended_at, s.updated_at
+                    s.platform, p.end_reason, p.ended_at, s.updated_at
              FROM sessions s
              LEFT JOIN sessions p ON p.id = s.parent_session_id
              WHERE s.id = ?1",
@@ -282,9 +294,10 @@ impl SqliteSessionSearchBackend {
                     created_at: row.get::<_, Option<String>>(1)?,
                     parent_session_id: row.get::<_, Option<String>>(2)?,
                     model_config: row.get::<_, Option<String>>(3)?,
-                    parent_end_reason: row.get::<_, Option<String>>(4)?,
-                    parent_ended_at: row.get::<_, Option<String>>(5)?,
-                    updated_at: row.get::<_, Option<String>>(6)?,
+                    source: row.get::<_, Option<String>>(4)?,
+                    parent_end_reason: row.get::<_, Option<String>>(5)?,
+                    parent_ended_at: row.get::<_, Option<String>>(6)?,
+                    updated_at: row.get::<_, Option<String>>(7)?,
                 })
             },
         )
@@ -302,9 +315,9 @@ impl SqliteSessionSearchBackend {
                 break;
             };
             if !Self::is_compression_child(
-                ctx.created_at.as_deref(),
+                ctx.model_config.as_deref(),
+                ctx.source.as_deref(),
                 ctx.parent_end_reason.as_deref(),
-                ctx.parent_ended_at.as_deref(),
             ) {
                 break;
             }
@@ -328,22 +341,54 @@ impl SqliteSessionSearchBackend {
             if sid.is_empty() || !visited.insert(sid.clone()) {
                 break;
             }
-            let child = conn
-                .query_row(
-                    "SELECT c.id
+            let mut stmt = match conn.prepare(
+                "SELECT c.id, c.model_config, c.platform
                      FROM sessions c
                      JOIN sessions p ON p.id = c.parent_session_id
                      WHERE c.parent_session_id = ?1
                        AND p.end_reason = 'compression'
-                       AND c.created_at >= p.ended_at
-                     ORDER BY c.created_at DESC, c.updated_at DESC, c.id DESC
-                     LIMIT 1",
-                    rusqlite::params![sid.clone()],
-                    |row| row.get::<_, String>(0),
-                )
-                .ok()
-                .map(|id| id.trim().to_string())
-                .filter(|id| !id.is_empty());
+                     ORDER BY
+                       CASE
+                         WHEN c.end_reason = 'compression' THEN 0
+                         WHEN NULLIF(TRIM(c.ended_at), '') IS NULL THEN 1
+                         ELSE 2
+                       END,
+                       COALESCE(
+                         (SELECT MAX(m.created_at) FROM messages m WHERE m.session_id = c.id),
+                         c.updated_at,
+                         c.created_at
+                       ) DESC,
+                       c.created_at DESC,
+                       c.id DESC",
+            ) {
+                Ok(stmt) => stmt,
+                Err(_) => break,
+            };
+            let candidates = match stmt.query_map(rusqlite::params![sid.clone()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            }) {
+                Ok(candidates) => candidates,
+                Err(_) => break,
+            };
+            let mut child = None;
+            for candidate in candidates.flatten() {
+                let (id, model_config, source) = candidate;
+                let id = id.trim().to_string();
+                if id.is_empty()
+                    || Self::is_explicit_non_compression_child(
+                        model_config.as_deref(),
+                        source.as_deref(),
+                    )
+                {
+                    continue;
+                }
+                child = Some(id);
+                break;
+            }
             match child {
                 Some(next) => sid = next,
                 None => break,
@@ -352,53 +397,44 @@ impl SqliteSessionSearchBackend {
         sid
     }
 
-    fn logical_session_key_for_row(
-        conn: &Connection,
-        session_id: &str,
-        parent_session_id: Option<&str>,
-        model_config: Option<&str>,
-        created_at: Option<&str>,
-        parent_end_reason: Option<&str>,
-        parent_ended_at: Option<&str>,
-    ) -> String {
+    fn logical_session_key_for_row(conn: &Connection, row: &SessionRowContext) -> String {
         if Self::is_branch_child(
-            parent_session_id,
-            model_config,
-            created_at,
-            parent_end_reason,
-            parent_ended_at,
+            row.parent_session_id.as_deref(),
+            row.model_config.as_deref(),
+            row.created_at.as_deref(),
+            row.parent_end_reason.as_deref(),
+            row.parent_ended_at.as_deref(),
         ) {
-            return session_id.to_string();
+            return row.id.to_string();
         }
-        if Self::is_compression_child(created_at, parent_end_reason, parent_ended_at) {
-            return Self::compression_root(conn, session_id);
+        if Self::is_compression_child(
+            row.model_config.as_deref(),
+            row.source.as_deref(),
+            row.parent_end_reason.as_deref(),
+        ) {
+            return Self::compression_root(conn, &row.id);
         }
-        Self::resolve_to_parent(conn, session_id)
+        Self::resolve_to_parent(conn, &row.id)
     }
 
-    fn visible_session_id_for_row(
-        conn: &Connection,
-        session_id: &str,
-        parent_session_id: Option<&str>,
-        model_config: Option<&str>,
-        created_at: Option<&str>,
-        parent_end_reason: Option<&str>,
-        parent_ended_at: Option<&str>,
-    ) -> String {
+    fn visible_session_id_for_row(conn: &Connection, row: &SessionRowContext) -> String {
         if Self::is_branch_child(
-            parent_session_id,
-            model_config,
-            created_at,
-            parent_end_reason,
-            parent_ended_at,
+            row.parent_session_id.as_deref(),
+            row.model_config.as_deref(),
+            row.created_at.as_deref(),
+            row.parent_end_reason.as_deref(),
+            row.parent_ended_at.as_deref(),
         ) {
-            session_id.to_string()
+            row.id.to_string()
         } else {
-            let root = if Self::is_compression_child(created_at, parent_end_reason, parent_ended_at)
-            {
-                Self::compression_root(conn, session_id)
+            let root = if Self::is_compression_child(
+                row.model_config.as_deref(),
+                row.source.as_deref(),
+                row.parent_end_reason.as_deref(),
+            ) {
+                Self::compression_root(conn, &row.id)
             } else {
-                Self::resolve_to_parent(conn, session_id)
+                Self::resolve_to_parent(conn, &row.id)
             };
             Self::compression_tip(conn, &root)
         }
@@ -406,17 +442,7 @@ impl SqliteSessionSearchBackend {
 
     fn logical_session_key_for_session_id(conn: &Connection, session_id: &str) -> String {
         Self::session_row_context(conn, session_id)
-            .map(|ctx| {
-                Self::logical_session_key_for_row(
-                    conn,
-                    &ctx.id,
-                    ctx.parent_session_id.as_deref(),
-                    ctx.model_config.as_deref(),
-                    ctx.created_at.as_deref(),
-                    ctx.parent_end_reason.as_deref(),
-                    ctx.parent_ended_at.as_deref(),
-                )
-            })
+            .map(|ctx| Self::logical_session_key_for_row(conn, &ctx))
             .unwrap_or_else(|| Self::resolve_to_parent(conn, session_id))
     }
 
@@ -468,7 +494,7 @@ impl SqliteSessionSearchBackend {
             .join(", ");
         let sql = format!(
             "SELECT s.id, s.created_at, s.parent_session_id, s.model_config,
-                    p.end_reason, p.ended_at, s.updated_at
+                    s.platform, p.end_reason, p.ended_at, s.updated_at
              FROM sessions s
              LEFT JOIN sessions p ON p.id = s.parent_session_id
              WHERE LOWER(s.id) LIKE ? ESCAPE '\\'
@@ -500,9 +526,10 @@ impl SqliteSessionSearchBackend {
                     created_at: row.get::<_, Option<String>>(1)?,
                     parent_session_id: row.get::<_, Option<String>>(2)?,
                     model_config: row.get::<_, Option<String>>(3)?,
-                    parent_end_reason: row.get::<_, Option<String>>(4)?,
-                    parent_ended_at: row.get::<_, Option<String>>(5)?,
-                    updated_at: row.get::<_, Option<String>>(6)?,
+                    source: row.get::<_, Option<String>>(4)?,
+                    parent_end_reason: row.get::<_, Option<String>>(5)?,
+                    parent_ended_at: row.get::<_, Option<String>>(6)?,
+                    updated_at: row.get::<_, Option<String>>(7)?,
                 })
             })
             .map_err(|e| {
@@ -511,15 +538,7 @@ impl SqliteSessionSearchBackend {
 
         let mut ranked = Vec::new();
         for (idx, row) in rows.flatten().enumerate() {
-            let logical_key = Self::logical_session_key_for_row(
-                conn,
-                &row.id,
-                row.parent_session_id.as_deref(),
-                row.model_config.as_deref(),
-                row.created_at.as_deref(),
-                row.parent_end_reason.as_deref(),
-                row.parent_ended_at.as_deref(),
-            );
+            let logical_key = Self::logical_session_key_for_row(conn, &row);
             let score = Self::id_match_score(&needle, &[row.id.as_str(), logical_key.as_str()]);
             ranked.push((score, idx, row));
         }
@@ -949,7 +968,7 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
         current_session_id: Option<&str>,
     ) -> Result<String, ToolError> {
         let query = query.map(str::trim).unwrap_or("");
-        let limit = limit.min(5).max(1);
+        let limit = limit.clamp(1, 5);
 
         let (tasks, sessions_searched, recent_payload, search_degraded): (
             Vec<SummaryTask>,
@@ -1096,24 +1115,8 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                 let mut tasks = Vec::new();
 
                 for row in Self::search_sessions_by_id(&conn, query, limit)? {
-                    let visible_session_id = Self::visible_session_id_for_row(
-                        &conn,
-                        &row.id,
-                        row.parent_session_id.as_deref(),
-                        row.model_config.as_deref(),
-                        row.created_at.as_deref(),
-                        row.parent_end_reason.as_deref(),
-                        row.parent_ended_at.as_deref(),
-                    );
-                    let logical_key = Self::logical_session_key_for_row(
-                        &conn,
-                        &row.id,
-                        row.parent_session_id.as_deref(),
-                        row.model_config.as_deref(),
-                        row.created_at.as_deref(),
-                        row.parent_end_reason.as_deref(),
-                        row.parent_ended_at.as_deref(),
-                    );
+                    let visible_session_id = Self::visible_session_id_for_row(&conn, &row);
+                    let logical_key = Self::logical_session_key_for_row(&conn, &row);
                     if current_lineage_root.as_ref() == Some(&logical_key) {
                         continue;
                     }
@@ -1222,31 +1225,27 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                             let (
                                 raw_session_id,
                                 raw_started_at,
-                                _raw_source,
+                                raw_source,
                                 _raw_model,
                                 parent_session_id,
                                 model_config,
                                 parent_end_reason,
                                 parent_ended_at,
                             ) = row;
-                            let resolved_session_id = Self::visible_session_id_for_row(
-                                &conn,
-                                &raw_session_id,
-                                parent_session_id.as_deref(),
-                                model_config.as_deref(),
-                                raw_started_at.as_deref(),
-                                parent_end_reason.as_deref(),
-                                parent_ended_at.as_deref(),
-                            );
-                            let logical_key = Self::logical_session_key_for_row(
-                                &conn,
-                                &raw_session_id,
-                                parent_session_id.as_deref(),
-                                model_config.as_deref(),
-                                raw_started_at.as_deref(),
-                                parent_end_reason.as_deref(),
-                                parent_ended_at.as_deref(),
-                            );
+                            let row_context = SessionRowContext {
+                                id: raw_session_id,
+                                created_at: raw_started_at,
+                                parent_session_id,
+                                model_config,
+                                source: Some(raw_source),
+                                parent_end_reason,
+                                parent_ended_at,
+                                updated_at: None,
+                            };
+                            let resolved_session_id =
+                                Self::visible_session_id_for_row(&conn, &row_context);
+                            let logical_key =
+                                Self::logical_session_key_for_row(&conn, &row_context);
                             if let Some(ref current_root) = current_lineage_root {
                                 if &logical_key == current_root {
                                     continue;
@@ -1447,10 +1446,20 @@ mod tests {
     }
 
     fn insert_message(conn: &Connection, session_id: &str, role: &str, content: &str) {
+        insert_message_at(conn, session_id, role, content, "2026-01-01T00:00:30Z");
+    }
+
+    fn insert_message_at(
+        conn: &Connection,
+        session_id: &str,
+        role: &str,
+        content: &str,
+        timestamp: &str,
+    ) {
         conn.execute(
             "INSERT INTO messages (session_id, role, content, created_at)
-             VALUES (?1, ?2, ?3, '2026-01-01T00:00:30Z')",
-            rusqlite::params![session_id, role, content],
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![session_id, role, content, timestamp],
         )
         .expect("insert message");
         conn.execute(
@@ -1460,6 +1469,22 @@ mod tests {
             rusqlite::params![session_id],
         )
         .expect("update message count");
+    }
+
+    fn update_session_model_config(conn: &Connection, session_id: &str, model_config: &str) {
+        conn.execute(
+            "UPDATE sessions SET model_config = ?1 WHERE id = ?2",
+            rusqlite::params![model_config, session_id],
+        )
+        .expect("update model_config");
+    }
+
+    fn update_session_platform(conn: &Connection, session_id: &str, platform: &str) {
+        conn.execute(
+            "UPDATE sessions SET platform = ?1 WHERE id = ?2",
+            rusqlite::params![platform, session_id],
+        )
+        .expect("update platform");
     }
 
     fn insert_inactive_message(conn: &Connection, session_id: &str, role: &str, content: &str) {
@@ -1872,6 +1897,170 @@ mod tests {
         let ids = result_ids(&output);
 
         assert_eq!(ids, vec!["20260603_010000_tip01".to_string()], "{output}");
+    }
+
+    #[tokio::test]
+    async fn search_session_id_resolves_compression_tip_created_before_parent_end() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "race-root",
+            None,
+            None,
+            Some("compression"),
+            Some("2026-06-03T00:00:30Z"),
+            "2026-06-03T00:00:00Z",
+        );
+        insert_message(&conn, "race-root", "user", "root segment");
+        insert_session(
+            &conn,
+            "race-cont",
+            Some("race-root"),
+            None,
+            None,
+            None,
+            "2026-06-03T00:00:10Z",
+        );
+        insert_message_at(
+            &conn,
+            "race-cont",
+            "user",
+            "continuation persisted before parent ended_at",
+            "2026-06-03T00:00:40Z",
+        );
+
+        let output = backend
+            .search(Some("race-root"), None, 1, None)
+            .await
+            .expect("search");
+        let ids = result_ids(&output);
+
+        assert_eq!(ids, vec!["race-cont".to_string()], "{output}");
+    }
+
+    #[tokio::test]
+    async fn search_session_id_prefers_live_race_continuation_over_closed_stale_sibling() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "stale-root",
+            None,
+            None,
+            Some("compression"),
+            Some("2026-06-03T00:00:30Z"),
+            "2026-06-03T00:00:00Z",
+        );
+        insert_session(
+            &conn,
+            "stale-real",
+            Some("stale-root"),
+            None,
+            None,
+            None,
+            "2026-06-03T00:00:10Z",
+        );
+        insert_message_at(
+            &conn,
+            "stale-real",
+            "user",
+            "live continuation",
+            "2026-06-03T00:00:40Z",
+        );
+        insert_session(
+            &conn,
+            "stale-closed",
+            Some("stale-root"),
+            None,
+            None,
+            Some("2026-06-03T00:00:50Z"),
+            "2026-06-03T00:00:45Z",
+        );
+        insert_message_at(
+            &conn,
+            "stale-closed",
+            "user",
+            "stale closed sibling with later message",
+            "2026-06-03T00:00:55Z",
+        );
+
+        let output = backend
+            .search(Some("stale-root"), None, 1, None)
+            .await
+            .expect("search");
+        let ids = result_ids(&output);
+
+        assert_eq!(ids, vec!["stale-real".to_string()], "{output}");
+    }
+
+    #[tokio::test]
+    async fn search_session_id_excludes_branch_delegate_and_tool_children_from_tip() {
+        let (tmp, backend) = backend_with_db();
+        let conn = db_conn(&tmp);
+        insert_session(
+            &conn,
+            "exclude-root",
+            None,
+            None,
+            Some("compression"),
+            Some("2026-06-03T00:00:10Z"),
+            "2026-06-03T00:00:00Z",
+        );
+        insert_session(
+            &conn,
+            "exclude-cont",
+            Some("exclude-root"),
+            None,
+            None,
+            None,
+            "2026-06-03T00:00:20Z",
+        );
+        insert_message_at(
+            &conn,
+            "exclude-cont",
+            "user",
+            "real continuation",
+            "2026-06-03T00:01:00Z",
+        );
+        for (id, config, source, message_at) in [
+            (
+                "exclude-branch",
+                Some(r#"{"_branched_from":"exclude-root"}"#),
+                "cli",
+                "2026-06-03T00:02:00Z",
+            ),
+            (
+                "exclude-delegate",
+                Some(r#"{"_delegate_from":"exclude-root"}"#),
+                "cli",
+                "2026-06-03T00:03:00Z",
+            ),
+            ("exclude-tool", None, "tool", "2026-06-03T00:04:00Z"),
+        ] {
+            insert_session(
+                &conn,
+                id,
+                Some("exclude-root"),
+                None,
+                None,
+                None,
+                message_at,
+            );
+            if let Some(config) = config {
+                update_session_model_config(&conn, id, config);
+            }
+            update_session_platform(&conn, id, source);
+            insert_message_at(&conn, id, "user", "must not become tip", message_at);
+        }
+
+        let output = backend
+            .search(Some("exclude-root"), None, 1, None)
+            .await
+            .expect("search");
+        let ids = result_ids(&output);
+
+        assert_eq!(ids, vec!["exclude-cont".to_string()], "{output}");
     }
 
     #[tokio::test]
