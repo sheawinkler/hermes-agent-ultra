@@ -1,11 +1,11 @@
 {
-  "generated_at_utc": "2026-06-23T05:17:48-06:00",
-  "head_sha": "f708494a083f916d02ab4ce056dc2cc2233f242c",
+  "generated_at_utc": "2026-06-26T15:22:04-06:00",
+  "head_sha": "79cd74ca3a2d7314e54e4a7d350db9b833142cf1",
   "states": {
     "complete": 7
   },
   "upstream_ref": "upstream/main",
-  "upstream_sha": "5ecf3bf0e0726b8b33682bb5c3aad9679b7b5be4",
+  "upstream_sha": "9b2af36d5aea3118ac6cfb15a2802f92fe0b5eda",
   "workstreams": [
     {
       "evidence": [
@@ -39,8 +39,8 @@
       ],
       "metrics": {
         "divergence_documented": true,
-        "local_skill_files": 890,
-        "upstream_skill_files": 894
+        "local_skill_files": 917,
+        "upstream_skill_files": 895
       },
       "state": "complete",
       "title": "Skills parity",

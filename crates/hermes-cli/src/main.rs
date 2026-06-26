@@ -880,6 +880,9 @@ async fn main() {
             )
             .await
         }
+        CliCommand::Cloudflare { action, selftest } => {
+            hermes_cli::cloudflare::handle_cli_cloudflare(action, selftest).await
+        }
         CliCommand::TeamsPipeline {
             action,
             id,
