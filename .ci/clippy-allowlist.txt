@@ -115,13 +115,13 @@ hermes_cron|clippy::unnecessary_map_or|crates/hermes-cron/src/persistence.rs
 hermes_cron|clippy::vec_init_then_push|crates/hermes-cron/src/runner.rs
 hermes_eval|clippy::default_constructed_unit_structs|crates/hermes-eval/src/configured.rs
 hermes_eval|clippy::default_constructed_unit_structs|crates/hermes-eval/src/tblite.rs
-hermes_gateway|clippy::await_holding_lock|crates/hermes-gateway/src/gateway.rs
+hermes_gateway|clippy::await_holding_lock|crates/hermes-gateway/src/gateway/tests.rs
 hermes_gateway|clippy::collapsible_if|crates/hermes-gateway/src/media.rs
 hermes_gateway|clippy::collapsible_if|crates/hermes-gateway/src/voice.rs
 hermes_gateway|clippy::derivable_impls|crates/hermes-gateway/src/adapter.rs
 hermes_gateway|clippy::derivable_impls|crates/hermes-gateway/src/gateway.rs
 hermes_gateway|clippy::derivable_impls|crates/hermes-gateway/src/voice.rs
-hermes_gateway|clippy::field_reassign_with_default|crates/hermes-gateway/src/gateway.rs
+hermes_gateway|clippy::field_reassign_with_default|crates/hermes-gateway/src/gateway/tests.rs
 hermes_gateway|clippy::field_reassign_with_default|crates/hermes-gateway/src/voice.rs
 hermes_gateway|clippy::identity_op|crates/hermes-gateway/src/platforms/weixin.rs
 hermes_gateway|clippy::if_same_then_else|crates/hermes-gateway/src/platforms/weixin.rs
