@@ -1071,7 +1071,7 @@ hermes claw migrate --source /home/user/old-openclaw
 hermes dashboard [options]
 ```
 
-Launch the web dashboard — a browser-based UI for managing configuration, API keys, and monitoring sessions. Requires `pip install hermes-agent[web]` (FastAPI + Uvicorn). See [Web Dashboard](/docs/user-guide/features/web-dashboard) for full documentation.
+Launch the web dashboard-compatible local HTTP UI/API helper for managing configuration, API keys, and monitoring sessions. Hermes Agent Ultra ships this as part of the Rust runtime; do not install the app with Python extras. See [Web Dashboard](/docs/user-guide/features/web-dashboard) for full documentation.
 
 | Option | Default | Description |
 |--------|---------|-------------|

@@ -7,7 +7,9 @@ sidebar_position: 2
 
 # Windows (WSL2) Guide
 
-Hermes Agent now supports **both** native Windows and WSL2.  This page covers the WSL2 path; for the native PowerShell install see the dedicated **[Windows (Native) Guide](./windows-native.md)**.
+Hermes Agent Ultra's supported Windows path is WSL2. This page covers that
+path; native Windows is currently an experimental Rust source-build route
+documented in the [Windows guide](./windows-native.md).
 
 **When to pick WSL2 over native:**
 - You want to use the dashboard's embedded terminal (`/chat` tab) — that pane requires a POSIX PTY and is WSL2-only.
@@ -95,14 +97,14 @@ Reopen your WSL terminal. `ps -p 1 -o comm=` should print `systemd`.
 
 The `metadata` mount option above is important — without it, files on `/mnt/c/...` can't store real Linux permission bits, which breaks things like `chmod +x` on scripts under Windows paths.
 
-### Install Hermes inside WSL
+### Install Hermes Agent Ultra inside WSL
 
 Once you have a WSL2 shell open:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | bash
 source ~/.bashrc
-hermes
+hermes-ultra
 ```
 
 The installer treats WSL2 as plain Linux — nothing WSL-specific is needed. See [Installation](/docs/getting-started/installation) for the full layout.

@@ -139,10 +139,9 @@ def install_deps():
     print(f"ERROR: Failed to install dependencies: {pip_error}")
     print(
         "On environments without pip (e.g. Nix, or the Hermes Docker image's "
-        "uv-managed venv), install the optional extra instead:"
+        "uv-managed venv), install the Google Workspace dependencies directly:"
     )
-    print("  pip install 'hermes-agent[google]'")
-    print(f"Or manually: {sys.executable} -m pip install {' '.join(REQUIRED_PACKAGES)}")
+    print(f"  {sys.executable} -m pip install {' '.join(REQUIRED_PACKAGES)}")
     return False
 
 

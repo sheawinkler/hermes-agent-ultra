@@ -37,7 +37,7 @@ This skill is a concise operating guide, not the complete source of truth for ev
 
 Good verification targets:
 
-- CLI commands: `hermes --help`, `hermes <command> --help`, and `hermes_cli/main.py`
+- CLI commands: `hermes-ultra --help`, `hermes-ultra <command> --help`, and `hermes_cli/main.py`
 - User documentation: https://hermes-agent.nousresearch.com/docs/
 - Source tree: https://github.com/NousResearch/hermes-agent
 
@@ -45,22 +45,22 @@ Good verification targets:
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | bash
 
 # Interactive chat (default)
-hermes
+hermes-ultra
 
 # Single query
-hermes chat -q "What is the capital of France?"
+hermes-ultra chat -q "What is the capital of France?"
 
 # Setup wizard
-hermes setup
+hermes-ultra setup
 
 # Change model/provider
-hermes model
+hermes-ultra model
 
 # Check health
-hermes doctor
+hermes-ultra doctor
 ```
 
 ---
@@ -70,7 +70,7 @@ hermes doctor
 ### Global Flags
 
 ```
-hermes [flags] [command]
+hermes-ultra [flags] [command]
 
   --version, -V             Show version
   --resume, -r SESSION      Resume session by ID or title
@@ -87,7 +87,7 @@ No subcommand defaults to `chat`.
 ### Chat
 
 ```
-hermes chat [flags]
+hermes-ultra chat [flags]
   -q, --query TEXT          Single query, non-interactive
   -m, --model MODEL         Model (e.g. anthropic/claude-sonnet-4)
   -t, --toolsets LIST       Comma-separated toolsets
@@ -101,62 +101,62 @@ hermes chat [flags]
 ### Configuration
 
 ```
-hermes setup [section]      Interactive wizard (model|terminal|gateway|tools|agent)
-hermes model                Interactive model/provider picker
-hermes config               View current config
-hermes config edit          Open config.yaml in $EDITOR
-hermes config set KEY VAL   Set a config value
-hermes config path          Print config.yaml path
-hermes config env-path      Print .env path
-hermes config check         Check for missing/outdated config
-hermes config migrate       Update config with new options
-hermes login [--provider P] OAuth login (nous, openai-codex)
-hermes logout               Clear stored auth
-hermes doctor [--fix]       Check dependencies and config
-hermes status [--all]       Show component status
+hermes-ultra setup [section]      Interactive wizard (model|terminal|gateway|tools|agent)
+hermes-ultra model                Interactive model/provider picker
+hermes-ultra config               View current config
+hermes-ultra config edit          Open config.yaml in $EDITOR
+hermes-ultra config set KEY VAL   Set a config value
+hermes-ultra config path          Print config.yaml path
+hermes-ultra config env-path      Print .env path
+hermes-ultra config check         Check for missing/outdated config
+hermes-ultra config migrate       Update config with new options
+hermes-ultra login [--provider P] OAuth login (nous, openai-codex)
+hermes-ultra logout               Clear stored auth
+hermes-ultra doctor [--fix]       Check dependencies and config
+hermes-ultra status [--all]       Show component status
 ```
 
 ### Tools & Skills
 
 ```
-hermes tools                Interactive tool enable/disable (curses UI)
-hermes tools list           Show all tools and status
-hermes tools enable NAME    Enable a toolset
-hermes tools disable NAME   Disable a toolset
+hermes-ultra tools                Interactive tool enable/disable (curses UI)
+hermes-ultra tools list           Show all tools and status
+hermes-ultra tools enable NAME    Enable a toolset
+hermes-ultra tools disable NAME   Disable a toolset
 
-hermes skills list          List installed skills
-hermes skills search QUERY  Search the skills hub
-hermes skills install ID    Install a skill (ID can be a hub identifier OR a direct https://…/SKILL.md URL; pass --name to override when frontmatter has no name)
-hermes skills inspect ID    Preview without installing
-hermes skills config        Enable/disable skills per platform
-hermes skills check         Check for updates
-hermes skills update        Update outdated skills
-hermes skills uninstall N   Remove a hub skill
-hermes skills publish PATH  Publish to registry
-hermes skills browse        Browse all available skills
-hermes skills tap add REPO  Add a GitHub repo as skill source
+hermes-ultra skills list          List installed skills
+hermes-ultra skills search QUERY  Search the skills hub
+hermes-ultra skills install ID    Install a skill (ID can be a hub identifier OR a direct https://…/SKILL.md URL; pass --name to override when frontmatter has no name)
+hermes-ultra skills inspect ID    Preview without installing
+hermes-ultra skills config        Enable/disable skills per platform
+hermes-ultra skills check         Check for updates
+hermes-ultra skills update        Update outdated skills
+hermes-ultra skills uninstall N   Remove a hub skill
+hermes-ultra skills publish PATH  Publish to registry
+hermes-ultra skills browse        Browse all available skills
+hermes-ultra skills tap add REPO  Add a GitHub repo as skill source
 ```
 
 ### MCP Servers
 
 ```
-hermes mcp serve            Run Hermes as an MCP server
-hermes mcp add NAME         Add an MCP server (--url or --command)
-hermes mcp remove NAME      Remove an MCP server
-hermes mcp list             List configured servers
-hermes mcp test NAME        Test connection
-hermes mcp configure NAME   Toggle tool selection
+hermes-ultra mcp serve            Run Hermes as an MCP server
+hermes-ultra mcp add NAME         Add an MCP server (--url or --command)
+hermes-ultra mcp remove NAME      Remove an MCP server
+hermes-ultra mcp list             List configured servers
+hermes-ultra mcp test NAME        Test connection
+hermes-ultra mcp configure NAME   Toggle tool selection
 ```
 
 ### Gateway (Messaging Platforms)
 
 ```
-hermes gateway run          Start gateway foreground
-hermes gateway install      Install as background service
-hermes gateway start/stop   Control the service
-hermes gateway restart      Restart the service
-hermes gateway status       Check status
-hermes gateway setup        Configure platforms
+hermes-ultra gateway run          Start gateway foreground
+hermes-ultra gateway install      Install as background service
+hermes-ultra gateway start/stop   Control the service
+hermes-ultra gateway restart      Restart the service
+hermes-ultra gateway status       Check status
+hermes-ultra gateway setup        Configure platforms
 ```
 
 Supported platforms: Telegram, Discord, Slack, WhatsApp, Signal, Email, SMS, Matrix, Mattermost, Home Assistant, DingTalk, Feishu, WeCom, BlueBubbles (iMessage), Weixin (WeChat), API Server, Webhooks. Open WebUI connects via the API Server adapter.
@@ -166,72 +166,72 @@ Platform docs: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/
 ### Sessions
 
 ```
-hermes sessions list        List recent sessions
-hermes sessions browse      Interactive picker
-hermes sessions export OUT  Export to JSONL
-hermes sessions rename ID T Rename a session
-hermes sessions delete ID   Delete a session
-hermes sessions prune       Clean up old sessions (--older-than N days)
-hermes sessions stats       Session store statistics
+hermes-ultra sessions list        List recent sessions
+hermes-ultra sessions browse      Interactive picker
+hermes-ultra sessions export OUT  Export to JSONL
+hermes-ultra sessions rename ID T Rename a session
+hermes-ultra sessions delete ID   Delete a session
+hermes-ultra sessions prune       Clean up old sessions (--older-than N days)
+hermes-ultra sessions stats       Session store statistics
 ```
 
 ### Cron Jobs
 
 ```
-hermes cron list            List jobs (--all for disabled)
-hermes cron create SCHED    Create: '30m', 'every 2h', '0 9 * * *'
-hermes cron edit ID         Edit schedule, prompt, delivery
-hermes cron pause/resume ID Control job state
-hermes cron run ID          Trigger on next tick
-hermes cron remove ID       Delete a job
-hermes cron status          Scheduler status
+hermes-ultra cron list            List jobs (--all for disabled)
+hermes-ultra cron create SCHED    Create: '30m', 'every 2h', '0 9 * * *'
+hermes-ultra cron edit ID         Edit schedule, prompt, delivery
+hermes-ultra cron pause/resume ID Control job state
+hermes-ultra cron run ID          Trigger on next tick
+hermes-ultra cron remove ID       Delete a job
+hermes-ultra cron status          Scheduler status
 ```
 
 ### Webhooks
 
 ```
-hermes webhook subscribe N  Create route at /webhooks/<name>
-hermes webhook list         List subscriptions
-hermes webhook remove NAME  Remove a subscription
-hermes webhook test NAME    Send a test POST
+hermes-ultra webhook subscribe N  Create route at /webhooks/<name>
+hermes-ultra webhook list         List subscriptions
+hermes-ultra webhook remove NAME  Remove a subscription
+hermes-ultra webhook test NAME    Send a test POST
 ```
 
 ### Profiles
 
 ```
-hermes profile list         List all profiles
-hermes profile create NAME  Create (--clone, --clone-all, --clone-from)
-hermes profile use NAME     Set sticky default
-hermes profile delete NAME  Delete a profile
-hermes profile show NAME    Show details
-hermes profile alias NAME   Manage wrapper scripts
-hermes profile rename A B   Rename a profile
-hermes profile export NAME  Export to tar.gz
-hermes profile import FILE  Import from archive
+hermes-ultra profile list         List all profiles
+hermes-ultra profile create NAME  Create (--clone, --clone-all, --clone-from)
+hermes-ultra profile use NAME     Set sticky default
+hermes-ultra profile delete NAME  Delete a profile
+hermes-ultra profile show NAME    Show details
+hermes-ultra profile alias NAME   Manage wrapper scripts
+hermes-ultra profile rename A B   Rename a profile
+hermes-ultra profile export NAME  Export to tar.gz
+hermes-ultra profile import FILE  Import from archive
 ```
 
 ### Credential Pools
 
 ```
-hermes auth add             Interactive credential wizard
-hermes auth list [PROVIDER] List pooled credentials
-hermes auth remove P INDEX  Remove by provider + index
-hermes auth reset PROVIDER  Clear exhaustion status
+hermes-ultra auth add             Interactive credential wizard
+hermes-ultra auth list [PROVIDER] List pooled credentials
+hermes-ultra auth remove P INDEX  Remove by provider + index
+hermes-ultra auth reset PROVIDER  Clear exhaustion status
 ```
 
 ### Other
 
 ```
-hermes insights [--days N]  Usage analytics
-hermes update               Update to latest version
-hermes pairing list/approve/revoke  DM authorization
-hermes plugins list/install/remove  Plugin management
-hermes honcho setup/status  Honcho memory integration (requires honcho plugin)
-hermes memory setup/status/off  Memory provider config
-hermes completion bash|zsh  Shell completions
-hermes acp                  ACP server (IDE integration)
-hermes claw migrate         Migrate from OpenClaw
-hermes uninstall            Uninstall Hermes
+hermes-ultra insights [--days N]  Usage analytics
+hermes-ultra update               Update to latest version
+hermes-ultra pairing list/approve/revoke  DM authorization
+hermes-ultra plugins list/install/remove  Plugin management
+hermes-ultra honcho setup/status  Honcho memory integration (requires honcho plugin)
+hermes-ultra memory setup/status/off  Memory provider config
+hermes-ultra completion bash|zsh  Shell completions
+hermes-ultra acp                  ACP server (IDE integration)
+hermes-ultra claw migrate         Migrate from OpenClaw
+hermes-ultra uninstall            Uninstall Hermes
 ```
 
 ---
@@ -356,7 +356,7 @@ Profiles use `~/.hermes/profiles/<name>/` with the same layout.
 
 ### Config Sections
 
-Edit with `hermes config edit` or `hermes config set section.key value`.
+Edit with `hermes-ultra config edit` or `hermes-ultra config set section.key value`.
 
 | Section | Key options |
 |---------|-------------|
@@ -376,14 +376,14 @@ Full config reference: https://hermes-agent.nousresearch.com/docs/user-guide/con
 
 ### Providers
 
-20+ providers supported. Set via `hermes model` or `hermes setup`.
+20+ providers supported. Set via `hermes-ultra model` or `hermes-ultra setup`.
 
 | Provider | Auth | Key env var |
 |----------|------|-------------|
 | OpenRouter | API key | `OPENROUTER_API_KEY` |
 | Anthropic | API key | `ANTHROPIC_API_KEY` |
-| Nous Portal | OAuth | `hermes auth` |
-| OpenAI Codex | OAuth | `hermes auth` |
+| Nous Portal | OAuth | `hermes-ultra auth` |
+| OpenAI Codex | OAuth | `hermes-ultra auth` |
 | GitHub Copilot | Token | `COPILOT_GITHUB_TOKEN` |
 | Google Gemini | API key | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
 | DeepSeek | API key | `DEEPSEEK_API_KEY` |
@@ -399,7 +399,7 @@ Full config reference: https://hermes-agent.nousresearch.com/docs/user-guide/con
 | AI Gateway (Vercel) | API key | `AI_GATEWAY_API_KEY` |
 | OpenCode Zen | API key | `OPENCODE_ZEN_API_KEY` |
 | OpenCode Go | API key | `OPENCODE_GO_API_KEY` |
-| Qwen OAuth | OAuth | `hermes login --provider qwen-oauth` |
+| Qwen OAuth | OAuth | `hermes-ultra login --provider qwen-oauth` |
 | Custom endpoint | Config | `model.base_url` + `model.api_key` in config.yaml |
 | GitHub Copilot ACP | External | `COPILOT_CLI_PATH` or Copilot CLI |
 
@@ -407,7 +407,7 @@ Full provider docs: https://hermes-agent.nousresearch.com/docs/integrations/prov
 
 ### Toolsets
 
-Enable/disable via `hermes tools` (interactive) or `hermes tools enable/disable NAME`.
+Enable/disable via `hermes-ultra tools` (interactive) or `hermes-ultra tools enable/disable NAME`.
 
 | Toolset | What it provides |
 |---------|-----------------|
@@ -465,7 +465,7 @@ Hermes injects project-level instructions into the system prompt by reading cont
 
 - **Use `.hermes.md`** when you want Hermes-specific behavior that lives above the cwd (root + subtree), or when you want rules to inherit from a parent directory. The parent walk stops at the git root, so a home-level `.hermes.md` won't leak into every project (a git repo's root is the boundary).
 - **Use `AGENTS.md`** when the same project will also be worked on by other agents (Codex, Claude Code, OpenCode). Those tools all have their own conventions for `AGENTS.md`, and the "cwd only" contract keeps the file portable.
-- **Don't put project rules in `~/.hermes/AGENTS.md`** (or any other home-level location). When Hermes runs with that directory as cwd, the file loads — but only for that one directory. For cross-project context, use `SOUL.md` (in `$HERMES_HOME`, identity-only) or install a skill via `hermes skills install`.
+- **Don't put project rules in `~/.hermes/AGENTS.md`** (or any other home-level location). When Hermes runs with that directory as cwd, the file loads — but only for that one directory. For cross-project context, use `SOUL.md` (in `$HERMES_HOME`, identity-only) or install a skill via `hermes-ultra skills install`.
 
 ### Size and truncation
 
@@ -477,7 +477,7 @@ All context files pass through the threat-pattern scanner before reaching the sy
 
 ### Disable for one session
 
-`hermes --ignore-rules` skips auto-injection of all project context files (`.hermes.md`, `AGENTS.md`, `CLAUDE.md`, `.cursorrules`) **and** `SOUL.md` identity, plus user config, plugins, and MCP servers. Use it to isolate whether a problem is your setup or Hermes itself.
+`hermes-ultra --ignore-rules` skips auto-injection of all project context files (`.hermes.md`, `AGENTS.md`, `CLAUDE.md`, `.cursorrules`) **and** `SOUL.md` identity, plus user config, plugins, and MCP servers. Use it to isolate whether a problem is your setup or Hermes itself.
 
 ### Example: a small `.hermes.md`
 
@@ -499,21 +499,21 @@ That file at `/home/me/projects/myrepo/.hermes.md` is auto-loaded when Hermes ru
 
 ## Security & Privacy Toggles
 
-Common "why is Hermes doing X to my output / tool calls / commands?" toggles — and the exact commands to change them. Most of these need a fresh session (`/reset` in chat, or start a new `hermes` invocation) because they're read once at startup.
+Common "why is Hermes doing X to my output / tool calls / commands?" toggles — and the exact commands to change them. Most of these need a fresh session (`/reset` in chat, or start a new `hermes-ultra` invocation) because they're read once at startup.
 
 ### Secret redaction in tool output
 
 Secret redaction is **on by default** — tool output (terminal stdout, `read_file`, web content, subagent summaries, etc.) is scanned for strings that look like API keys, tokens, and secrets before it enters the conversation context and logs. Leave it enabled for normal use:
 
 ```bash
-hermes config set security.redact_secrets true       # keep enabled globally
+hermes-ultra config set security.redact_secrets true       # keep enabled globally
 ```
 
 **Restart required.** `security.redact_secrets` is snapshotted at import time — toggling it mid-session (e.g. via `export HERMES_REDACT_SECRETS=false` from a tool call) will NOT take effect for the running process. Tell the user to change it in config from a terminal, then start a new session. This is deliberate — it prevents an LLM from flipping the toggle on itself mid-task.
 
 Disable only when you deliberately need raw credential-like strings for debugging or redactor development:
 ```bash
-hermes config set security.redact_secrets false
+hermes-ultra config set security.redact_secrets false
 ```
 
 ### PII redaction in gateway messages
@@ -521,8 +521,8 @@ hermes config set security.redact_secrets false
 Separate from secret redaction. When enabled, the gateway hashes user IDs and strips phone numbers from the session context before it reaches the model:
 
 ```bash
-hermes config set privacy.redact_pii true    # enable
-hermes config set privacy.redact_pii false   # disable (default)
+hermes-ultra config set privacy.redact_pii true    # enable
+hermes-ultra config set privacy.redact_pii false   # disable (default)
 ```
 
 ### Command approval prompts
@@ -534,12 +534,12 @@ By default (`approvals.mode: manual`), Hermes prompts the user before running sh
 - `off` — skip all approval prompts (equivalent to `--yolo`)
 
 ```bash
-hermes config set approvals.mode smart       # recommended middle ground
-hermes config set approvals.mode off         # bypass everything (not recommended)
+hermes-ultra config set approvals.mode smart       # recommended middle ground
+hermes-ultra config set approvals.mode off         # bypass everything (not recommended)
 ```
 
 Per-invocation bypass without changing config:
-- `hermes --yolo …`
+- `hermes-ultra --yolo …`
 - `export HERMES_YOLO_MODE=1`
 
 Note: YOLO / `approvals.mode: off` does NOT turn off secret redaction. They are independent.
@@ -550,7 +550,7 @@ Some shell-hook integrations require explicit allowlisting before they fire. Man
 
 ### Disabling the web/browser/image-gen tools
 
-To keep the model away from network or media tools entirely, open `hermes tools` and toggle per-platform. Takes effect on next session (`/reset`). See the Tools & Skills section above.
+To keep the model away from network or media tools entirely, open `hermes-ultra tools` and toggle per-platform. Takes effect on next session (`/reset`). See the Tools & Skills section above.
 
 ---
 
@@ -596,7 +596,7 @@ Run additional Hermes processes as fully independent subprocesses — separate s
 
 ### When to Use This vs delegate_task
 
-| | `delegate_task` | Spawning `hermes` process |
+| | `delegate_task` | Spawning `hermes-ultra` process |
 |-|-----------------|--------------------------|
 | Isolation | Separate conversation, shared process | Fully independent process |
 | Duration | Minutes (bounded by parent loop) | Hours/days |
@@ -607,10 +607,10 @@ Run additional Hermes processes as fully independent subprocesses — separate s
 ### One-Shot Mode
 
 ```
-terminal(command="hermes chat -q 'Research GRPO papers and write summary to ~/research/grpo.md'", timeout=300)
+terminal(command="hermes-ultra chat -q 'Research GRPO papers and write summary to ~/research/grpo.md'", timeout=300)
 
 # Background for long tasks:
-terminal(command="hermes chat -q 'Set up CI/CD for ~/myapp'", background=true)
+terminal(command="hermes-ultra chat -q 'Set up CI/CD for ~/myapp'", background=true)
 ```
 
 ### Interactive PTY Mode (via tmux)
@@ -619,7 +619,7 @@ Hermes uses prompt_toolkit, which requires a real terminal. Use tmux for interac
 
 ```
 # Start
-terminal(command="tmux new-session -d -s agent1 -x 120 -y 40 'hermes'", timeout=10)
+terminal(command="tmux new-session -d -s agent1 -x 120 -y 40 'hermes-ultra'", timeout=10)
 
 # Wait for startup, then send a message
 terminal(command="sleep 8 && tmux send-keys -t agent1 'Build a FastAPI auth service' Enter", timeout=15)
@@ -638,11 +638,11 @@ terminal(command="tmux send-keys -t agent1 '/exit' Enter && sleep 2 && tmux kill
 
 ```
 # Agent A: backend
-terminal(command="tmux new-session -d -s backend -x 120 -y 40 'hermes -w'", timeout=10)
+terminal(command="tmux new-session -d -s backend -x 120 -y 40 'hermes-ultra -w'", timeout=10)
 terminal(command="sleep 8 && tmux send-keys -t backend 'Build REST API for user management' Enter", timeout=15)
 
 # Agent B: frontend
-terminal(command="tmux new-session -d -s frontend -x 120 -y 40 'hermes -w'", timeout=10)
+terminal(command="tmux new-session -d -s frontend -x 120 -y 40 'hermes-ultra -w'", timeout=10)
 terminal(command="sleep 8 && tmux send-keys -t frontend 'Build React dashboard for user management' Enter", timeout=15)
 
 # Check progress, relay context between them
@@ -654,10 +654,10 @@ terminal(command="tmux send-keys -t frontend 'Here is the API schema from the ba
 
 ```
 # Resume most recent session
-terminal(command="tmux new-session -d -s resumed 'hermes --continue'", timeout=10)
+terminal(command="tmux new-session -d -s resumed 'hermes-ultra --continue'", timeout=10)
 
 # Resume specific session
-terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_143052_a1b2c3'", timeout=10)
+terminal(command="tmux new-session -d -s resumed 'hermes-ultra --resume 20260225_143052_a1b2c3'", timeout=10)
 ```
 
 ### Tips
@@ -665,7 +665,7 @@ terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_14305
 - **Prefer `delegate_task` for quick subtasks** — less overhead than spawning a full process
 - **Use `-w` (worktree mode)** when spawning agents that edit code — prevents git conflicts
 - **Set timeouts** for one-shot mode — complex tasks can take 5-10 minutes
-- **Use `hermes chat -q` for fire-and-forget** — no PTY needed
+- **Use `hermes-ultra chat -q` for fire-and-forget** — no PTY needed
 - **Use tmux for interactive sessions** — raw PTY mode has `\r` vs `\n` issues with prompt_toolkit
 - **For scheduled tasks**, use the `cronjob` tool instead of spawning — handles delivery and retry
 
@@ -696,7 +696,7 @@ Config: `delegation.*` in `config.yaml`.
 ### Cron (scheduled jobs)
 
 Durable scheduler — `cron/jobs.py` + `cron/scheduler.py`. Drive it via
-the `cronjob` tool, the `hermes cron` CLI (`list`, `add`, `edit`,
+the `cronjob` tool, the `hermes-ultra cron` CLI (`list`, `add`, `edit`,
 `pause`, `resume`, `run`, `remove`), or the `/cron` slash command.
 
 - **Schedules:** duration (`"30m"`, `"2h"`), "every" phrase
@@ -720,7 +720,7 @@ Background maintenance for agent-created skills. Tracks usage, marks
 idle skills stale, archives stale ones, keeps a pre-run tar.gz backup
 so nothing is lost.
 
-- **CLI:** `hermes curator <verb>` — `status`, `run`, `pause`, `resume`,
+- **CLI:** `hermes-ultra curator <verb>` — `status`, `run`, `pause`, `resume`,
   `pin`, `unpin`, `archive`, `restore`, `prune`, `backup`, `rollback`.
 - **Slash:** `/curator <subcommand>` mirrors the CLI.
 - **Scope:** only touches skills with `created_by: "agent"` provenance.
@@ -738,7 +738,7 @@ User docs: https://hermes-agent.nousresearch.com/docs/user-guide/features/curato
 ### Kanban (multi-agent work queue)
 
 Durable SQLite board for multi-profile / multi-worker collaboration.
-Users drive it via `hermes kanban <verb>`; dispatcher-spawned workers
+Users drive it via `hermes-ultra kanban <verb>`; dispatcher-spawned workers
 see a focused `kanban_*` toolset gated by `HERMES_KANBAN_TASK` so the
 schema footprint is zero outside worker processes.
 
@@ -795,7 +795,7 @@ Ctrl+Enter?" This is how the Ctrl+Enter = c-j fact was established.
 
 **HTTP 400 "No models provided" on first run.** `config.yaml` was saved
 with a UTF-8 BOM (common when Windows apps write it). Re-save as UTF-8
-without BOM. `hermes config edit` writes without BOM; manual edits in
+without BOM. `hermes-ultra config edit` writes without BOM; manual edits in
 Notepad are the usual culprit.
 
 ### `execute_code` / Sandbox
@@ -858,15 +858,15 @@ and logs — avoids shell-escaping backslashes in bash.
 3. In gateway: `/restart`. In CLI: exit and relaunch.
 
 ### Tool not available
-1. `hermes tools` — check if toolset is enabled for your platform
+1. `hermes-ultra tools` — check if toolset is enabled for your platform
 2. Some tools need env vars (check `.env`)
 3. `/reset` after enabling tools
 
 ### Model/provider issues
-1. `hermes doctor` — check config and dependencies
-2. `hermes login` — re-authenticate OAuth providers
+1. `hermes-ultra doctor` — check config and dependencies
+2. `hermes-ultra login` — re-authenticate OAuth providers
 3. Check `.env` has the right API key
-4. **Copilot 403**: `gh auth login` tokens do NOT work for Copilot API. You must use the Copilot-specific OAuth device code flow via `hermes model` → GitHub Copilot.
+4. **Copilot 403**: `gh auth login` tokens do NOT work for Copilot API. You must use the Copilot-specific OAuth device code flow via `hermes-ultra model` → GitHub Copilot.
 
 ### Changes not taking effect
 - **Tools/skills:** `/reset` starts a new session with updated toolset
@@ -874,9 +874,9 @@ and logs — avoids shell-escaping backslashes in bash.
 - **Code changes:** Restart the CLI or gateway process
 
 ### Skills not showing
-1. `hermes skills list` — verify installed
-2. `hermes skills config` — check platform enablement
-3. Load explicitly: `/skill name` or `hermes -s name`
+1. `hermes-ultra skills list` — verify installed
+2. `hermes-ultra skills config` — check platform enablement
+3. Load explicitly: `/skill name` or `hermes-ultra -s name`
 
 ### Gateway issues
 Check logs first:
@@ -897,8 +897,8 @@ Common gateway problems:
 ### Auxiliary models not working
 If `auxiliary` tasks (vision, compression, session_search) fail silently, the `auto` provider can't find a backend. Either set `OPENROUTER_API_KEY` or `GOOGLE_API_KEY`, or explicitly configure each auxiliary task's provider:
 ```bash
-hermes config set auxiliary.vision.provider <your_provider>
-hermes config set auxiliary.vision.model <model_name>
+hermes-ultra config set auxiliary.vision.provider <your_provider>
+hermes-ultra config set auxiliary.vision.model <model_name>
 ```
 
 ---
@@ -907,20 +907,20 @@ hermes config set auxiliary.vision.model <model_name>
 
 | Looking for... | Location |
 |----------------|----------|
-| Config options | `hermes config edit` or [Configuration docs](https://hermes-agent.nousresearch.com/docs/user-guide/configuration) |
-| Available tools | `hermes tools list` or [Tools reference](https://hermes-agent.nousresearch.com/docs/reference/tools-reference) |
+| Config options | `hermes-ultra config edit` or [Configuration docs](https://hermes-agent.nousresearch.com/docs/user-guide/configuration) |
+| Available tools | `hermes-ultra tools list` or [Tools reference](https://hermes-agent.nousresearch.com/docs/reference/tools-reference) |
 | Slash commands | `/help` in session or [Slash commands reference](https://hermes-agent.nousresearch.com/docs/reference/slash-commands) |
-| Skills catalog | `hermes skills browse` or [Skills catalog](https://hermes-agent.nousresearch.com/docs/reference/skills-catalog) |
-| Provider setup | `hermes model` or [Providers guide](https://hermes-agent.nousresearch.com/docs/integrations/providers) |
-| Platform setup | `hermes gateway setup` or [Messaging docs](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/) |
-| MCP servers | `hermes mcp list` or [MCP guide](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp) |
-| Profiles | `hermes profile list` or [Profiles docs](https://hermes-agent.nousresearch.com/docs/user-guide/profiles) |
-| Cron jobs | `hermes cron list` or [Cron docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron) |
-| Memory | `hermes memory status` or [Memory docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory) |
-| Env variables | `hermes config env-path` or [Env vars reference](https://hermes-agent.nousresearch.com/docs/reference/environment-variables) |
-| CLI commands | `hermes --help` or [CLI reference](https://hermes-agent.nousresearch.com/docs/reference/cli-commands) |
+| Skills catalog | `hermes-ultra skills browse` or [Skills catalog](https://hermes-agent.nousresearch.com/docs/reference/skills-catalog) |
+| Provider setup | `hermes-ultra model` or [Providers guide](https://hermes-agent.nousresearch.com/docs/integrations/providers) |
+| Platform setup | `hermes-ultra gateway setup` or [Messaging docs](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/) |
+| MCP servers | `hermes-ultra mcp list` or [MCP guide](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp) |
+| Profiles | `hermes-ultra profile list` or [Profiles docs](https://hermes-agent.nousresearch.com/docs/user-guide/profiles) |
+| Cron jobs | `hermes-ultra cron list` or [Cron docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron) |
+| Memory | `hermes-ultra memory status` or [Memory docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory) |
+| Env variables | `hermes-ultra config env-path` or [Env vars reference](https://hermes-agent.nousresearch.com/docs/reference/environment-variables) |
+| CLI commands | `hermes-ultra --help` or [CLI reference](https://hermes-agent.nousresearch.com/docs/reference/cli-commands) |
 | Gateway logs | `~/.hermes/logs/gateway.log` |
-| Session files | `~/.hermes/sessions/` or `hermes sessions browse` |
+| Session files | `~/.hermes/sessions/` or `hermes-ultra sessions browse` |
 | Source code | `~/.hermes/hermes-agent/` |
 
 ---

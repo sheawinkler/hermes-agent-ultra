@@ -41,13 +41,8 @@ This guide walks you through the full setup process — from creating your DingT
 
 ## Prerequisites
 
-Install the required Python packages:
-
-```bash
-pip install "hermes-agent[dingtalk]"
-```
-
-Or individually:
+Install any required third-party DingTalk packages directly when using a
+legacy Python-side adapter:
 
 ```bash
 pip install dingtalk-stream httpx alibabacloud-dingtalk

@@ -398,14 +398,9 @@ impl LocalBackend {
 
 #[cfg(unix)]
 fn configure_foreground_process_group(cmd: &mut TokioCommand) {
-    unsafe {
-        cmd.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+    use std::os::unix::process::CommandExt;
+
+    cmd.as_std_mut().process_group(0);
 }
 
 #[cfg(not(unix))]
@@ -2217,6 +2212,18 @@ mod tests {
         );
         let once = rewrite_compound_background("A && B &");
         assert_eq!(rewrite_compound_background(&once), once);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_foreground_process_group_avoids_fork_hook() {
+        let source = include_str!("local.rs");
+        let forbidden = ["pre", "_exec"].concat();
+        assert!(
+            !source.contains(&forbidden),
+            "{forbidden} fork hook must not be used in local foreground process setup"
+        );
+        assert!(source.contains("process_group(0)"));
     }
 
     #[cfg(not(unix))]

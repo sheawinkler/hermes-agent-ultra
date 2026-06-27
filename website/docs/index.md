@@ -13,7 +13,7 @@ The self-improving AI agent built by [Nous Research](https://nousresearch.com). 
 
 <div style={{display: 'flex', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap'}}>
   <a href="/docs/getting-started/installation" style={{display: 'inline-block', padding: '0.6rem 1.2rem', backgroundColor: '#FFD700', color: '#07070d', borderRadius: '8px', fontWeight: 600, textDecoration: 'none'}}>Get Started →</a>
-  <a href="https://github.com/NousResearch/hermes-agent" style={{display: 'inline-block', padding: '0.6rem 1.2rem', border: '1px solid rgba(255,215,0,0.2)', borderRadius: '8px', textDecoration: 'none'}}>View on GitHub</a>
+  <a href="https://github.com/sheawinkler/hermes-agent-ultra" style={{display: 'inline-block', padding: '0.6rem 1.2rem', border: '1px solid rgba(255,215,0,0.2)', borderRadius: '8px', textDecoration: 'none'}}>View on GitHub</a>
 </div>
 
 ## Install
@@ -21,18 +21,15 @@ The self-improving AI agent built by [Nous Research](https://nousresearch.com). 
 **Linux / macOS / WSL2**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | bash
 ```
 
-**Windows (native, PowerShell)** — *early beta, [details →](/docs/user-guide/windows-native)*
-
-```powershell
-irm https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1 | iex
-```
+**Windows** — use WSL2, then run the Linux installer above. Ultra does not ship
+the upstream Python PowerShell installer.
 
 **Android (Termux)** — same curl one-liner as Linux; the installer auto-detects Termux.
 
-See the full **[Installation Guide](/docs/getting-started/installation)** for what the installer does, the per-user vs root layout, and Windows-specific notes.
+See the full **[Installation Guide](/docs/getting-started/installation)** for what the installer does, the per-user vs root layout, and Windows notes.
 
 ## What is Hermes Agent?
 
@@ -42,7 +39,7 @@ It's not a coding copilot tethered to an IDE or a chatbot wrapper around a singl
 
 | | |
 |---|---|
-| 🚀 **[Installation](/docs/getting-started/installation)** | Install in 60 seconds on Linux, macOS, WSL2, or native Windows (early beta) |
+| 🚀 **[Installation](/docs/getting-started/installation)** | Install in 60 seconds on Linux, macOS, WSL2, or Termux |
 | 📖 **[Quickstart Tutorial](/docs/getting-started/quickstart)** | Your first conversation and key features to try |
 | 🗺️ **[Learning Path](/docs/getting-started/learning-path)** | Find the right docs for your experience level |
 | ⚙️ **[Configuration](/docs/user-guide/configuration)** | Config file, providers, models, and options |

@@ -57,7 +57,7 @@ const DEFAULT_KREA_RESOLUTION: &str = "1K";
 const DEFAULT_KREA_CREATIVITY: &str = "medium";
 const DEFAULT_KREA_STYLE_REFERENCE_STRENGTH: f64 = 0.6;
 const OPENROUTER_COMPAT_MAX_REFERENCE_IMAGES: usize = 3;
-const OPENROUTER_COMPAT_TIMEOUT_SECS: u64 = 180;
+const OPENROUTER_COMPAT_TIMEOUT_SECS: u64 = 300;
 const OPENROUTER_COMPAT_HTTP_REFERER: &str = "https://github.com/NousResearch/hermes-agent";
 const OPENROUTER_COMPAT_X_TITLE: &str = "Hermes Agent";
 const KREA_MAX_REFERENCE_IMAGES: usize = 10;
@@ -3480,6 +3480,11 @@ mod fal_managed_tests {
         let runtime: ImageGenRuntimeBackend = backend.into();
         assert_eq!(runtime.provider_label(), "openrouter");
         assert_eq!(runtime.required_env_vars(), vec!["OPENROUTER_API_KEY"]);
+    }
+
+    #[test]
+    fn openrouter_timeout_budget_matches_slow_quality_first_models() {
+        assert_eq!(OPENROUTER_COMPAT_TIMEOUT_SECS, 300);
     }
 
     #[test]

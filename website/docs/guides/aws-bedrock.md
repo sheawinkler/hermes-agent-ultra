@@ -10,12 +10,11 @@ Hermes Agent supports Amazon Bedrock as a native provider using the **Converse A
 
 ## Prerequisites
 
-- **AWS credentials** — any source supported by the [boto3 credential chain](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html):
+- **AWS credentials** — any source supported by the AWS SDK credential chain:
   - IAM instance role (EC2, ECS, Lambda — zero config)
   - `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` environment variables
   - `AWS_PROFILE` for SSO or named profiles
   - `aws configure` for local development
-- **boto3** — install with `pip install hermes-agent[bedrock]`
 - **IAM permissions** — at minimum:
   - `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` (for inference)
   - `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` (for model discovery)
@@ -27,16 +26,13 @@ On AWS compute, attach an IAM role with `AmazonBedrockFullAccess` and you're don
 ## Quick Start
 
 ```bash
-# Install with Bedrock support
-pip install hermes-agent[bedrock]
-
 # Select Bedrock as your provider
-hermes model
+hermes-ultra model
 # → Choose "More providers..." → "AWS Bedrock"
 # → Select your region and model
 
 # Start chatting
-hermes chat
+hermes-ultra chat
 ```
 
 ## Configuration

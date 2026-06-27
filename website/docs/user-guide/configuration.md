@@ -257,11 +257,9 @@ terminal:
   container_disk: 51200           # Shared default only; custom disk is unsupported
 ```
 
-**Required install:** Install the optional SDK extra:
-
-```bash
-pip install 'hermes-agent[vercel]'
-```
+**Runtime status:** Vercel Sandbox is not available in the Rust terminal
+runtime yet. Choose `local`, `docker`, `ssh`, `daytona`, `modal`, or
+`singularity` for production Hermes Agent Ultra sessions.
 
 **Required authentication:** Configure access-token auth with all three of `VERCEL_TOKEN`, `VERCEL_PROJECT_ID`, and `VERCEL_TEAM_ID`. This is the supported setup for deployments and normal long-running Hermes processes on Render, Railway, Docker, and similar hosts.
 

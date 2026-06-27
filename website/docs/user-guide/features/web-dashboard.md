@@ -39,15 +39,10 @@ hermes dashboard --no-open
 
 ## Prerequisites
 
-The default `hermes-agent` install does not ship the HTTP stack or PTY helper — those are optional extras. The **web dashboard** needs FastAPI and Uvicorn (`web` extra). The **Chat** tab also needs `ptyprocess` to spawn the embedded TUI behind a pseudo-terminal (`pty` extra on POSIX). Install both with:
-
-```bash
-pip install 'hermes-agent[web,pty]'
-```
-
-The `web` extra pulls in FastAPI/Uvicorn; `pty` pulls in `ptyprocess` (POSIX) or `pywinpty` (native Windows — note that the embedded TUI itself still requires WSL). `pip install hermes-agent[all]` includes both extras and is the easiest path if you also want messaging/voice/etc.
-
-When you run `hermes dashboard` without the dependencies, it will tell you what to install. If the frontend hasn't been built yet and `npm` is available, it builds automatically on first launch.
+Hermes Agent Ultra ships the dashboard-compatible local HTTP UI/API helper as
+part of the Rust runtime. Use `hermes-ultra dashboard`; do not install Python
+extras for the app. If local frontend or terminal helpers are missing,
+`hermes-ultra doctor` reports the concrete dependency to fix.
 
 ## Pages
 
@@ -64,12 +59,12 @@ The status page auto-refreshes every 5 seconds.
 
 ### Chat
 
-The **Chat** tab embeds the full Hermes TUI (the same interface you get from `hermes --tui`) directly in the browser. Everything you can do in the terminal TUI — slash commands, model picker, tool-call cards, markdown streaming, clarify/sudo/approval prompts, skin theming — works identically here, because the dashboard is running the real TUI binary and rendering its ANSI output through [xterm.js](https://xtermjs.org/) with its WebGL renderer for pixel-perfect cell layout.
+The **Chat** tab embeds the full Hermes TUI (the same interface you get from `hermes-ultra --tui`) directly in the browser. Everything you can do in the terminal TUI — slash commands, model picker, tool-call cards, markdown streaming, clarify/sudo/approval prompts, skin theming — works identically here, because the dashboard is running the real TUI binary and rendering its ANSI output through [xterm.js](https://xtermjs.org/) with its WebGL renderer for pixel-perfect cell layout.
 
 **How it works:**
 
 - `/api/pty` opens a WebSocket authenticated with the dashboard's session token
-- The server spawns `hermes --tui` behind a POSIX pseudo-terminal
+- The server spawns `hermes-ultra --tui` behind a POSIX pseudo-terminal
 - Keystrokes travel to the PTY; ANSI output streams back to the browser
 - xterm.js's WebGL renderer paints each cell to an integer-pixel grid; mouse tracking (SGR 1006), wide characters (Unicode 11), and box-drawing glyphs all render natively
 - Resizing the browser window resizes the TUI via the `@xterm/addon-fit` addon
@@ -78,9 +73,8 @@ The **Chat** tab embeds the full Hermes TUI (the same interface you get from `he
 
 **Prerequisites:**
 
-- Node.js (same requirement as `hermes --tui`; the TUI bundle is built on first launch)
-- `ptyprocess` — installed by the `pty` extra (`pip install 'hermes-agent[web,pty]'`, or `[all]` covers both)
-- POSIX kernel (Linux, macOS, or WSL2).  The `/chat` terminal pane specifically needs a POSIX PTY — native Windows Python has no equivalent, so on a native Windows install the rest of the dashboard (sessions, jobs, metrics, config editor) works but the `/chat` tab will show a banner telling you to use WSL2 for that feature.
+- Node.js when a local frontend bundle needs to be built
+- POSIX kernel (Linux, macOS, or WSL2). The `/chat` terminal pane specifically needs POSIX PTY behavior; use WSL2 on Windows.
 
 Close the browser tab and the PTY is reaped cleanly on the server. Re-opening spawns a fresh session.
 
