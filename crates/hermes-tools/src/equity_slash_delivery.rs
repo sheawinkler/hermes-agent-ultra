@@ -915,44 +915,79 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "live network — end-to-end slash delivery for 600522"]
-    async fn live_slash_delivery_600522() {
+    #[ignore = "live network — end-to-end slash delivery for 600528"]
+    async fn live_slash_delivery_600528() {
         let _guard = test_guard();
-        use crate::registry::ToolRegistry;
+        use std::path::Path;
+        use std::time::{Duration, Instant};
+
         use crate::tools::trading_analyze_stock::AnalyzeStockHandler;
         use hermes_core::ToolHandler;
         use serde_json::json;
 
+        const MAX_ELAPSED: Duration = Duration::from_secs(120);
+
+        analyze_stock_cache::clear_for_tests();
+        let started = Instant::now();
         let handler = AnalyzeStockHandler::new();
         handler
             .execute(json!({
-                "symbol": "600522.SH",
+                "symbol": "600528.SH",
                 "depth": "medium",
                 "use_providers": true
             }))
             .await
-            .expect("analyze_stock live");
+            .expect("analyze_stock live 600528");
+        let analyze_ms = started.elapsed().as_millis();
+        eprintln!("live 600528 analyze_stock: {analyze_ms}ms");
 
-        let msg = "[MODE: analyze-stock / depth=medium] Analyze: 600522";
+        let msg = "[MODE: analyze-stock / depth=medium] Analyze: 600528";
         let analyze = tc(
             "analyze_stock",
-            r#"{"symbol":"600522.SH","depth":"medium","use_providers":true}"#,
+            r#"{"symbol":"600528.SH","depth":"medium","use_providers":true}"#,
         );
-        let mut session = fresh_session();
+        let mut session = EquitySlashSession::default();
+        let deliver_started = Instant::now();
         let out = try_equity_slash_delivery(
             EquitySlashMode::AnalyzeStock,
             msg,
             std::slice::from_ref(&analyze),
-            &[ok(&ToolRegistry::tool_result(
-                "intentionally truncated for LLM context",
-            ))],
+            &[ok("analyze_stock ok")],
             &mut session,
         );
+        let deliver_ms = deliver_started.elapsed().as_millis();
+        let total_ms = started.elapsed().as_millis();
+        eprintln!("live 600528 slash deliver: {deliver_ms}ms total: {total_ms}ms");
+
         let text = match out {
             EquitySlashDeliveryOutcome::Deliver(text) => text,
-            other => panic!("live 600522 delivery failed: {other:?}"),
+            other => panic!("live 600528 delivery failed: {other:?}"),
         };
         assert!(text.contains("MEDIA:"), "must attach HTML report");
         assert!(text.chars().count() > 200, "brief must be substantive");
+
+        let html_path = text
+            .lines()
+            .find_map(|line| line.strip_prefix("MEDIA:"))
+            .expect("MEDIA path line");
+        let html = std::fs::read_to_string(Path::new(html_path.trim()))
+            .unwrap_or_else(|e| panic!("read HTML at {html_path}: {e}"));
+        assert!(html.contains("01 / CORE"), "HTML missing 01 / CORE");
+        assert!(
+            html.contains("05 / DEEP SCAN"),
+            "HTML missing 05 / DEEP SCAN"
+        );
+        assert!(
+            html.contains("06 / VALUATION"),
+            "HTML missing 06 / VALUATION"
+        );
+        assert!(html.contains("600528"), "HTML missing symbol");
+
+        assert!(
+            started.elapsed() < MAX_ELAPSED,
+            "600528 slash E2E exceeded {:?}: {:?}",
+            MAX_ELAPSED,
+            started.elapsed()
+        );
     }
 }

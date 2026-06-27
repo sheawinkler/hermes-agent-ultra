@@ -105,7 +105,10 @@ mod tests {
         assert!(html.contains("600519.SH"));
         assert!(html.contains("公司基本面"));
         assert!(html.contains("板块与同业"));
-        assert!(html.contains("19 维评分"));
+        assert!(html.contains("01 / CORE"));
+        assert!(html.contains("05 / DEEP SCAN"));
+        assert!(html.contains("06 / VALUATION"));
+        assert!(html.contains("已展示 19 维"));
         assert!(html.contains(&result.synthesis.headline));
         assert!(html.len() > 200);
         assert!(
