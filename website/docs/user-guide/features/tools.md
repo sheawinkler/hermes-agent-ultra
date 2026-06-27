@@ -124,11 +124,8 @@ hermes config set terminal.backend modal
 
 ### Vercel Sandbox
 
-```bash
-pip install 'hermes-agent[vercel]'
-hermes config set terminal.backend vercel_sandbox
-hermes config set terminal.vercel_runtime node24
-```
+Hermes Agent Ultra's Rust terminal runtime does not expose Vercel Sandbox yet.
+Use `local`, `docker`, `ssh`, `daytona`, `modal`, or `singularity` instead.
 
 Authenticate with all three of `VERCEL_TOKEN`, `VERCEL_PROJECT_ID`, and `VERCEL_TEAM_ID`. This access-token setup is the supported path for deployments and normal long-running Hermes processes on Render, Railway, Docker, and similar hosts. Supported runtimes are `node24`, `node22`, and `python3.13`; Hermes defaults to `/vercel/sandbox` as the remote workspace root.
 

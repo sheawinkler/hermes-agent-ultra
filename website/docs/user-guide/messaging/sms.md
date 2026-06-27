@@ -20,7 +20,7 @@ The SMS gateway shares credentials with the optional [telephony skill](/docs/ref
 - **Twilio account** — [Sign up at twilio.com](https://www.twilio.com/try-twilio) (free trial available)
 - **A Twilio phone number** with SMS capability
 - **A publicly accessible server** — Twilio sends webhooks to your server when SMS arrives
-- **aiohttp** — `pip install 'hermes-agent[sms]'`
+- **Webhook runtime** — provided by the Hermes Agent Ultra gateway; run `hermes-ultra doctor` if platform support is unavailable.
 
 ---
 

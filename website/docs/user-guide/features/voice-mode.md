@@ -14,12 +14,12 @@ If you want a practical setup walkthrough with recommended configurations and re
 
 Before using voice features, make sure you have:
 
-1. **Hermes Agent installed** — `pip install hermes-agent` (see [Installation](/docs/getting-started/installation))
-2. **An LLM provider configured** — run `hermes model` or set your preferred provider credentials in `~/.hermes/.env`
-3. **A working base setup** — run `hermes` to verify the agent responds to text before enabling voice
+1. **Hermes Agent Ultra installed** — use the [release installer](/docs/getting-started/installation)
+2. **An LLM provider configured** — run `hermes-ultra model` or set your preferred provider credentials in `~/.hermes/.env`
+3. **A working base setup** — run `hermes-ultra` to verify the agent responds to text before enabling voice
 
 :::tip
-The `~/.hermes/` directory and default `config.yaml` are created automatically the first time you run `hermes`. You only need to create `~/.hermes/.env` manually for API keys.
+The `~/.hermes/` directory and default `config.yaml` are created automatically the first time you run `hermes-ultra`. You only need to create `~/.hermes/.env` manually for API keys.
 :::
 
 ## Overview
@@ -32,24 +32,13 @@ The `~/.hermes/` directory and default `config.yaml` are created automatically t
 
 ## Requirements
 
-### Python Packages
+### Runtime Support
 
-```bash
-# CLI voice mode (microphone + audio playback)
-pip install "hermes-agent[voice]"
+Voice, messaging, and TTS tools ship with Hermes Agent Ultra's Rust runtime.
+Run `hermes-ultra doctor` to verify local audio tools and provider credentials.
 
-# Discord + Telegram messaging (includes discord.py[voice] for VC support)
-pip install "hermes-agent[messaging]"
-
-# Premium TTS (ElevenLabs)
-pip install "hermes-agent[tts-premium]"
-
-# Local TTS (NeuTTS, optional)
-python -m pip install -U neutts[all]
-
-# Everything at once
-pip install "hermes-agent[all]"
-```
+Optional local TTS engines can still have their own project-specific install
+steps, but they are not Hermes app installs.
 
 | Extra | Packages | Required For |
 |-------|----------|-------------|

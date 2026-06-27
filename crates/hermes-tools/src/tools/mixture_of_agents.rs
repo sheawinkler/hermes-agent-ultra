@@ -5,7 +5,9 @@ use futures::future::join_all;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
+use hermes_core::{
+    providers::canonical_provider_id, tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema,
+};
 
 const DEFAULT_MOA_BASE_URL: &str = "https://inference-api.nousresearch.com/v1";
 const DEFAULT_REFERENCE_MODELS: &[&str] = &[
@@ -228,6 +230,15 @@ impl MoaRuntimeConfig {
                 "reference_models must contain at least one model".into(),
             ));
         }
+        if let Some(model) = reference_models
+            .iter()
+            .find(|model| is_moa_virtual_slot(model))
+        {
+            return Err(ToolError::InvalidParams(format!(
+                "reference_models must not include the MoA virtual provider ({})",
+                model.trim()
+            )));
+        }
 
         let aggregator_model = string_param(params, "aggregator_model")
             .or_else(|| env_nonempty(&["HERMES_MOA_AGGREGATOR_MODEL", "MOA_AGGREGATOR_MODEL"]))
@@ -236,6 +247,12 @@ impl MoaRuntimeConfig {
             return Err(ToolError::InvalidParams(
                 "aggregator_model must not be empty".into(),
             ));
+        }
+        if is_moa_virtual_slot(&aggregator_model) {
+            return Err(ToolError::InvalidParams(format!(
+                "aggregator_model must not be the MoA virtual provider ({})",
+                aggregator_model.trim()
+            )));
         }
 
         let min_successful_references = usize_param(params, "min_successful_references")
@@ -521,6 +538,20 @@ fn nonempty(raw: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+fn is_moa_virtual_slot(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let provider = trimmed
+        .split_once(':')
+        .map(|(provider, _)| provider)
+        .or_else(|| trimmed.split_once('/').map(|(provider, _)| provider))
+        .unwrap_or(trimmed);
+    canonical_provider_id(provider) == "moa"
+}
+
 fn f64_param(params: &Value, key: &str) -> Option<f64> {
     params.get(key).and_then(|v| {
         v.as_f64()
@@ -611,6 +642,52 @@ mod tests {
                 std::env::remove_var(self.key);
             }
         }
+    }
+
+    #[test]
+    fn mixture_of_agents_rejects_moa_virtual_reference_model_slot() {
+        let err = MoaRuntimeConfig::from_params(&json!({
+            "reference_models": ["openrouter/deepseek/deepseek-v4-pro", "moa:default"],
+            "aggregator_model": "anthropic/claude-opus-4.8"
+        }))
+        .expect_err("moa reference slot must be rejected");
+
+        let ToolError::InvalidParams(message) = err else {
+            panic!("expected invalid params");
+        };
+        assert!(message.contains("reference_models"));
+        assert!(message.contains("MoA virtual provider"));
+    }
+
+    #[test]
+    fn mixture_of_agents_rejects_moa_virtual_aggregator_slot() {
+        let err = MoaRuntimeConfig::from_params(&json!({
+            "reference_models": ["openrouter/deepseek/deepseek-v4-pro"],
+            "aggregator_model": "Mixture-Of-Agents/default"
+        }))
+        .expect_err("moa aggregator slot must be rejected");
+
+        let ToolError::InvalidParams(message) = err else {
+            panic!("expected invalid params");
+        };
+        assert!(message.contains("aggregator_model"));
+        assert!(message.contains("MoA virtual provider"));
+    }
+
+    #[tokio::test]
+    async fn mixture_of_agents_rejects_env_derived_moa_virtual_slots() {
+        let _env_lock = ENV_LOCK.lock().await;
+        let _refs = EnvGuard::set("HERMES_MOA_REFERENCE_MODELS", "ref-a,moa:default");
+        let _legacy_refs = EnvGuard::remove("MOA_REFERENCE_MODELS");
+        let _agg = EnvGuard::remove("HERMES_MOA_AGGREGATOR_MODEL");
+        let _legacy_agg = EnvGuard::remove("MOA_AGGREGATOR_MODEL");
+
+        let err = MoaRuntimeConfig::from_params(&json!({}))
+            .expect_err("env-derived moa reference slot must be rejected");
+        let ToolError::InvalidParams(message) = err else {
+            panic!("expected invalid params");
+        };
+        assert!(message.contains("reference_models"));
     }
 
     #[tokio::test]

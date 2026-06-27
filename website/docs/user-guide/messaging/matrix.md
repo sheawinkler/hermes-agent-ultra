@@ -244,9 +244,6 @@ E2EE requires the `mautrix` library with encryption extras and the `libolm` C li
 ```bash
 # Install mautrix with E2EE support
 pip install 'mautrix[encryption]'
-
-# Or install with hermes extras
-pip install 'hermes-agent[matrix]'
 ```
 
 You also need `libolm` installed on your system:
@@ -380,11 +377,8 @@ If this returns your user info, the token is valid. If it returns an error, gene
 pip install 'mautrix[encryption]'
 ```
 
-Or with Hermes extras:
-
-```bash
-pip install 'hermes-agent[matrix]'
-```
+Hermes Agent Ultra itself is installed with the release installer or Cargo; do
+not install the app with Python extras.
 
 ### Encryption errors / "could not decrypt event"
 
@@ -482,7 +476,7 @@ history, so other clients trust it immediately.
 
 ## Proxy Mode (E2EE on macOS)
 
-Matrix E2EE requires `libolm`, which doesn't compile on macOS ARM64 (Apple Silicon). The `hermes-agent[matrix]` extra is gated to Linux only. If you're on macOS, proxy mode lets you run E2EE in a Docker container on a Linux VM while the actual agent runs natively on macOS with full access to your local files, memory, and skills.
+Matrix E2EE requires `libolm`, which doesn't compile on macOS ARM64 (Apple Silicon). If you're on macOS, proxy mode lets you run E2EE in a Docker container on a Linux VM while the actual agent runs natively on macOS with full access to your local files, memory, and skills.
 
 ### How It Works
 
@@ -563,9 +557,8 @@ services:
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y libolm-dev && rm -rf /var/lib/apt/lists/*
-RUN pip install 'hermes-agent[matrix]'
 
-CMD ["hermes", "gateway"]
+CMD ["hermes-ultra", "gateway"]
 ```
 
 That's the entire container. No API keys for OpenRouter, Anthropic, or any inference provider.

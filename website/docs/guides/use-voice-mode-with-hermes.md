@@ -52,36 +52,19 @@ What tools do you have available?
 
 If that is not solid yet, fix text mode first.
 
-## Step 2: install the right extras
+## Step 2: verify runtime support
 
-### CLI microphone + playback
-
-```bash
-pip install "hermes-agent[voice]"
-```
-
-### Messaging platforms
+Voice, messaging, and TTS surfaces ship with Hermes Agent Ultra's Rust runtime.
+Use the doctor command to verify local audio tools and provider credentials:
 
 ```bash
-pip install "hermes-agent[messaging]"
-```
-
-### Premium ElevenLabs TTS
-
-```bash
-pip install "hermes-agent[tts-premium]"
+hermes-ultra doctor
 ```
 
 ### Local NeuTTS (optional)
 
 ```bash
 python -m pip install -U neutts[all]
-```
-
-### Everything
-
-```bash
-pip install "hermes-agent[all]"
 ```
 
 ## Step 3: install system dependencies
@@ -440,7 +423,7 @@ By default, the bot needs an `@mention` in Discord server text channels unless c
 If you want the shortest path to success:
 
 1. get text Hermes working
-2. install `hermes-agent[voice]`
+2. run `hermes-ultra doctor` and fix any local audio dependency warnings
 3. use CLI voice mode with local STT + Edge TTS
 4. then enable `/voice on` in Telegram or Discord
 5. only after that, try Discord VC mode

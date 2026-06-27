@@ -240,9 +240,6 @@ TBLite is a thin subclass of TerminalBench2 — only the dataset and timeouts di
 | **Time** | ~3–6 hours |
 
 ```bash
-# Install yc-bench (optional dependency)
-pip install "hermes-agent[yc-bench]"
-
 # Run evaluation
 bash environments/benchmarks/yc_bench/run_eval.sh
 
@@ -477,12 +474,12 @@ python my_env.py evaluate \
 
 ### For Modal-sandboxed benchmarks (TB2, TBLite)
 
-- [Modal](https://modal.com) account and CLI: `pip install "hermes-agent[modal]"`
+- [Modal](https://modal.com) account and CLI installed from Modal's own instructions
 - `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` environment variables
 
 ### For YC-Bench
 
-- `pip install "hermes-agent[yc-bench]"` (installs the yc-bench CLI + SQLAlchemy)
+- Install the benchmark's direct Python dependencies from its environment docs or lockfile.
 - No Modal needed — runs with local terminal backend
 
 ### For RL training
