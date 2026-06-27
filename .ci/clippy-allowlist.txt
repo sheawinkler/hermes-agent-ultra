@@ -70,10 +70,10 @@ hermes_cli|clippy::await_holding_lock|crates/hermes-cli/src/commands/command_tes
 hermes_cli|clippy::await_holding_lock|crates/hermes-cli/src/model_switch.rs
 hermes_cli|clippy::bind_instead_of_map|crates/hermes-cli/src/theme.rs
 hermes_cli|clippy::bool_assert_comparison|crates/hermes-cli/src/alpha_runtime.rs
-hermes_cli|clippy::field_reassign_with_default|crates/hermes-cli/src/app.rs
+hermes_cli|clippy::field_reassign_with_default|crates/hermes-cli/src/app/tests.rs
 hermes_cli|clippy::field_reassign_with_default|crates/hermes-cli/src/tui.rs
 hermes_cli|clippy::inconsistent_digit_grouping|crates/hermes-cli/src/auth.rs
-hermes_cli|clippy::items_after_test_module|crates/hermes-cli/src/app.rs
+hermes_cli|clippy::items_after_test_module|crates/hermes-cli/src/app/tests.rs
 hermes_cli|clippy::manual_checked_ops|crates/hermes-cli/src/tui.rs
 hermes_cli|clippy::manual_clamp|crates/hermes-cli/src/tui.rs
 hermes_cli|clippy::manual_strip|crates/hermes-cli/src/auth.rs
@@ -82,7 +82,7 @@ hermes_cli|clippy::redundant_closure|crates/hermes-cli/src/auth.rs
 hermes_cli|clippy::redundant_closure|crates/hermes-cli/src/tui.rs
 hermes_cli|clippy::too_many_arguments|crates/hermes-cli/src/tui.rs
 hermes_cli|clippy::type_complexity|crates/hermes-cli/src/checklist.rs
-hermes_cli|clippy::unnecessary_cast|crates/hermes-cli/src/app.rs
+hermes_cli|clippy::unnecessary_cast|crates/hermes-cli/src/app/app_types.rs
 hermes_cli|clippy::unnecessary_lazy_evaluations|crates/hermes-cli/src/auth.rs
 hermes_cli|clippy::unnecessary_lazy_evaluations|crates/hermes-cli/src/tui.rs
 hermes_cli|clippy::useless_format|crates/hermes-cli/src/claw_migrate.rs
