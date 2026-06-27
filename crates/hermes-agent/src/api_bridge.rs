@@ -20,7 +20,10 @@ use hermes_core::{
 };
 
 use crate::credential_pool::CredentialPool;
-use crate::provider::{codex_cloudflare_headers, OPENAI_CODEX_BASE_URL};
+use crate::provider::{
+    codex_cloudflare_headers, is_openai_dynamic_model_alias, OPENAI_CODEX_BASE_URL,
+    OPENAI_CODEX_DYNAMIC_WIRE_MODEL,
+};
 use crate::rate_limit::RateLimitTracker;
 
 const CODEX_RESPONSES_BETA_HEADER: &str = "responses=2026-02-06";
@@ -53,6 +56,7 @@ pub struct CodexProvider {
     pub api_key: String,
     pub model: String,
     pub headers: Vec<(String, String)>,
+    chatgpt_codex_backend: bool,
     client: Client,
     request_timeout: Option<Duration>,
     pub rate_limiter: Option<Arc<RateLimitTracker>>,
@@ -67,6 +71,7 @@ impl CodexProvider {
             api_key: api_key.into(),
             model: "codex-mini-latest".to_string(),
             headers: Vec::new(),
+            chatgpt_codex_backend: false,
             client: build_codex_http_client(request_timeout),
             request_timeout,
             rate_limiter: None,
@@ -123,10 +128,21 @@ impl CodexProvider {
     }
 
     fn uses_chatgpt_codex_backend(&self) -> bool {
-        self.base_url
-            .trim()
-            .to_ascii_lowercase()
-            .contains("chatgpt.com/backend-api/codex")
+        self.chatgpt_codex_backend
+            || self
+                .base_url
+                .trim()
+                .to_ascii_lowercase()
+                .contains("chatgpt.com/backend-api/codex")
+    }
+
+    fn effective_wire_model(&self, requested_model: &str) -> String {
+        let requested_model = requested_model.trim();
+        if self.uses_chatgpt_codex_backend() && is_openai_dynamic_model_alias(requested_model) {
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL.to_string()
+        } else {
+            requested_model.to_string()
+        }
     }
 
     fn request_headers(&self, api_key: &str) -> Vec<(String, String)> {
@@ -173,10 +189,12 @@ impl CodexProvider {
 
     pub fn openai_pro(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         let api_key = api_key.into();
-        Self::new(api_key.as_str())
+        let mut provider = Self::new(api_key.as_str())
             .with_model(model)
             .with_base_url(OPENAI_CODEX_BASE_URL)
-            .with_headers(codex_cloudflare_headers(Some(api_key.as_str())))
+            .with_headers(codex_cloudflare_headers(Some(api_key.as_str())));
+        provider.chatgpt_codex_backend = true;
+        provider
     }
 
     async fn check_rate_limit(&self) {
@@ -331,6 +349,9 @@ impl CodexProvider {
         if self.uses_chatgpt_codex_backend() {
             body["stream"] = serde_json::json!(true);
             body["store"] = serde_json::json!(false);
+        }
+        if let Some(model) = body.get("model").and_then(Value::as_str) {
+            body["model"] = serde_json::json!(self.effective_wire_model(model));
         }
         body
     }
@@ -537,7 +558,7 @@ impl LlmProvider for CodexProvider {
         extra_body: Option<&Value>,
     ) -> Result<LlmResponse, AgentError> {
         self.check_rate_limit().await;
-        let effective_model = model.unwrap_or(&self.model);
+        let effective_model = self.effective_wire_model(model.unwrap_or(&self.model));
         let api_key = self.effective_api_key();
 
         let body = self.build_body(
@@ -545,7 +566,7 @@ impl LlmProvider for CodexProvider {
             tools,
             max_tokens,
             temperature,
-            effective_model,
+            effective_model.as_str(),
             extra_body,
             false,
         );
@@ -572,7 +593,9 @@ impl LlmProvider for CodexProvider {
         }
 
         if self.uses_chatgpt_codex_backend() {
-            return self.collect_streaming_response(resp, effective_model).await;
+            return self
+                .collect_streaming_response(resp, effective_model.as_str())
+                .await;
         }
 
         let resp_json: Value = resp
@@ -600,7 +623,7 @@ impl LlmProvider for CodexProvider {
 
         async_stream::stream! {
             provider.check_rate_limit().await;
-            let effective_model = model.as_deref().unwrap_or(&provider.model);
+            let effective_model = provider.effective_wire_model(model.as_deref().unwrap_or(&provider.model));
             let api_key = provider.effective_api_key();
 
             let body = provider.build_body(
@@ -608,7 +631,7 @@ impl LlmProvider for CodexProvider {
                 &tools,
                 max_tokens,
                 temperature,
-                effective_model,
+                effective_model.as_str(),
                 extra_body.as_ref(),
                 true,
             );
@@ -830,6 +853,71 @@ mod tests {
         assert!(body.get("strict_tool_calls").is_none());
         assert!(body.get("provider_strict").is_none());
         assert_eq!(body["input"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn openai_pro_dynamic_alias_uses_supported_chatgpt_wire_model() {
+        let provider = CodexProvider::openai_pro("token", "dynamic");
+        assert_eq!(
+            provider.effective_wire_model("dynamic"),
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL
+        );
+        assert_eq!(
+            provider.effective_wire_model("openai:dynamic"),
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL
+        );
+        assert_eq!(
+            provider.effective_wire_model("openai-codex:dynamic"),
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL
+        );
+        assert_eq!(provider.effective_wire_model("gpt-5.5"), "gpt-5.5");
+        assert_eq!(
+            provider.effective_wire_model("dynamic-runtime-model"),
+            "dynamic-runtime-model"
+        );
+
+        let body = provider.build_body(
+            &[Message::user("Say ok")],
+            &[],
+            None,
+            None,
+            provider.effective_wire_model("dynamic").as_str(),
+            None,
+            false,
+        );
+
+        assert_eq!(body["model"], OPENAI_CODEX_DYNAMIC_WIRE_MODEL);
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["store"], false);
+    }
+
+    #[test]
+    fn openai_pro_extra_body_cannot_restore_dynamic_wire_model() {
+        let provider = CodexProvider::openai_pro("token", "dynamic");
+        let extra_body = serde_json::json!({
+            "model": "dynamic",
+            "service_tier": "priority"
+        });
+
+        let body = provider.build_body(
+            &[Message::user("Say ok")],
+            &[],
+            None,
+            None,
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL,
+            Some(&extra_body),
+            false,
+        );
+
+        assert_eq!(body["model"], OPENAI_CODEX_DYNAMIC_WIRE_MODEL);
+        assert_eq!(body["service_tier"], "priority");
+    }
+
+    #[test]
+    fn codex_api_dynamic_alias_stays_literal_outside_chatgpt_backend() {
+        let provider = CodexProvider::new("sk-test").with_model("dynamic");
+
+        assert_eq!(provider.effective_wire_model("dynamic"), "dynamic");
     }
 
     #[test]

@@ -126,6 +126,30 @@
     }
 
     #[test]
+    fn test_runtime_wire_model_remaps_openai_dynamic_only() {
+        assert_eq!(
+            AgentLoop::runtime_wire_model_for_provider("openai", "dynamic"),
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL
+        );
+        assert_eq!(
+            AgentLoop::runtime_wire_model_for_provider("codex", "openai:dynamic"),
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL
+        );
+        assert_eq!(
+            AgentLoop::runtime_wire_model_for_provider("openai-codex", "codex:dynamic"),
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL
+        );
+        assert_eq!(
+            AgentLoop::runtime_wire_model_for_provider("openrouter", "dynamic"),
+            "dynamic"
+        );
+        assert_eq!(
+            AgentLoop::runtime_wire_model_for_provider("openai", "gpt-5.5"),
+            "gpt-5.5"
+        );
+    }
+
+    #[test]
     fn test_smart_model_routing_codex_provider_alias_builds_runtime() {
         use futures::stream::BoxStream;
 

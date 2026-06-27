@@ -46,6 +46,7 @@ struct ChatRequestParams<'a> {
 
 const ACP_MULTIMODAL_PREFIX: &str = "__hermes_acp_parts_json__:";
 pub const OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+pub const OPENAI_CODEX_DYNAMIC_WIRE_MODEL: &str = "gpt-5.4";
 const CODEX_CLOUDFLARE_ORIGINATOR: &str = "codex_cli_rs";
 
 fn request_timeout_duration(seconds: Option<f64>) -> Option<Duration> {
@@ -150,6 +151,42 @@ pub fn codex_chatgpt_account_id(token: &str) -> Option<String> {
 
 pub fn is_codex_chatgpt_token(token: &str) -> bool {
     codex_chatgpt_account_id(token).is_some()
+}
+
+pub fn is_openai_dynamic_model_alias(model: &str) -> bool {
+    matches!(
+        model.trim().to_ascii_lowercase().as_str(),
+        "dynamic" | "openai:dynamic" | "codex:dynamic" | "openai-codex:dynamic"
+    )
+}
+
+pub fn resolve_openai_chatgpt_dynamic_wire_model(requested_model: &str, api_key: &str) -> String {
+    let requested_model = requested_model.trim();
+    if is_openai_dynamic_model_alias(requested_model) && is_codex_chatgpt_token(api_key) {
+        OPENAI_CODEX_DYNAMIC_WIRE_MODEL.to_string()
+    } else {
+        requested_model.to_string()
+    }
+}
+
+fn is_native_openai_base_url(base_url: &str) -> bool {
+    let base_url = base_url.trim().to_ascii_lowercase();
+    base_url.contains("api.openai.com") || base_url.contains("chatgpt.com/backend-api/codex")
+}
+
+fn resolve_openai_compatible_dynamic_wire_model(
+    requested_model: &str,
+    api_key: &str,
+    base_url: &str,
+) -> String {
+    let requested_model = requested_model.trim();
+    if is_openai_dynamic_model_alias(requested_model)
+        && (is_codex_chatgpt_token(api_key) || is_native_openai_base_url(base_url))
+    {
+        OPENAI_CODEX_DYNAMIC_WIRE_MODEL.to_string()
+    } else {
+        requested_model.to_string()
+    }
 }
 
 fn parse_acp_multimodal_parts(content: &str) -> Option<Vec<Value>> {
@@ -765,6 +802,14 @@ impl GenericProvider {
             );
         }
         self.apply_opencode_go_reasoning_controls(&mut body, effective_model);
+        if body
+            .get("model")
+            .and_then(Value::as_str)
+            .is_some_and(is_openai_dynamic_model_alias)
+            && !is_openai_dynamic_model_alias(effective_model)
+        {
+            body["model"] = serde_json::json!(effective_model);
+        }
         body
     }
 
@@ -1061,14 +1106,18 @@ impl LlmProvider for GenericProvider {
     ) -> Result<LlmResponse, AgentError> {
         self.check_rate_limit().await;
 
-        let effective_model = model.unwrap_or(&self.model);
         let api_key = self.effective_api_key();
+        let effective_model = resolve_openai_compatible_dynamic_wire_model(
+            model.unwrap_or(&self.model),
+            &api_key,
+            &self.base_url,
+        );
         let body = self.chat_request_body(ChatRequestParams {
             messages,
             tools,
             max_tokens,
             temperature,
-            effective_model,
+            effective_model: effective_model.as_str(),
             extra_body,
             stream: false,
         });
@@ -1119,14 +1168,18 @@ impl LlmProvider for GenericProvider {
         async_stream::stream! {
             provider.check_rate_limit().await;
 
-            let effective_model = model.as_deref().unwrap_or(&provider.model);
             let api_key = provider.effective_api_key();
+            let effective_model = resolve_openai_compatible_dynamic_wire_model(
+                model.as_deref().unwrap_or(&provider.model),
+                &api_key,
+                &provider.base_url,
+            );
             let mut body = provider.chat_request_body(ChatRequestParams {
                 messages: &messages,
                 tools: &tools,
                 max_tokens,
                 temperature,
-                effective_model,
+                effective_model: effective_model.as_str(),
                 extra_body: extra_body.as_ref(),
                 stream: true,
             });
@@ -2892,6 +2945,74 @@ mod tests {
             .unwrap()
             .starts_with("codex_cli_rs/"));
         assert_eq!(headers.get("ChatGPT-Account-ID").unwrap(), "acct-request");
+    }
+
+    #[test]
+    fn chatgpt_oauth_dynamic_alias_resolves_to_supported_wire_model() {
+        let token = codex_jwt_with_account(Some("acct-dynamic"));
+
+        assert_eq!(
+            resolve_openai_chatgpt_dynamic_wire_model("dynamic", token.as_str()),
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL
+        );
+        assert_eq!(
+            resolve_openai_chatgpt_dynamic_wire_model("openai:dynamic", token.as_str()),
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL
+        );
+        assert_eq!(
+            resolve_openai_chatgpt_dynamic_wire_model("gpt-5.5", token.as_str()),
+            "gpt-5.5"
+        );
+        assert_eq!(
+            resolve_openai_chatgpt_dynamic_wire_model("dynamic", "sk-standard-api-key"),
+            "dynamic"
+        );
+        assert_eq!(
+            resolve_openai_chatgpt_dynamic_wire_model("dynamic", "not-a-jwt"),
+            "dynamic"
+        );
+        assert_eq!(
+            resolve_openai_compatible_dynamic_wire_model(
+                "dynamic",
+                "not-a-jwt",
+                "https://api.openai.com/v1"
+            ),
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL
+        );
+        assert_eq!(
+            resolve_openai_compatible_dynamic_wire_model(
+                "dynamic",
+                "not-a-jwt",
+                "https://example.test/v1"
+            ),
+            "dynamic"
+        );
+    }
+
+    #[test]
+    fn openai_compatible_extra_body_cannot_restore_dynamic_wire_model() {
+        let provider = GenericProvider::new(
+            "https://api.openai.com/v1",
+            "sk-test",
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL,
+        );
+        let extra_body = serde_json::json!({
+            "model": "dynamic",
+            "service_tier": "priority"
+        });
+
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages: &[Message::user("Say ok")],
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: OPENAI_CODEX_DYNAMIC_WIRE_MODEL,
+            extra_body: Some(&extra_body),
+            stream: false,
+        });
+
+        assert_eq!(body["model"], OPENAI_CODEX_DYNAMIC_WIRE_MODEL);
+        assert_eq!(body["service_tier"], "priority");
     }
 
     #[test]
