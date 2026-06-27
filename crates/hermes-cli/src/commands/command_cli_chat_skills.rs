@@ -19,9 +19,25 @@ fn resolve_cli_chat_provider_model(
 }
 
 async fn query_mode_remediation_target(provider_model: &str) -> Option<QueryModelRemediation> {
+    if hermes_agent::provider::is_openai_dynamic_model_alias(provider_model) {
+        return None;
+    }
     let (provider, model_id) = split_provider_model(provider_model);
     let provider = provider.trim().to_ascii_lowercase();
     if provider.is_empty() || model_id.trim().is_empty() {
+        return None;
+    }
+    if model_id.trim().eq_ignore_ascii_case("dynamic")
+        || provider_model.trim().eq_ignore_ascii_case("dynamic")
+    {
+        return None;
+    }
+    let runtime_provider = crate::app::normalize_runtime_provider_name(provider.as_str());
+    if matches!(
+        runtime_provider.as_str(),
+        "openai" | "openai-codex" | "codex"
+    ) && hermes_agent::provider::is_openai_dynamic_model_alias(model_id)
+    {
         return None;
     }
     let catalog = provider_model_ids(&provider).await;
@@ -138,18 +154,25 @@ pub async fn handle_cli_chat(
     match query {
         Some(q) => {
             let mut active_model = current_model.clone();
-            if let Some(remediation) = query_mode_remediation_target(&active_model).await {
-                println!(
-                    "[Model remediation: {} -> {}. Close matches: {}]",
-                    active_model,
-                    remediation.next_model,
-                    if remediation.close_matches.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        remediation.close_matches.join(", ")
-                    }
-                );
-                active_model = remediation.next_model;
+            let active_dynamic_selector = active_model.trim().eq_ignore_ascii_case("dynamic")
+                || active_model
+                    .trim()
+                    .to_ascii_lowercase()
+                    .ends_with(":dynamic");
+            if !active_dynamic_selector {
+                if let Some(remediation) = query_mode_remediation_target(&active_model).await {
+                    println!(
+                        "[Model remediation: {} -> {}. Close matches: {}]",
+                        active_model,
+                        remediation.next_model,
+                        if remediation.close_matches.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            remediation.close_matches.join(", ")
+                        }
+                    );
+                    active_model = remediation.next_model;
+                }
             }
             let outcome = match run_noninteractive_query(
                 &config,

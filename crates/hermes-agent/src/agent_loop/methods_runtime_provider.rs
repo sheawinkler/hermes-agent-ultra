@@ -18,6 +18,18 @@ impl AgentLoop {
         (fallback_provider, model)
     }
 
+    pub(crate) fn runtime_wire_model_for_provider(provider: &str, model: &str) -> String {
+        let provider = provider.trim().to_ascii_lowercase();
+        let canonical = hermes_core::providers::canonical_provider_id(provider.as_str());
+        let is_openai_codex_provider = matches!(provider.as_str(), "openai" | "codex" | "openai-codex")
+            || matches!(canonical.as_str(), "openai" | "codex" | "openai-codex");
+        if is_openai_codex_provider && is_openai_dynamic_model_alias(model) {
+            OPENAI_CODEX_DYNAMIC_WIRE_MODEL.to_string()
+        } else {
+            model.trim().to_string()
+        }
+    }
+
     fn runtime_provider_config(&self, provider: &str) -> Option<&RuntimeProviderConfig> {
         let provider = provider.trim();
         if provider.is_empty() {
@@ -884,7 +896,9 @@ impl AgentLoop {
         };
         let normalized_model_name =
             crate::model_normalize::normalize_model_for_provider(model_name, provider);
-        let model_name = normalized_model_name.as_str();
+        let wire_model_name =
+            Self::runtime_wire_model_for_provider(provider, normalized_model_name.as_str());
+        let model_name = wire_model_name.as_str();
 
         let provider_obj: Arc<dyn LlmProvider> = match provider {
             "openai" | "codex" | "openai-codex" => {

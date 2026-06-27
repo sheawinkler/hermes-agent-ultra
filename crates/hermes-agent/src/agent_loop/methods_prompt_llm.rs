@@ -543,11 +543,14 @@ impl AgentLoop {
             self.interrupt.check_interrupt()?;
             let result = if let Some(rt) = route {
                 let (provider_name, _) = self.extract_provider_and_model(model);
+                let runtime_provider_name = rt.provider.as_deref().unwrap_or(provider_name.as_str());
+                let wire_model_name =
+                    Self::runtime_wire_model_for_provider(runtime_provider_name, &effective_model_name);
                 let mode = rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
                 let extra_body_for_call = self.extra_body_for_api_mode(mode);
                 let pool = self.credential_pool_for_route(rt);
                 let routed_provider = self.build_runtime_provider(
-                    rt.provider.as_deref().unwrap_or(provider_name.as_str()),
+                    runtime_provider_name,
                     &effective_model_name,
                     rt.base_url.as_deref(),
                     rt.api_key_env.as_deref(),
@@ -563,7 +566,7 @@ impl AgentLoop {
                                 tool_schemas,
                                 effective_max_tokens,
                                 self.config.temperature,
-                                Some(&effective_model_name),
+                                Some(&wire_model_name),
                                 extra_body_for_call.as_ref(),
                             )
                             .await
@@ -574,26 +577,34 @@ impl AgentLoop {
                             rt.routing_reason,
                             e
                         );
+                        let fallback_wire_model_name = Self::runtime_wire_model_for_provider(
+                            active_provider.as_str(),
+                            &effective_model_name,
+                        );
                         self.llm_provider
                             .chat_completion(
                                 &api_messages,
                                 tool_schemas,
                                 effective_max_tokens,
                                 self.config.temperature,
-                                Some(&effective_model_name),
+                                Some(&fallback_wire_model_name),
                                 default_extra_body.as_ref(),
                             )
                             .await
                     }
                 }
             } else {
+                let wire_model_name = Self::runtime_wire_model_for_provider(
+                    active_provider.as_str(),
+                    &effective_model_name,
+                );
                 self.llm_provider
                     .chat_completion(
                         &api_messages,
                         tool_schemas,
                         effective_max_tokens,
                         self.config.temperature,
-                        Some(&effective_model_name),
+                        Some(&wire_model_name),
                         default_extra_body.as_ref(),
                     )
                     .await
@@ -729,8 +740,14 @@ impl AgentLoop {
                                         rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
                                     let extra_body_for_call = self.extra_body_for_api_mode(mode);
                                     let pool = self.credential_pool_for_route(rt);
+                                    let runtime_provider_name =
+                                        rt.provider.as_deref().unwrap_or(provider_name.as_str());
+                                    let wire_model_name = Self::runtime_wire_model_for_provider(
+                                        runtime_provider_name,
+                                        model_name,
+                                    );
                                     match self.build_runtime_provider(
-                                        rt.provider.as_deref().unwrap_or(provider_name.as_str()),
+                                        runtime_provider_name,
                                         model_name,
                                         rt.base_url.as_deref(),
                                         rt.api_key_env.as_deref(),
@@ -745,37 +762,45 @@ impl AgentLoop {
                                                     &[],
                                                     effective_max_tokens,
                                                     self.config.temperature,
-                                                    Some(model_name),
+                                                    Some(&wire_model_name),
                                                     extra_body_for_call.as_ref(),
                                                 )
                                                 .await
                                         }
                                         Err(_) => {
+                                            let (fallback_provider_name, fallback_model_name) = self
+                                                .extract_provider_and_model(
+                                                    self.config.model.as_str(),
+                                                );
+                                            let fallback_wire_model_name =
+                                                Self::runtime_wire_model_for_provider(
+                                                    fallback_provider_name.as_str(),
+                                                    fallback_model_name,
+                                                );
                                             self.llm_provider
                                                 .chat_completion(
                                                     &api_messages,
                                                     &[],
                                                     effective_max_tokens,
                                                     self.config.temperature,
-                                                    Some(
-                                                        self.extract_provider_and_model(
-                                                            self.config.model.as_str(),
-                                                        )
-                                                        .1,
-                                                    ),
+                                                    Some(&fallback_wire_model_name),
                                                     default_extra_body.as_ref(),
                                                 )
                                                 .await
                                         }
                                     }
                                 } else {
+                                    let wire_model_name = Self::runtime_wire_model_for_provider(
+                                        provider_name.as_str(),
+                                        model_name,
+                                    );
                                     self.llm_provider
                                         .chat_completion(
                                             &api_messages,
                                             &[],
                                             effective_max_tokens,
                                             self.config.temperature,
-                                            Some(model_name),
+                                            Some(&wire_model_name),
                                             default_extra_body.as_ref(),
                                         )
                                         .await
@@ -845,6 +870,13 @@ impl AgentLoop {
                                             model,
                                             fallback
                                         );
+                                        let (fallback_provider_name, fallback_model_name) =
+                                            self.extract_provider_and_model(&fallback);
+                                        let fallback_wire_model_name =
+                                            Self::runtime_wire_model_for_provider(
+                                                fallback_provider_name.as_str(),
+                                                fallback_model_name,
+                                            );
                                         let fallback_result = self
                                             .llm_provider
                                             .chat_completion(
@@ -852,7 +884,7 @@ impl AgentLoop {
                                                 tool_schemas,
                                                 effective_max_tokens,
                                                 self.config.temperature,
-                                                Some(self.extract_provider_and_model(&fallback).1),
+                                                Some(&fallback_wire_model_name),
                                                 default_extra_body.as_ref(),
                                             )
                                             .await;
@@ -946,7 +978,7 @@ impl AgentLoop {
         on_chunk: &(dyn Fn(StreamChunk) + Send + Sync),
     ) -> Result<StreamCollectOutcome, AgentError> {
         let api_messages = self.messages_for_api_call(ctx);
-        let (_, active_model_name) = self.extract_provider_and_model(active_model);
+        let (active_provider_name, active_model_name) = self.extract_provider_and_model(active_model);
         let default_extra_body = self.extra_body_for_api_mode(&self.config.api_mode);
         let effective_max_tokens = max_tokens_override.or(self.config.max_tokens);
         let max_stream_retries = std::env::var("HERMES_STREAM_RETRIES")
@@ -958,11 +990,14 @@ impl AgentLoop {
         'stream_attempt: for stream_attempt in 0..=max_stream_retries {
             let mut stream = if let Some(rt) = route {
                 let (provider_name, model_name) = self.extract_provider_and_model(active_model);
+                let runtime_provider_name = rt.provider.as_deref().unwrap_or(provider_name.as_str());
+                let wire_model_name =
+                    Self::runtime_wire_model_for_provider(runtime_provider_name, model_name);
                 let mode = rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
                 let extra_body_for_call = self.extra_body_for_api_mode(mode);
                 let pool = self.credential_pool_for_route(rt);
                 match self.build_runtime_provider(
-                    rt.provider.as_deref().unwrap_or(provider_name.as_str()),
+                    runtime_provider_name,
                     model_name,
                     rt.base_url.as_deref(),
                     rt.api_key_env.as_deref(),
@@ -975,7 +1010,7 @@ impl AgentLoop {
                         tool_schemas,
                         effective_max_tokens,
                         self.config.temperature,
-                        Some(model_name),
+                        Some(&wire_model_name),
                         extra_body_for_call.as_ref(),
                     ),
                     Err(e) => {
@@ -984,26 +1019,33 @@ impl AgentLoop {
                             rt.routing_reason,
                             e
                         );
+                        let (fallback_provider_name, fallback_model_name) =
+                            self.extract_provider_and_model(self.config.model.as_str());
+                        let fallback_wire_model_name = Self::runtime_wire_model_for_provider(
+                            fallback_provider_name.as_str(),
+                            fallback_model_name,
+                        );
                         self.llm_provider.chat_completion_stream(
                             &api_messages,
                             tool_schemas,
                             effective_max_tokens,
                             self.config.temperature,
-                            Some(
-                                self.extract_provider_and_model(self.config.model.as_str())
-                                    .1,
-                            ),
+                            Some(&fallback_wire_model_name),
                             default_extra_body.as_ref(),
                         )
                     }
                 }
             } else {
+                let wire_model_name = Self::runtime_wire_model_for_provider(
+                    active_provider_name.as_str(),
+                    active_model_name,
+                );
                 self.llm_provider.chat_completion_stream(
                     &api_messages,
                     tool_schemas,
                     effective_max_tokens,
                     self.config.temperature,
-                    Some(active_model_name),
+                    Some(&wire_model_name),
                     default_extra_body.as_ref(),
                 )
             };

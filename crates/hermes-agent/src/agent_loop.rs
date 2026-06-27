@@ -48,8 +48,8 @@ use crate::lsp_context::{build_lsp_context_note, LspContextConfig};
 use crate::memory_manager::{MemoryManager, StreamingContextScrubber};
 use crate::plugins::{HookResult, HookType, PluginManager, ToolExecutionMiddlewareContext};
 use crate::provider::{
-    is_codex_chatgpt_token, AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
-    OPENAI_CODEX_BASE_URL,
+    is_codex_chatgpt_token, is_openai_dynamic_model_alias, AnthropicProvider, GenericProvider,
+    OpenAiProvider, OpenRouterProvider, OPENAI_CODEX_BASE_URL, OPENAI_CODEX_DYNAMIC_WIRE_MODEL,
 };
 use crate::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,

@@ -12,6 +12,7 @@ use hermes_agent::agent_loop::{
     CheapModelRouteConfig, RetryConfig, RuntimeProviderConfig, SmartModelRoutingConfig,
     ToolRegistry as AgentToolRegistry,
 };
+use hermes_agent::provider::is_openai_dynamic_model_alias;
 use hermes_agent::smart_model_routing::ApiMode;
 use hermes_agent::{AgentCallbacks, AgentConfig, AgentLoop};
 use hermes_config::{normalize_service_tier, GatewayConfig, LlmProviderConfig};
@@ -626,6 +627,19 @@ pub fn query_mode_remediation_target_from_catalog(
     let (provider, model_id) = split_provider_model(provider_model);
     let provider = provider.trim().to_ascii_lowercase();
     if provider.is_empty() || model_id.trim().is_empty() || catalog.is_empty() {
+        return None;
+    }
+    if model_id.trim().eq_ignore_ascii_case("dynamic")
+        || provider_model.trim().eq_ignore_ascii_case("dynamic")
+    {
+        return None;
+    }
+    let runtime_provider = normalize_runtime_provider_name(provider.as_str());
+    if matches!(
+        runtime_provider.as_str(),
+        "openai" | "openai-codex" | "codex"
+    ) && is_openai_dynamic_model_alias(model_id)
+    {
         return None;
     }
     let close_matches = rank_catalog_model_candidates(model_id.trim(), catalog, 5);
@@ -1438,6 +1452,16 @@ mod tests {
         assert_eq!(
             remediation.close_matches.first().map(String::as_str),
             Some("qwen/qwen3.6-max-preview")
+        );
+    }
+
+    #[test]
+    fn query_mode_remediation_preserves_openai_dynamic_alias() {
+        let catalog = vec!["gpt-4o-mini".to_string(), "gpt-5.4-mini".to_string()];
+
+        assert!(query_mode_remediation_target_from_catalog("openai:dynamic", &catalog).is_none());
+        assert!(
+            query_mode_remediation_target_from_catalog("openai-codex:dynamic", &catalog).is_none()
         );
     }
 

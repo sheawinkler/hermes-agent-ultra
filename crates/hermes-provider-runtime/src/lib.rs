@@ -950,7 +950,7 @@ impl LlmProvider for NoBackendProvider {
 mod tests {
     use super::*;
     use hermes_agent::provider_profiles;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_partial_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -986,21 +986,39 @@ mod tests {
         }
     }
 
+    fn codex_sse_response_body(text: &str, model: &str) -> String {
+        let delta = serde_json::json!({ "delta": text });
+        let completed = serde_json::json!({
+            "response": {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            { "type": "output_text", "text": text }
+                        ]
+                    }
+                ],
+                "model": model,
+                "status": "completed",
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 1
+                }
+            }
+        });
+        format!("event: response.output_text.delta\ndata: {delta}\n\nevent: response.completed\ndata: {completed}\n\n")
+    }
+
     #[tokio::test]
     async fn build_provider_routes_chatgpt_openai_oauth_to_responses_backend() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/responses"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "output": [
-                    {
-                        "type": "message",
-                        "content": [{"type": "output_text", "text": "openai-pro-ok"}]
-                    }
-                ],
-                "model": "gpt-5.5",
-                "status": "completed"
-            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(codex_sse_response_body("openai-pro-ok", "gpt-5.5")),
+            )
             .expect(1)
             .mount(&server)
             .await;
@@ -1033,20 +1051,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn build_provider_remaps_openai_dynamic_for_chatgpt_oauth_backend() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            .and(body_partial_json(serde_json::json!({
+                "model": "gpt-5.4"
+            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(codex_sse_response_body("dynamic-ok", "gpt-5.4")),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut config = GatewayConfig::default();
+        config.llm_providers.insert(
+            "openai".to_string(),
+            LlmProviderConfig {
+                api_key: Some("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ1c2VyLXh5eiIsImV4cCI6OTk5OTk5OTk5OSwiaHR0cHM6Ly9hcGkub3BlbmFpLmNvbS9hdXRoIjp7ImNoYXRncHRfYWNjb3VudF9pZCI6ImFjY3QtZHluYW1pYy1wYXJpdHkiLCJjaGF0Z3B0X3BsYW5fdHlwZSI6InBsdXMifX0.sig".to_string()),
+                base_url: Some(server.uri()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let provider = build_provider(&config, "openai:dynamic");
+        let response = provider
+            .chat_completion(
+                &[hermes_core::Message::user("hello")],
+                &[],
+                None,
+                None,
+                Some("dynamic"),
+                None,
+            )
+            .await
+            .expect("OpenAI dynamic alias should resolve before the ChatGPT Codex request");
+
+        assert_eq!(response.message.content.as_deref(), Some("dynamic-ok"));
+        assert_eq!(response.model, "gpt-5.4");
+        server.verify().await;
+    }
+
+    #[tokio::test]
     async fn provider_auth_resolver_supplies_openai_oauth_token() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/responses"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "output": [
-                    {
-                        "type": "message",
-                        "content": [{"type": "output_text", "text": "resolver-oauth-ok"}]
-                    }
-                ],
-                "model": "gpt-5.5",
-                "status": "completed"
-            })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(codex_sse_response_body("resolver-oauth-ok", "gpt-5.5")),
+            )
             .expect(1)
             .mount(&server)
             .await;
