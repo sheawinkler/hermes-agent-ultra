@@ -6,6 +6,7 @@ pub mod dim_charts;
 pub mod dim_viz;
 pub mod disk;
 pub mod html;
+pub mod html_acceptance;
 pub mod identity;
 pub mod institutional;
 pub mod labels;

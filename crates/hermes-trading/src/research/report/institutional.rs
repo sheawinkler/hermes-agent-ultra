@@ -274,11 +274,14 @@ mod tests {
     fn moutai_result() -> AnalyzeStockResult {
         let symbol = "600519.SH";
         let dims = json!({
-            "0_basic": { "data": { "name": "贵州茅台", "industry": "白酒", "price": 1680.0, "pe_ttm": 28.5, "pb": 8.2, "market_cap_yi": 21000, "shares_outstanding_yi": 12.56 } },
-            "1_financials": { "data": { "roe": 32.0, "net_margin": 52.0, "revenue_latest_yi": 1500, "revenue_history": [1200.0, 1300.0, 1400.0, 1500.0], "roe_history": [28.0, 30.0, 31.0, 32.0], "financial_health": { "debt_ratio": 18.0, "current_ratio": 2.1 } } },
+            "0_basic": { "data": { "name": "贵州茅台", "industry": "白酒", "price": 1680.0, "pe_ttm": 28.5, "pb": 8.2, "market_cap_yi": 21000, "shares_outstanding_yi": 12.56, "eps": 58.0 } },
+            "1_financials": { "data": { "roe": 32.0, "net_margin": 52.0, "revenue_latest_yi": 1500, "revenue_history": [1200.0, 1300.0, 1400.0, 1500.0], "roe_history": [28.0, 30.0, 31.0, 32.0], "financial_health": { "debt_ratio": 18.0, "current_ratio": 2.1 }, "eps": 58.0 } },
             "2_kline": { "data": { "stage": "Stage 2 上升", "ma_align": "多头排列", "ma5": 1670.0, "ma20": 1650.0, "ma60": 1600.0 } },
             "10_valuation": { "data": { "pe_ttm": 28.5, "pe_percentile": 35.0 } },
-            "4_peers": { "data": { "peer_table": [{ "name": "五粮液", "ticker": "000858", "pe": 18.0, "pb": 4.2 }] } },
+            "4_peers": { "data": { "peer_table": [
+                { "name": "五粮液", "ticker": "000858", "pe": 18.0, "pb": 4.2, "roe": 22.0 },
+                { "name": "泸州老窖", "ticker": "000568", "pe": 22.0, "pb": 5.1, "roe": 28.0 }
+            ] } },
             "6_research": { "data": { "research_count": 10 } },
             "7_industry": { "data": { "industry": "白酒", "growth": 12.0, "industry_pe": 22.0 } },
             "6_fund_holders": { "data": { "holder_change_ratio": -8.0, "holder_count": 95000 } },

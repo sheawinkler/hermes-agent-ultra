@@ -120,6 +120,34 @@ mod tests {
         eprintln!("live HTML smoke ok: {} bytes", html.len());
     }
 
+    #[tokio::test]
+    #[ignore = "live network"]
+    async fn live_html_acceptance_600519() {
+        use crate::research::report::html_acceptance::{
+            assert_comps_html_parity, assert_dcf_html_parity, institutional_style_markers_present,
+        };
+        use crate::research::report::institutional::render_institutional_html;
+
+        let result = live_analyze_medium("600519.SH").await;
+        let html = render_institutional_html(&result, Some("Live 600519 HTML acceptance"));
+        assert_comps_html_parity(&html, &result.comps).expect("live COMPS parity");
+        assert_dcf_html_parity(&html, &result.dcf).expect("live DCF parity");
+        let missing = institutional_style_markers_present(&html);
+        assert!(missing.is_empty(), "live missing styles: {missing:?}");
+
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/live-600519-report.html");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        std::fs::write(&path, &html).expect("write live html");
+        eprintln!(
+            "live 600519 acceptance ok: {} bytes -> {}",
+            html.len(),
+            path.display()
+        );
+    }
+
     async fn live_analyze_medium(symbol: &str) -> crate::research::analyze::AnalyzeStockResult {
         use crate::providers::{QuoteRouter, QuoteSource};
         use crate::research::analyze::analyze_stock;

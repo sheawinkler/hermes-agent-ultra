@@ -145,16 +145,17 @@ pub fn build_comps_table(target: CompsTarget, peers: &[CompsPeer]) -> CompsResul
     let methodology_log = vec![
         format!("Step 1 · 同行池 n={}", peers.len()),
         format!(
-            "Step 2 · PE 中位数 {:?}，目标 PE {:?}",
-            pe_median, target.pe
+            "Step 2 · PE 中位数 {}，目标 PE {}",
+            fmt_log_f64(pe_median, 1),
+            fmt_log_f64(target.pe, 1),
         ),
         format!("Step 3 · 目标 PE 分位 {pe_pct}%"),
         format!(
-            "Step 4 · 隐含价 (中位 PE × EPS) = ¥{}",
+            "Step 4 · 隐含价 (中位 PE × EPS) = {}",
             implied
                 .get("via_median_pe")
-                .map(|v| format!("{v:.2}"))
-                .unwrap_or_else(|| "-".into())
+                .map(|v| format!("¥{v:.2}"))
+                .unwrap_or_else(|| "—（缺 EPS 或同行 PE）".into())
         ),
         format!("Step 5 · 结论: {val_verdict}"),
     ];
@@ -233,6 +234,11 @@ fn quantile(sorted: &[f64], q: f64) -> f64 {
 
 fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
+}
+
+fn fmt_log_f64(v: Option<f64>, decimals: usize) -> String {
+    v.map(|x| format!("{x:.decimals$}"))
+        .unwrap_or_else(|| "—".into())
 }
 
 #[cfg(test)]
