@@ -15,6 +15,11 @@ async fn main() {
     let global_model_override = cli.model.clone();
     let global_provider_override = cli.provider.clone();
     let global_allow_tools_override = cli.allow_tools;
+    let oneshot_auth_model_hint = global_model_override.clone().or_else(|| {
+        load_config(cli.config_dir.as_deref())
+            .ok()
+            .and_then(|config| config.model)
+    });
 
     // Initialize tracing
     init_tracing(
@@ -84,7 +89,7 @@ async fn main() {
             if let Some(provider) = oneshot_auto_verify_oauth_provider(
                 err,
                 global_provider_override.as_deref(),
-                global_model_override.as_deref(),
+                oneshot_auth_model_hint.as_deref(),
             ) {
                 eprintln!(
                     "Detected OAuth auth failure for provider '{}' in one-shot mode; running `hermes-ultra auth verify {}` and retrying once...",
@@ -122,42 +127,51 @@ async fn main() {
                     global_allow_tools_override,
                 )
                 .await;
-                if provider == "nous" {
-                    if let Err(retry_err) = &result {
-                        if oneshot_auto_verify_oauth_provider(
-                            retry_err,
-                            Some(provider.as_str()),
-                            global_model_override.as_deref(),
-                        )
-                        .as_deref()
-                            == Some("nous")
-                        {
+                if let Err(retry_err) = &result {
+                    if let Some(login_provider) = oneshot_auto_verify_oauth_provider(
+                        retry_err,
+                        Some(provider.as_str()),
+                        oneshot_auth_model_hint.as_deref(),
+                    ) {
+                        if !oneshot_oauth_provider_supports_login(&login_provider) {
                             eprintln!(
-                                "Nous OAuth still invalid; launching `hermes-ultra auth login nous` and retrying once..."
+                                "OAuth still invalid for provider '{}'. Run `hermes-ultra auth login {}` in a real terminal, then retry.",
+                                login_provider, login_provider
                             );
-                            if let Err(login_err) = run_auth(
+                        } else if !oneshot_login_prompt_available() {
+                            eprintln!(
+                                "OAuth still invalid for provider '{}', but this process is not attached to an interactive terminal. Run `hermes-ultra auth login {}` in a real terminal, then retry.",
+                                login_provider, login_provider
+                            );
+                        } else {
+                            let force_fresh = oneshot_auth_requires_fresh_login(retry_err);
+                            let freshness = if force_fresh { "fresh " } else { "" };
+                            eprintln!(
+                                "OAuth still invalid for provider '{}'; launching `hermes-ultra auth login {}` for a {}login and retrying once...",
+                                login_provider, login_provider, freshness
+                            );
+                            if let Err(login_err) = run_oneshot_oauth_login_repair(
                                 cli.clone(),
-                                Some("login".to_string()),
-                                Some("nous".to_string()),
-                                None,
-                                None,
-                                None,
-                                None,
-                                false,
+                                &login_provider,
+                                force_fresh,
                             )
                             .await
                             {
                                 eprintln!(
-                                    "Warning: automatic `auth login nous` failed: {}",
-                                    login_err
+                                    "Warning: automatic `auth login {}` failed: {}",
+                                    login_provider, login_err
+                                );
+                                eprintln!(
+                                    "Action required: run `hermes-ultra auth login {}` in a real terminal, then retry this command.",
+                                    login_provider
                                 );
                             } else {
                                 if let Err(hydrate_err) =
                                     hydrate_provider_env_from_vault_for_cli(&cli).await
                                 {
                                     eprintln!(
-                                        "Warning: automatic credential hydration after `auth login nous` failed: {}",
-                                        hydrate_err
+                                        "Warning: automatic credential hydration after `auth login {}` failed: {}",
+                                        login_provider, hydrate_err
                                     );
                                 }
                                 result = hermes_cli::commands::handle_cli_chat(
@@ -668,4 +682,3 @@ fn init_tracing(verbose: bool, interactive_tui: bool) {
     }
     init_telemetry_from_env("hermes-cli", default);
 }
-
