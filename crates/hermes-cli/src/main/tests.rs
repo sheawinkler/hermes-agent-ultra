@@ -589,6 +589,18 @@ mod tests {
             oneshot_auto_verify_oauth_provider(&openai, Some("openai"), Some("openai:gpt-5.5")),
             Some("openai".to_string())
         );
+        let openai_invalidated = AgentError::LlmApi(
+            r#"API error 401 Unauthorized: {"error":{"message":"Your authentication token has been invalidated. Please try signing in again.","code":"token_invalidated"}}"#
+                .to_string(),
+        );
+        assert_eq!(
+            oneshot_auto_verify_oauth_provider(
+                &openai_invalidated,
+                Some("openai"),
+                Some("openai:gpt-5.5")
+            ),
+            Some("openai".to_string())
+        );
         let codex = AgentError::LlmApi("API error 401 Unauthorized: chatgpt.com codex".to_string());
         assert_eq!(
             oneshot_auto_verify_oauth_provider(&codex, None, Some("openai-codex:codex-mini")),
@@ -657,8 +669,39 @@ mod tests {
         assert!(oneshot_auth_is_refreshable(
             "api error 401 unauthorized token expired"
         ));
+        assert!(oneshot_auth_is_refreshable("token_invalidated"));
         assert!(oneshot_auth_is_refreshable("invalid_grant"));
         assert!(!oneshot_auth_is_refreshable("api error 404 not found"));
+    }
+
+    #[test]
+    fn oneshot_auth_requires_fresh_login_for_invalidated_tokens() {
+        let invalidated = AgentError::LlmApi(
+            "API error 401 Unauthorized: token_invalidated authentication token has been invalidated"
+                .to_string(),
+        );
+        assert!(oneshot_auth_requires_fresh_login(&invalidated));
+
+        let refreshable = AgentError::LlmApi("API error 401 Unauthorized".to_string());
+        assert!(!oneshot_auth_requires_fresh_login(&refreshable));
+    }
+
+    #[test]
+    fn oneshot_oauth_login_repair_supports_promptable_providers() {
+        for provider in [
+            "nous",
+            "openai",
+            "openai-codex",
+            "anthropic",
+            "qwen-oauth",
+            "google-gemini-cli",
+        ] {
+            assert!(
+                oneshot_oauth_provider_supports_login(provider),
+                "{provider} should support one-shot login repair"
+            );
+        }
+        assert!(!oneshot_oauth_provider_supports_login("openrouter"));
     }
 
     #[test]
