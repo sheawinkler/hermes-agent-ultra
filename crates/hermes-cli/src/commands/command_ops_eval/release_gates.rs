@@ -91,7 +91,7 @@ async fn run_slo_auto_rollback_native(
     Ok((report, path))
 }
 
-async fn run_elite_sync_gate_native(
+pub async fn run_elite_sync_gate_native(
     repo_root: &Path,
 ) -> Result<(serde_json::Value, PathBuf), AgentError> {
     let path = report_path_with_stamp(repo_root, "elite-sync-gate");

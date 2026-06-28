@@ -3,19 +3,39 @@ async fn run_autopilot_probe_command(
     cwd: &Path,
     max_tail: usize,
 ) -> serde_json::Value {
+    run_autopilot_probe_command_with_timeout(command, cwd, max_tail, autopilot_probe_timeout())
+        .await
+}
+
+fn autopilot_probe_timeout() -> Duration {
+    std::env::var("HERMES_AUTOPILOT_PROBE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|secs| (1..=3600).contains(secs))
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(600))
+}
+
+async fn run_autopilot_probe_command_with_timeout(
+    command: &str,
+    cwd: &Path,
+    max_tail: usize,
+    timeout: Duration,
+) -> serde_json::Value {
     let started = chrono::Utc::now();
-    let output = tokio::process::Command::new("bash")
+    let mut child = tokio::process::Command::new("bash");
+    child
         .arg("-lc")
         .arg(command)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
-        .await;
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(timeout, child.output()).await;
     let finished = chrono::Utc::now();
     match output {
-        Ok(output) => serde_json::json!({
+        Ok(Ok(output)) => serde_json::json!({
             "command": command,
             "exit_code": output.status.code().unwrap_or(-1),
             "ok": output.status.success(),
@@ -25,7 +45,7 @@ async fn run_autopilot_probe_command(
             "stdout_tail": tail_chars(&String::from_utf8_lossy(&output.stdout), max_tail),
             "stderr_tail": tail_chars(&String::from_utf8_lossy(&output.stderr), max_tail),
         }),
-        Err(err) => serde_json::json!({
+        Ok(Err(err)) => serde_json::json!({
             "command": command,
             "exit_code": -1,
             "ok": false,
@@ -34,6 +54,16 @@ async fn run_autopilot_probe_command(
             "duration_ms": (finished - started).num_milliseconds().max(0),
             "stdout_tail": "",
             "stderr_tail": format!("spawn failed: {err}"),
+        }),
+        Err(_) => serde_json::json!({
+            "command": command,
+            "exit_code": -1,
+            "ok": false,
+            "started_at": started.to_rfc3339(),
+            "finished_at": finished.to_rfc3339(),
+            "duration_ms": (finished - started).num_milliseconds().max(0),
+            "stdout_tail": "",
+            "stderr_tail": format!("timed out after {}ms", timeout.as_millis()),
         }),
     }
 }
@@ -737,4 +767,3 @@ async fn run_performance_autopilot_native(
     write_performance_autopilot_markdown(&md_path, &report)?;
     Ok((report, json_path, md_path))
 }
-
