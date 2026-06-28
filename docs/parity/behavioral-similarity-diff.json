@@ -13,7 +13,7 @@
           "name": "test_golden_upstream_surface_aliases_are_registered"
         },
         {
-          "file": "crates/hermes-cli/src/main.rs",
+          "file": "crates/hermes-cli/src/main/tests/env_profile_diagnostics/gateway_runtime.rs",
           "name": "query_is_local_slash_command_detects_prefixed_queries"
         },
         {
@@ -24,7 +24,7 @@
       "score": 1.0,
       "source_artifacts": [
         "crates/hermes-cli/src/commands.rs",
-        "crates/hermes-cli/src/main.rs",
+        "crates/hermes-cli/src/main/tests/env_profile_diagnostics/gateway_runtime.rs",
         "crates/hermes-source-parity-tests/tests/cli_command_contract.rs"
       ],
       "ultra_behavior": "Rust CLI command aliases and local slash-query routing cover the upstream golden command surface while preserving terminal-first behavior.",
@@ -349,11 +349,11 @@
       "missing_source_artifacts": [],
       "rust_tests": [
         {
-          "file": "crates/hermes-cli/src/commands.rs",
+          "file": "crates/hermes-cli/src/commands/tests/skill_model_policy.rs",
           "name": "effective_skill_taps_merges_defaults_custom_and_subscriptions"
         },
         {
-          "file": "crates/hermes-cli/src/commands.rs",
+          "file": "crates/hermes-cli/src/commands/tests/runtime_parity_ops.rs",
           "name": "test_nous_official_default_skill_taps_present_in_merged_list"
         },
         {
@@ -367,7 +367,8 @@
       ],
       "score": 1.0,
       "source_artifacts": [
-        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-cli/src/commands/tests/skill_model_policy.rs",
+        "crates/hermes-cli/src/commands/tests/runtime_parity_ops.rs",
         "crates/hermes-skills/src/guard.rs"
       ],
       "ultra_behavior": "Rust skills governance merges official taps, verifies skill trust tiers, scans bundles before install, and preserves upstream-compatible tap/subscription shapes.",

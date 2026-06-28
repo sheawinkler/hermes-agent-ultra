@@ -366,7 +366,11 @@ fn test_rewrite_compound_background_contract() {
 #[cfg(unix)]
 #[test]
 fn test_foreground_process_group_avoids_fork_hook() {
-    let source = include_str!("../local.rs");
+    let source = [
+        include_str!("../local.rs"),
+        include_str!("../local/env_shell.rs"),
+    ]
+    .join("\n");
     let forbidden = ["pre", "_exec"].concat();
     assert!(
         !source.contains(&forbidden),

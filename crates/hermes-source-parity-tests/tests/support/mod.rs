@@ -22,6 +22,19 @@ fn declares_sidecar_tests(line: &str) -> bool {
     line.trim() == "mod tests;"
 }
 
+fn module_decl_target(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let rest = trimmed
+        .strip_prefix("mod ")
+        .or_else(|| trimmed.strip_prefix("pub mod "))?;
+    rest.strip_suffix(';').filter(|name| {
+        !name.is_empty()
+            && name
+                .chars()
+                .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    })
+}
+
 fn sidecar_test_candidates(path: &Path) -> Vec<PathBuf> {
     let Some(parent) = path.parent() else {
         return Vec::new();
@@ -39,6 +52,30 @@ fn sidecar_test_candidates(path: &Path) -> Vec<PathBuf> {
     ]
 }
 
+fn sidecar_module_candidates(path: &Path, module_name: &str) -> Vec<PathBuf> {
+    let Some(parent) = path.parent() else {
+        return Vec::new();
+    };
+    if path.file_name().and_then(|name| name.to_str()) == Some("mod.rs") {
+        return vec![
+            parent.join(format!("{module_name}.rs")),
+            parent.join(module_name).join("mod.rs"),
+        ];
+    }
+
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return Vec::new();
+    };
+    vec![
+        parent.join(format!("{module_name}.rs")),
+        parent.join(module_name).join("mod.rs"),
+        parent.join(stem).join(format!("{module_name}.rs")),
+        parent.join(stem).join(module_name).join("mod.rs"),
+        parent.join("tests").join(format!("{module_name}.rs")),
+        parent.join("tests").join(module_name).join("mod.rs"),
+    ]
+}
+
 fn append_sidecar_tests(path: &Path, source: &mut String, seen: &mut BTreeSet<PathBuf>) {
     let candidates = sidecar_test_candidates(path);
     if let Some(candidate) = candidates.iter().find(|candidate| candidate.exists()) {
@@ -52,6 +89,29 @@ fn append_sidecar_tests(path: &Path, source: &mut String, seen: &mut BTreeSet<Pa
         .join(", ");
     panic!(
         "{} declares `mod tests;` but no sidecar test module exists at: {}",
+        path.display(),
+        rendered
+    );
+}
+
+fn append_sidecar_module(
+    path: &Path,
+    module_name: &str,
+    source: &mut String,
+    seen: &mut BTreeSet<PathBuf>,
+) {
+    let candidates = sidecar_module_candidates(path, module_name);
+    if let Some(candidate) = candidates.iter().find(|candidate| candidate.exists()) {
+        append_source_with_includes(candidate, source, seen);
+        return;
+    }
+    let rendered = candidates
+        .iter()
+        .map(|candidate| candidate.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    panic!(
+        "{} declares `mod {module_name};` but no sidecar module exists at: {}",
         path.display(),
         rendered
     );
@@ -81,6 +141,8 @@ fn append_source_with_includes(path: &Path, source: &mut String, seen: &mut BTre
             append_source_with_includes(&parent.join(target), source, seen);
         } else if declares_sidecar_tests(line) {
             append_sidecar_tests(&path, source, seen);
+        } else if let Some(module_name) = module_decl_target(line) {
+            append_sidecar_module(&path, module_name, source, seen);
         }
     }
 }

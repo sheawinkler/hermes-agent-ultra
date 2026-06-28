@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 mod support;
-use support::rust_test_exists;
+use support::{read_rust_source_with_includes, rust_test_exists};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -180,7 +180,7 @@ fn python_suite_skill_and_external_service_contracts_are_rust_owned() {
         credential_files.contains("credential_mount_rejects_traversal_absolute_and_symlink_escape")
     );
 
-    let teams = read_text("crates/hermes-tools/src/teams_pipeline.rs");
+    let teams = read_rust_source_with_includes("crates/hermes-tools/src/teams_pipeline.rs");
     assert!(teams.contains("MicrosoftGraphTokenProvider"));
     assert!(teams.contains("TeamsMeetingPipeline"));
     assert!(teams.contains("ffmpeg_extract_audio"));
