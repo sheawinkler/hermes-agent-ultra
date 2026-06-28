@@ -25,20 +25,42 @@ fn read_source(root: &Path, path: &str) -> String {
     std::fs::read_to_string(root.join(path)).unwrap_or_else(|err| panic!("read {path}: {err}"))
 }
 
-fn read_included_source_tree(root: &Path, entry_path: &str, include_dir: &str) -> String {
-    let include_root = root.join(include_dir);
-    let entry_source = read_source(root, entry_path);
-    let include_re =
-        Regex::new(r#"include!\("([^"]+\.rs)"\);"#).expect("include regex should compile");
-    let mut combined = entry_source.clone();
-    for cap in include_re.captures_iter(&entry_source) {
-        let include_name = &cap[1];
-        let include_path = include_root.join(include_name);
-        let source = std::fs::read_to_string(&include_path)
-            .unwrap_or_else(|err| panic!("read include {include_name} from {entry_path}: {err}"));
+fn read_included_source_tree(root: &Path, entry_path: &str, _include_dir: &str) -> String {
+    fn append_source(
+        root: &Path,
+        relative_path: &Path,
+        include_re: &Regex,
+        visited: &mut BTreeSet<PathBuf>,
+        combined: &mut String,
+    ) {
+        if !visited.insert(relative_path.to_path_buf()) {
+            return;
+        }
+        let source = read_source(root, &relative_path.to_string_lossy());
         combined.push_str("\n\n");
         combined.push_str(&source);
+
+        let Some(parent) = relative_path.parent() else {
+            return;
+        };
+        for cap in include_re.captures_iter(&source) {
+            let include_name = &cap[1];
+            let include_path = parent.join(include_name);
+            append_source(root, &include_path, include_re, visited, combined);
+        }
     }
+
+    let include_re =
+        Regex::new(r#"include!\("([^"]+\.rs)"\);"#).expect("include regex should compile");
+    let mut combined = String::new();
+    let mut visited = BTreeSet::new();
+    append_source(
+        root,
+        Path::new(entry_path),
+        &include_re,
+        &mut visited,
+        &mut combined,
+    );
     combined
 }
 
