@@ -2,6 +2,9 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
+mod support;
+use support::rust_test_exists;
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -12,23 +15,6 @@ fn read_json(path: &str) -> Value {
         .unwrap_or_else(|e| panic!("failed reading {}: {}", full.display(), e));
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("failed parsing {}: {}", full.display(), e))
-}
-
-fn rust_test_exists(file: &str, name: &str) -> bool {
-    let full = repo_root().join(file);
-    let source = std::fs::read_to_string(&full)
-        .unwrap_or_else(|e| panic!("failed reading referenced Rust file {}: {}", file, e));
-    let needle = format!("fn {name}");
-    let Some(index) = source.find(&needle) else {
-        return false;
-    };
-    let line_start = source[..index].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-    source[..line_start]
-        .lines()
-        .rev()
-        .map(str::trim)
-        .take_while(|line| !line.is_empty() && line.starts_with("#["))
-        .any(|line| line == "#[test]" || line.starts_with("#[tokio::test"))
 }
 
 #[test]

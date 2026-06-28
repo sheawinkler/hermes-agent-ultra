@@ -34,6 +34,8 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy Warning Gate
         run: bash scripts/clippy-warning-gate.sh --check
+      - name: Rust module size policy
+        run: cargo test -p hermes-source-parity-tests --test rust_module_size_policy -- --nocapture
       - name: Placeholder gate
         run: bash scripts/check-runtime-placeholders.sh
       - name: Tests

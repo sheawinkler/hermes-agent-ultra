@@ -1,0 +1,12 @@
+# First-party Rust files above the 5,000-line hard limit.
+#
+# Format:
+# path|max_lines|reason
+#
+# Rules:
+# - path is repository-relative and must point to a tracked `.rs` file.
+# - max_lines must be greater than 5000 and at least the current line count.
+# - reason must explain why the exception is generated, vendored, or temporarily
+#   justified with a concrete follow-up.
+#
+# Keep this file empty unless a hard-limit exception is genuinely needed.

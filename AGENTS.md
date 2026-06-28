@@ -12,6 +12,16 @@
 6. 可对照的行为应通过 `crates/hermes-parity-tests/fixtures/<module>/*.json` 提供 golden；新增用例时同步更新 `scripts/record_fixtures.py`（若适用）。
 7. 单个 PR 尽量只移植一个模块；commit message 建议：`parity(<module>): port from python …`
 
+## Rust 模块规模策略
+
+- 以职责边界优先拆分模块；行数只是架构烟雾报警器，不是唯一目标。
+- `<800` 行通常最理想；`800-1,500` 行若职责单一可接受。
+- `1,501-2,500` 行需要在报告中可见；`2,501-4,000` 行进入 review pressure。
+- `4,001-5,000` 行视为 exceptional，应作为后续拆分候选。
+- `>5,000` 行是硬失败，除非是 generated / vendored / 明确 allowlist 的临时例外。
+- 策略文档与 gate：`docs/architecture/rust-module-size-policy.md`，
+  `cargo test -p hermes-source-parity-tests --test rust_module_size_policy -- --nocapture`。
+
 ## 禁止事项
 
 - 不要随意改动 workspace 成员结构（新增 crate 需有明确动机并更新根 `Cargo.toml`）。

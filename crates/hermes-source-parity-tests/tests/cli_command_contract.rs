@@ -21,6 +21,43 @@ fn load_fixture() -> CliCommandContractFixture {
     serde_json::from_str(&raw).expect("parse command_actions fixture")
 }
 
+fn read_source(root: &Path, path: &str) -> String {
+    std::fs::read_to_string(root.join(path)).unwrap_or_else(|err| panic!("read {path}: {err}"))
+}
+
+fn read_included_source_tree(root: &Path, entry_path: &str, include_dir: &str) -> String {
+    let include_root = root.join(include_dir);
+    let entry_source = read_source(root, entry_path);
+    let include_re =
+        Regex::new(r#"include!\("([^"]+\.rs)"\);"#).expect("include regex should compile");
+    let mut combined = entry_source.clone();
+    for cap in include_re.captures_iter(&entry_source) {
+        let include_name = &cap[1];
+        let include_path = include_root.join(include_name);
+        let source = std::fs::read_to_string(&include_path)
+            .unwrap_or_else(|err| panic!("read include {include_name} from {entry_path}: {err}"));
+        combined.push_str("\n\n");
+        combined.push_str(&source);
+    }
+    combined
+}
+
+fn read_main_module_sources(root: &Path) -> String {
+    read_included_source_tree(
+        root,
+        "crates/hermes-cli/src/main.rs",
+        "crates/hermes-cli/src",
+    )
+}
+
+fn read_commands_module_sources(root: &Path) -> String {
+    read_included_source_tree(
+        root,
+        "crates/hermes-cli/src/commands/mod.rs",
+        "crates/hermes-cli/src/commands",
+    )
+}
+
 fn function_body<'a>(source: &'a str, fn_name: &str) -> Option<&'a str> {
     let fn_re = Regex::new(&format!(
         r"(?m)^(?:pub\s+)?(?:async\s+)?fn\s+{}\b",
@@ -139,16 +176,8 @@ fn cli_action_contract_matches_fixture() {
     let root = repo_root();
 
     let sources: BTreeMap<&str, String> = [
-        (
-            "main",
-            std::fs::read_to_string(root.join("crates/hermes-cli/src/main.rs"))
-                .expect("read main.rs"),
-        ),
-        (
-            "commands",
-            std::fs::read_to_string(root.join("crates/hermes-cli/src/commands.rs"))
-                .expect("read commands.rs"),
-        ),
+        ("main", read_main_module_sources(&root)),
+        ("commands", read_commands_module_sources(&root)),
     ]
     .into_iter()
     .collect();
