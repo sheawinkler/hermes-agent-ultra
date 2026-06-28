@@ -82,8 +82,6 @@ use crate::model_switch::{
 use crate::pairing_store::{PairingStatus, PairingStore};
 use crate::providers::canonical_provider_id;
 use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
-#[cfg(test)]
-use hermes_config::LlmProviderConfig;
 use hermes_config::{find_node_executable, set_user_config_value, GatewayConfig};
 
 // The command surface is intentionally split by subsystem. These files are

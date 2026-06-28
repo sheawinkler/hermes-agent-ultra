@@ -1,4 +1,5 @@
 use super::*;
+use hermes_config::LlmProviderConfig;
 
     #[test]
     fn read_skill_taps_accepts_upstream_object_shape() {
