@@ -73,6 +73,41 @@ fn doctor_elite_diagnostics_payload_has_required_sections() {
 }
 
 #[test]
+fn doctor_elite_diagnostics_defaults_to_native_gate() {
+    use clap::Parser;
+
+    let previous = std::env::var("HERMES_ELITE_GATE_CMD").ok();
+    std::env::remove_var("HERMES_ELITE_GATE_CMD");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let cfg = tmp.path().join("cfg");
+    let cli = Cli::parse_from([
+        "hermes-ultra",
+        "--config-dir",
+        cfg.to_str().expect("utf8 path"),
+        "doctor",
+    ]);
+    let payload = build_elite_doctor_diagnostics(&cli);
+    assert_eq!(
+        payload["elite_gate"]["runner"].as_str(),
+        Some("native")
+    );
+    assert_eq!(
+        payload["elite_gate"]["command"].as_str(),
+        Some("native rust elite sync gate")
+    );
+    assert_eq!(
+        payload["elite_gate"]["script_available"].as_bool(),
+        Some(true)
+    );
+
+    match previous {
+        Some(value) => std::env::set_var("HERMES_ELITE_GATE_CMD", value),
+        None => std::env::remove_var("HERMES_ELITE_GATE_CMD"),
+    }
+}
+
+#[test]
 fn resolve_resume_session_file_prefers_latest_modified_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let cli = cli_for_temp_state_root(tmp.path());
@@ -520,4 +555,3 @@ async fn run_dump_writes_real_saved_session_export_with_system_prompt() {
         .as_str()
         .is_some_and(|p| p.ends_with("abc123.json")));
 }
-

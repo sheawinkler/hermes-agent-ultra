@@ -685,6 +685,24 @@ fn native_performance_autopilot_env_writer_uses_safe_actions() {
 }
 
 #[tokio::test]
+async fn autopilot_probe_command_times_out_instead_of_hanging() {
+    let repo = tempdir().expect("repo");
+    let report = run_autopilot_probe_command_with_timeout(
+        "sleep 2",
+        repo.path(),
+        200,
+        Duration::from_millis(50),
+    )
+    .await;
+    assert_eq!(report["ok"].as_bool(), Some(false));
+    assert_eq!(report["exit_code"].as_i64(), Some(-1));
+    assert!(report["stderr_tail"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("timed out after"));
+}
+
+#[tokio::test]
 async fn native_slo_auto_rollback_runs_rollback_on_violation() {
     let repo = tempdir().expect("repo");
     let rollback_marker = repo.path().join("rollback.marker");

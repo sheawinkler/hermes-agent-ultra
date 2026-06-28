@@ -35,15 +35,24 @@ fn build_elite_doctor_diagnostics(cli: &Cli) -> serde_json::Value {
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| "relaxed".to_string());
 
-    let elite_gate_script = std::env::var("HERMES_ELITE_GATE_CMD")
+    let elite_gate_override = std::env::var("HERMES_ELITE_GATE_CMD")
         .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| "python3 scripts/run-elite-sync-gate.py".to_string());
-    let gate_available = {
+        .filter(|v| !v.trim().is_empty());
+    let elite_gate_runner = if elite_gate_override.is_some() {
+        "shell_override"
+    } else {
+        "native"
+    };
+    let elite_gate_command = elite_gate_override
+        .as_deref()
+        .unwrap_or("native rust elite sync gate");
+    let gate_available = if elite_gate_override.is_some() {
         let script_path = std::env::current_dir()
             .ok()
             .map(|cwd| cwd.join("scripts").join("run-elite-sync-gate.py"));
         script_path.as_ref().map(|p| p.exists()).unwrap_or(false)
+    } else {
+        true
     };
 
     serde_json::json!({
@@ -71,7 +80,8 @@ fn build_elite_doctor_diagnostics(cli: &Cli) -> serde_json::Value {
             "counters": policy_counters,
         },
         "elite_gate": {
-            "command": elite_gate_script,
+            "command": elite_gate_command,
+            "runner": elite_gate_runner,
             "script_available": gate_available,
         }
     })
@@ -437,7 +447,10 @@ async fn run_doctor(
         elite["tool_policy"]["preset"].as_str().unwrap_or("unknown")
     );
     println!(
-        "  elite gate script... {}",
+        "  elite gate runner... {} {}",
+        elite["elite_gate"]["runner"]
+            .as_str()
+            .unwrap_or("unknown"),
         if elite["elite_gate"]["script_available"]
             .as_bool()
             .unwrap_or(false)
@@ -1198,12 +1211,8 @@ async fn run_update(_check: bool) -> Result<(), AgentError> {
     Ok(())
 }
 
-async fn run_elite_check(_cli: Cli, json: bool, strict: bool) -> Result<(), AgentError> {
-    let base_cmd = std::env::var("HERMES_ELITE_GATE_CMD")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| "python3 scripts/run-elite-sync-gate.py --repo-root .".to_string());
-    let mut cmdline = base_cmd;
+async fn run_legacy_elite_check(cmdline: String, json: bool, strict: bool) -> Result<(), AgentError> {
+    let mut cmdline = cmdline;
     if json {
         cmdline.push_str(" --json");
     }
@@ -1224,6 +1233,50 @@ async fn run_elite_check(_cli: Cli, json: bool, strict: bool) -> Result<(), Agen
         return Err(AgentError::Config(format!(
             "elite-check failed (status={})",
             output.status
+        )));
+    }
+    Ok(())
+}
+
+async fn run_elite_check(_cli: Cli, json: bool, strict: bool) -> Result<(), AgentError> {
+    if let Some(cmdline) = std::env::var("HERMES_ELITE_GATE_CMD")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+    {
+        return run_legacy_elite_check(cmdline, json, strict).await;
+    }
+
+    let repo_root = std::env::current_dir()
+        .map_err(|e| AgentError::Io(format!("resolve elite-check repo root: {}", e)))?;
+    let (report, report_path) =
+        hermes_cli::commands::run_elite_sync_gate_native(&repo_root).await?;
+    let ok = report
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let summary = report.get("summary").cloned().unwrap_or_default();
+    let passed = summary
+        .get("passed_sections")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let total = summary
+        .get("total_sections")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+
+    if json {
+        let body = serde_json::to_string_pretty(&report)
+            .map_err(|e| AgentError::Config(format!("serialize elite-check report: {}", e)))?;
+        println!("{}", body);
+    } else {
+        let status = if ok { "PASSED" } else { "FAILED" };
+        println!("[elite-sync-gate] {status} (passed={passed}/{total})");
+        println!("[elite-sync-gate] Report: {}", report_path.display());
+    }
+
+    if strict && !ok {
+        return Err(AgentError::Config(format!(
+            "elite-check failed (passed={passed}/{total})"
         )));
     }
     Ok(())
