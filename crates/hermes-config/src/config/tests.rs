@@ -379,6 +379,7 @@ display:
       tool_progress: off
 agent:
   service_tier: fast
+  preflight_context_compress: "false"
 "#,
         )
         .expect("display config");
@@ -393,6 +394,7 @@ agent:
             cfg.agent.normalized_service_tier().as_deref(),
             Some("priority")
         );
+        assert!(!cfg.agent.preflight_context_compress);
 
         let disabled: GatewayConfig = serde_yaml::from_str(
             r#"

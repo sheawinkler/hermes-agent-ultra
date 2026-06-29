@@ -501,6 +501,23 @@ fn apply_patch_dotted_agent_api_max_retries() {
 }
 
 #[test]
+fn apply_patch_dotted_agent_preflight_context_compress() {
+    let mut c = GatewayConfig::default();
+    assert!(c.agent.preflight_context_compress);
+
+    apply_user_config_patch(&mut c, "agent.preflight_context_compress", "false").unwrap();
+
+    assert!(!c.agent.preflight_context_compress);
+    assert_eq!(
+        user_config_field_display(&c, "agent.preflight_context_compress").unwrap(),
+        "false"
+    );
+    apply_user_config_patch(&mut c, "agent.preflightContextCompress", "on").unwrap();
+    assert!(c.agent.preflight_context_compress);
+    assert!(apply_user_config_patch(&mut c, "agent.preflight_context_compress", "nope").is_err());
+}
+
+#[test]
 fn apply_patch_dotted_delegation_provider_model_runtime_values() {
     let mut c = GatewayConfig::default();
 

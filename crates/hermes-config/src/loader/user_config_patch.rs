@@ -1,4 +1,4 @@
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, model_switch.persist_switch_by_default, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, display.busy_input_mode|busy_ack_enabled|memory_notifications, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, model_switch.persist_switch_by_default, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, display.busy_input_mode|busy_ack_enabled|memory_notifications, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries|preflight_context_compress, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -239,6 +239,10 @@ fn apply_user_config_patch_dotted(
                 ))
             })?);
         }
+        ["agent", "preflight_context_compress"] | ["agent", "preflightContextCompress"] => {
+            config.agent.preflight_context_compress =
+                parse_config_bool("agent.preflight_context_compress", value)?;
+        }
         ["delegation", "model"] => {
             config.delegation.model = Some(value.to_string());
         }
@@ -262,7 +266,7 @@ fn apply_user_config_patch_dotted(
             let entry = config
                 .auxiliary
                 .entry((*task).to_string())
-                .or_insert_with(crate::config::AuxiliaryTaskConfig::default);
+                .or_default();
             match *field {
                 "provider" => entry.provider = value.to_string(),
                 "model" => entry.model = value.to_string(),
@@ -296,7 +300,7 @@ fn apply_user_config_patch_dotted(
             let entry = config
                 .llm_providers
                 .entry((*provider).to_string())
-                .or_insert_with(LlmProviderConfig::default);
+                .or_default();
             match *field {
                 "api_key" => entry.api_key = Some(value.to_string()),
                 "api_key_env" => entry.api_key_env = Some(value.to_string()),
@@ -505,6 +509,9 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .api_max_retries
             .map(|value| value.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
+        ["agent", "preflight_context_compress"] | ["agent", "preflightContextCompress"] => {
+            Ok(config.agent.preflight_context_compress.to_string())
+        }
         ["delegation", "model"] => Ok(config
             .delegation
             .model
