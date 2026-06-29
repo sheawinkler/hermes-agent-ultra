@@ -5244,6 +5244,7 @@ pub async fn subscribe_task_stream(
     task_id: String,
     stream_id: Option<String>,
 ) -> Result<(), String> {
+    let _lazy_first = state.lazy_backend.should_start();
     let conn = start_hermes_impl(&app, &state, None).await?;
     let sid = StreamId::new(stream_id.unwrap_or_else(|| format!("task:{task_id}")));
     let bridge = ensure_ws_bridge(&state, conn.ws_url).await?;
