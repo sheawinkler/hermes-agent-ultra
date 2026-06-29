@@ -145,6 +145,8 @@ pub fn run() {
             create_alipay_order,
             create_wechat_order,
             query_payment_status,
+            register_push_token,
+            unregister_push_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
