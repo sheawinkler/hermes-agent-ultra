@@ -115,3 +115,49 @@ async fn billing_quota_stub() {
     assert_eq!(v["tier"], "free");
     assert_eq!(v["effective_provider_tier"], "economic");
 }
+
+#[tokio::test]
+async fn compat_api_status_has_desktop_fields() {
+    let _ = tracing_subscriber::fmt::try_init();
+    let cfg = hermes_config::GatewayConfig::default();
+    let state = hermes_http::HttpServerState::build(cfg).await.unwrap();
+    let app = hermes_http::router(state);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["gateway_running"], true);
+    assert_eq!(v["status"], "running");
+    assert!(v["hermes_home"].is_string());
+    assert!(v["config_path"].is_string());
+    assert!(v["active_sessions"].as_i64().is_some());
+}
+
+#[tokio::test]
+async fn compat_api_messaging_platforms_shape() {
+    let _ = tracing_subscriber::fmt::try_init();
+    let cfg = hermes_config::GatewayConfig::default();
+    let state = hermes_http::HttpServerState::build(cfg).await.unwrap();
+    let app = hermes_http::router(state);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/messaging/platforms")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(v["platforms"].is_array());
+}

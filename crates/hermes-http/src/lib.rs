@@ -57,6 +57,7 @@ use hermes_agent::{
     split_messages_for_run_conversation,
 };
 use hermes_config::GatewayConfig;
+use hermes_config::{config_path, env_path, gateway_pid_path, hermes_home};
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 use hermes_core::{AgentError, LlmProvider, Message, MessageRole, StreamChunk};
@@ -1224,13 +1225,71 @@ fn resolve_model(default_model: &str, provider: Option<&str>, model: Option<&str
 // Compatibility API handlers — Python Hermes API stubs for desktop app
 // ---------------------------------------------------------------------------
 
-async fn compat_api_status() -> impl IntoResponse {
-    Json(serde_json::json!({
-        "version": "0.17.0",
+fn read_gateway_pid_file(path: &FsPath) -> Option<u32> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(pid) = trimmed.parse::<u32>() {
+        return Some(pid);
+    }
+    let json: Value = serde_json::from_str(trimmed).ok()?;
+    let pid = json.get("pid")?.as_u64()?;
+    u32::try_from(pid).ok()
+}
+
+#[cfg(unix)]
+fn messaging_gateway_pid_alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn messaging_gateway_pid_alive(_pid: u32) -> bool {
+    false
+}
+
+fn compat_messaging_gateway_snapshot() -> (bool, Option<u32>, Option<String>) {
+    let pid_path = gateway_pid_path();
+    if let Some(pid) = read_gateway_pid_file(&pid_path) {
+        if messaging_gateway_pid_alive(pid) {
+            return (true, Some(pid), Some("running".into()));
+        }
+        return (false, Some(pid), Some("stale_pid".into()));
+    }
+
+    // Terra V1: hermes-http is the active local backend when no gateway.pid child exists.
+    (true, None, Some("hermes_http".into()))
+}
+
+fn compat_desktop_status_json() -> Value {
+    let home = hermes_home();
+    let (gateway_running, gateway_pid, gateway_state) = compat_messaging_gateway_snapshot();
+
+    serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "release_date": Utc::now().format("%Y-%m-%d").to_string(),
+        "active_sessions": 0,
+        "config_path": config_path().display().to_string(),
+        "config_version": 0,
+        "latest_config_version": 0,
+        "env_path": env_path().display().to_string(),
+        "hermes_home": home.display().to_string(),
+        "gateway_running": gateway_running,
+        "gateway_state": gateway_state,
+        "gateway_pid": gateway_pid,
+        "gateway_exit_reason": null,
+        "gateway_health_url": null,
+        "gateway_updated_at": null,
+        "gateway_platforms": {},
         "status": "running",
         "model": "hermes-agent-ultra",
         "uptime": 0
-    }))
+    })
+}
+
+async fn compat_api_status() -> impl IntoResponse {
+    Json(compat_desktop_status_json())
 }
 
 async fn compat_api_sessions(
@@ -1341,7 +1400,7 @@ async fn compat_api_logs() -> impl IntoResponse {
 }
 
 async fn compat_api_messaging_platforms() -> impl IntoResponse {
-    Json(serde_json::json!([]))
+    Json(serde_json::json!({ "platforms": [] }))
 }
 
 async fn compat_api_cron_jobs(State(state): State<HttpServerState>) -> impl IntoResponse {
