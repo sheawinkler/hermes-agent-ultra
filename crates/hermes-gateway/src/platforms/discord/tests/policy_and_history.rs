@@ -50,6 +50,32 @@ fn send_options_map_to_discord_metadata_without_losing_thread_or_status_flags() 
 }
 
 #[test]
+fn discord_outgoing_formatter_rewrites_gfm_tables_to_bullet_groups() {
+    let formatted = format_discord_outgoing_content(
+        "Report\n| Name | Score |\n| --- | ---: |\n| Ada | 10 |\n| Turing | 9 |",
+    );
+
+    assert_eq!(
+        formatted,
+        "Report\n**Ada**\n- Score: 10\n\n**Turing**\n- Score: 9"
+    );
+}
+
+#[test]
+fn discord_outgoing_formatter_preserves_fenced_tables_and_row_labels() {
+    let fenced = format_discord_outgoing_content("```\n| A | B |\n|---|---|\n| 1 | 2 |\n```");
+    assert_eq!(fenced, "```\n| A | B |\n|---|---|\n| 1 | 2 |\n```");
+
+    let row_labels = format_discord_outgoing_content(
+        "| Metric | Before | After |\n| --- | --- | --- |\n| p95 | latency | 120ms | 80ms |",
+    );
+    assert_eq!(
+        row_labels,
+        "**p95**\n- Metric: latency\n- Before: 120ms\n- After: 80ms"
+    );
+}
+
+#[test]
 fn clarify_choice_normalization_unwraps_llm_dict_shapes_only() {
     let choices = discord_normalize_clarify_choices([
         serde_json::json!({"description": "Tight, well-illustrated"}),
@@ -498,6 +524,26 @@ fn discord_component_auth_user_or_role_matches_and_fails_closed() {
     assert!(!policy.component_allows(&DiscordInteractionSubject::default()));
     assert!(DiscordInteractionAuthPolicy::default()
         .component_allows(&DiscordInteractionSubject::default()));
+}
+
+#[test]
+fn discord_allowed_user_wildcard_allows_component_and_slash_subjects() {
+    let policy = DiscordInteractionAuthPolicy {
+        allowed_user_ids: ["*"].into_iter().map(String::from).collect(),
+        ..DiscordInteractionAuthPolicy::default()
+    };
+    let subject = DiscordInteractionSubject::user("any-user");
+
+    assert!(policy.component_allows(&subject));
+    assert_eq!(
+        policy.authorize_slash(
+            &subject,
+            Some(&DiscordChannelContext::server("1111")),
+            Some("guild-1"),
+            None,
+        ),
+        DiscordAuthDecision::Allow
+    );
 }
 
 #[test]

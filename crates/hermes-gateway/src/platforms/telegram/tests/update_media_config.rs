@@ -21,6 +21,7 @@ fn make_text_message(msg_id: i64, chat: Chat, user: User, text: &str) -> Telegra
         message_id: msg_id,
         chat,
         from: Some(user),
+        sender_chat: None,
         text: Some(text.into()),
         voice: None,
         photo: None,
@@ -29,6 +30,7 @@ fn make_text_message(msg_id: i64, chat: Chat, user: User, text: &str) -> Telegra
         caption_entities: Vec::new(),
         sticker: None,
         document: None,
+        video: None,
         reply_to_message: None,
         rich_message: None,
         message_thread_id: None,
@@ -70,6 +72,7 @@ fn parse_update_voice_message() {
             message_id: 43,
             chat: make_chat(100, "private"),
             from: Some(make_user(200, None)),
+            sender_chat: None,
             text: None,
             voice: Some(Voice {
                 file_id: "voice123".into(),
@@ -82,6 +85,7 @@ fn parse_update_voice_message() {
             caption_entities: Vec::new(),
             sticker: None,
             document: None,
+            video: None,
             reply_to_message: None,
             rich_message: None,
             message_thread_id: None,
@@ -103,6 +107,7 @@ fn parse_update_photo_message() {
             message_id: 44,
             chat: make_chat(100, "group"),
             from: Some(make_user(200, None)),
+            sender_chat: None,
             text: None,
             voice: None,
             photo: Some(vec![
@@ -124,6 +129,7 @@ fn parse_update_photo_message() {
             caption_entities: Vec::new(),
             sticker: None,
             document: None,
+            video: None,
             reply_to_message: None,
             rich_message: None,
             message_thread_id: None,
@@ -162,6 +168,7 @@ fn parse_update_sticker_message() {
             message_id: 100,
             chat: make_chat(300, "private"),
             from: Some(make_user(400, Some("stickeruser"))),
+            sender_chat: None,
             text: None,
             voice: None,
             photo: None,
@@ -179,6 +186,7 @@ fn parse_update_sticker_message() {
                 set_name: Some("TestPack".into()),
             }),
             document: None,
+            video: None,
             reply_to_message: None,
             rich_message: None,
             message_thread_id: None,
@@ -203,6 +211,7 @@ fn parse_update_document_message() {
             message_id: 101,
             chat: make_chat(301, "private"),
             from: Some(make_user(401, Some("docuser"))),
+            sender_chat: None,
             text: None,
             voice: None,
             photo: None,
@@ -217,6 +226,7 @@ fn parse_update_document_message() {
                 mime_type: Some("text/markdown".into()),
                 file_size: Some(2048),
             }),
+            video: None,
             reply_to_message: None,
             rich_message: None,
             message_thread_id: None,
@@ -232,6 +242,50 @@ fn parse_update_document_message() {
     assert_eq!(incoming.document_mime_type, Some("text/markdown".into()));
     assert_eq!(incoming.document_file_size, Some(2048));
     assert_eq!(incoming.text, Some("document caption".into()));
+}
+
+#[test]
+fn parse_update_video_message_exposes_bounded_video_metadata() {
+    let update = Update {
+        update_id: 12,
+        message: Some(TelegramMessage {
+            message_id: 102,
+            chat: make_chat(301, "private"),
+            from: Some(make_user(401, Some("videouser"))),
+            sender_chat: None,
+            text: None,
+            voice: None,
+            photo: None,
+            caption: Some("video caption".into()),
+            entities: Vec::new(),
+            caption_entities: Vec::new(),
+            sticker: None,
+            document: None,
+            video: Some(Video {
+                file_id: "video_abc".into(),
+                file_unique_id: Some("vu_abc".into()),
+                duration: Some(9),
+                width: Some(1280),
+                height: Some(720),
+                file_name: Some("clip.mp4".into()),
+                mime_type: Some("video/mp4".into()),
+                file_size: Some(4096),
+            }),
+            reply_to_message: None,
+            rich_message: None,
+            message_thread_id: None,
+            is_topic_message: None,
+        }),
+        callback_query: None,
+    };
+
+    let incoming = TelegramAdapter::parse_update(&update).unwrap();
+    assert!(incoming.is_video);
+    assert_eq!(incoming.video_file_id, Some("video_abc".into()));
+    assert_eq!(incoming.video_file_name, Some("clip.mp4".into()));
+    assert_eq!(incoming.video_mime_type, Some("video/mp4".into()));
+    assert_eq!(incoming.video_file_size, Some(4096));
+    assert_eq!(incoming.text, Some("video caption".into()));
 }
 
 // -----------------------------------------------------------------------
@@ -250,6 +304,7 @@ fn parse_update_callback_query() {
                 message_id: 200,
                 chat: make_chat(600, "private"),
                 from: None,
+                sender_chat: None,
                 text: Some("Original message".into()),
                 voice: None,
                 photo: None,
@@ -258,6 +313,7 @@ fn parse_update_callback_query() {
                 caption_entities: Vec::new(),
                 sticker: None,
                 document: None,
+                video: None,
                 reply_to_message: None,
                 rich_message: None,
                 message_thread_id: None,
@@ -307,6 +363,7 @@ fn parse_update_with_reply_and_thread() {
         message_id: 10,
         chat: make_chat(100, "supergroup"),
         from: Some(make_user(50, None)),
+            sender_chat: None,
         text: Some("original".into()),
         voice: None,
         photo: None,
@@ -315,6 +372,7 @@ fn parse_update_with_reply_and_thread() {
         caption_entities: Vec::new(),
         sticker: None,
         document: None,
+        video: None,
         reply_to_message: None,
         rich_message: None,
         message_thread_id: None,
@@ -327,6 +385,7 @@ fn parse_update_with_reply_and_thread() {
             message_id: 55,
             chat: make_chat(100, "supergroup"),
             from: Some(make_user(200, None)),
+            sender_chat: None,
             text: Some("replying".into()),
             voice: None,
             photo: None,
@@ -335,6 +394,7 @@ fn parse_update_with_reply_and_thread() {
             caption_entities: Vec::new(),
             sticker: None,
             document: None,
+            video: None,
             reply_to_message: Some(Box::new(reply_msg)),
             rich_message: None,
             message_thread_id: Some(999),
@@ -356,6 +416,7 @@ fn parse_update_text_reply_to_photo_exposes_replied_media() {
         message_id: 51,
         chat: make_chat(100, "supergroup"),
         from: Some(make_user(50, None)),
+            sender_chat: None,
         text: None,
         voice: None,
         photo: Some(vec![PhotoSize {
@@ -369,6 +430,7 @@ fn parse_update_text_reply_to_photo_exposes_replied_media() {
         caption_entities: Vec::new(),
         sticker: None,
         document: None,
+        video: None,
         reply_to_message: None,
         rich_message: None,
         message_thread_id: None,
@@ -381,6 +443,7 @@ fn parse_update_text_reply_to_photo_exposes_replied_media() {
             message_id: 56,
             chat: make_chat(100, "supergroup"),
             from: Some(make_user(200, None)),
+            sender_chat: None,
             text: Some("what is in this image?".into()),
             voice: None,
             photo: None,
@@ -389,6 +452,7 @@ fn parse_update_text_reply_to_photo_exposes_replied_media() {
             caption_entities: Vec::new(),
             sticker: None,
             document: None,
+            video: None,
             reply_to_message: Some(Box::new(reply_msg)),
             rich_message: None,
             message_thread_id: Some(999),
@@ -410,6 +474,7 @@ fn parse_update_current_media_does_not_merge_replied_media() {
         message_id: 53,
         chat: make_chat(100, "supergroup"),
         from: Some(make_user(50, None)),
+            sender_chat: None,
         text: None,
         voice: Some(Voice {
             file_id: "replied-voice".into(),
@@ -422,6 +487,7 @@ fn parse_update_current_media_does_not_merge_replied_media() {
         caption_entities: Vec::new(),
         sticker: None,
         document: None,
+        video: None,
         reply_to_message: None,
         rich_message: None,
         message_thread_id: None,
@@ -434,6 +500,7 @@ fn parse_update_current_media_does_not_merge_replied_media() {
             message_id: 58,
             chat: make_chat(100, "supergroup"),
             from: Some(make_user(200, None)),
+            sender_chat: None,
             text: None,
             voice: None,
             photo: Some(vec![PhotoSize {
@@ -447,6 +514,7 @@ fn parse_update_current_media_does_not_merge_replied_media() {
             caption_entities: Vec::new(),
             sticker: None,
             document: None,
+            video: None,
             reply_to_message: Some(Box::new(reply_msg)),
             rich_message: None,
             message_thread_id: None,
@@ -468,6 +536,7 @@ fn parse_update_text_reply_ignores_oversized_replied_document() {
         message_id: 52,
         chat: make_chat(100, "supergroup"),
         from: Some(make_user(50, None)),
+            sender_chat: None,
         text: None,
         voice: None,
         photo: None,
@@ -482,6 +551,7 @@ fn parse_update_text_reply_ignores_oversized_replied_document() {
             mime_type: Some("application/pdf".into()),
             file_size: Some(TELEGRAM_MAX_DOCUMENT_SIZE_BYTES + 1),
         }),
+        video: None,
         reply_to_message: None,
         rich_message: None,
         message_thread_id: None,
@@ -494,6 +564,7 @@ fn parse_update_text_reply_ignores_oversized_replied_document() {
             message_id: 57,
             chat: make_chat(100, "supergroup"),
             from: Some(make_user(200, None)),
+            sender_chat: None,
             text: Some("read this".into()),
             voice: None,
             photo: None,
@@ -502,6 +573,7 @@ fn parse_update_text_reply_ignores_oversized_replied_document() {
             caption_entities: Vec::new(),
             sticker: None,
             document: None,
+            video: None,
             reply_to_message: Some(Box::new(reply_msg)),
             rich_message: None,
             message_thread_id: None,
@@ -514,6 +586,108 @@ fn parse_update_text_reply_ignores_oversized_replied_document() {
     assert_eq!(incoming.reply_to_message_id, Some(52));
     assert!(!incoming.is_document);
     assert_eq!(incoming.document_file_id, None);
+}
+
+#[test]
+fn parse_update_ignores_oversized_current_video() {
+    let update = Update {
+        update_id: 34,
+        message: Some(TelegramMessage {
+            message_id: 59,
+            chat: make_chat(100, "supergroup"),
+            from: Some(make_user(200, None)),
+            sender_chat: None,
+            text: None,
+            voice: None,
+            photo: None,
+            caption: Some("huge clip".into()),
+            entities: Vec::new(),
+            caption_entities: Vec::new(),
+            sticker: None,
+            document: None,
+            video: Some(Video {
+                file_id: "huge-video".into(),
+                file_unique_id: Some("huge-video-unique".into()),
+                duration: Some(120),
+                width: Some(1920),
+                height: Some(1080),
+                file_name: Some("huge.mp4".into()),
+                mime_type: Some("video/mp4".into()),
+                file_size: Some(TELEGRAM_MAX_VIDEO_SIZE_BYTES + 1),
+            }),
+            reply_to_message: None,
+            rich_message: None,
+            message_thread_id: None,
+            is_topic_message: None,
+        }),
+        callback_query: None,
+    };
+
+    let incoming = TelegramAdapter::parse_update(&update).unwrap();
+    assert_eq!(incoming.text, Some("huge clip".into()));
+    assert!(!incoming.is_video);
+    assert_eq!(incoming.video_file_id, None);
+}
+
+#[test]
+fn parse_update_text_reply_ignores_oversized_replied_video() {
+    let reply_msg = TelegramMessage {
+        message_id: 60,
+        chat: make_chat(100, "supergroup"),
+        from: Some(make_user(50, None)),
+            sender_chat: None,
+        text: None,
+        voice: None,
+        photo: None,
+        caption: None,
+        entities: Vec::new(),
+        caption_entities: Vec::new(),
+        sticker: None,
+        document: None,
+        video: Some(Video {
+            file_id: "huge-replied-video".into(),
+            file_unique_id: Some("huge-replied-video-unique".into()),
+            duration: Some(120),
+            width: Some(1920),
+            height: Some(1080),
+            file_name: Some("huge-reply.mp4".into()),
+            mime_type: Some("video/mp4".into()),
+            file_size: Some(TELEGRAM_MAX_VIDEO_SIZE_BYTES + 1),
+        }),
+        reply_to_message: None,
+        rich_message: None,
+        message_thread_id: None,
+        is_topic_message: None,
+    };
+
+    let update = Update {
+        update_id: 35,
+        message: Some(TelegramMessage {
+            message_id: 61,
+            chat: make_chat(100, "supergroup"),
+            from: Some(make_user(200, None)),
+            sender_chat: None,
+            text: Some("describe the clip".into()),
+            voice: None,
+            photo: None,
+            caption: None,
+            entities: Vec::new(),
+            caption_entities: Vec::new(),
+            sticker: None,
+            document: None,
+            video: None,
+            reply_to_message: Some(Box::new(reply_msg)),
+            rich_message: None,
+            message_thread_id: None,
+            is_topic_message: None,
+        }),
+        callback_query: None,
+    };
+
+    let incoming = TelegramAdapter::parse_update(&update).unwrap();
+    assert_eq!(incoming.reply_to_message_id, Some(60));
+    assert!(!incoming.is_video);
+    assert_eq!(incoming.video_file_id, None);
 }
 
 // -----------------------------------------------------------------------
@@ -985,6 +1159,32 @@ async fn telegram_get_updates_advances_offset_after_success() {
     assert_eq!(adapter.poll_offset.load(Ordering::SeqCst), 43);
 }
 
+#[tokio::test]
+async fn telegram_polling_conflict_marks_adapter_unhealthy_immediately() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/botfake_token_12345/getUpdates"))
+        .respond_with(
+            ResponseTemplate::new(409).set_body_json(serde_json::json!({
+                "ok": false,
+                "description": "Conflict: terminated by other getUpdates request"
+            })),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut adapter = test_adapter(test_config());
+    adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+    adapter.base.mark_running();
+
+    let result = adapter.poll_with_backoff().await;
+
+    assert!(matches!(result, PollResult::Backoff { .. }));
+    assert_eq!(adapter.consecutive_error_count(), 1);
+    assert!(!adapter.is_running());
+}
+
 #[test]
 fn supported_document_type_from_extension_or_mime() {
     let doc_from_name = Document {
@@ -1061,6 +1261,45 @@ fn document_size_limit_check() {
         file_size: None,
     };
     assert!(TelegramAdapter::document_exceeds_size_limit(&unknown_size));
+}
+
+#[test]
+fn video_size_limit_check() {
+    let small = Video {
+        file_id: "v1".into(),
+        file_unique_id: None,
+        duration: Some(5),
+        width: Some(640),
+        height: Some(360),
+        file_name: Some("ok.mp4".into()),
+        mime_type: Some("video/mp4".into()),
+        file_size: Some(1_024),
+    };
+    assert!(!TelegramAdapter::video_exceeds_size_limit(&small));
+
+    let large = Video {
+        file_id: "v2".into(),
+        file_unique_id: None,
+        duration: Some(5),
+        width: Some(640),
+        height: Some(360),
+        file_name: Some("large.mp4".into()),
+        mime_type: Some("video/mp4".into()),
+        file_size: Some(TELEGRAM_MAX_VIDEO_SIZE_BYTES + 1),
+    };
+    assert!(TelegramAdapter::video_exceeds_size_limit(&large));
+
+    let unknown_size = Video {
+        file_id: "v3".into(),
+        file_unique_id: None,
+        duration: None,
+        width: None,
+        height: None,
+        file_name: Some("unknown.mp4".into()),
+        mime_type: Some("video/mp4".into()),
+        file_size: None,
+    };
+    assert!(TelegramAdapter::video_exceeds_size_limit(&unknown_size));
 }
 
 // -----------------------------------------------------------------------

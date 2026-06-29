@@ -98,7 +98,8 @@ fn lift_toolsets_to_tools(map: &mut Mapping) {
     }
 }
 
-/// Python `model: { default, provider, base_url, ... }` → `model: "provider:default"` + `llm_providers`.
+/// Python `model: { default|name|model, provider, base_url, ... }` →
+/// `model: "provider:default"` + `llm_providers`.
 fn normalize_model_block(map: &mut Mapping) {
     let model_key = key("model");
     let Some(raw) = map.remove(&model_key) else {
@@ -124,11 +125,12 @@ fn normalize_model_block(map: &mut Mapping) {
                 switch_map.insert(key("persist_switch_by_default"), persist);
                 map.insert(switch_key, Value::Mapping(switch_map));
             }
-            let default = m
-                .get(&key("default"))
-                .and_then(as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty());
+            let default = ["default", "name", "model"].iter().find_map(|field| {
+                m.get(&key(field))
+                    .and_then(as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            });
             let provider = m
                 .get(&key("provider"))
                 .and_then(as_str)
@@ -622,6 +624,48 @@ model:
         let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
         assert_eq!(cfg.model.as_deref(), Some("openrouter:zai/glm-5.2"));
         assert!(!cfg.model_switch.persist_switch_by_default);
+    }
+
+    #[test]
+    fn python_model_block_accepts_name_and_model_aliases_for_default() {
+        for (field, expected) in [
+            ("name", "openrouter:zai/glm-5.2"),
+            ("model", "openrouter:anthropic/claude-sonnet-4.6"),
+        ] {
+            let raw = format!(
+                r#"
+model:
+  {field}: {model}
+  provider: openrouter
+"#,
+                model = expected.split_once(':').unwrap().1
+            );
+            let mut root: Value = serde_yaml::from_str(&raw).unwrap();
+            let Value::Mapping(ref mut m) = root else {
+                panic!();
+            };
+            normalize_config_yaml_root(m);
+            let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+            assert_eq!(cfg.model.as_deref(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn python_model_block_prefers_default_over_aliases() {
+        let raw = r#"
+model:
+  default: canonical/model
+  name: stale/name
+  model: stale/model
+  provider: openrouter
+"#;
+        let mut root: Value = serde_yaml::from_str(raw).unwrap();
+        let Value::Mapping(ref mut m) = root else {
+            panic!();
+        };
+        normalize_config_yaml_root(m);
+        let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+        assert_eq!(cfg.model.as_deref(), Some("openrouter:canonical/model"));
     }
 
     #[test]

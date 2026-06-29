@@ -14,8 +14,12 @@ def test_docker_image_carries_license_metadata_and_files() -> None:
     text = DOCKERFILE.read_text()
 
     assert 'org.opencontainers.image.licenses="MIT"' in text
-    assert "COPY LICENSE NOTICE /usr/share/doc/hermes-agent-ultra/" in text
-    assert "chmod -R a+rX /usr/local/bin /usr/share/doc/hermes-agent-ultra" in text
+    assert "COPY --link LICENSE NOTICE /usr/share/doc/hermes-agent-ultra/" in text
+    assert (
+        "chmod 0644 /usr/share/doc/hermes-agent-ultra/LICENSE "
+        "/usr/share/doc/hermes-agent-ultra/NOTICE"
+    ) in text
+    assert "chmod -R" not in text
 
 
 def test_docker_context_does_not_exclude_license_file() -> None:
@@ -45,10 +49,14 @@ def test_docker_image_has_no_python_setup_install_surface() -> None:
 def test_docker_image_keeps_code_immutable_and_state_on_data_volume() -> None:
     text = DOCKERFILE.read_text()
 
-    assert "COPY --from=builder /app/target/release/hermes /usr/local/bin/hermes" in text
+    assert (
+        "COPY --link --from=builder --chmod=0755 "
+        "/app/target/release/hermes /usr/local/bin/hermes"
+    ) in text
     assert "ENV HERMES_HOME=/data" in text
     assert 'VOLUME ["/data"]' in text
-    assert "chown -R 10000:10000 /data" in text
+    assert "install -d -o 10000 -g 10000 -m 0755 /data" in text
+    assert "chown -R 10000:10000 /data" not in text
     assert "chown -R 10000:10000 /usr/local" not in text
 
 

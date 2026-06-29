@@ -152,6 +152,8 @@
             serde_json::json!("149.154.167.220,::1"),
         );
         platform.require_mention = Some(true);
+        platform.allowed_users = vec!["42".to_string()];
+        platform.admin_users = vec!["admin".to_string()];
         platform
             .extra
             .insert("guest_mode".to_string(), serde_json::json!(true));
@@ -165,6 +167,13 @@
         platform.extra.insert(
             "group_allowed_chats".to_string(),
             serde_json::json!(["-300", "-301"]),
+        );
+        platform
+            .extra
+            .insert("allow_from".to_string(), serde_json::json!(["alice"]));
+        platform.extra.insert(
+            "group_allowed_users".to_string(),
+            serde_json::json!(["group_user"]),
         );
         platform
             .extra
@@ -208,6 +217,8 @@
         assert_eq!(cfg.free_response_chats, vec!["-100", "-101"]);
         assert_eq!(cfg.allowed_chats, vec!["-200", "-201"]);
         assert_eq!(cfg.group_allowed_chats, vec!["-300", "-301"]);
+        assert_eq!(cfg.allowed_users, vec!["42", "admin", "alice"]);
+        assert_eq!(cfg.group_allowed_users, vec!["group_user"]);
         assert_eq!(cfg.ignored_threads, vec!["31", "32"]);
         assert_eq!(cfg.allowed_topics, vec!["8", "0"]);
         assert_eq!(cfg.mention_patterns, vec![r"^\s*chompy\b", "@hermes"]);

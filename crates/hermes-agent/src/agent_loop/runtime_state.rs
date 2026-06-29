@@ -117,7 +117,7 @@ fn maybe_nous_401_diagnostic(
          Response: {response_snippet}\n\
          Most likely: Portal OAuth expired, account out of credits, or agent key revoked.\n\
          Troubleshooting:\n\
-           - Re-authenticate: hermes auth login nous\n\
+          - Re-authenticate: hermes auth add nous\n\
            - Check credits / billing: https://portal.nousresearch.com\n\
            - Verify stored credentials: {}\n\
            - Switch providers temporarily: /model <model> --provider openrouter",
@@ -906,4 +906,3 @@ fn runtime_provider_allows_no_api_key(provider: &str, base_url: Option<&str>) ->
     crate::local_backends::is_local_backend_provider(provider)
         || base_url.is_some_and(crate::local_backends::is_local_or_private_base_url)
 }
-

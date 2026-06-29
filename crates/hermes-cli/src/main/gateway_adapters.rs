@@ -759,6 +759,7 @@ fn telegram_should_batch_text(msg: &TelegramIncomingMessage) -> bool {
         && !msg.is_photo
         && !msg.is_sticker
         && !msg.is_document
+        && !msg.is_video
         && msg.callback_query_id.is_none()
         && msg.callback_data.is_none()
 }
@@ -789,6 +790,8 @@ fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMess
             "[voice message]".to_string()
         } else if msg.is_photo {
             "[photo message]".to_string()
+        } else if msg.is_video {
+            "[video message]".to_string()
         } else {
             "[unsupported message]".to_string()
         }
@@ -926,4 +929,3 @@ async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdap
         }
     }
 }
-

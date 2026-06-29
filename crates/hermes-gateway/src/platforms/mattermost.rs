@@ -175,16 +175,27 @@ impl MattermostAdapter {
         if !self.config.reply_to_mode.eq_ignore_ascii_case("thread") {
             return None;
         }
-        thread_id.map(str::trim).filter(|id| !id.is_empty())
+        thread_id
+            .map(str::trim)
+            .filter(|id| mattermost_api_path_segment("thread id", id).is_ok())
     }
 
     async fn thread_root_for_send(&self, thread_id: Option<&str>) -> Option<String> {
         let candidate = self.thread_candidate_for_send(thread_id)?;
-        Some(self.resolve_root_id(candidate).await)
+        self.resolve_root_id(candidate).await
     }
 
-    async fn resolve_root_id(&self, post_id: &str) -> String {
-        let candidate = post_id.trim();
+    async fn resolve_root_id(&self, post_id: &str) -> Option<String> {
+        let candidate = match mattermost_api_path_segment("post id", post_id) {
+            Ok(candidate) => candidate,
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "Mattermost refused unsafe thread root lookup path segment"
+                );
+                return None;
+            }
+        };
         let url = format!("{}/api/v4/posts/{}", self.config.server_url, candidate);
         let Ok(resp) = self
             .client
@@ -193,22 +204,33 @@ impl MattermostAdapter {
             .send()
             .await
         else {
-            return candidate.to_string();
+            return Some(candidate.to_string());
         };
 
         if !resp.status().is_success() {
-            return candidate.to_string();
+            return Some(candidate.to_string());
         }
 
         let Ok(post) = resp.json::<serde_json::Value>().await else {
-            return candidate.to_string();
+            return Some(candidate.to_string());
         };
-        post.get("root_id")
+        let root = post
+            .get("root_id")
             .and_then(|v| v.as_str())
             .map(str::trim)
             .filter(|id| !id.is_empty())
             .unwrap_or(candidate)
-            .to_string()
+            .to_string();
+        match mattermost_api_path_segment("root id", &root) {
+            Ok(_) => Some(root),
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "Mattermost refused unsafe resolved thread root path segment"
+                );
+                None
+            }
+        }
     }
 
     async fn send_file_with_thread(
@@ -550,6 +572,7 @@ impl MattermostAdapter {
 
     /// Edit a message via Mattermost REST API.
     pub async fn edit_text(&self, post_id: &str, text: &str) -> Result<(), GatewayError> {
+        let post_id = mattermost_api_path_segment("post id", post_id)?;
         let url = format!("{}/api/v4/posts/{}", self.config.server_url, post_id);
         let body = serde_json::json!({ "id": post_id, "message": text });
 
@@ -667,6 +690,21 @@ fn image_fallback_text(image_url: &str, caption: Option<&str>) -> String {
         Some(c) => format!("{c}\n{image_url}"),
         None => image_url.to_string(),
     }
+}
+
+fn mattermost_api_path_segment<'a>(label: &str, raw: &'a str) -> Result<&'a str, GatewayError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.contains("..")
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('\0')
+    {
+        return Err(GatewayError::SendFailed(format!(
+            "Mattermost {label} contains unsafe API path segment"
+        )));
+    }
+    Ok(trimmed)
 }
 
 fn mattermost_post_body(
@@ -911,6 +949,33 @@ mod tests {
             Some("root-post-1")
         );
         assert_eq!(threaded.thread_candidate_for_send(Some("   ")), None);
+        assert_eq!(
+            threaded.thread_candidate_for_send(Some("../users/me")),
+            None
+        );
+        assert_eq!(
+            threaded.thread_candidate_for_send(Some("posts/root-post-1")),
+            None
+        );
+    }
+
+    #[test]
+    fn mattermost_api_path_segment_rejects_traversal_shapes() {
+        assert_eq!(
+            mattermost_api_path_segment("post id", " post-1 ").unwrap(),
+            "post-1"
+        );
+        for unsafe_id in [
+            "../users/me",
+            "posts/post-1",
+            r"posts\\post-1",
+            "post\0id",
+            "",
+        ] {
+            let err = mattermost_api_path_segment("post id", unsafe_id)
+                .expect_err("unsafe segment should fail closed");
+            assert!(err.to_string().contains("unsafe API path segment"));
+        }
     }
 
     #[test]

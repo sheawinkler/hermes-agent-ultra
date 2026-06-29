@@ -54,6 +54,11 @@
       "owner": "rust-runtime",
       "notes": "Ported on the Rust CLI primary surface: hermes computer-use doctor calls cua-driver health_report and renders permission/preflight checks without requiring the absent Electron desktop panel."
     },
+    "0229246ab879b9968c9fcc384d8d5d0add939771": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "027cb649ef80": {
       "disposition": "ported",
       "owner": "rust-runtime",
@@ -203,6 +208,11 @@
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
     },
+    "09abbf8a63f8faada154850fd716b23a6dae9ee8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "09bcf5a9370e": {
       "disposition": "superseded",
       "notes": "Upstream tool-row copy affordance is desktop React assistant-ui layout. Hermes Agent Ultra has no Electron tool fallback row; terminal/TUI copy behavior is handled by local TUI/terminal clipboard surfaces."
@@ -315,6 +325,11 @@
     "0e0ddaac8fa0": {
       "disposition": "superseded",
       "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "0e2a5a3206d3543294abd132a8dcf914a5257759": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "0e2e69a71dda": {
       "disposition": "ported",
@@ -574,6 +589,11 @@
       "disposition": "ported",
       "notes": "Upstream desktop composer draft persistence is ported into the Rust TUI as state-root backed per-session composer drafts that restore on restart, clear on submit, and stay separate from message persistence."
     },
+    "18f7ad49ab25f8f27cc56f9bd80e3e4caeaa1455": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
+    },
     "1927ff217e6b": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
@@ -581,6 +601,11 @@
     "19854c7cd2f00e3d591e72ccbe2e456ad10c4886": {
       "disposition": "superseded",
       "notes": "Rust ACP already fences read_file completion content and intentionally flushes load/resume replay before the RPC response for deterministic local clients; server tests cover replay flushing and read_file formatting."
+    },
+    "19bae1b9e0d32f9ba05830e44ba8c1cdbdb246c8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "19c07c40379b": {
       "disposition": "ported",
@@ -594,6 +619,11 @@
     "19db9cd0760e05dafcd1ae637db946cdd65322ce": {
       "disposition": "ported",
       "notes": "Rust ACP SessionManager now exposes a public lock-protected update_session_meta API with COALESCE-style optional model preservation, merges cwd/provider/api_mode/base_url/config options, routes existing update_cwd/update_model through it, and tests missing-session no-op plus single persist callback behavior."
+    },
+    "1a1e00f37e0f4558dc930b7b0147f01411e02e76": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "1a3cd3d436a1": {
       "disposition": "superseded",
@@ -620,6 +650,11 @@
       "notes": "Upstream desktop OAuth account-removal UI is superseded by Rust provider/auth config surfaces; Electron onboarding/settings UI is outside the Rust-only shipped runtime.",
       "owner": "rust-runtime"
     },
+    "1b70a9184498cd03bb1e2274b3eac4b2635f7835": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation/infographic-only upstream delta is superseded by Hermes Agent Ultra's Rust-first docs/parity/release surfaces for this batch; it does not add or change a shipped Rust runtime behavior. Runtime, provider, platform, and install changes remain pending for separate evidence."
+    },
     "1b7b4d138a67": {
       "disposition": "superseded",
       "owner": "rust-runtime",
@@ -642,9 +677,19 @@
       "disposition": "ported",
       "notes": "Rust ACP initialize advertises loadSession and sessionCapabilities.resume in the wire-format agentCapabilities object; handler tests assert the ACP aliases so editor clients can discover load/resume support."
     },
+    "1bff85cf664e18579965d1a205e13b5b54679dc5": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "1c0437dfc5bb": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "1c0fa12edb1c33b8c72ff860b6a0276262394cd7": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "1c2189839d0b": {
       "disposition": "superseded",
@@ -751,6 +796,11 @@
       "owner": "rust-runtime",
       "notes": "Rust one-shot helper now renders commit-message templates, strips wrapping code fences, runs through the auxiliary client without session mutation, and exposes llm.oneshot over HTTP JSON-RPC with deterministic validation errors. Focused agent and HTTP tests cover template rendering, client usage, and missing-prompt failure."
     },
+    "216ace4bf3ce88d142057813970554fff91a8e6a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "218452b05019": {
       "disposition": "ported",
       "notes": "Rust SessionPersistence now detects malformed sessions.db schema, backs up raw DB sidecars, deduplicates sqlite_master, escalates to FTS schema drop and rebuild, auto-heals once during ensure_db, exposes hermes sessions repair, and has focused regression tests."
@@ -820,6 +870,11 @@
       "disposition": "ported",
       "notes": "Rust TUI consumes App pending prefill after /rewind or /undo, restoring the rewound prompt into the composer without auto-submitting while App soft-rewinds active session rows."
     },
+    "24a4df9cd11598ec41c0bbb1f85369ff06d234e5": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust-native table rendering surfaces: Telegram rich-text table detection lives in adapter_impl/rich_text.rs with pipe-table tests, while Discord now has an outbound table-to-bullet formatter with focused tests; no Python helpers.py sharing layer is used in the Rust runtime."
+    },
     "24d48ffb8294": {
       "disposition": "superseded",
       "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
@@ -849,6 +904,11 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "25d35cce18cd51f903b8800dcda31950d6190a16": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation/infographic-only upstream delta is superseded by Hermes Agent Ultra's Rust-first docs/parity/release surfaces for this batch; it does not add or change a shipped Rust runtime behavior. Runtime, provider, platform, and install changes remain pending for separate evidence."
     },
     "2609bcccca30": {
       "disposition": "superseded",
@@ -986,6 +1046,11 @@
       "notes": "Rust OpenViking setup validates manual endpoint, credential mode, API key presence, root tenant account/user requirements, agent defaults, and local no-key mode before persisting config.",
       "owner": "rust-runtime"
     },
+    "2bd17221b73190f87f1a4ae09c45515b9637bfb1": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
+    },
     "2bd1977d8fad185c9b4be47884f7e87f1add0ce3": {
       "disposition": "superseded",
       "owner": "rust-runtime",
@@ -1009,6 +1074,11 @@
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
     },
+    "2d206a3a4242f2d909f3dd71f0f782032bbab578": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/desktop/dashboard-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, web, or Electron desktop runtime tree, while Rust CLI/TUI/gateway/install paths own the applicable behavior. Mixed Rust/runtime/provider/platform commits remain pending for separate evidence."
+    },
     "2d232c999115": {
       "disposition": "ported",
       "notes": "Ported in Rust gateway: display.busy_input_mode is typed/normalized and bridged through HERMES_GATEWAY_BUSY_INPUT_MODE; active-session plain text can queue instead of interrupting, explicit /queue bypasses the busy guard and enqueues a FIFO follow-up, and gateway tests cover queue drain plus ack suppression.",
@@ -1018,6 +1088,11 @@
       "disposition": "ported",
       "notes": "Ported in Rust OpenViking memory plugin: structured batch conversion pre-scans assistant tool calls once, caches parsed tool input by non-empty id, and reuses that cached input for completed and pending tool parts with a fallback parse for uncached/empty-id calls.",
       "owner": "rust-runtime"
+    },
+    "2d55ff8fcaf3d0f3ac80938437e99af7a9f067ab": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "2d587c56622f": {
       "disposition": "ported",
@@ -1118,6 +1193,11 @@
       "notes": "Superseded by Ultra local Rust gates: scripts/clippy-warning-gate.sh, check-runtime-placeholders, cargo tests, and parity generators define local CI; upstream pytest-timeout/GitHub workflow tuning is optional.",
       "owner": "local-gates"
     },
+    "2fa66950e8ba06ed8d587aad4bfc1766f06dee5b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
+    },
     "30340eae2f6e": {
       "disposition": "ported",
       "notes": "Rust shared version_label includes the workspace package version and optional build git SHA captured by hermes-core build.rs, so CLI/gateway/ACP version surfaces share the same label helper."
@@ -1138,6 +1218,11 @@
     "3045d54547f7": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "304f0650c4071951cbdc067a47e87eb3c0d01fe3": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "3078053795e838e47797ede02b44e6dead731aac": {
       "disposition": "ported",
@@ -1163,6 +1248,11 @@
       "disposition": "superseded",
       "notes": "Rust OpenViking does not autostart openviking-server from the agent runtime; local setup can use no-key config, while runtime initialization is health-gated and fail-closed.",
       "owner": "rust-runtime"
+    },
+    "317b94871be6d90383078f07bf4975e2efc38217": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "31bdb60013c98d033dac3c0475be6e24773b5bf9": {
       "disposition": "ported",
@@ -1228,6 +1318,11 @@
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
     },
+    "35dfe7b58f791c021d49514a13775ef9d4a6fc78": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
+    },
     "3625dbb8442c": {
       "disposition": "ported",
       "notes": "Security redaction guidance is covered by the local Rust approval/credential guard surface plus skill catalog security standards, rather than vendoring upstream-only docs."
@@ -1252,6 +1347,11 @@
     "375c7f9cc379f940f3923ac967793675bdfd2b5c": {
       "disposition": "ported",
       "notes": "Rust ACP now renders structured JSON tool results into compact readable completion text, including todo summaries, read_file fenced content, search_files matches/files with JSON-prefix hint handling, skill summaries, browser/media/edit helpers, and generic nested JSON bullets without leaking raw blobs."
+    },
+    "376d021feef98fdb5dca160d46c0125134c9b4e6": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/desktop/dashboard-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, web, or Electron desktop runtime tree, while Rust CLI/TUI/gateway/install paths own the applicable behavior. Mixed Rust/runtime/provider/platform commits remain pending for separate evidence."
     },
     "37c37c9dc51118b75bbd3eec9b689e540683a13a": {
       "disposition": "superseded",
@@ -1294,6 +1394,11 @@
     "38d3c49aaf2e": {
       "disposition": "ported",
       "notes": "Current upstream skill catalog cleanup was adopted where it affects source SKILL.md trees, including optional Baoyu article illustrator and platform/environment frontmatter; generated website docs remain covered by Rust catalog governance."
+    },
+    "391090083c3bbf382cea7097fdac3b5cd41eee3f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream fixes Electron desktop MoA preset add/delete/default save buttons in apps/desktop. Hermes Agent Ultra does not ship apps/desktop; Rust CLI/TUI MoA model switching and runtime MoA config own the applicable shipped surface, so there is no local desktop React persistence path to port."
     },
     "395dbcc873c8": {
       "disposition": "superseded",
@@ -1566,6 +1671,11 @@
       "owner": "rust-runtime",
       "notes": "Ported/proven in Rust: the Telegram CLI poll loop calls deleteWebhook(drop_pending_updates=false), preserves Bot API queued updates across reconnects, advances getUpdates offsets only after successful responses, and keeps the poll sidecar resident so watcher start() can recover after outages."
     },
+    "43eaf79ae645dcab89e54f089f5d05b44db46735": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream committed-infographic cleanup is superseded by this repo state: no top-level infographic artifact tree is shipped locally, and parity/release docs are generated under docs/website surfaces instead."
+    },
     "441bd6d8dbe5": {
       "disposition": "ported",
       "owner": "rust-runtime",
@@ -1596,6 +1706,11 @@
       "disposition": "superseded",
       "notes": "Upstream streams subagent text into Electron watch windows and Python tui_gateway mirrors. Ultra has no apps/desktop runtime; Rust subagent/process progress is owned by hermes-agent and hermes-gateway/TUI status surfaces, so the Python/React watch-window mirror is outside the Rust-only runtime.",
       "owner": "rust-runtime"
+    },
+    "4526fccdbe6bd804eb26aa131f82d6e319be101b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "452a725ae19f": {
       "disposition": "ported",
@@ -1776,6 +1891,11 @@
       "owner": "rust-runtime",
       "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
     },
+    "4b0a2040e72d7c5bf35288e388c4d21ef9a96ac1": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
+    },
     "4b2d00f845eb": {
       "disposition": "ported",
       "notes": "Rust custom provider catalogs now preserve `discover_models: false` from both canonical llm_providers and legacy custom_providers, keep explicit `models` subsets without probing live `/models`, and expose config-aware provider lists with Rust model-switch tests."
@@ -1821,6 +1941,16 @@
       "owner": "rust-runtime",
       "notes": "Rust project_facts records authoritative workspace metadata including detected root/cwd, manifests, package managers, verification commands, context files, and git branch/head/dirty status; exposed through tool and HTTP RPC tests."
     },
+    "4cf69f0da43c841475b9c6d209b1487a376961a4": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
+    },
+    "4da744ef9b6182982684c6b46bd5f41569e907ee": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "4db58d45d4e0": {
       "disposition": "ported",
       "notes": "Rust startup model parsing trims configured and env-sourced model strings through resolve_startup_model/resolve_provider_and_model, and runtime env synchronization keeps model/provider variables aligned for TUI sessions."
@@ -1841,6 +1971,11 @@
     "4e78963fe86a5f2758bf754a7979dc31aaf1a3db": {
       "disposition": "superseded",
       "notes": "The dead Python nested usage dict path is structurally superseded by Rust's typed AgentResult.usage and PromptExecutionOutput.usage flow; the CLI ACP usage test proves only the top-level typed fields are converted."
+    },
+    "4e9439cc3b330a6b6f1dbcc4f27a4a39e9eeb1ac": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/desktop/dashboard-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, web, or Electron desktop runtime tree, while Rust CLI/TUI/gateway/install paths own the applicable behavior. Mixed Rust/runtime/provider/platform commits remain pending for separate evidence."
     },
     "4ece87efb0dd": {
       "disposition": "ported",
@@ -1872,9 +2007,19 @@
       "disposition": "ported",
       "notes": "The video orchestrator optional skill is present at optional-skills/creative/kanban-video-orchestrator/SKILL.md with assets, scripts, and monitoring references."
     },
+    "515192c4b90c934c26389da37c47877e2cd274db": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust local environment subprocess isolation: foreground command setup now uses process_group(0) through Tokio/std CommandExt instead of a fork-time pre_exec setsid hook, preserving process-group termination without running code in the child between fork and exec. A Rust regression test asserts the local backend source keeps the fork hook out and retains process_group(0). Upstream Python preexec_fn call sites remain absent from the shipped Rust runtime."
+    },
     "518d37f6af49": {
       "disposition": "ported",
       "notes": "ported in local commit c261ffeae (kanban reclaim_first support)"
+    },
+    "5191ebba22d834faa52cd1f5f37acddd3d34ce96": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "5196575d40caa367395c5535da1c99caecef072c": {
       "disposition": "superseded",
@@ -1918,6 +2063,11 @@
     "5404a8fcd8a5": {
       "disposition": "ported",
       "notes": "rust gateway already supports vision/image URL handling and platform media send paths; this slice adds MEDIA marker extraction/routing with unsafe path blocking to close generated screenshot/image delivery parity"
+    },
+    "546193aa6d0ab3aff44a9691723c3c0a63ffda99": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream installer delta targets Python/Electron Playwright or desktop/node dependency setup. Hermes Agent Ultra's installer downloads Rust release binaries, bootstraps SOUL/config, and has bounded post-install probes; it has no Playwright desktop install stage to patch."
     },
     "547a014e7eae": {
       "disposition": "superseded",
@@ -1991,6 +2141,11 @@
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
     },
+    "572c7dbd93336f54d0989f9e8e6f94059f2d119a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "573b964dc780": {
       "disposition": "superseded",
       "notes": "Superseded by Ultra release installer: scripts/install.sh installs release binaries/cargo artifacts and does not use upstream in-place git stashing/update semantics.",
@@ -2046,6 +2201,11 @@
       "owner": "rust-runtime",
       "notes": "Queued desktop-turn stop interrupt fix targets tui_gateway/server.py. Ultra has no Python tui_gateway server; Rust busy/interrupt handling lives in CLI/TUI/gateway session coordination."
     },
+    "596b813c9b03ecdc46b8c6a75aa1cb42e79eb7d2": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "59ea2f98e691": {
       "disposition": "superseded",
       "notes": "Desktop Manage-profiles overflow visibility is Electron/React UI only; Rust profile operations are exposed through CLI/config flows."
@@ -2059,9 +2219,19 @@
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
     },
+    "5a2906a11b4422c4e4f0a5d9955dc2a08ae3266e": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "5a3092b60106": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5a4bdfda5062055ca8ab4bfb68a8d7bc99067e10": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "5aa755e4e63c": {
       "disposition": "superseded",
@@ -2124,6 +2294,11 @@
     "5d4c93afe476": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "5d661a3ad785a5668b5bdd6b0081f099d76689ed": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "5d6c16e97237": {
       "disposition": "superseded",
@@ -2288,6 +2463,11 @@
       "disposition": "superseded",
       "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
     },
+    "6326d5c6f6e5f574d6e788939716506610a7b832": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported by Rust Telegram rich_text.rs: table detection/rendering is centralized in the Telegram adapter include rather than duplicated in delivery code, with pipe-table rich-message tests covering the behavior."
+    },
     "632a7088a32a": {
       "disposition": "ported",
       "notes": "Antigravity CLI optional skill was adopted with Hermes-tool framing and tightened frontmatter from upstream."
@@ -2296,6 +2476,11 @@
       "disposition": "ported",
       "notes": "Ported in Rust: display.busy_input_mode accepts interrupt/queue/steer, display.busy_ack_enabled suppresses automatic busy acknowledgements, env/config-set bridges cover HERMES_GATEWAY_BUSY_INPUT_MODE and HERMES_GATEWAY_BUSY_ACK_ENABLED, and gateway tests cover steer fallback/attachment and quiet queueing.",
       "owner": "rust-runtime"
+    },
+    "638243726eb99497bf9bd9f9cdffca492abe190b": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported to the Rust container image: Dockerfile now uses BuildKit layer-linked copies, explicit binary/script chmod at COPY time, targeted license-file permissions, and install -d ownership for /data instead of broad recursive chmod/chown sweeps. Dockerfile packaging/PID-1 contract tests assert the Rust-image invariants."
     },
     "63991bbd9751": {
       "disposition": "ported",
@@ -2383,6 +2568,11 @@
       "disposition": "superseded",
       "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
     },
+    "6776b2f9b57c01249c435c74798bc07eb539929b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "680189b5def4": {
       "disposition": "ported",
       "notes": "Baoyu article illustrator was adopted from upstream at optional-skills/creative/baoyu-article-illustrator with SKILL.md, prompts, palettes, styles, and workflow references."
@@ -2391,6 +2581,11 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "6875d6cd3e11770ac3029811d31002b515084584": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "68a997fed4a1": {
       "disposition": "superseded",
@@ -2424,6 +2619,11 @@
       "disposition": "ported",
       "notes": "Hermes Ultra uses the upstream platform-plugin ntfy shape rather than a bundled core adapter; tests/gateway/test_ntfy_plugin.py covers plugin registration and standalone delivery."
     },
+    "6ac9ba9fc4ad3c6ca0a450578cc78cd4dd243551": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "6b330522e1fb": {
       "disposition": "superseded",
       "notes": "Upstream AGENTS.md design-philosophy text is superseded by local Hermes Rust Parity Rules plus account-level engineering directives."
@@ -2456,6 +2656,11 @@
       "owner": "rust-runtime",
       "notes": "Upstream lazy-installs the Python hindsight-client dependency for the embedded Python plugin. The Rust runtime has no Python Hindsight dependency or lazy install path; crates/hermes-agent/src/memory_plugins/hindsight.rs uses native reqwest HTTP clients and config-backed cloud/local_external modes."
     },
+    "6c52e4a318f6766d1e0dc7a4d87789f8614b501c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "6cb04be779de": {
       "disposition": "superseded",
       "owner": "rust-runtime",
@@ -2483,6 +2688,11 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "6e12f8ce4a30c3a95b0f2bd64deaa5f0bf4a17d0": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "6e20c1992ff9": {
       "disposition": "superseded",
@@ -2816,6 +3026,11 @@
       "disposition": "superseded",
       "notes": "Upstream Python release AUTHOR_MAP maintenance is not part of the Rust release pipeline in hermes-agent-ultra."
     },
+    "7a6b3cb923f1fa99260b909e3729c35e6ffee323": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "7a7b56d49830": {
       "disposition": "ported",
       "owner": "rust-runtime",
@@ -2863,6 +3078,11 @@
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
     },
+    "7cf6758e336c67b1b90cb93928f609008a3a8e5e": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "7d183f64979f": {
       "disposition": "superseded",
       "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
@@ -2871,6 +3091,11 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Cursor-anchored pet zoom is Electron pet overlay UI only. Ultra has no desktop pet overlay runtime."
+    },
+    "7d3c1d55f4e7f74539ffde1c8bde39701c2a3996": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "7d66d30d774e": {
       "disposition": "superseded",
@@ -2893,6 +3118,11 @@
     "7de8cd4c5f67": {
       "disposition": "ported",
       "notes": "TUI voice TTS state now flows through SlashHandlerContext into useMainApp status rendering, with createSlashHandler coverage for /voice tts state sync."
+    },
+    "7e101e553b52e157e9a8a5c11faf81921776e06f": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust MoA runtime config: reference_models and aggregator_model now reject moa/mixture virtual-provider slots, including env-derived config, before dispatching any OpenAI-compatible requests. Focused hermes-tools tests cover reference, aggregator, and env-derived recursive slot rejection."
     },
     "7e2af0c2e872": {
       "disposition": "superseded",
@@ -3003,6 +3233,11 @@
       "disposition": "superseded",
       "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
     },
+    "8194dbf6126f404a43acb93f2778854d3c1a620e": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "81ac562bf0": {
       "disposition": "superseded",
       "owner": "rust-runtime",
@@ -3071,6 +3306,11 @@
     "8505e9d6691d": {
       "disposition": "superseded",
       "notes": "Upstream composer spellcheck is a desktop React/Electron input attribute fix. Hermes Agent Ultra uses the Rust Ratatui TUI/CLI composer and has no browser spellcheck attribute surface."
+    },
+    "851f75d4df0a1b5fb4d58c78087652c311add903": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Discord authorization: user allowlist matching now treats * as an allow-all wildcard for component and slash auth, complementing the existing gateway/platform wildcard policy and channel wildcard tests."
     },
     "85383c636309": {
       "disposition": "superseded",
@@ -3241,9 +3481,19 @@
       "disposition": "superseded",
       "notes": "Electron websocket reconnect and Python tui_gateway session rebind paths are superseded by Rust gateway session state and agent cache rebind behavior."
     },
+    "8d8c7111d96d8c9451573e942746f16fb9a555da": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "8e0c48e6d25b": {
       "disposition": "ported",
       "notes": "Rust CLI and gateway now resolve otherwise-unknown installed SKILL.md slash commands from configured skill roots, apply enabled/disabled/platform/security filtering, inject full skill content plus invocation args into the normal agent turn, and cover the shared resolver plus CLI and gateway routing with focused tests."
+    },
+    "8e356eccea34214252955f5035ebef379518b760": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation/infographic-only upstream delta is superseded by Hermes Agent Ultra's Rust-first docs/parity/release surfaces for this batch; it does not add or change a shipped Rust runtime behavior. Runtime, provider, platform, and install changes remain pending for separate evidence."
     },
     "8e629b9f386d": {
       "disposition": "superseded",
@@ -3416,6 +3666,11 @@
       "disposition": "superseded",
       "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline"
     },
+    "964ec680cc9250b3389104e4d1e0cabe1dd1872c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "96cd37e212e8": {
       "disposition": "superseded",
       "notes": "Upstream leak fix targets Python TUI gateway detached transports and _SlashWorker subprocesses. Rust HTTP websocket handling has no detached slash-worker subprocess lifecycle; in-process SessionManager already exposes explicit remove/idle-expire cleanup APIs."
@@ -3444,6 +3699,11 @@
     "975b9f0a5426": {
       "disposition": "superseded",
       "notes": "Upstream contributor docs recommend the Python standard installer. Ultra contributor docs intentionally use the Rust workspace flow in CONTRIBUTING.md with cargo build/test/install, so the upstream Python venv layout does not apply."
+    },
+    "97640fd9adf5584bc0dc7246518a26c2d771aef8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/desktop/dashboard-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, web, or Electron desktop runtime tree, while Rust CLI/TUI/gateway/install paths own the applicable behavior. Mixed Rust/runtime/provider/platform commits remain pending for separate evidence."
     },
     "97888fed483c1e867666b6beb4eb03e409cc9481": {
       "disposition": "superseded",
@@ -3486,6 +3746,11 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream only fixes a stale Python tui_gateway/server.py MCP late-refresh docstring. Hermes Agent Ultra does not ship tui_gateway/server.py; Rust MCP late-refresh behavior and documentation are owned by the Rust CLI/tool snapshot surfaces and existing parity checkpoints."
+    },
+    "991220747fb5ac3dbd0cafb236fdda518d0b247c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "9915665e4c51": {
       "disposition": "superseded",
@@ -3530,6 +3795,11 @@
     "9b2fb1cc2e95": {
       "disposition": "ported",
       "notes": "Rust ACP now parses client-provided mcpServers/mcp_servers during session new/load/resume/fork, converts stdio and HTTP/SSE configs into hermes_mcp configs, preserves stdio env and bearer Authorization headers, registers reachable MCP servers through McpManager, and exposes discovered MCP tools as real callable ToolRegistry tools with provider-safe names and focused hermes-mcp/hermes-acp coverage."
+    },
+    "9b7122118716474a53f559df44b8baf0526ce2ce": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "9bdf01852ac1": {
       "disposition": "superseded",
@@ -3626,6 +3896,11 @@
       "disposition": "ported",
       "notes": "Rust resume now falls back from missing exact snapshot stems to session-id search over saved session snapshots, matching exact, prefix, and substring IDs case-insensitively across both file stems and session_info.session_id, with deterministic exact-before-prefix-before-substring ranking and focused CLI tests."
     },
+    "9f02eea1d28440b54dc1956afc16cf3acc05ae42": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "9f1b1977bca3": {
       "disposition": "ported",
       "notes": "Trigger and usage details live in the local SKILL.md bodies loaded by Rust skill scanners, preserving content without relying on upstream generated catalog pages."
@@ -3666,6 +3941,11 @@
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
     },
+    "a1e699ae55085416924df00b9105cc1764f1fa06": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "a1eaad2fc0bf": {
       "disposition": "superseded",
       "notes": "Upstream website skills-page lazy catalog fetch is a generated website UX concern, superseded by approved website divergence while Rust skill catalog loading remains native."
@@ -3691,6 +3971,11 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
+    },
+    "a28fe788a6651bb09ad0cfff40d9e84e2f2edfe4": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream installer delta targets Python/Electron Playwright or desktop/node dependency setup. Hermes Agent Ultra's installer downloads Rust release binaries, bootstraps SOUL/config, and has bounded post-install probes; it has no Playwright desktop install stage to patch."
     },
     "a2b8e430e851": {
       "disposition": "superseded",
@@ -3795,6 +4080,11 @@
       "owner": "rust-runtime",
       "notes": "Upstream CI/workflow-only delta is superseded by Hermes Agent Ultra's local Rust-first deterministic gates and PR verification workflow; it does not add or change a shipped Rust runtime behavior. Runtime/install/docker changes remain pending for separate evidence."
     },
+    "a6ae179f43e1e5c6d8e372f6ec4b4c6b2f8c0b15": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "a6b670d4a251f98ca3bac91a867bb469f7ce4e93": {
       "disposition": "superseded",
       "owner": "rust-runtime",
@@ -3826,6 +4116,11 @@
       "disposition": "superseded",
       "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
     },
+    "a8f1d9cc76b1bb2719260534d83aa26c1407731a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "a911bcda18cf": {
       "disposition": "ported",
       "owner": "rust-runtime",
@@ -3851,6 +4146,11 @@
     "aa1e2edd35a8": {
       "disposition": "ported",
       "notes": "Upstream EVM multi-chain optional skill was adopted at optional-skills/blockchain/evm with SKILL.md plus evm_client.py covering the 8-chain read-only command surface."
+    },
+    "aa2ae36c3fcb6ea9af76c603d262389d832a24dd": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "aa52cd3b574e": {
       "disposition": "superseded",
@@ -3928,6 +4228,11 @@
       "disposition": "superseded",
       "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
     },
+    "ad831dd4928e817bbb4b913561ec5ee09e0672b9": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "ada0b4f131ba": {
       "disposition": "ported",
       "notes": "rust gateway/platform adapter surface sends inline image URLs natively and now strips/delivers local MEDIA image markers through validated send_file paths; tests cover inline image extraction and media marker delivery"
@@ -3995,6 +4300,11 @@
     "b0288ae9b6ea": {
       "disposition": "superseded",
       "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
+    },
+    "b02f453496a2f1afd963aeb30c44996b41bbe134": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "b07b7894ec55": {
       "disposition": "superseded",
@@ -4088,6 +4398,11 @@
       "disposition": "superseded",
       "notes": "Upstream Photon Windows-safe os.kill comments document Python sidecar cleanup behavior. Hermes Agent Ultra does not depend on that Python subprocess lifecycle in the Rust runtime."
     },
+    "b508d4296e04bd0c5361b63615915e9c00c6017c": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python test-runner timeout/infographic delta is superseded by this repo's Rust CI/gateway parity workflow and WD-Black local verification; scripts/run_tests_parallel.py is not the shipped Rust runtime surface."
+    },
     "b55ac45264e9": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
@@ -4149,6 +4464,11 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Rust MCP refresh parity now diffs reload snapshots against the advertised tool schema surface, so restricted/custom platform toolsets do not report hidden MCP handlers as added. ACP prompt execution no longer appends all live mcp-* schemas after planner filtering; explicit MCP server aliases still resolve through the shared platform planner. Python in-place tools/valid_tool_names race and post-build memory/context reinjection issues are superseded by Rust AgentLoop construction plus advertised-tool-name guards."
+    },
+    "b72c9e1b2c9f7c60520d6b411f61796d1a0931e1": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "b75757d4aa85": {
       "disposition": "ported",
@@ -4246,6 +4566,11 @@
     "ba19d530ad24": {
       "disposition": "superseded",
       "notes": "Python mini-swe/hecate terminal backend integration is superseded by Rust-native terminal and process backends: command execution, background lifecycle, stdin/PTY/workdir, schema registration, and local runtime contracts are implemented without Python terminal_tool dispatch."
+    },
+    "ba37c910e0e2d19b3329a7e74dca21def8d4c3b6": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "ba44de06da10": {
       "disposition": "superseded",
@@ -4388,6 +4713,11 @@
       "disposition": "ported",
       "notes": "Rust ZAI model metadata and CLI curated models include glm-5.2 with a verified 1M context window; model context tests cover zai/glm-5.2."
     },
+    "bff91f978fd93158edcd0e5e3c1137b8d0f829b7": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "c02192ff6ace129fc9bcc2f8907eabd6eb3f0f1d": {
       "disposition": "ported",
       "notes": "Ported in Rust image_generate: the tool request/schema now carries image_url and reference_image_urls, FAL has a typed model catalog with edit endpoints/reference caps/payload filtering plus runtime FAL_IMAGE_MODEL/config selection, OpenAI Codex remains explicit text-only, and Rust tests cover forwarding, endpoint routing, reference clamping, capabilities, and unsupported-modality errors.",
@@ -4402,6 +4732,11 @@
       "disposition": "ported",
       "notes": "Rust approval gateway callbacks now emit GatewayApprovalRequest::redacted_for_display using redact_approval_command before user-facing TUI/chat transports, while the internal queue retains the raw command for resolution; hermes-tools approval tests cover credential redaction, command-structure preservation, and raw-queue/redacted-egress behavior.",
       "owner": "rust-runtime"
+    },
+    "c0b4a3438ac66a4f0c25d4aa9f6f54f2f9f24816": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream installer delta targets Python/Electron Playwright or desktop/node dependency setup. Hermes Agent Ultra's installer downloads Rust release binaries, bootstraps SOUL/config, and has bounded post-install probes; it has no Playwright desktop install stage to patch."
     },
     "c10fea8d264e": {
       "disposition": "ported",
@@ -4422,6 +4757,11 @@
     "c1927d2342a7": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "c1bb34d5e86deee11d92e26a3574e5f3781fbe9b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "c1eb2dcda7d7": {
       "disposition": "superseded",
@@ -4531,10 +4871,20 @@
       "notes": "Upstream desktop remote-artifact authenticated download is superseded by Rust gateway/media delivery boundaries; Electron artifacts UI and Python web_server files endpoint are outside the Rust-only runtime.",
       "owner": "rust-runtime"
     },
+    "c6c1fd8b6b6828361bc117b532848537904ac562": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation/infographic-only upstream delta is superseded by Hermes Agent Ultra's Rust-first docs/parity/release surfaces for this batch; it does not add or change a shipped Rust runtime behavior. Runtime, provider, platform, and install changes remain pending for separate evidence."
+    },
     "c6c8abbadb80": {
       "disposition": "ported",
       "notes": "Ported in Rust: default static agent toolsets no longer expose send_message, messaging was removed from built-in toolset distributions, explicit SendMessageHandler/GatewayMessagingBackend remain for gateway/cron/CLI runtime sends, and hermes-mcp default tool-call timeout is now 300s with env override/cap coverage.",
       "owner": "rust-runtime"
+    },
+    "c6d6a1c30d033287f2cbbd9d7ecdd47146f1942a": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "c6dc2fcd2153": {
       "disposition": "superseded",
@@ -4565,6 +4915,11 @@
       "disposition": "ported",
       "notes": "Ported in Rust Honcho setup semantics: pinUserPeer is only true for the single-user/operator peer shape; multi/hybrid runtime peers are modeled through runtimePeerPrefix/userPeerAliases.",
       "owner": "rust-runtime"
+    },
+    "c7542358f2ba5b4b7ef3f49d9e13f9b2e92c98e7": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "c77c470d2762": {
       "disposition": "superseded",
@@ -4601,6 +4956,16 @@
       "disposition": "ported",
       "notes": "Rust OpenViking does not block command/session-switch callers on old-session writer drains; old commits run through a deferred finalizer and non-blocking switch coverage asserts prompt return.",
       "owner": "rust-runtime"
+    },
+    "c8fd47be14921fed55e643092f9ab18c7953885d": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation/infographic-only upstream delta is superseded by Hermes Agent Ultra's Rust-first docs/parity/release surfaces for this batch; it does not add or change a shipped Rust runtime behavior. Runtime, provider, platform, and install changes remain pending for separate evidence."
+    },
+    "c918d07b50921da6be27a881c67669cf1337f2f1": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
     },
     "c92a95a130cc": {
       "disposition": "superseded",
@@ -4704,6 +5069,11 @@
       "disposition": "superseded",
       "notes": "The Python on_memory_write metadata ABC compatibility shim is not a Rust API surface; Rust memory writes use typed trait methods and provider tool handlers."
     },
+    "cd5fb760a5ee42181d21b1c66cb61033cb2a8d18": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "cda64a59612f": {
       "disposition": "ported",
       "notes": "Rust ToolsetManager now resolves otherwise-unknown live registry-owned toolsets, including MCP-style dynamic toolsets, through ToolRegistry instead of requiring static toolset registration. Wildcard/list discovery includes live registry toolsets and focused hermes-tools tests cover filtered and unfiltered resolution."
@@ -4744,6 +5114,11 @@
     "cf786593cd83": {
       "disposition": "ported",
       "notes": "Rust now propagates active provider output caps into AgentConfig.max_tokens so gateway/CLI/cron agent paths pass configured max_tokens into provider requests through the existing AgentLoop max_tokens chain."
+    },
+    "cf7bf5bdc900078cc18a2055a6bcaf1abfb1e7a0": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Discord outbound formatting: GFM pipe tables are rewritten to Discord-safe bold-heading plus bullet groups before send/edit splitting, fenced code tables are preserved, Unicode splitting is char-boundary safe, and hermes-gateway tests cover the formatter and split behavior."
     },
     "cf9dc366dd0b": {
       "disposition": "superseded",
@@ -4855,6 +5230,11 @@
     "d473e7c9385e": {
       "disposition": "ported",
       "notes": "Rust disk-cleanup auto categorization only marks cron/cronjobs output subtrees as cron-output and explicitly leaves cron/jobs.json plus .tick.lock as control-plane state; covered by hermes-tools disk_cleanup tests."
+    },
+    "d4aec4e92f2c6973169743022f2226b57cd80284": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
     },
     "d4be583d986f7bcca4f8414fd21ef9e34b18c948": {
       "disposition": "ported",
@@ -5053,6 +5433,11 @@
       "disposition": "superseded",
       "notes": "Desktop thread padding is an apps/desktop React-only presentation change. Ultra has no desktop React runtime; CLI/TUI rendering is Rust-owned."
     },
+    "dd0e4ab81abccf7df5b11c6c16853d5e5de9db69": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
+    },
     "dd12a5403de9": {
       "disposition": "superseded",
       "notes": "Upstream Electron desktop-only delta is superseded by Hermes Ultra's Rust-first operator surfaces: crates/hermes-cli/src/tui.rs, crates/hermes-gateway/src/gateway.rs, and ui-tui parity contracts. The local repo intentionally does not ship apps/desktop, so this TS/Electron UI commit has no Rust runtime port target."
@@ -5081,6 +5466,11 @@
     "de07aa7c4046": {
       "disposition": "ported",
       "notes": "Rust now exposes a first-class `nous-api` direct API-key provider with aliases, non-OAuth provider capability, setup catalog entry, NOUS_API_KEY/NOUS_BASE_URL runtime resolution, Nous provider construction, Nous model normalization/catalog reuse, and targeted core/CLI/agent tests."
+    },
+    "de6e9ac76014d73b80f75f1bd1887f3ee4fb701d": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation/infographic-only upstream delta is superseded by Hermes Agent Ultra's Rust-first docs/parity/release surfaces for this batch; it does not add or change a shipped Rust runtime behavior. Runtime, provider, platform, and install changes remain pending for separate evidence."
     },
     "de7ad8b78eaeab96324b9800e28f12d8b92e83a7": {
       "disposition": "superseded",
@@ -5121,6 +5511,11 @@
     "df55660e3c3c": {
       "disposition": "superseded",
       "notes": "The unsupported-CPU guard is a Python import workaround for local embedded Hindsight; Rust Hindsight never imports that Python stack and normalizes embedded aliases to local_external."
+    },
+    "dfb561a3aebf459da9f05718da04784af8e661f3": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "dfc5563641f0": {
       "disposition": "ported",
@@ -5283,6 +5678,11 @@
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
     },
+    "e684b808adf4c3a2740a93a9cc425b8b9bc3c2b5": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/desktop/dashboard-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, web, or Electron desktop runtime tree, while Rust CLI/TUI/gateway/install paths own the applicable behavior. Mixed Rust/runtime/provider/platform commits remain pending for separate evidence."
+    },
     "e68fc4def2ba": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
@@ -5349,6 +5749,11 @@
     "e9b8dd236c79": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
+    },
+    "e9b95dfd19b5399385c5f8d0f4512c97f3e3d8f8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream dashboard Docker delta depends on apps/shared/web dashboard image inputs that are absent here; Hermes Agent Ultra ships a distinct Rust multi-stage Dockerfile with container contracts, so the dashboard-web image inclusion patch is not a Rust runtime port target."
     },
     "e9c47c70422d": {
       "disposition": "ported",
@@ -5521,6 +5926,11 @@
       "disposition": "ported",
       "notes": "Initial Python RL training tools and loop are ported as Rust rl_* ToolHandler implementations backed by hermes_intelligence::rl run/config/status/metrics types, registered as built-in tools under the rl_training toolset with lifecycle and inference tests."
     },
+    "f019a999d85ca18e3aa8a6a7f092e518df4e9541": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/desktop/dashboard-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, web, or Electron desktop runtime tree, while Rust CLI/TUI/gateway/install paths own the applicable behavior. Mixed Rust/runtime/provider/platform commits remain pending for separate evidence."
+    },
     "f033b7dbfbe8": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
@@ -5529,6 +5939,11 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence."
+    },
+    "f0cb04921709b473b1e8f3a979b7fc384db37f11": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
     },
     "f15d2cb5e424": {
       "disposition": "superseded",
@@ -5630,6 +6045,11 @@
       "notes": "Ported by Rust-native telemetry shape: there is no unbounded Python _TRACE_STATE dict in Ultra; spans are created/dropped per LLM/tool event and Langfuse OTLP config tests pass.",
       "owner": "rust-runtime"
     },
+    "f53b184c48712bcbb98556a6314cd1f240fc104d": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
+    },
     "f583c6ebd5bd": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
@@ -5711,6 +6131,11 @@
       "disposition": "superseded",
       "notes": "Upstream simple-terminal registration is superseded by Rust TerminalHandler and LocalBackend command execution, explicit background=true lifecycle tracking, timeout/workdir/schema contracts, and process-management tests without the Python Morph VM dependency."
     },
+    "f8604928422ff3461d4004ae6f71fdfdea9923a2": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
+    },
     "f92298fe955fe2ddbea27f4c504ce310ec46545b": {
       "disposition": "ported",
       "notes": "Rust ACP maps typed top-level AgentResult usage into PromptResponse.usage through the CLI ACP executor boundary; regression coverage proves prompt/completion/total fields populate ACP input/output/total tokens without relying on a nested result usage dict."
@@ -5735,6 +6160,11 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Notification-click stored session-id recovery is Electron desktop route/resume behavior. Rust CLI/TUI/gateway sessions are not resumed through desktop notifications or renderer route state."
+    },
+    "fa3dba4b30b2802c87c8733fcb359d906f60b4b2": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Documentation/infographic-only upstream delta is superseded by Hermes Agent Ultra's Rust-first docs/parity/release surfaces for this batch; it does not add or change a shipped Rust runtime behavior. Runtime, provider, platform, and install changes remain pending for separate evidence."
     },
     "fa42ac094dca": {
       "disposition": "superseded",
@@ -5765,6 +6195,11 @@
       "disposition": "superseded",
       "notes": "Desktop profile-rail haptic reordering touches only apps/desktop React UI, which is absent from this Rust-only runtime repo."
     },
+    "fb1dd1bf910c68f6199329d46dce8cce01a6535d": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs."
+    },
     "fb3d31ba8b772bbca130f829423df7e61afd7820": {
       "disposition": "superseded",
       "owner": "rust-runtime",
@@ -5790,6 +6225,11 @@
     "fcb1944b4f76": {
       "disposition": "ported",
       "notes": "Rust now captures Nous credits headers at the provider HTTP boundary, parses the v1 x-nous-credits and x-nous-tool-pool contracts with strict money/bool validation, stores a last-known credits snapshot, appends the credits block to CLI and gateway /usage output, and surfaces depleted/50/75/90 percent usage notices in the TUI status bar with focused Rust tests. Python dev fixtures and desktop-only scaffolding are superseded by the Rust runtime surface."
+    },
+    "fcdc05c89145f5e16e8d4641e5b83dd2e3014306": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence."
     },
     "fce58cbe2e02": {
       "disposition": "ported",
@@ -5864,20 +6304,105 @@
       "disposition": "superseded",
       "notes": "Google Chat OAuth client-secret anchoring is Python adapter-only in upstream; this Rust gateway surface has no Google Chat platform adapter or OAuth helper under crates/hermes-gateway, so no Rust runtime path exists to port."
     },
-    "515192c4b90c934c26389da37c47877e2cd274db": {
+    "6fb25f86ac4946b7f50238c68b545f77b57fd9f4": {
       "disposition": "ported",
       "owner": "rust-runtime",
-      "notes": "Ported in Rust local environment subprocess isolation: foreground command setup now uses process_group(0) through Tokio/std CommandExt instead of a fork-time pre_exec setsid hook, preserving process-group termination without running code in the child between fork and exec. A Rust regression test asserts the local backend source keeps the fork hook out and retains process_group(0). Upstream Python preexec_fn call sites remain absent from the shipped Rust runtime."
+      "notes": "Ported in Rust Telegram routing: should_process_message rejects messages from the configured bot_username when the sender is a bot before private/group acceptance; regression coverage proves own-bot messages are filtered and other bots are not over-blocked."
     },
-    "7e101e553b52e157e9a8a5c11faf81921776e06f": {
+    "ab1f9b94c5055f859a3b0183f6bdd0ff4d93d65a": {
       "disposition": "ported",
       "owner": "rust-runtime",
-      "notes": "Ported in Rust MoA runtime config: reference_models and aggregator_model now reject moa/mixture virtual-provider slots, including env-derived config, before dispatching any OpenAI-compatible requests. Focused hermes-tools tests cover reference, aggregator, and env-derived recursive slot rejection."
+      "notes": "Ported in Rust Telegram delivery: encoded chat_id splitting now accepts @username bases for topic-thread delivery while preserving malformed IDs unsplit; telegram_username_gateway_chat_id_sends_to_topic_thread covers the Bot API payload shape."
     },
-    "391090083c3bbf382cea7097fdac3b5cd41eee3f": {
+    "dbc925b7550c2224631d6fb1a2fa0ec236d76beb": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram inbound media parsing: Video metadata is first-class, unknown/oversized videos are rejected before file IDs reach downstream download paths, and tests cover normal videos plus oversized current and replied videos."
+    },
+    "f03823014b01b7b85a6777040e1bb02a68cf8877": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram polling: 409/getUpdates conflict detection now marks the adapter unhealthy immediately instead of backing off in a conflict loop; mock Bot API coverage asserts the poll loop disarms after one conflict."
+    },
+    "97640fd9adf532d6ce4ebc63ec817137ba685157": {
       "disposition": "superseded",
       "owner": "rust-runtime",
-      "notes": "Upstream fixes Electron desktop MoA preset add/delete/default save buttons in apps/desktop. Hermes Agent Ultra does not ship apps/desktop; Rust CLI/TUI MoA model switching and runtime MoA config own the applicable shipped surface, so there is no local desktop React persistence path to port."
+      "notes": "Upstream Electron titlebar/window-control overlay delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: apps/desktop is absent locally, and CLI/TUI/gateway surfaces do not ship Electron WCO behavior."
+    },
+    "2d206a3a42429465f6bb99c9425e3f7316273782": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop Electron bundling/native-deps delta is superseded by the local Rust-first distribution: apps/desktop and nix desktop packaging are absent, while Rust installer/Docker/CLI paths own shipped runtime startup."
+    },
+    "b508d4296e045c2754f075628ec80761b86f7126": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Python parallel-test timeout plus infographic delta is superseded by local Rust/pytest targeted verification and WD-Black cargo target policy; scripts/run_tests_parallel.py is not a shipped Rust runtime surface."
+    },
+    "376d021feef9cb27e6f5a750d6a423221e49f6c8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream macOS Electron update/uninstall handoff delta is superseded because apps/desktop is absent; Hermes Agent Ultra ships Rust CLI/TUI/gateway lifecycle paths instead of Electron app-exit handoff code."
+    },
+    "e9b95dfd19b5046ffd633e6ce2dfd87e504a372b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream dashboard Docker image delta depends on apps/shared and web inputs that are absent here; the Rust multi-stage Dockerfile and its packaging/PID-1 contracts are the shipped container surface."
+    },
+    "f019a999d85c4fe6408858fbd7c022122ab4c373": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop-dashboard documentation delta is superseded by local repo shape: apps/desktop is absent and Rust CLI/TUI/gateway docs own the shipped operator surfaces."
+    },
+    "e684b808adf4c4865a10e77f057535b2fd785f64": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream old-Electron-runtime dashboard fallback is superseded because no Electron desktop runtime is shipped locally; Rust CLI/TUI/gateway startup paths are the runtime surface."
+    },
+    "43eaf79ae6451e10dacba3342d28230e6fef87de": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream committed-infographic cleanup is superseded by local repo state: no top-level infographic artifact tree is shipped, and parity/release documentation is generated under docs/website surfaces."
+    },
+    "e3c9924b8b358e4b7b0a600178426fd70e6f9481": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust auth/runtime hints: stale Nous re-authentication guidance now consistently says `hermes auth add nous` across Chronos and agent 401 diagnostics; focused agent diagnostic test asserts the new hint and source search leaves no stale Rust hints."
+    },
+    "64972b64038b97cf9af095dd5f107723a2ee6ab3": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust config compatibility: nested model blocks now canonicalize model.default, model.name, and model.model into the root model string with default precedence, covered by python_yaml_compat alias and precedence tests."
+    },
+    "c1c179a2395a19c3a8e4fb5dae7ef527227da07a": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust terminal runtime: foreground command stdout/stderr are sanitized at the formatting boundary using assignment redaction plus credential_guard fallback line redaction, so env dumps and process output do not return secret values. Terminal formatter tests cover key=value and bare-token redaction."
+    },
+    "74541beb9ce32fcb1b8d89d698120d4b59d34ca8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust WeCom callback adapter: POST callback requests now enforce a 64 KiB body limit from Content-Length and from buffered body length before Encrypt XML extraction/decrypt, returning 413 for oversized unauthenticated payloads. Focused wecom-callback tests cover oversized declared length, oversized buffered body, and normal callback envelopes."
+    },
+    "d836b2bac4447c099475a38c90b5f577a952d4ef": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Matrix and Mattermost adapters. Matrix invite auto-join now filters invite-state senders when an allowlist is configured while preserving default/no-allowlist behavior and allow-all escape hatch. Mattermost dynamic REST post/thread ids reject traversal path segments before interpolation. Focused matrix and mattermost feature tests cover both hardenings."
+    },
+    "9e490138a009c9c9aa64ac90fd6804928a6646b8": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust architecture and existing guards: the local Feishu adapter has no internet-facing webhook rate-limiter table matching the upstream Python bypass surface, and the local WhatsApp adapter is Cloud API based rather than a Baileys bridge returning absolute cache paths. Native file/media delivery goes through gateway/media validation and canonicalization before adapter send, with existing tests for unsafe media marker and file delivery rejection."
+    },
+    "fc70d023d82b93778a337f741da05335550e7bb7": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram adapter/config bridge: TelegramConfig now receives direct/admin/group user allowlists from PlatformConfig aliases and should_process_update applies adapter-level user/bot auth before parse/batch/event construction. Callback taps authorize CallbackQuery.from rather than the bot-authored message. Focused Telegram and CLI config tests cover normal, group, callback, and sender_chat cases."
+    },
+    "c648ecdca526f8c421d8c8c00e1aa9b330bbcb5e": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Telegram intake: unauthorized users are rejected in should_process_update before TelegramAdapter::parse_update and before CLI text batching/route_message. The model now includes sender_chat for from-less channel-post authorization, and tests cover unauthorized users, allowed group senders, callback tap users, and sender_chat allowlists."
     }
   },
   "subject_patterns": [

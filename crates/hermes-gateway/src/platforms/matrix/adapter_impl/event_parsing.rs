@@ -234,12 +234,63 @@ impl MatrixAdapter {
 
     /// Extract room IDs from the `invite` section of a sync response.
     fn parse_invites(&self, sync_response: &serde_json::Value) -> Vec<String> {
+        let allowed_users = matrix_invite_allowed_users_from_env();
+        let allow_all = matrix_invite_allow_all_from_env();
+        self.parse_invites_with_auth(sync_response, &allowed_users, allow_all)
+    }
+
+    fn parse_invites_with_auth(
+        &self,
+        sync_response: &serde_json::Value,
+        allowed_users: &[String],
+        allow_all: bool,
+    ) -> Vec<String> {
         sync_response
             .get("rooms")
             .and_then(|r| r.get("invite"))
             .and_then(|inv| inv.as_object())
-            .map(|m| m.keys().cloned().collect())
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(room_id, invite)| {
+                        let sender = self.invite_sender(invite);
+                        matrix_invite_sender_allowed(sender, allowed_users, allow_all)
+                            .then(|| room_id.clone())
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
+    }
+
+    fn invite_sender<'a>(&self, invite: &'a serde_json::Value) -> Option<&'a str> {
+        invite
+            .pointer("/invite_state/events")
+            .and_then(|events| events.as_array())
+            .and_then(|events| {
+                events.iter().find_map(|event| {
+                    let event_type = event.get("type").and_then(|v| v.as_str())?;
+                    if event_type != "m.room.member" {
+                        return None;
+                    }
+                    let state_key = event.get("state_key").and_then(|v| v.as_str());
+                    let membership = event.pointer("/content/membership").and_then(|v| v.as_str());
+                    if state_key == Some(self.config.user_id.as_str())
+                        && membership == Some("invite")
+                    {
+                        return event.get("sender").and_then(|v| v.as_str());
+                    }
+                    None
+                })
+            })
+            .or_else(|| {
+                invite
+                    .pointer("/invite_state/events")
+                    .and_then(|events| events.as_array())
+                    .and_then(|events| {
+                        events
+                            .iter()
+                            .find_map(|event| event.get("sender").and_then(|v| v.as_str()))
+                    })
+            })
     }
 
     // -----------------------------------------------------------------------
@@ -250,4 +301,59 @@ impl MatrixAdapter {
     pub fn is_sync_running(&self) -> bool {
         self.sync_running.load(Ordering::SeqCst)
     }
+}
+
+fn matrix_invite_allowed_users_from_env() -> Vec<String> {
+    std::env::var("HERMES_MATRIX_ALLOWED_USERS")
+        .ok()
+        .or_else(|| std::env::var("MATRIX_ALLOWED_USERS").ok())
+        .map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|user| !user.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn matrix_invite_allow_all_from_env() -> bool {
+    ["HERMES_MATRIX_ALLOW_ALL_USERS", "GATEWAY_ALLOW_ALL_USERS"]
+        .iter()
+        .any(|key| {
+            std::env::var(key)
+                .ok()
+                .map(|value| {
+                    matches!(
+                        value.trim().to_ascii_lowercase().as_str(),
+                        "1" | "true" | "yes" | "on" | "*"
+                    )
+                })
+                .unwrap_or(false)
+        })
+}
+
+fn matrix_invite_sender_allowed(
+    sender: Option<&str>,
+    allowed_users: &[String],
+    allow_all: bool,
+) -> bool {
+    if allow_all || allowed_users.is_empty() {
+        return true;
+    }
+    let Some(sender) = sender.map(str::trim).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let sender_no_at = sender.strip_prefix('@').unwrap_or(sender);
+    allowed_users.iter().any(|allowed| {
+        let allowed = allowed.trim();
+        if allowed == "*" {
+            return true;
+        }
+        let allowed_no_at = allowed.strip_prefix('@').unwrap_or(allowed);
+        allowed.eq_ignore_ascii_case(sender)
+            || allowed.eq_ignore_ascii_case(sender_no_at)
+            || allowed_no_at.eq_ignore_ascii_case(sender)
+            || allowed_no_at.eq_ignore_ascii_case(sender_no_at)
+    })
 }

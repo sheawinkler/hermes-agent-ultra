@@ -101,6 +101,14 @@ impl TelegramAdapter {
             .unwrap_or(true)
     }
 
+    /// Return true if this Telegram video exceeds processing size limits.
+    pub fn video_exceeds_size_limit(video: &Video) -> bool {
+        video
+            .file_size
+            .map(|sz| sz > TELEGRAM_MAX_VIDEO_SIZE_BYTES)
+            .unwrap_or(true)
+    }
+
     fn extract_extension(name: &str) -> Option<String> {
         std::path::Path::new(name)
             .extension()

@@ -183,30 +183,46 @@ impl PlatformAdapter for DiscordAdapter {
 
 /// Split a message into chunks that fit within the given max length.
 fn split_message(text: &str, max_len: usize) -> Vec<String> {
-    if text.len() <= max_len {
+    if text.chars().count() <= max_len {
         return vec![text.to_string()];
     }
 
     let mut chunks = Vec::new();
-    let mut start = 0;
+    let mut current = String::new();
+    let mut current_len = 0usize;
 
-    while start < text.len() {
-        let end = (start + max_len).min(text.len());
-
-        if end >= text.len() {
-            chunks.push(text[start..].to_string());
-            break;
+    for segment in text.split_inclusive('\n') {
+        let segment_len = segment.chars().count();
+        if current_len + segment_len <= max_len {
+            current.push_str(segment);
+            current_len += segment_len;
+            continue;
         }
 
-        let break_at = text[start..end]
-            .rfind('\n')
-            .map(|pos| start + pos + 1)
-            .unwrap_or(end);
+        if !current.is_empty() {
+            chunks.push(std::mem::take(&mut current));
+            current_len = 0;
+        }
 
-        chunks.push(text[start..break_at].to_string());
-        start = break_at;
+        if segment_len <= max_len {
+            current.push_str(segment);
+            current_len = segment_len;
+            continue;
+        }
+
+        for ch in segment.chars() {
+            if current_len == max_len {
+                chunks.push(std::mem::take(&mut current));
+                current_len = 0;
+            }
+            current.push(ch);
+            current_len += 1;
+        }
     }
 
+    if !current.is_empty() {
+        chunks.push(current);
+    }
     chunks
 }
 

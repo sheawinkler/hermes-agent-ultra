@@ -57,6 +57,20 @@ impl TelegramAdapter {
         let document_mime_type = document.and_then(|d| d.mime_type.clone());
         let document_file_size = document.and_then(|d| d.file_size);
 
+        let replied_video = replied_media
+            .and_then(|r| r.video.as_ref())
+            .filter(|video| !Self::video_exceeds_size_limit(video));
+        let video = msg
+            .video
+            .as_ref()
+            .filter(|video| !Self::video_exceeds_size_limit(video))
+            .or(replied_video);
+        let is_video = video.is_some();
+        let video_file_id = video.map(|v| v.file_id.clone());
+        let video_file_name = video.and_then(|v| v.file_name.clone());
+        let video_mime_type = video.and_then(|v| v.mime_type.clone());
+        let video_file_size = video.and_then(|v| v.file_size);
+
         let reply_to_message_id = msg.reply_to_message.as_ref().map(|r| r.message_id);
 
         let chat_type = ChatKind::from_telegram_type(&msg.chat.chat_type);
@@ -77,6 +91,7 @@ impl TelegramAdapter {
             is_photo,
             is_sticker,
             is_document,
+            is_video,
             voice_file_id,
             photo_file_id,
             sticker_file_id,
@@ -84,6 +99,10 @@ impl TelegramAdapter {
             document_file_name,
             document_mime_type,
             document_file_size,
+            video_file_id,
+            video_file_name,
+            video_mime_type,
+            video_file_size,
             reply_to_message_id,
             message_thread_id: msg.message_thread_id,
             chat_type,
@@ -114,6 +133,7 @@ impl TelegramAdapter {
             is_photo: false,
             is_sticker: false,
             is_document: false,
+            is_video: false,
             voice_file_id: None,
             photo_file_id: None,
             sticker_file_id: None,
@@ -121,6 +141,10 @@ impl TelegramAdapter {
             document_file_name: None,
             document_mime_type: None,
             document_file_size: None,
+            video_file_id: None,
+            video_file_name: None,
+            video_mime_type: None,
+            video_file_size: None,
             reply_to_message_id: None,
             message_thread_id: msg.and_then(|m| m.message_thread_id),
             chat_type,

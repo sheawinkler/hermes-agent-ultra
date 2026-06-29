@@ -183,7 +183,7 @@ impl ChronosNasCronProvider {
     fn access_token(&self) -> Result<String, CronError> {
         read_nous_access_token(None).ok_or_else(|| {
             CronError::Scheduler(
-                "Chronos requires a Nous Portal access token; run `hermes auth login nous`"
+                "Chronos requires a Nous Portal access token; run `hermes auth add nous`"
                     .to_string(),
             )
         })
