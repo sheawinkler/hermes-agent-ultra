@@ -282,6 +282,137 @@ fn discord_message_body(
     }
 }
 
+fn format_discord_outgoing_content(content: &str) -> String {
+    if !content.contains('|') || !content.contains('-') {
+        return content.to_string();
+    }
+
+    let lines = content.split('\n').collect::<Vec<_>>();
+    let mut out = Vec::with_capacity(lines.len());
+    let mut in_fence = false;
+    let mut index = 0;
+
+    while index < lines.len() {
+        let line = lines[index];
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            out.push(line.to_string());
+            index += 1;
+            continue;
+        }
+        if in_fence {
+            out.push(line.to_string());
+            index += 1;
+            continue;
+        }
+        if line.contains('|')
+            && index + 1 < lines.len()
+            && looks_like_markdown_table_separator(lines[index + 1])
+        {
+            let mut block = vec![line, lines[index + 1]];
+            let mut next = index + 2;
+            while next < lines.len() && is_markdown_table_row(lines[next]) {
+                block.push(lines[next]);
+                next += 1;
+            }
+            out.push(render_markdown_table_as_discord_bullets(&block));
+            index = next;
+            continue;
+        }
+
+        out.push(line.to_string());
+        index += 1;
+    }
+
+    out.join("\n")
+}
+
+fn is_markdown_table_row(line: &str) -> bool {
+    let trimmed = line.trim();
+    !trimmed.is_empty() && trimmed.contains('|')
+}
+
+fn split_markdown_table_row(line: &str) -> Vec<String> {
+    line.trim()
+        .trim_start_matches('|')
+        .trim_end_matches('|')
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
+}
+
+fn looks_like_markdown_table_separator(line: &str) -> bool {
+    let trimmed = line.trim().trim_start_matches('|').trim_end_matches('|');
+    if !trimmed.contains('|') {
+        return false;
+    }
+    let cells = trimmed.split('|').collect::<Vec<_>>();
+    cells.len() >= 2
+        && cells.iter().all(|cell| {
+            let cell = cell.trim();
+            cell.len() >= 3
+                && cell.contains('-')
+                && cell.chars().all(|ch| matches!(ch, '-' | ':' | ' '))
+        })
+}
+
+fn render_markdown_table_as_discord_bullets(table_block: &[&str]) -> String {
+    if table_block.len() < 3 {
+        return table_block.join("\n");
+    }
+    let headers = split_markdown_table_row(table_block[0]);
+    if headers.len() < 2 {
+        return table_block.join("\n");
+    }
+
+    let first_data_row = split_markdown_table_row(table_block[2]);
+    let has_row_label_col = first_data_row.len() == headers.len() + 1;
+    let mut rendered_groups = Vec::new();
+
+    for (index, row) in table_block.iter().skip(2).enumerate() {
+        let mut cells = split_markdown_table_row(row);
+        let heading = if has_row_label_col {
+            cells
+                .first()
+                .filter(|cell| !cell.is_empty())
+                .cloned()
+                .unwrap_or_else(|| format!("Row {}", index + 1))
+        } else {
+            cells
+                .iter()
+                .find(|cell| !cell.is_empty())
+                .cloned()
+                .unwrap_or_else(|| format!("Row {}", index + 1))
+        };
+
+        let mut data_cells = if has_row_label_col {
+            cells.split_off(cells.len().min(1))
+        } else {
+            cells
+        };
+        data_cells.resize(headers.len(), String::new());
+        data_cells.truncate(headers.len());
+
+        let mut group = vec![format!("**{}**", heading)];
+        for (header, value) in headers.iter().zip(data_cells.iter()) {
+            if !has_row_label_col && value == &heading {
+                continue;
+            }
+            group.push(format!("- {}: {}", header, value));
+        }
+        rendered_groups.push(group.join("\n"));
+    }
+
+    rendered_groups.join("\n\n")
+}
+
+fn truncate_discord_content(content: &str, max_chars: usize) -> String {
+    if content.chars().count() <= max_chars {
+        return content.to_string();
+    }
+    content.chars().take(max_chars).collect()
+}
+
 fn discord_reply_reference_error_allows_retry(raw_error: &str) -> bool {
     let normalized = raw_error.to_ascii_lowercase();
     normalized.contains("cannot reply to a system message")
@@ -320,4 +451,3 @@ fn forum_thread_payload(
 pub fn discord_channel_type_is_forum_parent(channel_type: Option<u8>) -> bool {
     matches!(channel_type, Some(15))
 }
-

@@ -272,6 +272,62 @@ fn test_parse_invites() {
     assert_eq!(invites.len(), 2);
 }
 
+#[test]
+fn parse_invites_filters_inviter_when_allowlist_is_configured() {
+    let config = MatrixConfig {
+        homeserver_url: "https://matrix.test".into(),
+        user_id: "@bot:test".into(),
+        access_token: "tok".into(),
+        room_id: None,
+        proxy: AdapterProxyConfig::default(),
+    };
+    let adapter = MatrixAdapter::new(config).unwrap();
+
+    let sync = serde_json::json!({
+        "rooms": {
+            "invite": {
+                "!trusted:test": {
+                    "invite_state": {
+                        "events": [{
+                            "type": "m.room.member",
+                            "state_key": "@bot:test",
+                            "sender": "@trusted:test",
+                            "content": {"membership": "invite"}
+                        }]
+                    }
+                },
+                "!attacker:test": {
+                    "invite_state": {
+                        "events": [{
+                            "type": "m.room.member",
+                            "state_key": "@bot:test",
+                            "sender": "@attacker:test",
+                            "content": {"membership": "invite"}
+                        }]
+                    }
+                },
+                "!unknown:test": {}
+            }
+        }
+    });
+
+    let mut invites = adapter.parse_invites_with_auth(&sync, &["@trusted:test".to_string()], false);
+    invites.sort();
+    assert_eq!(invites, vec!["!trusted:test".to_string()]);
+
+    let mut allow_all =
+        adapter.parse_invites_with_auth(&sync, &["@trusted:test".to_string()], true);
+    allow_all.sort();
+    assert_eq!(
+        allow_all,
+        vec![
+            "!attacker:test".to_string(),
+            "!trusted:test".to_string(),
+            "!unknown:test".to_string(),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn test_parse_sync_encrypted_event_metadata() {
     let config = MatrixConfig {

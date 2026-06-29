@@ -468,7 +468,7 @@
         )
         .expect("nous 401 should produce diagnostics");
         assert!(diag.contains("Nous 401 — Portal authentication failed."));
-        assert!(diag.contains("hermes auth login nous"));
+        assert!(diag.contains("hermes auth add nous"));
         assert!(diag.contains("portal.nousresearch.com"));
         assert!(diag.contains("/tmp/hermes-home/auth.json"));
     }

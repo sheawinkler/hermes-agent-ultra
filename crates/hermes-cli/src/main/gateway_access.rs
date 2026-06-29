@@ -233,6 +233,8 @@ fn build_telegram_config(
         free_response_chats: extra_string_vec(platform_cfg, "free_response_chats"),
         allowed_chats: extra_string_vec(platform_cfg, "allowed_chats"),
         group_allowed_chats: extra_string_vec(platform_cfg, "group_allowed_chats"),
+        allowed_users: telegram_allowed_users_for_adapter(platform_cfg),
+        group_allowed_users: telegram_group_allowed_users_for_adapter(platform_cfg),
         ignored_threads: extra_string_vec(platform_cfg, "ignored_threads"),
         allowed_topics: extra_string_vec(platform_cfg, "allowed_topics"),
         mention_patterns: extra_string_vec(platform_cfg, "mention_patterns"),
@@ -257,6 +259,32 @@ fn build_telegram_config(
             "prepend",
         ),
     }
+}
+
+#[cfg(feature = "gateway-telegram")]
+fn telegram_allowed_users_for_adapter(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+) -> Vec<String> {
+    let mut users = platform_cfg.allowed_users.clone();
+    users.extend(platform_cfg.admin_users.clone());
+    for key in GATEWAY_CONFIG_DIRECT_USER_ALLOWLIST_EXTRA_KEYS {
+        users.extend(extra_string_vec(platform_cfg, key));
+    }
+    if gateway_platform_config_allows_all_users(platform_cfg) {
+        users.push("*".to_string());
+    }
+    users
+}
+
+#[cfg(feature = "gateway-telegram")]
+fn telegram_group_allowed_users_for_adapter(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+) -> Vec<String> {
+    let mut users = Vec::new();
+    for key in GATEWAY_CONFIG_GROUP_USER_ALLOWLIST_EXTRA_KEYS {
+        users.extend(extra_string_vec(platform_cfg, key));
+    }
+    users
 }
 
 #[cfg(feature = "gateway-telegram")]
@@ -1231,4 +1259,3 @@ fn missing_gateway_adapter_feature(platform: &str) -> Option<&'static str> {
         _ => None,
     }
 }
-

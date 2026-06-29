@@ -211,6 +211,9 @@ fn id_matches_any(candidate: &str, allowed: &BTreeSet<String>) -> bool {
         if allowed.is_empty() {
             return false;
         }
+        if allowed == "*" {
+            return true;
+        }
         let allowed_no_at = allowed.strip_prefix('@').unwrap_or(allowed);
         allowed.eq_ignore_ascii_case(candidate)
             || allowed.eq_ignore_ascii_case(candidate_no_at)
@@ -560,4 +563,3 @@ pub fn discord_members_intent_required(
         .into_iter()
         .any(|user| discord_user_identifier_requires_member_lookup(user.as_ref()))
 }
-

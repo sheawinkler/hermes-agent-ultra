@@ -363,13 +363,13 @@ impl ToolHandler for TerminalHandler {
 fn format_command_output(output: &CommandOutput) -> String {
     let mut result = String::new();
     if !output.stdout.is_empty() {
-        result.push_str(&output.stdout);
+        result.push_str(&redact_terminal_output_text(&output.stdout));
     }
     if !output.stderr.is_empty() {
         if !result.is_empty() {
             result.push_str("\n--- STDERR ---\n");
         }
-        result.push_str(&output.stderr);
+        result.push_str(&redact_terminal_output_text(&output.stderr));
     }
     if output.exit_code != 0 {
         result.push_str(&format!("\n[exit code: {}]", output.exit_code));
@@ -378,6 +378,57 @@ fn format_command_output(output: &CommandOutput) -> String {
         result = format!("[exit code: {}]", output.exit_code);
     }
     result
+}
+
+fn secret_assignment_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)\b(?P<key>[A-Z0-9_]*(?:SECRET|TOKEN|API[_-]?KEY|PASSWORD|PASSWD|PWD|ACCESS[_-]?KEY)[A-Z0-9_]*)\s*=\s*(?P<value>[^\s]+)",
+        )
+        .expect("valid terminal secret assignment regex")
+    })
+}
+
+fn redacted_secret_assignment_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)\b[A-Z0-9_]*(?:SECRET|TOKEN|API[_-]?KEY|PASSWORD|PASSWD|PWD|ACCESS[_-]?KEY)[A-Z0-9_]*\s*=\s*<redacted>",
+        )
+        .expect("valid terminal redacted assignment regex")
+    })
+}
+
+fn terminal_output_contains_unredacted_secret(text: &str) -> bool {
+    let scrubbed = redacted_secret_assignment_regex()
+        .replace_all(text, "")
+        .to_string();
+    crate::credential_guard::detect_secrets(&scrubbed).is_some()
+}
+
+fn redact_terminal_output_text(text: &str) -> String {
+    let assigned = secret_assignment_regex()
+        .replace_all(text, "$key=<redacted>")
+        .to_string();
+    if !terminal_output_contains_unredacted_secret(&assigned) {
+        return assigned;
+    }
+
+    assigned
+        .split_inclusive('\n')
+        .map(|line| {
+            let (body, newline) = line
+                .strip_suffix('\n')
+                .map(|body| (body, "\n"))
+                .unwrap_or((line, ""));
+            if terminal_output_contains_unredacted_secret(body) {
+                format!("[redacted secret output]{newline}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect()
 }
 
 fn sudo_word_regex() -> &'static Regex {
@@ -1346,6 +1397,40 @@ mod tests {
         assert!(formatted.contains("out"));
         assert!(formatted.contains("err"));
         assert!(formatted.contains("exit code: 1"));
+    }
+
+    #[test]
+    fn format_command_output_redacts_secret_assignments() {
+        let secret = "sk-abcdefghijklmnopqrstuvwxyz123456";
+        let output = CommandOutput {
+            exit_code: 0,
+            stdout: format!("OPENAI_API_KEY={secret}\nvisible=1"),
+            stderr: String::new(),
+        };
+
+        let formatted = format_command_output(&output);
+
+        assert!(!formatted.contains(secret));
+        assert!(formatted.contains("OPENAI_API_KEY=<redacted>"));
+        assert!(formatted.contains("visible=1"));
+    }
+
+    #[test]
+    fn format_command_output_redacts_bare_secret_lines() {
+        let secret = "ghp_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ";
+        let output = CommandOutput {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: format!("before\n{secret}\nafter"),
+        };
+
+        let formatted = format_command_output(&output);
+
+        assert!(!formatted.contains(secret));
+        assert!(formatted.contains("before"));
+        assert!(formatted.contains("[redacted secret output]"));
+        assert!(formatted.contains("after"));
+        assert!(formatted.contains("[exit code: 1]"));
     }
 
     #[test]

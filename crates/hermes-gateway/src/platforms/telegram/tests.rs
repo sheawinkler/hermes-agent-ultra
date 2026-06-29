@@ -39,6 +39,8 @@ fn test_config() -> TelegramConfig {
         free_response_chats: Vec::new(),
         allowed_chats: Vec::new(),
         group_allowed_chats: Vec::new(),
+        allowed_users: Vec::new(),
+        group_allowed_users: Vec::new(),
         ignored_threads: Vec::new(),
         allowed_topics: Vec::new(),
         mention_patterns: Vec::new(),
@@ -445,6 +447,141 @@ fn telegram_group_gating_covers_mentions_guests_threads_and_topics() {
 }
 
 #[test]
+fn telegram_routing_filters_own_bot_messages_before_private_or_group_accept() {
+    let mut cfg = test_config();
+    cfg.bot_username = Some("HermesBot".into());
+    let adapter = test_adapter(cfg);
+
+    let mut own_bot = make_user(42, Some("hermesbot"));
+    own_bot.is_bot = Some(true);
+    let private = make_text_message(1, make_chat(100, "private"), own_bot.clone(), "echo");
+    assert!(!adapter.should_process_message(&private, false));
+
+    let group = make_text_message(2, make_chat(-100, "supergroup"), own_bot, "@HermesBot echo");
+    assert!(!adapter.should_process_message(&group, false));
+
+    let mut other_bot = make_user(43, Some("helperbot"));
+    other_bot.is_bot = Some(true);
+    let other = make_text_message(3, make_chat(100, "private"), other_bot, "ping");
+    assert!(adapter.should_process_message(&other, false));
+}
+
+#[test]
+fn telegram_routing_rejects_unauthorized_user_before_update_parse() {
+    let mut cfg = test_config();
+    cfg.allowed_users = vec!["42".into(), "@alice".into()];
+    cfg.group_allowed_users = vec!["group_user".into()];
+    let adapter = test_adapter(cfg);
+
+    let denied_dm = Update {
+        update_id: 1,
+        message: Some(make_text_message(
+            1,
+            make_chat(100, "private"),
+            make_user(7, Some("mallory")),
+            "secret prompt",
+        )),
+        callback_query: None,
+    };
+    assert!(!adapter.should_process_update(&denied_dm));
+
+    let allowed_dm = Update {
+        update_id: 2,
+        message: Some(make_text_message(
+            2,
+            make_chat(100, "private"),
+            make_user(42, Some("other")),
+            "hello",
+        )),
+        callback_query: None,
+    };
+    assert!(adapter.should_process_update(&allowed_dm));
+
+    let allowed_group = Update {
+        update_id: 3,
+        message: Some(make_text_message(
+            3,
+            make_chat(-100, "supergroup"),
+            make_user(99, Some("group_user")),
+            "hello group",
+        )),
+        callback_query: None,
+    };
+    assert!(adapter.should_process_update(&allowed_group));
+}
+
+#[test]
+fn telegram_routing_authorizes_sender_chat_when_from_user_absent() {
+    let mut cfg = test_config();
+    cfg.group_allowed_users = vec!["@news_channel".into()];
+    let adapter = test_adapter(cfg);
+
+    let mut sender_chat = make_chat(-100200, "channel");
+    sender_chat.username = Some("news_channel".into());
+    let mut channel_post = make_text_message(
+        1,
+        make_chat(-100, "supergroup"),
+        make_user(7, None),
+        "update",
+    );
+    channel_post.from = None;
+    channel_post.sender_chat = Some(sender_chat);
+
+    let allowed = Update {
+        update_id: 6,
+        message: Some(channel_post.clone()),
+        callback_query: None,
+    };
+    assert!(adapter.should_process_update(&allowed));
+
+    channel_post.sender_chat = Some(make_chat(-100201, "channel"));
+    let denied = Update {
+        update_id: 7,
+        message: Some(channel_post),
+        callback_query: None,
+    };
+    assert!(!adapter.should_process_update(&denied));
+}
+
+#[test]
+fn telegram_callback_auth_uses_tapping_user_not_bot_message_author() {
+    let mut cfg = test_config();
+    cfg.bot_username = Some("HermesBot".into());
+    cfg.allowed_users = vec!["@alice".into()];
+    let adapter = test_adapter(cfg);
+
+    let mut bot_user = make_user(42, Some("HermesBot"));
+    bot_user.is_bot = Some(true);
+    let bot_message = make_text_message(10, make_chat(100, "private"), bot_user, "Approve?");
+
+    let denied = Update {
+        update_id: 4,
+        message: None,
+        callback_query: Some(CallbackQuery {
+            id: "cb-denied".into(),
+            from: make_user(7, Some("mallory")),
+            message: Some(bot_message.clone()),
+            data: Some("approval:once:1".into()),
+            chat_instance: None,
+        }),
+    };
+    assert!(!adapter.should_process_update(&denied));
+
+    let allowed = Update {
+        update_id: 5,
+        message: None,
+        callback_query: Some(CallbackQuery {
+            id: "cb-allowed".into(),
+            from: make_user(8, Some("alice")),
+            message: Some(bot_message),
+            data: Some("approval:once:1".into()),
+            chat_instance: None,
+        }),
+    };
+    assert!(adapter.should_process_update(&allowed));
+}
+
+#[test]
 fn telegram_text_batcher_aggregates_by_chat_user_and_thread() {
     let now = Instant::now();
     let mut batcher = TelegramTextBatcher::new(Duration::from_millis(50));
@@ -458,6 +595,7 @@ fn telegram_text_batcher_aggregates_by_chat_user_and_thread() {
         is_photo: false,
         is_sticker: false,
         is_document: false,
+        is_video: false,
         voice_file_id: None,
         photo_file_id: None,
         sticker_file_id: None,
@@ -465,6 +603,10 @@ fn telegram_text_batcher_aggregates_by_chat_user_and_thread() {
         document_file_name: None,
         document_mime_type: None,
         document_file_size: None,
+        video_file_id: None,
+        video_file_name: None,
+        video_mime_type: None,
+        video_file_size: None,
         reply_to_message_id: None,
         message_thread_id: Some(8),
         chat_type: ChatKind::Private,
@@ -1079,6 +1221,44 @@ async fn telegram_encoded_gateway_chat_id_sends_to_topic_thread() {
     assert_eq!(
         body.pointer("/chat_id").and_then(|v| v.as_str()),
         Some("-1001")
+    );
+    assert_eq!(
+        body.pointer("/message_thread_id").and_then(|v| v.as_i64()),
+        Some(17585)
+    );
+}
+
+#[tokio::test]
+async fn telegram_username_gateway_chat_id_sends_to_topic_thread() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/botfake_token_12345/sendMessage"))
+        .and(body_partial_json(serde_json::json!({
+            "chat_id": "@hermes_group",
+            "message_thread_id": 17585,
+            "text": "topic hello"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "ok": true,
+            "result": { "message_id": 89 }
+        })))
+        .mount(&server)
+        .await;
+
+    let mut adapter = test_adapter(test_config());
+    adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+    let ids = adapter
+        .send_text("@hermes_group:17585", "topic hello", None, None)
+        .await
+        .unwrap();
+    assert_eq!(ids, vec![89]);
+    let requests = server.received_requests().await.expect("requests");
+    assert_eq!(requests.len(), 1);
+    let body: Value = requests[0].body_json().expect("json body");
+    assert_eq!(
+        body.pointer("/chat_id").and_then(|v| v.as_str()),
+        Some("@hermes_group")
     );
     assert_eq!(
         body.pointer("/message_thread_id").and_then(|v| v.as_i64()),

@@ -44,6 +44,15 @@ fn split_message_long() {
 }
 
 #[test]
+fn split_message_long_unicode_is_char_boundary_safe() {
+    let text = "é".repeat(2001);
+    let chunks = split_message(&text, 2000);
+    assert_eq!(chunks.len(), 2);
+    assert_eq!(chunks[0].chars().count(), 2000);
+    assert_eq!(chunks[1], "é");
+}
+
+#[test]
 fn gateway_payload_identify() {
     let adapter = DiscordAdapter::new(test_config()).unwrap();
     let payload = adapter.build_identify_payload();

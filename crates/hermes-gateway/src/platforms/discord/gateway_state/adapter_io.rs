@@ -113,7 +113,8 @@ impl DiscordAdapter {
         metadata: Option<&DiscordSendMetadata>,
     ) -> Result<Vec<String>, GatewayError> {
         let target_channel_id = target_channel_id_for_metadata(channel_id, metadata);
-        let chunks = split_message(content, MAX_MESSAGE_LENGTH);
+        let formatted_content = format_discord_outgoing_content(content);
+        let chunks = split_message(&formatted_content, MAX_MESSAGE_LENGTH);
         let mut message_ids = Vec::new();
         let reply_to_message_id = reply_to_message_id_for_metadata(metadata);
         let reply_to_mode = DiscordReplyToMode::parse(Some(&self.config.reply_to_mode));
@@ -275,8 +276,9 @@ impl DiscordAdapter {
             DISCORD_API_BASE, channel_id, message_id
         );
 
+        let formatted_content = format_discord_outgoing_content(content);
         let body = with_default_allowed_mentions(serde_json::json!({
-            "content": &content[..content.len().min(MAX_MESSAGE_LENGTH)],
+            "content": truncate_discord_content(&formatted_content, MAX_MESSAGE_LENGTH),
         }));
 
         let resp = self

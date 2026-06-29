@@ -109,8 +109,8 @@ def test_dockerfile_entrypoint_routes_through_the_init(dockerfile_text):
 
 def test_dockerfile_builds_rust_workspace_binary(dockerfile_text):
     assert "FROM rust:" in dockerfile_text
-    assert "COPY Cargo.toml Cargo.lock ./" in dockerfile_text
-    assert "COPY crates crates" in dockerfile_text
+    assert "COPY --link Cargo.toml Cargo.lock ./" in dockerfile_text
+    assert "COPY --link crates crates" in dockerfile_text
     assert any(
         "cargo build --release" in step and "telegram,discord,slack" in step
         for step in _run_steps(dockerfile_text)
@@ -119,7 +119,8 @@ def test_dockerfile_builds_rust_workspace_binary(dockerfile_text):
 
 def test_dockerfile_runtime_installs_rust_binary(dockerfile_text):
     assert (
-        "COPY --from=builder /app/target/release/hermes /usr/local/bin/hermes"
+        "COPY --link --from=builder --chmod=0755 "
+        "/app/target/release/hermes /usr/local/bin/hermes"
         in dockerfile_text
     )
     assert "uv sync" not in dockerfile_text

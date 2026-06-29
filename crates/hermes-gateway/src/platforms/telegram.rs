@@ -53,6 +53,9 @@ const RATE_LIMIT_MAX_RETRIES: u32 = 3;
 /// Maximum supported Telegram document size for processing (20 MB).
 const TELEGRAM_MAX_DOCUMENT_SIZE_BYTES: u64 = 20 * 1024 * 1024;
 
+/// Maximum supported Telegram video size for processing (20 MB).
+const TELEGRAM_MAX_VIDEO_SIZE_BYTES: u64 = TELEGRAM_MAX_DOCUMENT_SIZE_BYTES;
+
 /// Supported document extensions for Telegram document processing.
 const SUPPORTED_DOCUMENT_EXTENSIONS: &[&str] = &[
     "pdf", "md", "txt", "docx", "xlsx", "pptx", "zip", "png", "jpg", "jpeg",
@@ -173,6 +176,14 @@ pub struct TelegramConfig {
     /// Alias for Python `group_allowed_chats`.
     #[serde(default)]
     pub group_allowed_chats: Vec<String>,
+
+    /// Telegram users allowed to interact when a user allowlist is configured.
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+
+    /// Telegram group senders allowed to interact when group user allowlists are configured.
+    #[serde(default)]
+    pub group_allowed_users: Vec<String>,
 
     /// Forum topic/thread IDs to ignore.
     #[serde(default)]
@@ -333,6 +344,8 @@ pub struct TelegramMessage {
     #[serde(default)]
     pub from: Option<User>,
     #[serde(default)]
+    pub sender_chat: Option<Chat>,
+    #[serde(default)]
     pub text: Option<String>,
     #[serde(default)]
     pub voice: Option<Voice>,
@@ -348,6 +361,8 @@ pub struct TelegramMessage {
     pub sticker: Option<Sticker>,
     #[serde(default)]
     pub document: Option<Document>,
+    #[serde(default)]
+    pub video: Option<Video>,
     #[serde(default)]
     pub reply_to_message: Option<Box<TelegramMessage>>,
     /// Native Bot API rich-message echo for replies to rich bot messages.
@@ -442,6 +457,26 @@ pub struct Document {
     pub file_size: Option<u64>,
 }
 
+/// Telegram Video object.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Video {
+    pub file_id: String,
+    #[serde(default)]
+    pub file_unique_id: Option<String>,
+    #[serde(default)]
+    pub duration: Option<u32>,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub file_size: Option<u64>,
+}
+
 /// Telegram File object (from getFile).
 #[derive(Debug, Clone, Deserialize)]
 pub struct TelegramFile {
@@ -505,6 +540,7 @@ pub struct IncomingMessage {
     pub is_photo: bool,
     pub is_sticker: bool,
     pub is_document: bool,
+    pub is_video: bool,
     pub voice_file_id: Option<String>,
     pub photo_file_id: Option<String>,
     pub sticker_file_id: Option<String>,
@@ -512,6 +548,10 @@ pub struct IncomingMessage {
     pub document_file_name: Option<String>,
     pub document_mime_type: Option<String>,
     pub document_file_size: Option<u64>,
+    pub video_file_id: Option<String>,
+    pub video_file_name: Option<String>,
+    pub video_mime_type: Option<String>,
+    pub video_file_size: Option<u64>,
     pub reply_to_message_id: Option<i64>,
     pub message_thread_id: Option<i64>,
     pub chat_type: ChatKind,

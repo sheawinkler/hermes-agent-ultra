@@ -27,6 +27,10 @@ use crate::platforms::helpers::download_media_url;
 
 const WECOM_API_BASE: &str = "https://qyapi.weixin.qq.com/cgi-bin";
 const DEDUP_TTL_SECS: u64 = 300;
+const WECOM_CALLBACK_MAX_BODY_BYTES: usize = 64 * 1024;
+const WECOM_CALLBACK_HEADER_BUDGET_BYTES: usize = 8 * 1024;
+const WECOM_CALLBACK_READ_BUFFER_BYTES: usize =
+    WECOM_CALLBACK_MAX_BODY_BYTES + WECOM_CALLBACK_HEADER_BUDGET_BYTES;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeComCallbackApp {
@@ -139,6 +143,27 @@ fn strip_group_mention_prefix(text: &str) -> String {
         .find_map(|(idx, ch)| ch.is_whitespace().then_some(&trimmed_start[idx..]))
         .unwrap_or("");
     rest.trim().to_string()
+}
+
+fn http_content_length(header_text: &str) -> Option<usize> {
+    header_text.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if !name.trim().eq_ignore_ascii_case("content-length") {
+            return None;
+        }
+        value.trim().parse::<usize>().ok()
+    })
+}
+
+fn wecom_callback_body_exceeds_limit(req: &str, body_start: usize) -> bool {
+    let header_end = body_start.saturating_sub(4).min(req.len());
+    if http_content_length(&req[..header_end])
+        .map(|len| len > WECOM_CALLBACK_MAX_BODY_BYTES)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    req.len().saturating_sub(body_start) > WECOM_CALLBACK_MAX_BODY_BYTES
 }
 
 pub struct WeComCallbackAdapter {
@@ -635,7 +660,7 @@ async fn handle_callback_request(
     seen: Arc<RwLock<HashMap<String, Instant>>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut buf = vec![0u8; 65536];
+    let mut buf = vec![0u8; WECOM_CALLBACK_READ_BUFFER_BYTES];
     let (mut reader, mut writer) = stream.into_split();
     let n = reader.read(&mut buf).await?;
     if n == 0 {
@@ -693,6 +718,12 @@ async fn handle_callback_request(
     }
 
     let body_start = req.find("\r\n\r\n").map(|i| i + 4).unwrap_or(n);
+    if wecom_callback_body_exceeds_limit(&req, body_start) {
+        writer
+            .write_all(b"HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n")
+            .await?;
+        return Ok(());
+    }
     let body = String::from_utf8_lossy(&buf[body_start..n]).to_string();
     let encrypt = WeComCallbackAdapter::xml_tag(&body, "Encrypt").unwrap_or_default();
     for app in apps {
@@ -879,5 +910,37 @@ mod tests {
             "/approve run-123"
         );
         assert_eq!(strip_group_mention_prefix("hello team"), "hello team");
+    }
+
+    #[test]
+    fn callback_body_limit_rejects_oversized_content_length_before_parse() {
+        let req = format!(
+            "POST /wecom/callback HTTP/1.1\r\nContent-Length: {}\r\n\r\n<xml/>",
+            WECOM_CALLBACK_MAX_BODY_BYTES + 1
+        );
+        let body_start = req.find("\r\n\r\n").unwrap() + 4;
+
+        assert!(wecom_callback_body_exceeds_limit(&req, body_start));
+    }
+
+    #[test]
+    fn callback_body_limit_rejects_oversized_buffered_body() {
+        let body = "x".repeat(WECOM_CALLBACK_MAX_BODY_BYTES + 1);
+        let req = format!("POST /wecom/callback HTTP/1.1\r\n\r\n{body}");
+        let body_start = req.find("\r\n\r\n").unwrap() + 4;
+
+        assert!(wecom_callback_body_exceeds_limit(&req, body_start));
+    }
+
+    #[test]
+    fn callback_body_limit_allows_normal_callback_envelope() {
+        let body = format!("<xml><Encrypt>{}</Encrypt></xml>", "x".repeat(1024));
+        let req = format!(
+            "POST /wecom/callback HTTP/1.1\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let body_start = req.find("\r\n\r\n").unwrap() + 4;
+
+        assert!(!wecom_callback_body_exceeds_limit(&req, body_start));
     }
 }

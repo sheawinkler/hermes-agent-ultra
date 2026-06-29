@@ -61,6 +61,9 @@ impl TelegramAdapter {
 
                 let err_count = self.consecutive_errors.fetch_add(1, Ordering::SeqCst) + 1;
                 let conflict = Self::is_polling_conflict_error(&e);
+                if conflict {
+                    self.mark_polling_unhealthy();
+                }
                 warn!(
                     consecutive_errors = err_count,
                     backoff_ms = next,

@@ -73,13 +73,27 @@ impl TelegramAdapter {
         if base_chat_id.trim().is_empty() || thread_id.trim().is_empty() {
             return (chat_id, None);
         }
-        if base_chat_id.parse::<i64>().is_err() {
+        if !Self::is_threadable_chat_id(base_chat_id) {
             return (chat_id, None);
         }
         match thread_id.parse::<i64>() {
             Ok(0) | Err(_) => (chat_id, None),
             Ok(thread_id) => (base_chat_id, Some(thread_id)),
         }
+    }
+
+    fn is_threadable_chat_id(chat_id: &str) -> bool {
+        let chat_id = chat_id.trim();
+        if chat_id.parse::<i64>().is_ok() {
+            return true;
+        }
+        let Some(username) = chat_id.strip_prefix('@') else {
+            return false;
+        };
+        !username.is_empty()
+            && username
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
     }
 
     fn build_client(
