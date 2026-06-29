@@ -1,9 +1,76 @@
 {
-  "app": { "name": "Terra" },
-  "task": { "list": "タスク", "new": "新規タスク" },
-  "vertical": { "picker": "垂直領域を選択" },
-  "composer": { "send": "送信", "stop": "停止" },
-  "settings": { "title": "設定" },
-  "billing": { "quota": "クォータ" },
-  "auth": { "signIn": "サインイン" }
+  "app": {
+    "name": "Terra",
+    "loading": "読み込み中…",
+    "error": "エラーが発生しました",
+    "retry": "再試行"
+  },
+  "task": {
+    "list": "タスク",
+    "new": "新規タスク",
+    "empty": "タスクがありません",
+    "status": {
+      "pending": "保留",
+      "running": "実行中",
+      "needsApproval": "承認待ち",
+      "done": "完了",
+      "failed": "失敗",
+      "cancelled": "キャンセル",
+      "scheduled": "予定",
+      "paused": "一時停止"
+    },
+    "progress": "進捗",
+    "cost": "コスト",
+    "branch": "分岐",
+    "minimap": "ミニマップ",
+    "outline": "アウトライン"
+  },
+  "vertical": {
+    "picker": "垂直領域を選択",
+    "trader": {
+      "name": "A株アシスタント",
+      "description": "中国A株の資金フロー、セクターローテーション、市場構造"
+    },
+    "knowledge": {
+      "name": "ナレッジ",
+      "description": "URL、画像、音声、動画を整理して構造化ナレッジを構築"
+    },
+    "disclaimer": {
+      "delay15min": "相場データは最大15分遅延する場合があります"
+    }
+  },
+  "composer": {
+    "send": "送信",
+    "stop": "停止",
+    "placeholder": "Terra にやってほしいことを入力…",
+    "attach": "添付",
+    "voice": "音声",
+    "queue": "キュー"
+  },
+  "settings": {
+    "title": "設定",
+    "language": "言語",
+    "provider": "プロバイダー階層",
+    "advanced": "詳細",
+    "billing": "課金とクォータ"
+  },
+  "billing": {
+    "quota": "クォータ",
+    "tier": {
+      "free": "無料",
+      "pro": "Pro"
+    },
+    "providerTier": {
+      "smart": "スマート",
+      "economic": "エコノミー",
+      "local": "ローカル"
+    },
+    "remaining": "残り",
+    "upgrade": "アップグレード"
+  },
+  "auth": {
+    "signIn": "サインイン",
+    "signOut": "サインアウト",
+    "trial": "無料トライアルを開始"
+  }
 }

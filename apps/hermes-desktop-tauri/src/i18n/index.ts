@@ -17,4 +17,8 @@ export {
   normalizeLocale
 } from './languages'
 export { setRuntimeI18nLocale, translateNow } from './runtime'
+export { getTerraCatalog, resolveTerraString, TERRA_LOCALES, terraLocaleFor } from './terra-locales'
+export type { TerraCatalog, TerraLocaleKey } from './terra-locales'
+export { useT, useTDomain } from './useT'
+export type { DomainTranslator, TranslationDomain } from './useT'
 export type { Locale, Translations } from './types'

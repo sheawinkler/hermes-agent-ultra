@@ -8,6 +8,7 @@ description = "Vertical definitions and persona loading for Terra"
 
 [dependencies]
 hermes-tasks = { workspace = true }
+hermes-billing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

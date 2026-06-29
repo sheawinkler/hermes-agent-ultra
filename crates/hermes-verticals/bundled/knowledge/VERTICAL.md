@@ -20,6 +20,18 @@ local = "ollama-qwen3-14b"
 default = "akshare"
 default_mode = "cloud"
 allowed = ["user_custom"]
+
+[persona]
+strategy = "auto_blend"
+
+[[persona.blocks]]
+kind = "instruction"
+follow_user_locale = false
+variants = { en = "instruction.en.md", "zh-CN" = "instruction.zh-CN.md" }
+
+[[persona.blocks]]
+kind = "output_directive"
+follow_user_locale = true
 ---
 
 # Knowledge Vertical

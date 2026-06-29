@@ -28,6 +28,23 @@ providers_economic = ["aliyun-tongyi"]
 providers_local = []
 disclosure_key = "vertical.trader.privacy.disclosure"
 require_explicit_consent = true
+
+[persona]
+strategy = "auto_blend"
+
+[[persona.blocks]]
+kind = "instruction"
+follow_user_locale = false
+variants = { en = "instruction.en.md", "zh-CN" = "instruction.zh-CN.md" }
+
+[[persona.blocks]]
+kind = "terminology"
+follow_user_locale = true
+variants = { en = "glossary.en.md", "zh-CN" = "glossary.zh-CN.md" }
+
+[[persona.blocks]]
+kind = "output_directive"
+follow_user_locale = true
 ---
 
 # Trader Vertical

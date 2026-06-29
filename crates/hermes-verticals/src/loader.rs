@@ -5,6 +5,8 @@ use serde::Deserialize;
 use hermes_tasks::TaskCategory;
 use thiserror::Error;
 
+use crate::persona::{PersonaDefinition, load_persona};
+
 #[derive(Debug, Error)]
 pub enum VerticalLoadError {
     #[error("io: {0}")]
@@ -26,12 +28,18 @@ pub struct VerticalMeta {
     pub task_category: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct FrontmatterDoc {
+    meta: VerticalMeta,
+}
+
 #[derive(Debug, Clone)]
 pub struct VerticalDefinition {
     pub meta: VerticalMeta,
     pub dir: PathBuf,
     pub starters: serde_json::Value,
     pub datasources: serde_json::Value,
+    pub persona: PersonaDefinition,
 }
 
 pub struct VerticalLoader {
@@ -74,22 +82,19 @@ impl VerticalLoader {
         let vertical_md = dir.join("VERTICAL.md");
         let content = std::fs::read_to_string(&vertical_md)?;
         let (frontmatter, _) = split_frontmatter(&content);
-        let doc: toml::Table = toml::from_str(frontmatter)?;
-        let meta: VerticalMeta = doc
-            .get("meta")
-            .ok_or_else(|| VerticalLoadError::Other("missing [meta]".into()))?
-            .clone()
-            .try_into()
-            .map_err(VerticalLoadError::Toml)?;
+        let FrontmatterDoc { meta } = toml::from_str(&frontmatter)?;
 
         let starters = read_json_or_default(&dir.join("starters.json"));
         let datasources = read_json_or_default(&dir.join("datasources.json"));
+        let persona = load_persona(&dir, &frontmatter)
+            .map_err(|err| VerticalLoadError::Other(err.to_string()))?;
 
         Ok(VerticalDefinition {
             meta,
             dir,
             starters,
             datasources,
+            persona,
         })
     }
 }
@@ -102,15 +107,27 @@ impl VerticalMeta {
     }
 }
 
-fn split_frontmatter(content: &str) -> (&str, &str) {
-    if let Some(rest) = content.strip_prefix("---")
-        && let Some(end) = rest.find("\n---")
-    {
-        let fm = &rest[..end];
-        let body = &rest[end + 4..];
-        return (fm, body);
+fn split_frontmatter(content: &str) -> (String, String) {
+    if let Some(rest) = content.strip_prefix("---") {
+        let rest = rest
+            .strip_prefix("\r\n")
+            .or_else(|| rest.strip_prefix('\n'))
+            .unwrap_or(rest);
+        if let Some(end) = rest.find("\n---").or_else(|| rest.find("\r\n---")) {
+            let fm = rest[..end].replace("\r\n", "\n").trim().to_string();
+            let body_start = end
+                + if rest[end..].starts_with("\r\n---") {
+                    5
+                } else {
+                    4
+                };
+            let body = rest[body_start..]
+                .trim_start_matches(['\r', '\n'])
+                .to_string();
+            return (fm, body);
+        }
     }
-    ("", content)
+    (String::new(), content.to_string())
 }
 
 fn read_json_or_default(path: &Path) -> serde_json::Value {
@@ -118,4 +135,38 @@ fn read_json_or_default(path: &Path) -> serde_json::Value {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or(serde_json::json!([]))
+}
+
+#[cfg(test)]
+mod tests {
+    use hermes_billing::{AutoBlendContext, Language, default_profile};
+    use hermes_tasks::TaskCategory;
+
+    use super::*;
+    use crate::persona::{PersonaStrategy, blend_persona};
+
+    #[test]
+    fn bundled_trader_has_persona_blocks() {
+        let loader = VerticalLoader::bundled();
+        let trader = loader.load("trader").expect("trader vertical");
+        assert_eq!(trader.meta.task_category.as_deref(), Some("Financial"));
+        assert_eq!(trader.persona.strategy, PersonaStrategy::AutoBlend);
+        assert!(trader.persona.blocks.len() >= 2);
+    }
+
+    #[test]
+    fn trader_auto_blend_produces_prompt() {
+        let loader = VerticalLoader::bundled();
+        let trader = loader.load("trader").expect("trader vertical");
+        let ctx = AutoBlendContext {
+            model_profile: default_profile("tongyi-qwen-max"),
+            user_locale: Language::ZhCN,
+            vertical_task_category: TaskCategory::Financial,
+        };
+        let (prompt, decisions) =
+            blend_persona(&trader.persona.blocks, &ctx, &trader.dir).expect("blend");
+        assert!(prompt.contains("A 股"));
+        assert!(prompt.contains("zh-CN"));
+        assert!(!decisions.is_empty());
+    }
 }

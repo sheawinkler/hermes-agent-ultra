@@ -1,9 +1,76 @@
 {
-  "app": { "name": "Terra" },
-  "task": { "list": "任務", "new": "新建任務" },
-  "vertical": { "picker": "選擇垂直領域" },
-  "composer": { "send": "傳送", "stop": "停止" },
-  "settings": { "title": "設定" },
-  "billing": { "quota": "配額" },
-  "auth": { "signIn": "登入" }
+  "app": {
+    "name": "Terra",
+    "loading": "載入中…",
+    "error": "發生錯誤",
+    "retry": "重試"
+  },
+  "task": {
+    "list": "任務",
+    "new": "新建任務",
+    "empty": "尚無任務",
+    "status": {
+      "pending": "待處理",
+      "running": "進行中",
+      "needsApproval": "待審批",
+      "done": "已完成",
+      "failed": "失敗",
+      "cancelled": "已取消",
+      "scheduled": "已排程",
+      "paused": "已暫停"
+    },
+    "progress": "進度",
+    "cost": "費用",
+    "branch": "分支",
+    "minimap": "縮圖",
+    "outline": "大綱"
+  },
+  "vertical": {
+    "picker": "選擇垂直領域",
+    "trader": {
+      "name": "A 股助手",
+      "description": "A 股資金流向、板塊輪動與市場結構分析"
+    },
+    "knowledge": {
+      "name": "知識庫",
+      "description": "整理 URL、圖片、音訊與影片，建構結構化知識"
+    },
+    "disclaimer": {
+      "delay15min": "行情資料可能有 15 分鐘延遲"
+    }
+  },
+  "composer": {
+    "send": "傳送",
+    "stop": "停止",
+    "placeholder": "描述你想讓 Terra 做什麼…",
+    "attach": "附件",
+    "voice": "語音",
+    "queue": "排隊"
+  },
+  "settings": {
+    "title": "設定",
+    "language": "語言",
+    "provider": "模型檔位",
+    "advanced": "進階",
+    "billing": "計費與配額"
+  },
+  "billing": {
+    "quota": "配額",
+    "tier": {
+      "free": "免費",
+      "pro": "專業版"
+    },
+    "providerTier": {
+      "smart": "智能",
+      "economic": "經濟",
+      "local": "本地"
+    },
+    "remaining": "剩餘",
+    "upgrade": "升級"
+  },
+  "auth": {
+    "signIn": "登入",
+    "signOut": "登出",
+    "trial": "開始免費試用"
+  }
 }

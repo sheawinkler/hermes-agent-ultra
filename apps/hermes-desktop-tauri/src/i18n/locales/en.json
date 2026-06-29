@@ -1,9 +1,76 @@
 {
-  "app": { "name": "Terra" },
-  "task": { "list": "Tasks", "new": "New task" },
-  "vertical": { "picker": "Choose vertical" },
-  "composer": { "send": "Send", "stop": "Stop" },
-  "settings": { "title": "Settings" },
-  "billing": { "quota": "Quota" },
-  "auth": { "signIn": "Sign in" }
+  "app": {
+    "name": "Terra",
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "retry": "Retry"
+  },
+  "task": {
+    "list": "Tasks",
+    "new": "New task",
+    "empty": "No tasks yet",
+    "status": {
+      "pending": "Pending",
+      "running": "Running",
+      "needsApproval": "Needs approval",
+      "done": "Done",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "scheduled": "Scheduled",
+      "paused": "Paused"
+    },
+    "progress": "Progress",
+    "cost": "Cost",
+    "branch": "Branch",
+    "minimap": "Minimap",
+    "outline": "Outline"
+  },
+  "vertical": {
+    "picker": "Choose vertical",
+    "trader": {
+      "name": "A-Share Trader",
+      "description": "Capital flows, sector rotation, and market structure for CN-A equities"
+    },
+    "knowledge": {
+      "name": "Knowledge",
+      "description": "Organize URLs, images, audio, and video into structured knowledge"
+    },
+    "disclaimer": {
+      "delay15min": "Market data may be delayed by 15 minutes"
+    }
+  },
+  "composer": {
+    "send": "Send",
+    "stop": "Stop",
+    "placeholder": "Describe what you want Terra to do…",
+    "attach": "Attach",
+    "voice": "Voice",
+    "queue": "Queue"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "provider": "Provider tier",
+    "advanced": "Advanced",
+    "billing": "Billing & quota"
+  },
+  "billing": {
+    "quota": "Quota",
+    "tier": {
+      "free": "Free",
+      "pro": "Pro"
+    },
+    "providerTier": {
+      "smart": "Smart",
+      "economic": "Economic",
+      "local": "Local"
+    },
+    "remaining": "Remaining",
+    "upgrade": "Upgrade"
+  },
+  "auth": {
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "trial": "Start free trial"
+  }
 }

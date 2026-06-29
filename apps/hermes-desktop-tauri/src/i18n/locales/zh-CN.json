@@ -1,9 +1,76 @@
 {
-  "app": { "name": "Terra" },
-  "task": { "list": "任务", "new": "新建任务" },
-  "vertical": { "picker": "选择垂直领域" },
-  "composer": { "send": "发送", "stop": "停止" },
-  "settings": { "title": "设置" },
-  "billing": { "quota": "配额" },
-  "auth": { "signIn": "登录" }
+  "app": {
+    "name": "Terra",
+    "loading": "加载中…",
+    "error": "出错了",
+    "retry": "重试"
+  },
+  "task": {
+    "list": "任务",
+    "new": "新建任务",
+    "empty": "暂无任务",
+    "status": {
+      "pending": "待处理",
+      "running": "进行中",
+      "needsApproval": "待审批",
+      "done": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "scheduled": "已计划",
+      "paused": "已暂停"
+    },
+    "progress": "进度",
+    "cost": "费用",
+    "branch": "分支",
+    "minimap": "缩略图",
+    "outline": "大纲"
+  },
+  "vertical": {
+    "picker": "选择垂直领域",
+    "trader": {
+      "name": "A 股助手",
+      "description": "A 股资金流向、板块轮动与市场结构分析"
+    },
+    "knowledge": {
+      "name": "知识库",
+      "description": "整理 URL、图片、音频与视频，构建结构化知识"
+    },
+    "disclaimer": {
+      "delay15min": "行情数据可能有 15 分钟延迟"
+    }
+  },
+  "composer": {
+    "send": "发送",
+    "stop": "停止",
+    "placeholder": "描述你想让 Terra 做什么…",
+    "attach": "附件",
+    "voice": "语音",
+    "queue": "排队"
+  },
+  "settings": {
+    "title": "设置",
+    "language": "语言",
+    "provider": "模型档位",
+    "advanced": "高级",
+    "billing": "计费与配额"
+  },
+  "billing": {
+    "quota": "配额",
+    "tier": {
+      "free": "免费",
+      "pro": "专业版"
+    },
+    "providerTier": {
+      "smart": "智能",
+      "economic": "经济",
+      "local": "本地"
+    },
+    "remaining": "剩余",
+    "upgrade": "升级"
+  },
+  "auth": {
+    "signIn": "登录",
+    "signOut": "退出",
+    "trial": "开始免费试用"
+  }
 }
