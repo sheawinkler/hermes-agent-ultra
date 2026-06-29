@@ -6,7 +6,11 @@ import { VerticalPicker } from '@/components/home/VerticalPicker'
 import { VerticalSearch } from '@/components/home/VerticalSearch'
 import { TaskDetail } from '@/components/tasks/TaskDetail'
 import { TaskListRail } from '@/components/tasks/TaskListRail'
+import { RightRailSwitcher, type RightRailMode } from '@/components/tasks/RightRailSwitcher'
+import { TaskBranchView } from '@/components/tasks/TaskBranchView'
 import { TaskMinimap } from '@/components/tasks/TaskMinimap'
+import { TaskOutline } from '@/components/tasks/TaskOutline'
+import { TaskProgressDashboard } from '@/components/tasks/TaskProgressDashboard'
 import {
   useCancelTaskMutation,
   useContinueTaskMutation,
@@ -16,7 +20,12 @@ import {
   useTasksQuery,
   useVerticalsQuery
 } from '@/hooks/use-task-queries'
-import { minimapColorForKind } from '@/lib/task-event-utils'
+import {
+  branchIdsFromEvents,
+  minimapColorForKind,
+  outlineItemsFromEvents,
+  progressFromEvents
+} from '@/lib/task-event-utils'
 import { headApproval, resolveHeadApproval } from '@/stores/approval-queue'
 import { $activeTaskId, $unreadTaskIds, setActiveTaskId, setSelectedVerticalId } from '@/stores/active-task'
 
@@ -27,6 +36,7 @@ export default function TerraApp() {
 
   const [verticalQuery, setVerticalQuery] = useState('')
   const [composerDraft, setComposerDraft] = useState('')
+  const [rightRailMode, setRightRailMode] = useState<RightRailMode>('minimap')
 
   const tasksQuery = useTasksQuery()
   const taskQuery = useTaskQuery(activeTaskId)
@@ -71,11 +81,18 @@ export default function TerraApp() {
     setComposerDraft('')
   }, [activeTaskId, composerDraft, continueTaskMutation, createTaskMutation, verticalsQuery.data?.verticals])
 
-  const minimapAnchors =
-    eventsQuery.data?.events.map(event => ({
-      id: event.anchor_slug,
-      color: minimapColorForKind(event.kind)
-    })) ?? []
+  const events = eventsQuery.data?.events ?? []
+  const minimapAnchors = events.map(event => ({
+    id: event.anchor_slug,
+    color: minimapColorForKind(event.kind)
+  }))
+  const outlineItems = outlineItemsFromEvents(events)
+  const branchIds = branchIdsFromEvents(events)
+  const taskProgress = progressFromEvents(events)
+
+  const jumpToAnchor = (anchorId: string) => {
+    document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth' })
+  }
 
   return (
     <div className="terra-shell">
@@ -107,10 +124,23 @@ export default function TerraApp() {
             onComposerSubmit={() => void handleComposerSubmit()}
             onComposerStop={() => void cancelTaskMutation.mutate()}
             rightRail={
-              <TaskMinimap
-                anchors={minimapAnchors}
-                onJump={anchorId => document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth' })}
-              />
+              <aside className="terra-right-rail">
+                <TaskProgressDashboard progress={taskProgress} />
+                <RightRailSwitcher
+                  mode={rightRailMode}
+                  onChange={setRightRailMode}
+                  showBranch={branchIds.length > 0}
+                />
+                {rightRailMode === 'minimap' ? (
+                  <TaskMinimap anchors={minimapAnchors} onJump={jumpToAnchor} />
+                ) : null}
+                {rightRailMode === 'outline' ? (
+                  <TaskOutline items={outlineItems} onSelect={jumpToAnchor} />
+                ) : null}
+                {rightRailMode === 'branch' && activeTaskId ? (
+                  <TaskBranchView rootTaskId={activeTaskId} branchIds={branchIds} />
+                ) : null}
+              </aside>
             }
           />
         ) : (

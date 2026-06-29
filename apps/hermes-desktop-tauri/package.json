@@ -16,7 +16,12 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "variant:apply": "node scripts/apply-variant.mjs",
+    "tauri:android:dev": "tauri android dev",
+    "tauri:android:build": "tauri android build",
+    "tauri:ios:dev": "tauri ios dev",
+    "tauri:ios:build": "tauri ios build"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.12.28",

@@ -79,6 +79,36 @@ export function eventArtifactName(event: TaskEvent): string {
   return event.toc_label ?? 'artifact'
 }
 
+export function outlineItemsFromEvents(events: TaskEvent[]): { id: string; label: string; depth?: number }[] {
+  return events
+    .filter(event => event.toc_label || event.anchor_slug)
+    .map(event => ({
+      id: event.anchor_slug,
+      label: event.toc_label ?? event.kind,
+      depth: event.kind === 'subagent_spawn' ? 1 : 0
+    }))
+}
+
+export function branchIdsFromEvents(events: TaskEvent[]): string[] {
+  const ids = new Set<string>()
+  for (const event of events) {
+    const payload = event.payload ?? {}
+    const subTask = payload.sub_task_id ?? payload.child_task_id
+    if (typeof subTask === 'string' && subTask.trim()) {
+      ids.add(subTask)
+    }
+  }
+  return [...ids]
+}
+
+export function progressFromEvents(events: TaskEvent[]): number {
+  if (events.length === 0) return 0
+  const terminal = events.filter(event =>
+    ['message', 'artifact', 'error', 'checkpoint'].includes(event.kind)
+  ).length
+  return Math.min(100, Math.round((terminal / events.length) * 100))
+}
+
 export function minimapColorForKind(kind: TaskEvent['kind']): string {
   switch (kind) {
     case 'instruction':
