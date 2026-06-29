@@ -15,6 +15,8 @@ import { notify, notifyError } from '@/store/notifications'
 import { $startupShell, closeStartupGuide, completeStartupGuide } from '@/store/startup'
 
 import { DesktopController } from './desktop-controller'
+import { hasColdCache } from '@/lib/cache-first-bootstrap'
+import { scheduleBackgroundPrewarm } from '@/lib/bg-prewarm'
 
 type RemoteAuthMode = 'oauth' | 'token'
 type StartupMode = 'local' | 'remote'
@@ -258,7 +260,13 @@ export function StartupController() {
   const startupShell = useStore($startupShell)
   const desktop = window.hermesDesktop
   const probeSeq = useRef(0)
+  const cacheFastPath = useMemo(() => hasColdCache(), [])
   const updateSourceCopy = t.settings.updateSources
+
+  useEffect(() => {
+    if (!cacheFastPath) return
+    return scheduleBackgroundPrewarm({})
+  }, [cacheFastPath])
 
   const [phase, setPhase] = useState<StartupPhase>('mode_gate')
   const [selectedMode, setSelectedMode] = useState<null | StartupMode>(null)
@@ -664,6 +672,10 @@ export function StartupController() {
       ) : null}
     </div>
   )
+
+  if (cacheFastPath) {
+    return <DesktopController />
+  }
 
   if (!startupShell.visible && startupShell.entered) {
     return <DesktopController />

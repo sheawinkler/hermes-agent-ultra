@@ -1,8 +1,6 @@
 {
   "id": "default",
-  "brand": "Terra",
-  "bundle_id": "app.terra.desktop",
-  "base_url": "https://terra.local",
-  "feature_flags": {},
-  "i18n_overrides": {}
+  "brandName": "Terra",
+  "bundleId": "app.terra.desktop",
+  "supportEmail": "support@terra.local"
 }

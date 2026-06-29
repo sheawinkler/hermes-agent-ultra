@@ -1,0 +1,9 @@
+{
+  "app": { "name": "Terra" },
+  "task": { "list": "任務", "new": "新建任務" },
+  "vertical": { "picker": "選擇垂直領域" },
+  "composer": { "send": "傳送", "stop": "停止" },
+  "settings": { "title": "設定" },
+  "billing": { "quota": "配額" },
+  "auth": { "signIn": "登入" }
+}

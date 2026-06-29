@@ -1,13 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TerraVariant",
   "type": "object",
-  "required": ["id", "brand", "bundle_id"],
+  "required": ["id", "brandName", "bundleId"],
   "properties": {
     "id": { "type": "string" },
-    "brand": { "type": "string" },
-    "bundle_id": { "type": "string" },
-    "base_url": { "type": "string" },
-    "feature_flags": { "type": "object" },
-    "i18n_overrides": { "type": "object" }
+    "brandName": { "type": "string" },
+    "bundleId": { "type": "string" },
+    "supportEmail": { "type": "string" },
+    "i18nOverrides": { "type": "object" }
   }
 }

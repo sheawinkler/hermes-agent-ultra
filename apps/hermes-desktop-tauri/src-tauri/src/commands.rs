@@ -1,4 +1,5 @@
 use crate::hermes_backend;
+use crate::hermes_ws_bridge::{HermesWsBridge, StreamId, StreamRouter};
 use base64::Engine as _;
 #[cfg(target_os = "macos")]
 use block2::RcBlock;
@@ -259,12 +260,6 @@ pub struct DesktopOauthLogoutResult {
     pub ok: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct HermesCliInfo {
-    version: String,
-    project_root: Option<PathBuf>,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BootProgress {
     pub phase: String,
@@ -425,6 +420,9 @@ pub struct AppState {
     pub preview_watches: Mutex<HashMap<String, Arc<AtomicBool>>>,
     pub preview_shortcut_active: AtomicBool,
     pub update_in_flight: AtomicBool,
+    pub ws_router: Arc<StreamRouter>,
+    pub ws_bridge: Mutex<Option<Arc<HermesWsBridge>>>,
+    pub lazy_backend: hermes_backend::LazyBackendGate,
     terminal_sessions: Arc<StdMutex<HashMap<String, Arc<TerminalSession>>>>,
 }
 
@@ -450,6 +448,9 @@ impl AppState {
             preview_watches: Mutex::new(HashMap::new()),
             preview_shortcut_active: AtomicBool::new(false),
             update_in_flight: AtomicBool::new(false),
+            ws_router: StreamRouter::shared(),
+            ws_bridge: Mutex::new(None),
+            lazy_backend: hermes_backend::LazyBackendGate::new(),
             terminal_sessions: Arc::new(StdMutex::new(HashMap::new())),
         }
     }
@@ -3222,12 +3223,6 @@ fn resolve_update_root() -> PathBuf {
         }
     }
 
-    if let Some(root) = probe_hermes_cli_info().and_then(|info| info.project_root) {
-        if root.exists() {
-            return root;
-        }
-    }
-
     if let Ok(current_dir) = std::env::current_dir() {
         for ancestor in current_dir.ancestors() {
             if ancestor.join(".git").is_dir() {
@@ -3313,25 +3308,6 @@ fn desktop_command(program: impl AsRef<OsStr>) -> StdCommand {
     command
 }
 
-fn hermes_cli_install_command_for(platform: &str) -> &'static str {
-    if platform.eq_ignore_ascii_case("windows") {
-        "iex (irm https://hermes-agent.nousresearch.com/install.ps1)"
-    } else {
-        "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
-    }
-}
-
-fn missing_hermes_cli_payload(platform: &str, active_root: &Path) -> serde_json::Value {
-    serde_json::json!({
-        "type": "unsupported-platform",
-        "platform": platform,
-        "activeRoot": active_root.to_string_lossy().to_string(),
-        "installCommand": hermes_cli_install_command_for(platform),
-        "docsUrl": DESKTOP_DOCS_URL,
-        "missingDependencies": ["Hermes CLI"],
-    })
-}
-
 fn desktop_manual_update_command_for(
     platform: &str,
     update_root: &Path,
@@ -3393,55 +3369,6 @@ fn manual_desktop_update_payload(update_root: &PathBuf) -> serde_json::Value {
         "desktopRoot": update_root.to_string_lossy().to_string(),
         "hermesRoot": update_root.to_string_lossy().to_string()
     })
-}
-
-fn parse_hermes_cli_info(output: &str) -> Option<HermesCliInfo> {
-    let mut version = None;
-    let mut project_root = None;
-
-    for line in output.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("Hermes Agent v") {
-            let candidate = rest.split_whitespace().next().unwrap_or("").trim();
-            if !candidate.is_empty() {
-                version = Some(candidate.to_string());
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("Project:") {
-            let candidate = rest.trim();
-            if !candidate.is_empty() {
-                project_root = Some(PathBuf::from(candidate));
-            }
-        }
-    }
-
-    if version.is_none() && project_root.is_none() {
-        return None;
-    }
-
-    Some(HermesCliInfo {
-        version: version.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
-        project_root,
-    })
-}
-
-fn probe_hermes_cli_info() -> Option<HermesCliInfo> {
-    let hermes = resolve_hermes_cli_binary(&active_hermes_root())?;
-    let output = desktop_command(hermes)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if let Some(info) = parse_hermes_cli_info(&stdout) {
-        return Some(info);
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    parse_hermes_cli_info(&stderr)
 }
 
 fn resolve_hermes_web_dist_dir(project_root: &Path) -> Option<PathBuf> {
@@ -3514,9 +3441,9 @@ struct SystemHermesStatusSnapshot {
 fn inspect_system_hermes_status(
     config: &UpdateSourceConfig,
 ) -> Result<SystemHermesStatusSnapshot, String> {
-    let installed = resolve_hermes_cli_binary(&active_hermes_root()).is_some();
-    let info = probe_hermes_cli_info();
-    let current_version = info.as_ref().map(|value| value.version.clone());
+    let http_probe = hermes_backend::probe_status_blocking(None);
+    let installed = http_probe.ok || hermes_backend::resolve_hermes_http_bin().is_some();
+    let current_version = http_probe.version;
 
     if !installed {
         return Ok(SystemHermesStatusSnapshot {
@@ -3527,9 +3454,7 @@ fn inspect_system_hermes_status(
             latest_commit: None,
             latest_version: None,
             update_available: false,
-            message:
-                "Hermes CLI was not found on PATH. Install Hermes manually, then retry the local check."
-                    .to_string(),
+            message: "hermes-http was not found. Build with `cargo build -p hermes-http` or set HERMES_HTTP_BIN.".to_string(),
         });
     }
 
@@ -3542,7 +3467,8 @@ fn inspect_system_hermes_status(
             latest_commit: None,
             latest_version: None,
             update_available: false,
-            message: "Hermes CLI is installed on this machine. Hermes Desktop Community will use that system installation directly.".to_string(),
+            message: "hermes-http backend is available. Rebuild from this repository to update."
+                .to_string(),
         });
     };
 
@@ -3610,7 +3536,7 @@ fn manual_hermes_agent_action_payload(
     config: &UpdateSourceConfig,
     message: String,
 ) -> serde_json::Value {
-    let command = hermes_cli_install_command_for(std::env::consts::OS);
+    let command = "cargo build -p hermes-http".to_string();
     emit_update_progress(
         app,
         serde_json::json!({
@@ -3623,10 +3549,10 @@ fn manual_hermes_agent_action_payload(
     );
 
     let status = inspect_system_hermes_status(config).unwrap_or(SystemHermesStatusSnapshot {
-        installed: resolve_hermes_cli_binary(&active_hermes_root()).is_some(),
+        installed: hermes_backend::resolve_hermes_http_bin().is_some(),
         branch: Some("manual".to_string()),
         current_commit: None,
-        current_version: probe_hermes_cli_info().map(|value| value.version),
+        current_version: hermes_backend::probe_status_blocking(None).version,
         latest_commit: None,
         latest_version: None,
         update_available: false,
@@ -3693,7 +3619,7 @@ fn set_system_hermes_skip_upstream_prompt(skip: bool) -> Result<(), String> {
 }
 
 fn detected_system_hermes_checkout_root() -> Option<PathBuf> {
-    let root = probe_hermes_cli_info()?.project_root?;
+    let root = resolve_update_root();
     if root.join(".git").is_dir() {
         Some(root)
     } else {
@@ -3755,8 +3681,8 @@ fn resolve_hermes_version() -> String {
         return version;
     }
 
-    if let Some(info) = probe_hermes_cli_info() {
-        return info.version;
+    if let Some(version) = hermes_backend::probe_status_blocking(None).version {
+        return version;
     }
 
     env!("CARGO_PKG_VERSION").to_string()
@@ -4408,25 +4334,6 @@ fn packaged_updater_status(
     })
 }
 
-fn resolve_hermes_cli_binary(_update_root: &PathBuf) -> Option<PathBuf> {
-    if let Some(path_candidate) = find_on_path("hermes").map(PathBuf::from) {
-        return Some(path_candidate);
-    }
-
-    if let Some(home_dir) = dirs::home_dir() {
-        let candidate = home_dir.join(".local").join("bin").join(if cfg!(windows) {
-            "hermes.exe"
-        } else {
-            "hermes"
-        });
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-
-    None
-}
-
 fn resolve_current_update_branch(update_root: &PathBuf) -> Option<String> {
     let head = run_git(&["rev-parse", "--abbrev-ref", "HEAD"], update_root).ok()?;
     if head.code != 0 {
@@ -4810,237 +4717,22 @@ fn apply_updates_posix_in_app(
     app: &AppHandle,
     update_root: &PathBuf,
 ) -> Result<serde_json::Value, String> {
-    let Some(hermes) = resolve_hermes_cli_binary(update_root) else {
-        emit_update_progress(
-            app,
-            serde_json::json!({
-                "stage": "manual",
-                "message": "hermes update",
-                "percent": serde_json::Value::Null,
-                "error": serde_json::Value::Null,
-                "at": chrono::Utc::now().timestamp_millis()
-            }),
-        );
-
-        return Ok(serde_json::json!({
-            "ok": true,
-            "manual": true,
-            "command": "hermes update",
-            "hermesRoot": update_root.to_string_lossy().to_string()
-        }));
-    };
-
-    let env = update_command_env(update_root);
-    let branch = resolve_current_update_branch(update_root);
-    let mut update_args = vec!["update", "--yes"];
-    if let Some(branch) = branch.as_deref() {
-        if branch != DEFAULT_UPDATE_BRANCH {
-            update_args.push("--branch");
-            update_args.push(branch);
-        }
-    }
-
     emit_update_progress(
         app,
         serde_json::json!({
-            "stage": "update",
-            "message": "Updating Hermes (git + dependencies)…",
-            "percent": 10,
+            "stage": "manual",
+            "message": "cargo build -p hermes-http",
+            "percent": serde_json::Value::Null,
             "error": serde_json::Value::Null,
             "at": chrono::Utc::now().timestamp_millis()
         }),
     );
-    let updated = run_streamed_update(&hermes, &update_args, update_root, "update", app, &env)?;
-    if updated != 0 {
-        emit_update_progress(
-            app,
-            serde_json::json!({
-                "stage": "error",
-                "message": "hermes update failed.",
-                "percent": serde_json::Value::Null,
-                "error": "update-failed",
-                "at": chrono::Utc::now().timestamp_millis()
-            }),
-        );
-        return Ok(serde_json::json!({
-            "ok": false,
-            "error": "hermes update failed"
-        }));
-    }
-
-    emit_update_progress(
-        app,
-        serde_json::json!({
-            "stage": "rebuild",
-            "message": "Rebuilding the desktop app…",
-            "percent": 60,
-            "error": serde_json::Value::Null,
-            "at": chrono::Utc::now().timestamp_millis()
-        }),
-    );
-    let rebuilt = run_streamed_update(
-        &hermes,
-        &["desktop", "--build-only"],
-        update_root,
-        "rebuild",
-        app,
-        &env,
-    )?;
-    if rebuilt != 0 {
-        emit_update_progress(
-            app,
-            serde_json::json!({
-                "stage": "error",
-                "message": "Backend updated, but the desktop rebuild failed. Restart Hermes to retry.",
-                "percent": serde_json::Value::Null,
-                "error": "rebuild-failed",
-                "at": chrono::Utc::now().timestamp_millis()
-            }),
-        );
-        return Ok(serde_json::json!({
-            "ok": false,
-            "backendUpdated": true,
-            "error": "desktop rebuild failed"
-        }));
-    }
-
-    let rebuilt_app = rebuilt_desktop_app(update_root);
-    let target_app = running_app_bundle();
-
-    if rebuilt_app.is_none() || target_app.is_none() {
-        emit_update_progress(
-            app,
-            serde_json::json!({
-                "stage": "done",
-                "message": "Backend updated. Restart Hermes to load the new version.",
-                "percent": 100,
-                "error": serde_json::Value::Null,
-                "at": chrono::Utc::now().timestamp_millis()
-            }),
-        );
-
-        return Ok(serde_json::json!({
-            "ok": true,
-            "backendUpdated": true,
-            "rebuiltApp": rebuilt_app.map(|path| path.to_string_lossy().to_string())
-        }));
-    }
-
-    let rebuilt_app = rebuilt_app.expect("checked above");
-    let target_app = target_app.expect("checked above");
-
-    emit_update_progress(
-        app,
-        serde_json::json!({
-            "stage": "restart",
-            "message": "Installing the updated app and restarting…",
-            "percent": 95,
-            "error": serde_json::Value::Null,
-            "at": chrono::Utc::now().timestamp_millis()
-        }),
-    );
-
-    let script_path = std::env::temp_dir().join(format!(
-        "hermes-desktop-update-{}-{}.sh",
-        std::process::id(),
-        chrono::Utc::now().timestamp_millis()
-    ));
-    let script = r#"#!/bin/bash
-set -u
-APP_PID="$1"
-SRC="$2"
-DST="$3"
-for _ in $(seq 1 240); do
-  kill -0 "$APP_PID" 2>/dev/null || break
-  sleep 0.5
-done
-if [ "$SRC" != "$DST" ]; then
-  if /usr/bin/ditto "$SRC" "$DST.hermes-update-new"; then
-    rm -rf "$DST.hermes-update-old" 2>/dev/null || true
-    mv "$DST" "$DST.hermes-update-old" 2>/dev/null || rm -rf "$DST"
-    mv "$DST.hermes-update-new" "$DST"
-    rm -rf "$DST.hermes-update-old" 2>/dev/null || true
-  fi
-fi
-/usr/bin/xattr -dr com.apple.quarantine "$DST" 2>/dev/null || true
-/usr/bin/open "$DST"
-"#;
-    if let Err(error) = fs::write(&script_path, script) {
-        emit_posix_update_restart_fallback(app);
-        log::warn!(
-            "Could not write app swap script ({}); rebuilt app remains at {}",
-            error,
-            rebuilt_app.to_string_lossy()
-        );
-        return Ok(posix_update_restart_fallback_payload(Some(
-            rebuilt_app.as_path(),
-        )));
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        let mut permissions = match fs::metadata(&script_path) {
-            Ok(metadata) => metadata.permissions(),
-            Err(error) => {
-                emit_posix_update_restart_fallback(app);
-                log::warn!(
-                    "Could not inspect app swap script permissions ({}); rebuilt app remains at {}",
-                    error,
-                    rebuilt_app.to_string_lossy()
-                );
-                return Ok(posix_update_restart_fallback_payload(Some(
-                    rebuilt_app.as_path(),
-                )));
-            }
-        };
-        permissions.set_mode(0o755);
-        if let Err(error) = fs::set_permissions(&script_path, permissions) {
-            emit_posix_update_restart_fallback(app);
-            log::warn!(
-                "Could not chmod app swap script ({}); rebuilt app remains at {}",
-                error,
-                rebuilt_app.to_string_lossy()
-            );
-            return Ok(posix_update_restart_fallback_payload(Some(
-                rebuilt_app.as_path(),
-            )));
-        }
-    }
-
-    let child = match StdCommand::new("/bin/bash")
-        .arg(&script_path)
-        .arg(std::process::id().to_string())
-        .arg(rebuilt_app.to_string_lossy().to_string())
-        .arg(target_app.to_string_lossy().to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(error) => {
-            emit_posix_update_restart_fallback(app);
-            log::warn!(
-                "Could not launch app swapper ({}); rebuilt app remains at {}",
-                error,
-                rebuilt_app.to_string_lossy()
-            );
-            return Ok(posix_update_restart_fallback_payload(Some(
-                rebuilt_app.as_path(),
-            )));
-        }
-    };
-
-    drop(child);
-    schedule_app_exit(app);
 
     Ok(serde_json::json!({
         "ok": true,
-        "handedOff": true,
-        "rebuiltApp": rebuilt_app.to_string_lossy().to_string(),
-        "targetApp": target_app.to_string_lossy().to_string()
+        "manual": true,
+        "command": "cargo build -p hermes-http",
+        "hermesRoot": update_root.to_string_lossy().to_string()
     }))
 }
 
@@ -6265,6 +5957,42 @@ pub async fn set_preview_shortcut_active(
     Ok(())
 }
 
+async fn ensure_ws_bridge(state: &AppState, ws_url: String) -> Result<Arc<HermesWsBridge>, String> {
+    let mut guard = state.ws_bridge.lock().await;
+    if let Some(bridge) = guard.as_ref() {
+        return Ok(bridge.clone());
+    }
+    let bridge = Arc::new(HermesWsBridge::new(ws_url, state.ws_router.clone()));
+    bridge.connect_with_retry(5).await?;
+    *guard = Some(bridge.clone());
+    Ok(bridge)
+}
+
+#[tauri::command]
+pub async fn subscribe_task_stream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: String,
+    stream_id: Option<String>,
+) -> Result<(), String> {
+    let conn = start_hermes_impl(&app, &state, None).await?;
+    let sid = StreamId::new(stream_id.unwrap_or_else(|| format!("task:{task_id}")));
+    let bridge = ensure_ws_bridge(&state, conn.ws_url).await?;
+    bridge.subscribe_task(sid, task_id).await
+}
+
+#[tauri::command]
+pub async fn cancel_task_stream(
+    state: State<'_, AppState>,
+    stream_id: String,
+) -> Result<(), String> {
+    if let Some(bridge) = state.ws_bridge.lock().await.as_ref() {
+        bridge.cancel_stream(StreamId::new(stream_id)).await
+    } else {
+        Ok(())
+    }
+}
+
 // ============================================================================
 // Version
 // ============================================================================
@@ -7327,92 +7055,8 @@ async fn try_handle_local_session_rename(
         return Ok(None);
     };
 
-    let active_root = active_hermes_root();
-    let Some(hermes) = resolve_hermes_cli_binary(&active_root) else {
-        return Err(
-            "Hermes CLI is installed, but Hermes Desktop Community could not resolve it for session rename."
-                .to_string(),
-        );
-    };
-
-    let env = update_command_env(&active_root);
-    let session_id = rename.session_id.clone();
-    let title = rename.title.clone();
-    let hermes = hermes.clone();
-    let active_root_for_command = active_root.clone();
-
-    let output = tokio::task::spawn_blocking(move || {
-        let mut command = desktop_command(&hermes);
-        command
-            .current_dir(&active_root_for_command)
-            .arg("sessions")
-            .arg("rename")
-            .arg(&session_id)
-            .arg(&title);
-
-        for (key, value) in &env {
-            command.env(key, value);
-        }
-
-        command.output()
-    })
-    .await
-    .map_err(|error| format!("Failed to run Hermes session rename: {}", error))?
-    .map_err(|error| format!("Failed to run Hermes session rename: {}", error))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!(
-                "Hermes session rename exited with status {}",
-                output.status.code().unwrap_or(1)
-            )
-        };
-        return Err(detail);
-    }
-
-    let timeout_ms = resolve_timeout_ms(request.timeout_ms, DEFAULT_FETCH_TIMEOUT_MS);
-    let timeout = std::time::Duration::from_millis(timeout_ms);
-    let client = reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
-        .map_err(|e| format!("Failed to create client: {}", e))?;
-
-    let fallback_title = rename_title_fallback(&rename.title);
-    let detail_url = format!("{}{}", base_url, rename.session_path);
-    let final_title = match client
-        .get(&detail_url)
-        .header("X-Hermes-Session-Token", token)
-        .send()
-        .await
-    {
-        Ok(response) if response.status().is_success() => {
-            let text = response
-                .text()
-                .await
-                .map_err(|e| format!("Failed to read response: {}", e))?;
-            serde_json::from_str::<serde_json::Value>(&text)
-                .ok()
-                .and_then(|value| {
-                    value
-                        .get("title")
-                        .and_then(|title| title.as_str())
-                        .map(|title| title.to_string())
-                })
-                .unwrap_or(fallback_title)
-        }
-        _ => fallback_title,
-    };
-
-    Ok(Some(serde_json::json!({
-        "ok": true,
-        "title": final_title,
-    })))
+    let _ = (rename, base_url, token);
+    Ok(None)
 }
 
 fn parse_hermes_api_response(
@@ -8776,17 +8420,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_hermes_cli_info_extracts_version_and_project_root() {
-        let info = parse_hermes_cli_info(
-            "Hermes Agent v0.14.0 (2026.5.16)\nProject: /tmp/hermes-agent\nPython: 3.11.15\n",
-        )
-        .expect("cli info should parse");
-
-        assert_eq!(info.version, "0.14.0");
-        assert_eq!(info.project_root, Some(PathBuf::from("/tmp/hermes-agent")));
-    }
-
-    #[test]
     fn resolve_hermes_web_dist_dir_returns_dist_when_index_exists() {
         let temp = TempDirGuard::new("hermes-web-dist");
         let dist_dir = temp.path.join("hermes_cli").join("web_dist");
@@ -9003,55 +8636,6 @@ mod tests {
         assert_eq!(desktop_command_creation_flags_for("linux"), 0);
     }
 
-    #[test]
-    fn hermes_cli_guidance_uses_platform_native_install_commands() {
-        assert_eq!(
-            hermes_cli_install_command_for("windows"),
-            "iex (irm https://hermes-agent.nousresearch.com/install.ps1)"
-        );
-        assert_eq!(
-            hermes_cli_install_command_for("darwin"),
-            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
-        );
-        assert_eq!(
-            hermes_cli_install_command_for("linux"),
-            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
-        );
-    }
-
-    #[test]
-    fn missing_hermes_cli_payload_includes_windows_manual_guidance() {
-        let payload =
-            missing_hermes_cli_payload("windows", Path::new("C:/Users/demo/.hermes/hermes-agent"));
-
-        assert_eq!(
-            payload.get("type").and_then(|value| value.as_str()),
-            Some("unsupported-platform")
-        );
-        assert_eq!(
-            payload.get("platform").and_then(|value| value.as_str()),
-            Some("windows")
-        );
-        assert_eq!(
-            payload
-                .get("installCommand")
-                .and_then(|value| value.as_str()),
-            Some("iex (irm https://hermes-agent.nousresearch.com/install.ps1)")
-        );
-        assert_eq!(
-            payload.get("docsUrl").and_then(|value| value.as_str()),
-            Some(DESKTOP_DOCS_URL)
-        );
-        assert_eq!(
-            payload
-                .get("missingDependencies")
-                .and_then(|value| value.as_array())
-                .and_then(|items| items.first())
-                .and_then(|value| value.as_str()),
-            Some("Hermes CLI")
-        );
-    }
-
     #[tokio::test]
     async fn read_dir_filters_hidden_entries_and_sorts_directories_first() {
         let temp = TempDirGuard::new("read-dir");
@@ -9250,72 +8834,6 @@ mod tests {
             builder.get_env("LC_CTYPE").and_then(|value| value.to_str()),
             Some("UTF-8")
         );
-    }
-
-    #[test]
-    fn resolve_hermes_cli_binary_falls_back_to_path() {
-        let _env_lock = lock_test_process_env();
-        let temp = TempDirGuard::new("hermes-cli-path");
-        let bin_dir = temp.path.join("bin");
-        fs::create_dir_all(&bin_dir).expect("bin dir should be created");
-        let hermes = bin_dir.join("hermes");
-        fs::write(&hermes, "#!/bin/sh\n").expect("stub hermes should be written");
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let mut perms = fs::metadata(&hermes)
-                .expect("stub hermes metadata should exist")
-                .permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&hermes, perms).expect("stub hermes should be executable");
-        }
-
-        let original_path = std::env::var_os("PATH").unwrap_or_default();
-        let joined = std::env::join_paths(
-            std::iter::once(bin_dir.clone()).chain(std::env::split_paths(&original_path)),
-        )
-        .expect("PATH should join");
-        let _path = EnvVarGuard::set("PATH", joined);
-
-        let resolved = resolve_hermes_cli_binary(&temp.path).expect("PATH fallback should resolve");
-
-        assert_eq!(resolved, hermes);
-    }
-
-    #[test]
-    #[cfg(not(windows))]
-    fn resolve_hermes_cli_binary_falls_back_to_user_local_bin_when_path_is_missing_it() {
-        let _env_lock = lock_test_process_env();
-        let temp = TempDirGuard::new("hermes-cli-user-local");
-        let home_dir = temp.path.join("home");
-        let local_bin = home_dir.join(".local").join("bin");
-        let empty_bin = temp.path.join("empty-bin");
-        fs::create_dir_all(&local_bin).expect("local bin dir should be created");
-        fs::create_dir_all(&empty_bin).expect("empty bin dir should be created");
-
-        let hermes = local_bin.join("hermes");
-        fs::write(&hermes, "#!/bin/sh\n").expect("stub hermes should be written");
-
-        use std::os::unix::fs::PermissionsExt;
-
-        let mut perms = fs::metadata(&hermes)
-            .expect("stub hermes metadata should exist")
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&hermes, perms).expect("stub hermes should be executable");
-
-        let _home = EnvVarGuard::set("HOME", home_dir.into_os_string());
-        let _path = EnvVarGuard::set(
-            "PATH",
-            std::env::join_paths([empty_bin]).expect("PATH should join"),
-        );
-
-        let resolved = resolve_hermes_cli_binary(&temp.path.join("missing-root"))
-            .expect("user-local hermes should resolve");
-
-        assert_eq!(resolved, hermes);
     }
 
     #[test]

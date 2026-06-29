@@ -63,6 +63,8 @@ pub fn run() {
             oauth_logout_connection_config,
             get_gateway_ws_url,
             start_hermes,
+            subscribe_task_stream,
+            cancel_task_stream,
             // API proxy
             hermes_api,
             local_model_chat_completion,

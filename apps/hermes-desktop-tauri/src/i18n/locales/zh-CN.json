@@ -1,0 +1,9 @@
+{
+  "app": { "name": "Terra" },
+  "task": { "list": "任务", "new": "新建任务" },
+  "vertical": { "picker": "选择垂直领域" },
+  "composer": { "send": "发送", "stop": "停止" },
+  "settings": { "title": "设置" },
+  "billing": { "quota": "配额" },
+  "auth": { "signIn": "登录" }
+}

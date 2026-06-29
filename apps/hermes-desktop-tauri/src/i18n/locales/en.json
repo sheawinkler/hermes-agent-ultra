@@ -1,0 +1,9 @@
+{
+  "app": { "name": "Terra" },
+  "task": { "list": "Tasks", "new": "New task" },
+  "vertical": { "picker": "Choose vertical" },
+  "composer": { "send": "Send", "stop": "Stop" },
+  "settings": { "title": "Settings" },
+  "billing": { "quota": "Quota" },
+  "auth": { "signIn": "Sign in" }
+}
