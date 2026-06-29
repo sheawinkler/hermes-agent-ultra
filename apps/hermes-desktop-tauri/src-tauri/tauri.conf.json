@@ -31,7 +31,11 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* http://[::1]:* ws://127.0.0.1:* ws://localhost:* ws://[::1]:* https://* wss://*; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' asset: http://asset.localhost"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* http://[::1]:* ws://127.0.0.1:* ws://localhost:* ws://[::1]:* https://* wss://*; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' asset: http://asset.localhost",
+      "capabilities": [
+        "default",
+        "desktop"
+      ]
     }
   },
   "bundle": {
@@ -42,8 +46,22 @@
       "deb",
       "nsis"
     ],
+    "resources": [
+      "../installers/windows/install-service.ps1",
+      "../installers/windows/uninstall-service.ps1",
+      "../installers/macos/app.terra.http.plist",
+      "../installers/macos/postinstall.sh"
+    ],
     "macOS": {
-      "infoPlist": "Info.plist"
+      "infoPlist": "Info.plist",
+      "entitlements": "entitlements.plist",
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
     },
     "icon": [
       "icons/32x32.png",

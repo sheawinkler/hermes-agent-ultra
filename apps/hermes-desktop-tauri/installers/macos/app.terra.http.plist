@@ -2,20 +2,24 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>Label</key>
-    <string>app.terra.http</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Applications/Terra.app/Contents/Resources/hermes-http</string>
-    </array>
-    <key>KeepAlive</key>
-    <true/>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HERMES_HTTP_BIND</key>
-        <string>127.0.0.1:8787</string>
-    </dict>
+  <key>Label</key>
+  <string>app.terra.http</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/hermes-http</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${HOME}/Library/Logs/Terra/hermes-http.log</string>
+  <key>StandardErrorPath</key>
+  <string>${HOME}/Library/Logs/Terra/hermes-http.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HERMES_HTTP_ADDR</key>
+    <string>127.0.0.1:8787</string>
+  </dict>
 </dict>
 </plist>

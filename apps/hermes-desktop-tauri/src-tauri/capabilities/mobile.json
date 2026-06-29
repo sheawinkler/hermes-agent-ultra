@@ -1,13 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "Shared Terra desktop/mobile capabilities: webview, events, paths, websocket",
+  "identifier": "mobile",
+  "description": "Mobile shell: restricted IPC set without PTY, native menu, or desktop window APIs",
   "windows": ["main"],
+  "platforms": ["iOS", "android"],
   "permissions": [
     "core:default",
     "core:event:default",
     "core:path:default",
-    "core:webview:allow-internal-toggle-devtools",
     "core:webview:allow-set-webview-zoom",
     "core:window:allow-start-dragging",
     "websocket:default"
