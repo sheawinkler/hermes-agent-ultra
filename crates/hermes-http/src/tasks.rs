@@ -110,6 +110,12 @@ pub async fn create_task(
         .create_and_run(owner, device, req.title, vertical, &instruction)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::task_agent::spawn_task_agent_run(
+        state.clone(),
+        task.clone(),
+        instruction,
+        event.turn_id,
+    );
     Ok(Json(json!({ "task": task, "event": event })))
 }
 
@@ -267,6 +273,12 @@ pub async fn continue_task(
         .turns()
         .bind_instruction_event(tasks.runtime.events(), &mut event, &req.instruction)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::task_agent::spawn_task_agent_run(
+        state.clone(),
+        task,
+        req.instruction.clone(),
+        Some(turn.id),
+    );
     Ok(Json(json!({ "event": event, "turn": turn })))
 }
 

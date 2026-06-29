@@ -66,6 +66,7 @@ pub mod memory_manager;
 pub mod memory_plugins;
 pub mod message_sanitization;
 pub mod model_normalize;
+pub mod modes;
 pub mod nous_rate_guard;
 pub mod oauth;
 pub mod objective_guard;

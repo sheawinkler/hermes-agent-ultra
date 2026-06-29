@@ -5,11 +5,16 @@
 //! Policy HTTP routes are intentionally omitted (Hermes Python does not expose them).
 
 mod billing;
+mod devices;
+mod mcp;
 mod otel;
 mod push;
+mod schedules;
 mod security;
+mod task_agent;
 mod task_ws;
 mod tasks;
+mod voice;
 
 pub use billing::routes as billing_routes;
 pub use otel::init_otel_stub;
@@ -59,6 +64,7 @@ use hermes_gateway::{
     DmManager, Gateway, GatewayRuntimeContext, SessionManager, SessionTeardownContext,
     SessionTeardownHandler,
 };
+use hermes_tasks::CronRuntime;
 use hermes_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -151,6 +157,8 @@ pub struct HttpServerState {
     pub config: Arc<GatewayConfig>,
     pub tool_registry: Arc<ToolRegistry>,
     pub tasks: Option<Arc<tasks::TaskApiState>>,
+    pub devices: devices::DeviceRegistry,
+    pub cron: CronRuntime,
     gateway: Arc<Gateway>,
     outbound: ChatOutboundBuffer,
 }
@@ -369,6 +377,8 @@ impl HttpServerState {
             config: config_arc,
             tool_registry,
             tasks: task_api,
+            devices: devices::DeviceRegistry::default(),
+            cron: CronRuntime::new(),
             gateway,
             outbound,
         })
@@ -554,6 +564,10 @@ pub fn router(state: HttpServerState) -> Router {
         .route("/api/providers/oauth", get(compat_api_oauth_providers))
         .route("/api/ws", get(compat_or_multiplex_ws))
         .merge(tasks::task_routes())
+        .merge(devices::routes())
+        .merge(schedules::routes())
+        .merge(mcp::routes())
+        .merge(voice::routes())
         .merge(push_routes())
         .merge(billing_routes())
         .with_state(state)
@@ -1315,8 +1329,8 @@ async fn compat_api_messaging_platforms() -> impl IntoResponse {
     Json(serde_json::json!([]))
 }
 
-async fn compat_api_cron_jobs() -> impl IntoResponse {
-    Json(serde_json::json!([]))
+async fn compat_api_cron_jobs(State(state): State<HttpServerState>) -> impl IntoResponse {
+    schedules::compat_cron_jobs(State(state)).await
 }
 
 async fn compat_api_analytics() -> impl IntoResponse {
