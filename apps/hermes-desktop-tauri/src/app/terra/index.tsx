@@ -1,5 +1,8 @@
 import { useStore } from '@nanostores/react'
 import { useCallback, useState } from 'react'
+import { Link, Route, Routes } from 'react-router-dom'
+
+import TerraSettings from '@/app/terra/settings'
 
 import { ApprovalModal } from '@/components/approval/ApprovalModal'
 import { VerticalPicker } from '@/components/home/VerticalPicker'
@@ -94,8 +97,11 @@ export default function TerraApp() {
     document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  return (
+  const shell = (
     <div className="terra-shell">
+      <header className="terra-shell__top">
+        <Link to="/terra/settings">Settings</Link>
+      </header>
       <TaskListRail
         tasks={tasksQuery.data?.tasks ?? []}
         selectedId={activeTaskId}
@@ -156,5 +162,22 @@ export default function TerraApp() {
         onClose={() => undefined}
       />
     </div>
+  )
+
+  return (
+    <Routes>
+      <Route
+        path="settings"
+        element={
+          <div className="terra-shell">
+            <nav className="terra-shell__nav">
+              <Link to="/terra">← Tasks</Link>
+            </nav>
+            <TerraSettings />
+          </div>
+        }
+      />
+      <Route path="*" element={shell} />
+    </Routes>
   )
 }
