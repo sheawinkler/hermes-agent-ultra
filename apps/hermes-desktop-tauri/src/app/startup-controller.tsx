@@ -265,7 +265,17 @@ export function StartupController() {
 
   useEffect(() => {
     if (!cacheFastPath) return
-    return scheduleBackgroundPrewarm({})
+    return scheduleBackgroundPrewarm({
+      fetchAccount: async () => {
+        await fetch('/v1/billing/tier-mapping').catch(() => undefined)
+      },
+      fetchActiveTasks: async () => {
+        await fetch('/api/tasks?limit=20').catch(() => undefined)
+      },
+      fetchProviderPrefs: async () => {
+        await fetch('/api/config').catch(() => undefined)
+      }
+    })
   }, [cacheFastPath])
 
   const [phase, setPhase] = useState<StartupPhase>('mode_gate')
