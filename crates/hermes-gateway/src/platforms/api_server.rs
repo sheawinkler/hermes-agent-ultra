@@ -611,6 +611,22 @@ impl PlatformAdapter for ApiServerAdapter {
         Ok(())
     }
 
+    async fn send_or_update_status(
+        &self,
+        chat_id: &str,
+        status_key: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
+        debug!(
+            chat_id = chat_id,
+            status_key = status_key,
+            text = text,
+            "API server status update ignored for HTTP response mailbox"
+        );
+        Ok(())
+    }
+
     async fn edit_message(
         &self,
         chat_id: &str,

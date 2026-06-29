@@ -970,6 +970,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         code_index_max_symbols: config.agent.code_index_max_symbols,
         lsp_context_enabled: config.agent.lsp_context_enabled,
         lsp_context_max_chars: config.agent.lsp_context_max_chars,
+        preflight_context_compress: config.agent.preflight_context_compress,
         ..AgentConfig::default()
     }
 }
@@ -1126,6 +1127,16 @@ mod tests {
                 .and_then(|cfg| cfg.request_timeout_seconds),
             Some(45.5)
         );
+    }
+
+    #[test]
+    fn build_agent_config_maps_preflight_context_compress() {
+        let mut config = GatewayConfig::default();
+        config.agent.preflight_context_compress = false;
+
+        let agent_config = build_agent_config(&config, "openai:dynamic");
+
+        assert!(!agent_config.preflight_context_compress);
     }
 
     #[test]

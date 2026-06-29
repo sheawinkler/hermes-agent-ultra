@@ -548,6 +548,44 @@ async fn responses_endpoint_accepts_input_and_quoted_false_without_storing() {
 }
 
 #[tokio::test]
+async fn status_updates_do_not_complete_pending_http_mailbox() {
+    let adapter = ApiServerAdapter::new(ApiServerConfig::default());
+    let (reply_tx, mut reply_rx) = mpsc::channel(1);
+    adapter
+        .mailbox
+        .write()
+        .await
+        .pending
+        .insert("api-session".to_string(), reply_tx);
+
+    adapter
+        .send_or_update_status(
+            "api-session",
+            "lifecycle",
+            "Preflight compression check: 6% context usage, no compression needed",
+            None,
+        )
+        .await
+        .expect("status update");
+
+    let status_result =
+        tokio::time::timeout(std::time::Duration::from_millis(20), reply_rx.recv()).await;
+    assert!(
+        status_result.is_err(),
+        "status update must not satisfy API response"
+    );
+
+    adapter
+        .send_message("api-session", "final assistant reply", None)
+        .await
+        .expect("final reply");
+    let final_reply = tokio::time::timeout(std::time::Duration::from_secs(1), reply_rx.recv())
+        .await
+        .expect("final timeout");
+    assert_eq!(final_reply.as_deref(), Some("final assistant reply"));
+}
+
+#[tokio::test]
 async fn api_jobs_endpoint_crud_filters_and_actions() {
     let (tx, _rx) = mpsc::channel(1);
     let state = ApiTestState::new(tx);
