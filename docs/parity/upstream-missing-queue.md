@@ -1,8 +1,8 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-30T01:23:08.771275+00:00`
+Generated: `2026-06-30T03:26:00.450945+00:00`
 
-- Range: `origin/main..upstream/main`; total commits tracked: `7651`.
+- Range: `origin/main..upstream/main`; total commits tracked: `7656`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
@@ -11,15 +11,15 @@ Generated: `2026-06-30T01:23:08.771275+00:00`
 | #22 | GPAR-03 UX parity | 1003 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 503 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 25 |
-| #25 | GPAR-06 packaging/docs/install parity | 162 |
-| #26 | GPAR-07 upstream queue backfill | 2333 |
+| #25 | GPAR-06 packaging/docs/install parity | 165 |
+| #26 | GPAR-07 upstream queue backfill | 2335 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 97 |
 | pending | 35 |
-| ported | 523 |
-| superseded | 6996 |
+| ported | 527 |
+| superseded | 6997 |
 
 ## First 100 Pending Commits
 
@@ -38,7 +38,6 @@ Generated: `2026-06-30T01:23:08.771275+00:00`
 | `d3d621f7c38b` | #20 | revert(windows): roll back terminal-popup PRs #53791 #53810 #53829 (#53853) |
 | `163cb24d45d8` | #22 | feat(moa): render reference-model blocks in TUI and desktop, not just CLI (#53855) |
 | `a94f657a5059` | #20 | fix(tui): route completion RPCs to the pool so they can't freeze the TUI (#53895) |
-| `9c6229ce249e` | #20 | fix(security): centralize credential-safe subprocess env (#29157) |
 | `d43e0cf304a1` | #20 | fix(agent): config-driven intent-ack continuation for all api_modes (#27881) (#53943) |
 | `a8c862900b9c` | #20 | fix(tui): sanitize replay history on WebUI/TUI session resume (#29086) (#53939) |
 | `fde1c8570ffe` | #20 | fix(tui_gateway): suppress WS peer-hangup teardown error flood (#50005) (#54126) |
@@ -52,11 +51,12 @@ Generated: `2026-06-30T01:23:08.771275+00:00`
 | `e5d22ab80d97` | #20 | fix(daytona): quote single-upload mkdir parent path (#54440) |
 | `ee22d853eb13` | #26 | fix(windows): hide pdftoppm console flash on PDF attach |
 | `520212cc593d` | #26 | feat(desktop): stream agent terminal output live instead of polling |
-| `f1cbe4308f54` | #23 | fix(gateway): log error-notification failures instead of silently swallowing (#54472) |
 | `e117cfdff08b` | #20 | feat(desktop): live agent terminals + agent-driven tab close |
 | `adacb16d6243` | #26 | fix(desktop): make agent terminal tabs fully readable |
 | `dff491a2b993` | #22 | feat(cli): add headless `hermes serve` backend; desktop no longer launches `dashboard` |
 | `476875acb9f0` | #22 | Add dashboard backup upload and download |
-| `34e616e778d0` | #22 | feat(slack): nudge stale installs to add mpim scopes; mark message.mpim required |
 | `fd324562d3ad` | #20 | feat(desktop): add context usage breakdown popover |
-| `f3d2dfbec670` | #20 | fix(dashboard_auth): allow any http:// host in self-hosted OIDC redirect_uri (#55099) |
+| `808ba82125e2` | #25 | feat(ci): add CI timing report |
+| `66ba9e06d925` | #25 | change(ci): remove lint PR comment |
+| `cca8b4ef4e3f` | #25 | fix(ci): unify amd64/arm64 docker pipelines |
+| `41c85fb9469b` | #26 | fix(agents.md): fix documentation on subprocess isolation in tests |

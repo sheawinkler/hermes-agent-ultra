@@ -8,6 +8,7 @@ pub struct SlackAdapter {
     config: SlackConfig,
     client: Client,
     stop_signal: Arc<Notify>,
+    group_dm_scope_warned: Mutex<BTreeSet<String>>,
 }
 
 impl SlackAdapter {
@@ -23,6 +24,7 @@ impl SlackAdapter {
             config,
             client,
             stop_signal: Arc::new(Notify::new()),
+            group_dm_scope_warned: Mutex::new(BTreeSet::new()),
         })
     }
 
@@ -233,6 +235,67 @@ impl SlackAdapter {
             .and_then(|v| v.as_str())
             .map(String::from)
             .ok_or_else(|| GatewayError::ConnectionFailed("No URL in Socket Mode response".into()))
+    }
+
+    pub(crate) async fn warn_if_missing_group_dm_scopes_from_auth_test(
+        &self,
+        base_url: &str,
+    ) -> Result<bool, GatewayError> {
+        let resp = self
+            .client
+            .post(&format!("{}/auth.test", base_url.trim_end_matches('/')))
+            .header("Authorization", format!("Bearer {}", self.config.token))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .send()
+            .await
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Slack auth.test failed: {e}")))?;
+        let scopes = resp
+            .headers()
+            .get("x-oauth-scopes")
+            .or_else(|| resp.headers().get("X-OAuth-Scopes"))
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let body: SlackAuthTestResponse = resp.json().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to parse Slack auth.test response: {e}"))
+        })?;
+        if !body.ok {
+            return Err(GatewayError::Auth(format!(
+                "Slack auth.test error: {}",
+                body.error.unwrap_or_else(|| "unknown".into())
+            )));
+        }
+        Ok(self.warn_if_missing_group_dm_scopes(
+            &scopes,
+            body.team.as_deref().or(body.team_id.as_deref()),
+        ))
+    }
+
+    pub(crate) fn warn_if_missing_group_dm_scopes(
+        &self,
+        scopes_header: &str,
+        team_name: Option<&str>,
+    ) -> bool {
+        let granted = parse_slack_scope_header(scopes_header);
+        if !granted.contains("im:history") || granted.contains("mpim:history") {
+            return false;
+        }
+        let team_key = team_name
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("this workspace")
+            .to_string();
+        let Ok(mut warned) = self.group_dm_scope_warned.lock() else {
+            return false;
+        };
+        if !warned.insert(team_key.clone()) {
+            return false;
+        }
+        warn!(
+            workspace = %team_key,
+            "Slack Group DMs will not work: the app is missing `mpim:history` scope and `message.mpim` event subscription. Add `mpim:history` and `mpim:read` to bot scopes, add `message.mpim` to event subscriptions, then reinstall the app to the workspace."
+        );
+        true
     }
 
     /// Parse a Socket Mode envelope into an IncomingSlackMessage.
@@ -584,4 +647,3 @@ impl SlackAdapter {
         Ok(result)
     }
 }
-

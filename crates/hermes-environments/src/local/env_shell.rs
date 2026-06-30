@@ -241,87 +241,11 @@ fn resolve_path(input: &str) -> Result<PathBuf, AgentError> {
     Ok(PathBuf::from(input))
 }
 
-const SUBPROCESS_ENV_BLOCKLIST_EXACT: &[&str] = &[
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_TOKEN",
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "BROWSERBASE_PROJECT_ID",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "COHERE_API_KEY",
-    "DAYTONA_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "DISCORD_FREE_RESPONSE_CHANNELS",
-    "DISCORD_HOME_CHANNEL",
-    "DISCORD_HOME_CHANNEL_NAME",
-    "DISCORD_REQUIRE_MENTION",
-    "EMAIL_ADDRESS",
-    "EMAIL_HOME_ADDRESS",
-    "EMAIL_HOME_ADDRESS_NAME",
-    "EMAIL_IMAP_HOST",
-    "EMAIL_PASSWORD",
-    "EMAIL_SMTP_HOST",
-    "ELEVENLABS_API_KEY",
-    "FIRECRAWL_API_KEY",
-    "FIREWORKS_API_KEY",
-    "GATEWAY_ALLOW_ALL_USERS",
-    "GATEWAY_ALLOWED_USERS",
-    "GH_TOKEN",
-    "GITHUB_APP_ID",
-    "GITHUB_APP_INSTALLATION_ID",
-    "GITHUB_APP_PRIVATE_KEY_PATH",
-    "GITHUB_TOKEN",
-    "GLM_API_KEY",
-    "GOOGLE_API_KEY",
-    "GROQ_API_KEY",
-    "HASS_TOKEN",
-    "HASS_URL",
-    "HELICONE_API_KEY",
-    "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
-    "HERMES_POLICY_ADMIN_TOKEN",
-    "KIMI_API_KEY",
-    "LLM_MODEL",
-    "MINIMAX_API_KEY",
-    "MINIMAX_CN_API_KEY",
-    "MISTRAL_API_KEY",
-    "MODAL_TOKEN_ID",
-    "MODAL_TOKEN_SECRET",
-    "NVIDIA_API_KEY",
-    "OPENAI_API_KEY",
-    "OPENAI_BASE_URL",
-    "OPENROUTER_API_KEY",
-    "PERPLEXITY_API_KEY",
-    "SIGNAL_ACCOUNT",
-    "SIGNAL_ALLOWED_USERS",
-    "SIGNAL_GROUP_ALLOWED_USERS",
-    "SIGNAL_HOME_CHANNEL",
-    "SIGNAL_HOME_CHANNEL_NAME",
-    "SIGNAL_HTTP_URL",
-    "SIGNAL_IGNORE_STORIES",
-    "SLACK_ALLOWED_USERS",
-    "SLACK_APP_TOKEN",
-    "SLACK_HOME_CHANNEL",
-    "SLACK_HOME_CHANNEL_NAME",
-    "TELEGRAM_BOT_TOKEN",
-    "TELEGRAM_HOME_CHANNEL",
-    "TELEGRAM_HOME_CHANNEL_NAME",
-    "TOGETHER_API_KEY",
-    "WHATSAPP_ALLOWED_USERS",
-    "WHATSAPP_ENABLED",
-    "WHATSAPP_MODE",
-    "XAI_API_KEY",
-    "ZAI_API_KEY",
-    "Z_AI_API_KEY",
-];
-
-const SUBPROCESS_ENV_BLOCKLIST_PREFIXES: &[&str] = &[
-    "TOOL_GATEWAY_",
-    "HERMES_MANAGED_TOOL_GATEWAY_",
-    "HERMES_GATEWAY_",
-    "HERMES_HTTP_",
-];
-
-const SUBPROCESS_ENV_FORCE_PREFIX: &str = "_HERMES_FORCE_";
-const SUBPROCESS_ENV_PASSTHROUGH_VAR: &str = "HERMES_SUBPROCESS_ENV_PASSTHROUGH";
+use hermes_core::subprocess_env::{
+    should_strip_subprocess_env_key, SUBPROCESS_ENV_BLOCKLIST_EXACT,
+    SUBPROCESS_ENV_BLOCKLIST_PREFIXES, SUBPROCESS_ENV_FORCE_PREFIX,
+    SUBPROCESS_ENV_PASSTHROUGH_VAR,
+};
 
 const SANE_PATH_ENTRIES: &[&str] = &[
     "/usr/local/bin",
@@ -334,10 +258,7 @@ const SANE_PATH_ENTRIES: &[&str] = &[
 ];
 
 fn should_strip_subprocess_env(key: &str) -> bool {
-    SUBPROCESS_ENV_BLOCKLIST_EXACT.contains(&key)
-        || SUBPROCESS_ENV_BLOCKLIST_PREFIXES
-            .iter()
-            .any(|prefix| key.starts_with(prefix))
+    should_strip_subprocess_env_key(key, false)
 }
 
 fn normalize_env_passthrough_name(value: &str) -> Option<String> {
@@ -853,4 +774,3 @@ fn last_top_level_chain_operator(line: &str, stop: usize) -> Option<ChainOperato
     }
     last
 }
-

@@ -248,7 +248,7 @@
       "unverified_cases": 0
     }
   },
-  "generated_at_utc": "2026-06-30T01:23:08.904982+00:00",
+  "generated_at_utc": "2026-06-30T03:26:00.619065+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -300,8 +300,8 @@
     "by_disposition": {
       "mirrored": 97,
       "pending": 35,
-      "ported": 523,
-      "superseded": 6996
+      "ported": 527,
+      "superseded": 6997
     },
     "by_target_ticket": {
       "20": 3494,
@@ -309,12 +309,12 @@
       "22": 1003,
       "23": 503,
       "24": 25,
-      "25": 162,
-      "26": 2333
+      "25": 165,
+      "26": 2335
     },
     "overrides_path": "docs/parity/queue-overrides.json",
     "patch_equivalent_count": 6,
-    "total_commits": 7651
+    "total_commits": 7656
   },
   "release_gate": {
     "checks": [
