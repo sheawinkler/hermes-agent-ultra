@@ -817,6 +817,29 @@ fn process_stream_lane_event(app: &mut App, state: &mut TuiState, event: Event) 
                                     state.append_live_thinking(text);
                                 }
                             }
+                            "moa_reference" => {
+                                let label = extra
+                                    .get("label")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("reference")
+                                    .trim();
+                                let text = extra
+                                    .get("text")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .trim();
+                                let index = extra.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let count = extra.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+                                if !text.is_empty() {
+                                    let heading = if index > 0 && count > 0 {
+                                        format!("MoA reference {index}/{count} {label}")
+                                    } else {
+                                        format!("MoA reference {label}")
+                                    };
+                                    state.push_activity(heading.clone());
+                                    state.append_live_thinking(&format!("{heading}: {text}"));
+                                }
+                            }
                             _ => {}
                         }
                     }

@@ -56,6 +56,39 @@ impl App {
         self.run_agent().await
     }
 
+    pub(crate) async fn submit_moa_oneshot(&mut self, raw: &str) -> Result<(), AgentError> {
+        let prompt = raw.trim();
+        if prompt.is_empty() {
+            return Err(AgentError::Config("MoA prompt cannot be empty".to_string()));
+        }
+
+        let restore_model = self.current_model.clone();
+        let moa_model = format!("{MOA_PROVIDER}:{MOA_DEFAULT_PRESET}");
+        self.try_switch_model(&moa_model)?;
+        Self::emit_lifecycle_event(
+            &self.stream_handle_shared,
+            format!("MoA one-shot armed via {moa_model}; prior model will be restored"),
+        );
+
+        let run_result = self.submit_user_message(prompt).await;
+        let restore_result = if self.current_model != restore_model {
+            self.try_switch_model(&restore_model)
+        } else {
+            Ok(())
+        };
+
+        match (run_result, restore_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(run_err), Ok(())) => Err(run_err),
+            (Ok(()), Err(restore_err)) => Err(AgentError::Config(format!(
+                "MoA one-shot completed but failed to restore prior model `{restore_model}`: {restore_err}"
+            ))),
+            (Err(run_err), Err(restore_err)) => Err(AgentError::Config(format!(
+                "MoA one-shot failed: {run_err}; also failed to restore prior model `{restore_model}`: {restore_err}"
+            ))),
+        }
+    }
+
     pub fn queue_next_turn_system_note(&mut self, note: String) {
         let trimmed = note.trim();
         if !trimmed.is_empty() {

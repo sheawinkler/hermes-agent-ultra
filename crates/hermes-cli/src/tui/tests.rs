@@ -2,7 +2,9 @@
 mod tests {
     use super::*;
     use crate::test_env_lock;
+    use clap::Parser;
     use hermes_core::Message;
+    use std::path::Path;
     use unicode_width::UnicodeWidthStr;
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -22,6 +24,23 @@ mod tests {
         fn drop(&mut self) {
             crate::commands::set_reasoning_full(false);
         }
+    }
+
+    fn build_test_app(home: &Path) -> App {
+        let config_dir = home.join("config");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        let cli = crate::cli::Cli::try_parse_from(vec![
+            "hermes".to_string(),
+            "-C".to_string(),
+            config_dir.display().to_string(),
+            "--ignore-user-config".to_string(),
+            "--ignore-rules".to_string(),
+        ])
+        .expect("parse cli");
+        tokio::runtime::Runtime::new()
+            .expect("tokio runtime")
+            .block_on(App::new(cli))
+            .expect("build app")
     }
 
     #[test]
@@ -330,6 +349,41 @@ mod tests {
             .recent_activity
             .last()
             .is_some_and(|line| line.contains("phase 42%")));
+    }
+
+    #[test]
+    fn test_moa_reference_event_updates_activity_and_thinking() {
+        let _guard = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut app = build_test_app(tmp.path());
+        let mut state = TuiState::default();
+        state.begin_processing_cycle("moa:default");
+        let chunk = StreamChunk {
+            delta: Some(hermes_core::StreamDelta {
+                content: None,
+                tool_calls: None,
+                extra: Some(serde_json::json!({
+                    "ui_event": "moa_reference",
+                    "index": 1,
+                    "count": 2,
+                    "label": "ref-a",
+                    "text": "first reference answer"
+                })),
+            }),
+            finish_reason: None,
+            usage: None,
+        };
+
+        assert!(process_stream_lane_event(
+            &mut app,
+            &mut state,
+            Event::StreamChunk(chunk)
+        ));
+        assert!(state
+            .recent_activity
+            .iter()
+            .any(|line| line.contains("MoA reference 1/2 ref-a")));
+        assert!(state.live_thinking.contains("first reference answer"));
     }
 
     #[test]

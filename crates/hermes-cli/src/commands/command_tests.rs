@@ -618,6 +618,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn moa_without_prompt_is_usage_only() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        let before_model = app.current_model.clone();
+
+        let result = handle_slash_command(&mut app, "/moa", &[])
+            .await
+            .expect("moa usage command");
+
+        assert_eq!(result, CommandResult::Handled);
+        assert_eq!(app.current_model, before_model);
+        let text = latest_ui_assistant_text(&app);
+        assert!(text.contains("Usage: /moa <prompt>"));
+        assert!(text.contains("Use /model to switch"));
+    }
+
+    #[tokio::test]
     async fn reasoning_full_and_clamp_commands_update_mode_and_status() {
         let _guard = env_test_lock();
         let _reasoning_guard = ReasoningFullResetGuard::new();

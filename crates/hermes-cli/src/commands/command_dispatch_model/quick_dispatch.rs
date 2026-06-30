@@ -207,6 +207,7 @@ async fn dispatch_slash_command(
         "/objective" => handle_objective_command(app, args),
         "/claims" => handle_claims_command(app, args),
         "/quorum" => handle_quorum_command(app, args).await,
+        "/moa" => handle_moa_command(app, args).await,
         "/swarm" => handle_swarm_command(app, args).await,
         "/simulate" => handle_simulate_command(app, args),
         "/specpatch" => handle_specpatch_command(app, args).await,
@@ -330,6 +331,20 @@ async fn dispatch_slash_command(
             Ok(CommandResult::Handled)
         }
     }
+}
+
+async fn handle_moa_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let prompt = args.join(" ");
+    if prompt.trim().is_empty() {
+        emit_command_output(
+            app,
+            "Usage: /moa <prompt>\nRuns one prompt through moa:default and restores your prior model. Use /model to switch to a MoA preset for the session.",
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    app.submit_moa_oneshot(&prompt).await?;
+    Ok(CommandResult::Handled)
 }
 
 fn resolve_cli_skill_slash_command(

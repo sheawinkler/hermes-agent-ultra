@@ -19,6 +19,14 @@ pub struct OpenAiVisionBackend {
     model: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VisionEndpointConfig {
+    provider: String,
+    api_key: String,
+    base_url: String,
+    model: String,
+}
+
 impl OpenAiVisionBackend {
     pub fn new(api_key: String, base_url: String, model: String) -> Self {
         Self {
@@ -30,23 +38,8 @@ impl OpenAiVisionBackend {
     }
 
     pub fn from_env() -> Result<Self, ToolError> {
-        let api_key = std::env::var("HERMES_OPENAI_API_KEY")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .ok_or_else(|| {
-                ToolError::ExecutionFailed(
-                    "HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) not set".into(),
-                )
-            })?;
-        let base_url = std::env::var("OPENAI_BASE_URL")
-            .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-        let model = std::env::var("AUXILIARY_VISION_MODEL")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .or_else(|| std::env::var("VISION_MODEL").ok())
-            .unwrap_or_else(|| "gpt-4o".to_string());
-        Ok(Self::new(api_key, base_url, model))
+        let cfg = VisionEndpointConfig::from_env()?;
+        Ok(Self::new(cfg.api_key, cfg.base_url, cfg.model))
     }
 
     async fn encode_image_if_local(&self, image_url: &str) -> Result<Value, ToolError> {
@@ -70,6 +63,120 @@ impl OpenAiVisionBackend {
             }))
         }
     }
+}
+
+impl VisionEndpointConfig {
+    fn from_env() -> Result<Self, ToolError> {
+        let explicit_base_url = env_nonempty(&["AUXILIARY_VISION_BASE_URL", "VISION_BASE_URL"]);
+        let provider = env_nonempty(&["AUXILIARY_VISION_PROVIDER", "VISION_PROVIDER"])
+            .unwrap_or_else(|| {
+                if explicit_base_url.is_some() {
+                    "custom".to_string()
+                } else {
+                    "openai".to_string()
+                }
+            });
+        let provider = canonical_vision_provider(&provider);
+        let base_url = explicit_base_url
+            .or_else(|| {
+                if provider == "openai" {
+                    env_nonempty(&["OPENAI_BASE_URL"])
+                } else {
+                    None
+                }
+            })
+            .or_else(|| default_vision_base_url(&provider).map(str::to_string))
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed(format!(
+                    "Unsupported vision provider `{provider}`; set AUXILIARY_VISION_BASE_URL for OpenAI-compatible custom endpoints"
+                ))
+            })?;
+        let api_key = env_nonempty(&["AUXILIARY_VISION_API_KEY", "VISION_API_KEY"])
+            .or_else(|| provider_vision_api_key(&provider))
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed(format!(
+                    "No API key configured for vision provider `{provider}`; set AUXILIARY_VISION_API_KEY or the provider-specific key"
+                ))
+            })?;
+        let model = env_nonempty(&["AUXILIARY_VISION_MODEL", "VISION_MODEL"])
+            .or_else(|| default_vision_model(&provider).map(str::to_string))
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed(format!(
+                    "No vision model configured for provider `{provider}`; set AUXILIARY_VISION_MODEL"
+                ))
+            })?;
+        Ok(Self {
+            provider,
+            api_key,
+            base_url: base_url.trim_end_matches('/').to_string(),
+            model,
+        })
+    }
+}
+
+fn env_nonempty(keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        std::env::var(key)
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    })
+}
+
+fn canonical_vision_provider(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+        "openrouter" | "open-router" => "openrouter".to_string(),
+        "nous" | "nousresearch" | "nous-research" => "nous".to_string(),
+        "google" | "google-ai-studio" | "google-gemini" => "gemini".to_string(),
+        "custom" | "openai-compatible" | "openai-compatible-endpoint" => "custom".to_string(),
+        "x-ai" | "grok" => "xai".to_string(),
+        "z-ai" | "glm" => "zai".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn default_vision_base_url(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("https://api.openai.com/v1"),
+        "openrouter" => Some("https://openrouter.ai/api/v1"),
+        "nous" => Some("https://inference-api.nousresearch.com/v1"),
+        "gemini" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
+        "xai" => Some("https://api.x.ai/v1"),
+        "zai" => Some("https://api.z.ai/api/paas/v4"),
+        "gmi" => Some("https://api.gmi-serving.com/v1"),
+        "huggingface" => Some("https://router.huggingface.co/v1"),
+        "custom" => None,
+        _ => None,
+    }
+}
+
+fn default_vision_model(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" | "custom" => Some("gpt-4o"),
+        "openrouter" => Some("openai/gpt-4o"),
+        "nous" => Some("openai/gpt-4o"),
+        "gemini" => Some("gemini-2.5-flash"),
+        "xai" => Some("grok-2-vision-1212"),
+        "zai" => Some("glm-4.5v"),
+        "gmi" => Some("google/gemini-2.5-flash"),
+        "huggingface" => None,
+        _ => None,
+    }
+}
+
+fn provider_vision_api_key(provider: &str) -> Option<String> {
+    let keys: &[&str] = match provider {
+        "openai" | "custom" => &["HERMES_OPENAI_API_KEY", "OPENAI_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        "nous" => &["NOUS_API_KEY", "HERMES_MOA_API_KEY"],
+        "gemini" => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "xai" => &["XAI_API_KEY"],
+        "zai" => &["GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"],
+        "gmi" => &["GMI_API_KEY"],
+        "huggingface" => &["HF_TOKEN", "HUGGINGFACE_API_KEY"],
+        _ => &[],
+    };
+    env_nonempty(keys)
 }
 
 pub(crate) fn determine_image_mime_type(path: &Path) -> &'static str {
@@ -200,6 +307,36 @@ impl VisionBackend for OpenAiVisionBackend {
 mod tests {
     use super::*;
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvGuard {
+        previous: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        fn clear(keys: &[&'static str]) -> Self {
+            let previous = keys
+                .iter()
+                .map(|key| (*key, std::env::var(key).ok()))
+                .collect::<Vec<_>>();
+            for key in keys {
+                std::env::remove_var(key);
+            }
+            Self { previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.previous.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn image_mime_type_matches_upstream_defaults() {
         assert_eq!(
@@ -268,5 +405,80 @@ mod tests {
             })),
             "The page shows a login form."
         );
+    }
+
+    #[test]
+    fn vision_endpoint_defaults_to_legacy_openai_env() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let keys = [
+            "AUXILIARY_VISION_PROVIDER",
+            "AUXILIARY_VISION_BASE_URL",
+            "AUXILIARY_VISION_API_KEY",
+            "AUXILIARY_VISION_MODEL",
+            "VISION_PROVIDER",
+            "VISION_BASE_URL",
+            "VISION_API_KEY",
+            "VISION_MODEL",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+        ];
+        let _guard = EnvGuard::clear(&keys);
+        std::env::set_var("HERMES_OPENAI_API_KEY", "sk-openai");
+        std::env::set_var("OPENAI_BASE_URL", "https://openai.example/v1/");
+
+        let cfg = VisionEndpointConfig::from_env().expect("vision config");
+
+        assert_eq!(cfg.provider, "openai");
+        assert_eq!(cfg.api_key, "sk-openai");
+        assert_eq!(cfg.base_url, "https://openai.example/v1");
+        assert_eq!(cfg.model, "gpt-4o");
+    }
+
+    #[test]
+    fn vision_endpoint_accepts_any_openai_compatible_provider_model() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let keys = [
+            "AUXILIARY_VISION_PROVIDER",
+            "AUXILIARY_VISION_BASE_URL",
+            "AUXILIARY_VISION_API_KEY",
+            "AUXILIARY_VISION_MODEL",
+            "OPENROUTER_API_KEY",
+        ];
+        let _guard = EnvGuard::clear(&keys);
+        std::env::set_var("AUXILIARY_VISION_PROVIDER", "openrouter");
+        std::env::set_var("AUXILIARY_VISION_MODEL", "anthropic/claude-opus-4.8");
+        std::env::set_var("OPENROUTER_API_KEY", "sk-or");
+
+        let cfg = VisionEndpointConfig::from_env().expect("vision config");
+
+        assert_eq!(cfg.provider, "openrouter");
+        assert_eq!(cfg.api_key, "sk-or");
+        assert_eq!(cfg.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(cfg.model, "anthropic/claude-opus-4.8");
+    }
+
+    #[test]
+    fn vision_endpoint_base_url_promotes_custom_provider() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let keys = [
+            "AUXILIARY_VISION_PROVIDER",
+            "AUXILIARY_VISION_BASE_URL",
+            "AUXILIARY_VISION_API_KEY",
+            "AUXILIARY_VISION_MODEL",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+        ];
+        let _guard = EnvGuard::clear(&keys);
+        std::env::set_var("AUXILIARY_VISION_BASE_URL", "https://vision.local/v1/");
+        std::env::set_var("AUXILIARY_VISION_API_KEY", "sk-custom");
+        std::env::set_var("AUXILIARY_VISION_MODEL", "local-vision-model");
+
+        let cfg = VisionEndpointConfig::from_env().expect("vision config");
+
+        assert_eq!(cfg.provider, "custom");
+        assert_eq!(cfg.api_key, "sk-custom");
+        assert_eq!(cfg.base_url, "https://vision.local/v1");
+        assert_eq!(cfg.model, "local-vision-model");
     }
 }

@@ -240,9 +240,18 @@ impl App {
                     duration_ms: started.elapsed().as_millis() as u64,
                     total_turns: combined_turns,
                     tool_errors: combined_tool_errors,
-                    output,
+                    output: output.clone(),
                     error,
                 });
+                if status == "ok" {
+                    Self::emit_moa_reference_event(
+                        &self.stream_handle_shared,
+                        display_index,
+                        voter_models.len(),
+                        model,
+                        &output,
+                    );
+                }
             } else {
                 let err_text = last_err
                     .as_ref()

@@ -183,6 +183,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "Optional multi-voter deep-reasoning mode (`status|on|off|models|run`)",
     ),
     (
+        "/moa",
+        "Run one prompt through the default Mixture of Agents preset, then restore your model",
+    ),
+    (
         "/swarm",
         "Swarm orchestration surface (`status|plan|run|cancel|artifact`) with quorum-compatible controls",
     ),

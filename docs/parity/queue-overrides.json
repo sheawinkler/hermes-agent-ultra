@@ -6683,6 +6683,21 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream fix targets a Python/TUI pdftoppm subprocess. Hermes Agent Ultra has no Rust pdftoppm PDF attach subprocess surface; the broader Rust helper subprocess chokepoint now covers actual shipped helper spawns that can flash on Windows."
+    },
+    "50f685521734237faf0d902fa7d347492d9ea96a": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: /moa is a one-shot slash command that requires a prompt, routes exactly one turn through the default virtual MoA preset, preserves the model-picker path for sticky moa:default selection, and restores the prior model after the turn even when inference fails. Covered by CLI command usage and app one-shot restore tests."
+    },
+    "163cb24d45d83e551d65da74678c191ceabecd5c": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: MoA/quorum fan-out emits structured moa_reference stream events with index/count/model/text for successful reference voters, TUI consumes them as visible reference activity/thinking, and the mixture_of_agents tool returns reference_responses with model labels and content for downstream renderers. Covered by TUI stream-event and MoA tool mock HTTP tests."
+    },
+    "917f6bdb00b8b4d0f1c678702c639a5bc966a8eb": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: vision_analyze no longer depends solely on HERMES_OPENAI_API_KEY/OPENAI_API_KEY. The OpenAI-compatible vision backend resolves AUXILIARY_VISION_PROVIDER/MODEL/BASE_URL/API_KEY, supports custom endpoints and provider keys such as OpenRouter/Nous/Gemini/xAI/Z.ai/GMI/HuggingFace, and builtin registration advertises those env surfaces. Covered by vision endpoint resolver tests."
     }
   },
   "subject_patterns": [
