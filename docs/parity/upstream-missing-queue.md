@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-30T00:53:29.424303+00:00`
+Generated: `2026-06-30T01:08:06.689673+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7644`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-30T00:53:29.424303+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 97 |
-| pending | 38 |
-| ported | 521 |
+| pending | 37 |
+| ported | 522 |
 | superseded | 6988 |
 
 ## First 100 Pending Commits
@@ -62,4 +62,3 @@ Generated: `2026-06-30T00:53:29.424303+00:00`
 | `476875acb9f0` | #22 | Add dashboard backup upload and download |
 | `34e616e778d0` | #22 | feat(slack): nudge stale installs to add mpim scopes; mark message.mpim required |
 | `fd324562d3ad` | #20 | feat(desktop): add context usage breakdown popover |
-| `290fa7fd2baa` | #20 | fix(gateway): skip confirmed-dead delivery targets (deleted groups, blocked bots) (#55115) |

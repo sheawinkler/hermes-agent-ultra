@@ -16,12 +16,13 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use crate::media::validate_media_delivery_path;
-use hermes_core::errors::GatewayError;
+use hermes_core::errors::{GatewayError, SendErrorKind};
 use hermes_core::traits::{PlatformAdapter, SendMessageOptions};
 
 /// Cap before gateway-level truncation for adapters that cannot split long text.
 pub(crate) const MAX_PLATFORM_OUTPUT: usize = 4000;
 static AUDIT_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const DEAD_TARGETS_FILE: &str = "dead_targets.json";
 
 pub(crate) fn prepare_platform_message_for_adapter<'a>(
     adapter: &dyn PlatformAdapter,
@@ -129,6 +130,167 @@ fn sanitized_audit_label(label: Option<&str>, fallback: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+// ---------------------------------------------------------------------------
+// DeadTargetRegistry
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct DeadTargetEntry {
+    platform: String,
+    chat_id: String,
+    reason: String,
+    marked_at_unix: u64,
+}
+
+/// Persistent, best-effort registry of delivery targets that a platform has
+/// confirmed unreachable, such as deleted groups or blocked bots.
+#[derive(Clone)]
+pub struct DeadTargetRegistry {
+    path: PathBuf,
+    entries: Arc<std::sync::Mutex<HashMap<String, DeadTargetEntry>>>,
+}
+
+impl DeadTargetRegistry {
+    pub fn new() -> Self {
+        Self::with_path(
+            hermes_config::hermes_home()
+                .join("gateway")
+                .join(DEAD_TARGETS_FILE),
+        )
+    }
+
+    pub fn with_path(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        let entries = load_dead_targets(&path);
+        Self {
+            path,
+            entries: Arc::new(std::sync::Mutex::new(entries)),
+        }
+    }
+
+    pub fn is_dead_error_kind(kind: SendErrorKind) -> bool {
+        matches!(kind, SendErrorKind::Forbidden | SendErrorKind::NotFound)
+    }
+
+    pub fn is_dead(&self, platform: &str, chat_id: &str) -> bool {
+        let key = dead_target_key(platform, chat_id);
+        self.entries
+            .lock()
+            .map(|entries| entries.contains_key(&key))
+            .unwrap_or(false)
+    }
+
+    pub fn mark_dead(&self, platform: &str, chat_id: &str, reason: impl Into<String>) -> bool {
+        let key = dead_target_key(platform, chat_id);
+        let entry = DeadTargetEntry {
+            platform: normalize_platform(platform),
+            chat_id: chat_id.trim().to_string(),
+            reason: reason.into().chars().take(240).collect(),
+            marked_at_unix: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+        let Ok(mut entries) = self.entries.lock() else {
+            return false;
+        };
+        let inserted = entries.insert(key.clone(), entry).is_none();
+        flush_dead_targets(&self.path, &entries);
+        if inserted {
+            warn!(
+                target = %key,
+                "Marked delivery target as confirmed dead; future deliveries will be skipped"
+            );
+        }
+        inserted
+    }
+
+    pub fn clear(&self, platform: &str, chat_id: &str) -> bool {
+        let key = dead_target_key(platform, chat_id);
+        let Ok(mut entries) = self.entries.lock() else {
+            return false;
+        };
+        let removed = entries.remove(&key).is_some();
+        if removed {
+            flush_dead_targets(&self.path, &entries);
+            info!(
+                target = %key,
+                "Cleared confirmed-dead delivery target after successful send"
+            );
+        }
+        removed
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries
+            .lock()
+            .map(|entries| entries.len())
+            .unwrap_or(0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl Default for DeadTargetRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn dead_target_key(platform: &str, chat_id: &str) -> String {
+    format!("{}:{}", normalize_platform(platform), chat_id.trim())
+}
+
+fn load_dead_targets(path: &Path) -> HashMap<String, DeadTargetEntry> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    serde_json::from_str::<HashMap<String, DeadTargetEntry>>(&text).unwrap_or_default()
+}
+
+fn flush_dead_targets(path: &Path, entries: &HashMap<String, DeadTargetEntry>) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if let Err(err) = std::fs::create_dir_all(parent) {
+        debug!(path = %parent.display(), error = %err, "Failed to create dead-target registry directory");
+        return;
+    }
+    let tmp = path.with_extension("json.tmp");
+    match serde_json::to_vec_pretty(entries) {
+        Ok(bytes) => {
+            if let Err(err) = std::fs::write(&tmp, bytes) {
+                debug!(path = %tmp.display(), error = %err, "Failed to write dead-target registry");
+                return;
+            }
+            if let Err(err) = std::fs::rename(&tmp, path) {
+                debug!(from = %tmp.display(), to = %path.display(), error = %err, "Failed to replace dead-target registry");
+            }
+        }
+        Err(err) => debug!(error = %err, "Failed to serialize dead-target registry"),
+    }
+}
+
+fn is_thread_or_message_not_found(error_text: &str) -> bool {
+    let lower = error_text.to_ascii_lowercase();
+    lower.contains("thread not found")
+        || lower.contains("topic_deleted")
+        || lower.contains("message to reply not found")
+        || lower.contains("message to edit not found")
+        || lower.contains("message_id_invalid")
+}
+
+fn dead_target_reason_from_error(error: &GatewayError) -> Option<String> {
+    let rendered = error.to_string();
+    if is_thread_or_message_not_found(&rendered) {
+        return None;
+    }
+    let kind = error.send_error_kind();
+    DeadTargetRegistry::is_dead_error_kind(kind).then(|| format!("{kind}: {rendered}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -410,13 +572,19 @@ pub fn parse_target_with_origin(
 pub struct DeliveryRouter {
     adapters: RwLock<HashMap<String, Arc<dyn PlatformAdapter>>>,
     fallback_queue: DeliveryQueue,
+    dead_targets: DeadTargetRegistry,
 }
 
 impl DeliveryRouter {
     pub fn new() -> Self {
+        Self::with_dead_target_registry(DeadTargetRegistry::new())
+    }
+
+    pub fn with_dead_target_registry(dead_targets: DeadTargetRegistry) -> Self {
         Self {
             adapters: RwLock::new(HashMap::new()),
             fallback_queue: DeliveryQueue::new(),
+            dead_targets,
         }
     }
 
@@ -502,6 +670,15 @@ impl DeliveryRouter {
         message: &str,
         options: SendMessageOptions,
     ) -> Result<(), GatewayError> {
+        if self.dead_targets.is_dead(platform_name, chat_id) {
+            info!(
+                platform = platform_name,
+                chat_id = chat_id,
+                "Skipping delivery to confirmed-dead target"
+            );
+            return Ok(());
+        }
+
         let adapters = self.adapters.read().await;
         match adapters.get(platform_name) {
             Some(adapter) => {
@@ -516,9 +693,21 @@ impl DeliveryRouter {
                     message,
                     options.delivery_audit_label.as_deref(),
                 )?;
-                adapter
+                let result = adapter
                     .send_message_with_options(chat_id, message.as_ref(), None, options)
-                    .await
+                    .await;
+                match result {
+                    Ok(()) => {
+                        self.dead_targets.clear(platform_name, chat_id);
+                        Ok(())
+                    }
+                    Err(err) => {
+                        if let Some(reason) = dead_target_reason_from_error(&err) {
+                            self.dead_targets.mark_dead(platform_name, chat_id, reason);
+                        }
+                        Err(err)
+                    }
+                }
             }
             None => {
                 error!(
@@ -582,7 +771,15 @@ impl DeliveryRouter {
         let adapters = self.adapters.read().await;
         match adapters.get(platform_name) {
             Some(adapter) => {
-                adapter
+                if self.dead_targets.is_dead(platform_name, chat_id) {
+                    info!(
+                        platform = platform_name,
+                        chat_id = chat_id,
+                        "Skipping file delivery to confirmed-dead target"
+                    );
+                    return Ok(());
+                }
+                let result = adapter
                     .send_file_with_options(
                         chat_id,
                         validated_path,
@@ -595,7 +792,19 @@ impl DeliveryRouter {
                             delivery_audit_label: None,
                         },
                     )
-                    .await
+                    .await;
+                match result {
+                    Ok(()) => {
+                        self.dead_targets.clear(platform_name, chat_id);
+                        Ok(())
+                    }
+                    Err(err) => {
+                        if let Some(reason) = dead_target_reason_from_error(&err) {
+                            self.dead_targets.mark_dead(platform_name, chat_id, reason);
+                        }
+                        Err(err)
+                    }
+                }
             }
             None => Err(GatewayError::SendFailed(format!(
                 "No adapter registered for platform '{}'",
@@ -632,6 +841,11 @@ mod tests {
     struct MessageRecordingAdapter {
         messages: Arc<Mutex<Vec<RecordedMessage>>>,
         splits_long_messages: bool,
+    }
+
+    struct FailingMessageAdapter {
+        calls: Arc<Mutex<Vec<String>>>,
+        error_text: &'static str,
     }
 
     #[async_trait]
@@ -753,6 +967,64 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl PlatformAdapter for FailingMessageAdapter {
+        async fn start(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn stop(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_message(
+            &self,
+            chat_id: &str,
+            _text: &str,
+            _parse_mode: Option<ParseMode>,
+        ) -> Result<(), GatewayError> {
+            self.calls.lock().unwrap().push(chat_id.to_string());
+            Err(GatewayError::SendFailed(self.error_text.to_string()))
+        }
+
+        async fn send_message_with_options(
+            &self,
+            chat_id: &str,
+            _text: &str,
+            _parse_mode: Option<ParseMode>,
+            _options: SendMessageOptions,
+        ) -> Result<(), GatewayError> {
+            self.calls.lock().unwrap().push(chat_id.to_string());
+            Err(GatewayError::SendFailed(self.error_text.to_string()))
+        }
+
+        async fn edit_message(
+            &self,
+            _chat_id: &str,
+            _message_id: &str,
+            _text: &str,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_file(
+            &self,
+            _chat_id: &str,
+            _file_path: &str,
+            _caption: Option<&str>,
+        ) -> Result<(), GatewayError> {
+            Err(GatewayError::SendFailed(self.error_text.to_string()))
+        }
+
+        fn is_running(&self) -> bool {
+            true
+        }
+
+        fn platform_name(&self) -> &str {
+            "telegram"
+        }
+    }
+
     #[test]
     fn prepare_platform_message_truncates_and_saves_for_non_chunking_adapter() {
         let tmp = tempfile::tempdir().unwrap();
@@ -820,6 +1092,45 @@ mod tests {
         assert_ne!(first, second);
         assert_eq!(std::fs::read_to_string(first).unwrap(), "first");
         assert_eq!(std::fs::read_to_string(second).unwrap(), "second");
+    }
+
+    #[test]
+    fn dead_target_registry_persists_and_clears() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("dead_targets.json");
+        let registry = DeadTargetRegistry::with_path(&path);
+
+        assert!(registry.is_empty());
+        assert!(registry.mark_dead("Telegram", "123", "forbidden"));
+        assert!(registry.is_dead("telegram", "123"));
+        assert!(!registry.mark_dead("telegram", "123", "forbidden again"));
+
+        let reloaded = DeadTargetRegistry::with_path(&path);
+        assert!(reloaded.is_dead("telegram", "123"));
+        assert!(reloaded.clear("telegram", "123"));
+        assert!(!reloaded.is_dead("telegram", "123"));
+    }
+
+    #[test]
+    fn dead_target_registry_corrupt_store_degrades_to_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("dead_targets.json");
+        std::fs::write(&path, "{not json").unwrap();
+
+        let registry = DeadTargetRegistry::with_path(&path);
+
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn dead_target_reason_excludes_thread_not_found() {
+        let err = GatewayError::SendFailed("Bad Request: thread not found".to_string());
+        assert!(dead_target_reason_from_error(&err).is_none());
+
+        let err = GatewayError::SendFailed("Forbidden: bot was blocked by the user".to_string());
+        assert!(dead_target_reason_from_error(&err)
+            .expect("dead target")
+            .contains("forbidden"));
     }
 
     #[test]
@@ -934,6 +1245,66 @@ mod tests {
             messages.lock().unwrap().as_slice(),
             &[("alerts-channel".to_string(), "done".to_string(), None, true,)]
         );
+    }
+
+    #[tokio::test]
+    async fn route_delivery_marks_dead_target_and_skips_next_attempt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let registry = DeadTargetRegistry::with_path(tmp.path().join("dead_targets.json"));
+        let router = DeliveryRouter::with_dead_target_registry(registry.clone());
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        router
+            .register_adapter(
+                "telegram",
+                Arc::new(FailingMessageAdapter {
+                    calls: calls.clone(),
+                    error_text: "Forbidden: bot was blocked by the user",
+                }),
+            )
+            .await;
+        let target = parse_target("telegram:42");
+
+        let first = router.route_delivery(&target, "hello", None, None).await;
+        assert!(first.is_err());
+        assert!(registry.is_dead("telegram", "42"));
+        assert_eq!(calls.lock().unwrap().as_slice(), &["42".to_string()]);
+
+        router
+            .route_delivery(&target, "hello again", None, None)
+            .await
+            .expect("dead target short-circuits successfully");
+        assert_eq!(calls.lock().unwrap().as_slice(), &["42".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn route_delivery_transient_and_thread_errors_are_not_marked_dead() {
+        for error_text in [
+            "http 503 temporarily unavailable",
+            "Bad Request: thread not found",
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let registry = DeadTargetRegistry::with_path(tmp.path().join("dead_targets.json"));
+            let router = DeliveryRouter::with_dead_target_registry(registry.clone());
+            router
+                .register_adapter(
+                    "telegram",
+                    Arc::new(FailingMessageAdapter {
+                        calls: Arc::new(Mutex::new(Vec::new())),
+                        error_text,
+                    }),
+                )
+                .await;
+
+            let result = router
+                .route_delivery(&parse_target("telegram:13"), "hello", None, None)
+                .await;
+
+            assert!(result.is_err());
+            assert!(
+                !registry.is_dead("telegram", "13"),
+                "{error_text} should not mark target dead"
+            );
+        }
     }
 
     #[tokio::test]

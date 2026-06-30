@@ -6509,6 +6509,11 @@
       "owner": "rust-runtime",
       "notes": "Ported with Rust tests for browser open-timeout floors, timeout diagnostics, sandbox hint formatting, bounded CDP timeout behavior, and failed-navigate labeling. The upstream desktop chip text is represented in the Rust tool error surface because this repo does not ship the Electron chip UI."
     },
+    "290fa7fd2baaa842856000143bc5028dcedd4185": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust DeliveryRouter: confirmed-dead platform targets are persisted under HERMES_HOME/gateway/dead_targets.json after whole-chat Forbidden or chat-level NotFound send failures, skipped on later deliveries to avoid flood-control burn, and thread/topic/message not-found plus transient errors are not marked dead. Focused tests cover persistence, corrupt-store fallback, marking, skipping, and non-dead errors."
+    },
     "1289f12812a9c6a3f3e6fbdf39e39ed7e1b7bd50": {
       "disposition": "superseded",
       "owner": "rust-runtime",
