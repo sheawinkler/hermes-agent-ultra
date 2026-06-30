@@ -330,7 +330,7 @@ impl ToolOutputConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DisplayConfig {
     /// Enable `/verbose` as a runtime tool-progress cycling command.
     #[serde(
@@ -364,9 +364,31 @@ pub struct DisplayConfig {
     )]
     pub memory_notifications: Option<bool>,
 
+    /// Render built-in tool progress with human-phrased labels instead of raw tool ids.
+    #[serde(
+        default = "default_true",
+        deserialize_with = "deserialize_boolish",
+        skip_serializing_if = "is_true"
+    )]
+    pub friendly_tool_labels: bool,
+
     /// Per-platform display overrides keyed by normalized platform name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub platforms: BTreeMap<String, PlatformDisplayConfig>,
+}
+
+impl Default for DisplayConfig {
+    fn default() -> Self {
+        Self {
+            tool_progress_command: false,
+            tool_progress: None,
+            busy_input_mode: None,
+            busy_ack_enabled: None,
+            memory_notifications: None,
+            friendly_tool_labels: true,
+            platforms: BTreeMap::new(),
+        }
+    }
 }
 
 impl DisplayConfig {
@@ -404,6 +426,10 @@ impl DisplayConfig {
 
     pub fn memory_notifications_enabled(&self) -> bool {
         self.memory_notifications.unwrap_or(true)
+    }
+
+    pub fn friendly_tool_labels_enabled(&self) -> bool {
+        self.friendly_tool_labels
     }
 }
 

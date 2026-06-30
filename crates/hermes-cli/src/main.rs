@@ -51,7 +51,7 @@ use hermes_cli::runtime_tool_wiring::{
 use hermes_cli::terminal_backend::build_terminal_backend;
 use hermes_cli::App;
 use hermes_cli_ui::tool_preview::{
-    build_gateway_tool_progress_message, build_tool_preview_from_value, tool_emoji,
+    build_gateway_tool_progress_message_with_labels, build_tool_label_from_value, tool_emoji,
 };
 use hermes_config::{
     gateway_pid_path_in, hermes_home, load_config, load_user_config_file, save_config_yaml,

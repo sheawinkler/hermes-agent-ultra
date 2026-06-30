@@ -199,6 +199,7 @@ pub fn display_config_env_bridge_pairs() -> &'static [(&'static str, &'static st
             "memory_notifications",
             "HERMES_MEMORY_NOTIFICATIONS_ENABLED",
         ),
+        ("friendly_tool_labels", "HERMES_FRIENDLY_TOOL_LABELS"),
     ]
 }
 

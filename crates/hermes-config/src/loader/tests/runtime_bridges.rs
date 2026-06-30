@@ -175,6 +175,7 @@ fn display_config_bridge_map_covers_busy_runtime_keys() {
         "busy_input_mode",
         "busy_ack_enabled",
         "memory_notifications",
+        "friendly_tool_labels",
     ] {
         assert!(keys.contains(key), "missing display bridge key: {key}");
         assert!(
@@ -207,6 +208,11 @@ fn set_user_config_value_bridges_display_runtime_keys() {
             "false",
             "HERMES_MEMORY_NOTIFICATIONS_ENABLED",
         ),
+        (
+            "display.friendly_tool_labels",
+            "false",
+            "HERMES_FRIENDLY_TOOL_LABELS",
+        ),
     ] {
         let result = set_user_config_value(dir.path(), key, value).unwrap();
         assert!(result.wrote_config(), "{key} should write config");
@@ -217,6 +223,7 @@ fn set_user_config_value_bridges_display_runtime_keys() {
     assert!(env_text.contains("HERMES_GATEWAY_BUSY_INPUT_MODE=steer"));
     assert!(env_text.contains("HERMES_GATEWAY_BUSY_ACK_ENABLED=false"));
     assert!(env_text.contains("HERMES_MEMORY_NOTIFICATIONS_ENABLED=false"));
+    assert!(env_text.contains("HERMES_FRIENDLY_TOOL_LABELS=false"));
     clear_display_env_bridge_vars();
 }
 
@@ -233,6 +240,7 @@ fn load_config_bridges_display_yaml_to_env_without_overriding_existing_env() {
 display:
   busy_input_mode: steer
   busy_ack_enabled: false
+  friendly_tool_labels: false
 "#,
     )
     .unwrap();
@@ -243,6 +251,7 @@ display:
 
     assert_eq!(cfg.display.normalized_busy_input_mode(), "queue");
     assert!(!cfg.display.busy_ack_enabled());
+    assert!(!cfg.display.friendly_tool_labels_enabled());
     assert_eq!(
         std::env::var("HERMES_GATEWAY_BUSY_INPUT_MODE")
             .ok()
@@ -251,6 +260,12 @@ display:
     );
     assert_eq!(
         std::env::var("HERMES_GATEWAY_BUSY_ACK_ENABLED")
+            .ok()
+            .as_deref(),
+        Some("false")
+    );
+    assert_eq!(
+        std::env::var("HERMES_FRIENDLY_TOOL_LABELS")
             .ok()
             .as_deref(),
         Some("false")
@@ -337,4 +352,3 @@ terminal:
     );
     clear_terminal_env_bridge_vars();
 }
-

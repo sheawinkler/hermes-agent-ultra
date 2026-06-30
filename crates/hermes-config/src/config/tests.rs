@@ -374,6 +374,7 @@ display:
   busy_input_mode: steer
   busy_ack_enabled: "false"
   memory_notifications: "false"
+  friendly_tool_labels: "false"
   platforms:
     telegram:
       tool_progress: off
@@ -390,6 +391,7 @@ agent:
         assert_eq!(cfg.display.normalized_busy_input_mode(), "steer");
         assert!(!cfg.display.busy_ack_enabled());
         assert!(!cfg.display.memory_notifications_enabled());
+        assert!(!cfg.display.friendly_tool_labels_enabled());
         assert_eq!(
             cfg.agent.normalized_service_tier().as_deref(),
             Some("priority")
@@ -404,6 +406,8 @@ display:
         )
         .expect("quoted false");
         assert!(!disabled.display.tool_progress_command_enabled());
+        assert!(disabled.display.friendly_tool_labels_enabled());
+        assert!(DisplayConfig::default().friendly_tool_labels_enabled());
     }
 
     #[test]

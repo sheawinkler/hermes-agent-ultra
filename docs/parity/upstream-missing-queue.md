@@ -1,25 +1,25 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-30T05:00:11.751235+00:00`
+Generated: `2026-06-30T06:11:48.456436+00:00`
 
-- Range: `origin/main..upstream/main`; total commits tracked: `7668`.
+- Range: `origin/main..upstream/main`; total commits tracked: `7672`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3502 |
+| #20 | GPAR-01 tests+CI parity | 3505 |
 | #21 | GPAR-02 skills parity | 132 |
 | #22 | GPAR-03 UX parity | 1003 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 503 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 25 |
 | #25 | GPAR-06 packaging/docs/install parity | 165 |
-| #26 | GPAR-07 upstream queue backfill | 2338 |
+| #26 | GPAR-07 upstream queue backfill | 2339 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 97 |
-| pending | 39 |
-| ported | 530 |
-| superseded | 7002 |
+| pending | 38 |
+| ported | 531 |
+| superseded | 7006 |
 
 ## First 100 Pending Commits
 
@@ -60,7 +60,6 @@ Generated: `2026-06-30T05:00:11.751235+00:00`
 | `66ba9e06d925` | #25 | change(ci): remove lint PR comment |
 | `cca8b4ef4e3f` | #25 | fix(ci): unify amd64/arm64 docker pipelines |
 | `41c85fb9469b` | #26 | fix(agents.md): fix documentation on subprocess isolation in tests |
-| `481caa66f23c` | #20 | feat(display): friendly human-phrased tool labels for built-in tools (#55166) |
 | `9ce79cd64212` | #20 | feat(xai): Imagine public-URL storage, chaining & video edit/extend |
 | `5a3d7fb99d1f` | #26 | fix(xai): suppress false-positive windows-footgun on binary image read |
 | `d4c14011ebbc` | #21 | feat(claude-design): add surface-first conditioning + slop diagnostic (#55399) |
