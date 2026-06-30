@@ -353,6 +353,7 @@ async fn register_gateway_adapters(
                     token,
                     phone_number_id: extra_string(platform_cfg, "phone_number_id"),
                     business_account_id: extra_string(platform_cfg, "business_account_id"),
+                    api_base_url: extra_string(platform_cfg, "api_base_url"),
                     verify_token: extra_string(platform_cfg, "verify_token"),
                     reply_prefix: platform_cfg
                         .extra

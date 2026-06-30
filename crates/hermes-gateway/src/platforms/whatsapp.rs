@@ -17,7 +17,7 @@ use hermes_core::traits::{ParseMode, PlatformAdapter};
 
 use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
 
-const WHATSAPP_API_BASE: &str = "https://graph.facebook.com/v18.0";
+const DEFAULT_WHATSAPP_API_BASE: &str = "https://graph.facebook.com/v18.0";
 const MAX_WHATSAPP_MESSAGE_LENGTH: usize = 4096;
 
 // ---------------------------------------------------------------------------
@@ -51,6 +51,10 @@ pub struct WhatsAppConfig {
     /// WhatsApp Business Account ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub business_account_id: Option<String>,
+
+    /// Optional WhatsApp Cloud API base URL override for tests/private gateways.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base_url: Option<String>,
 
     /// Webhook verify token for incoming events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -126,6 +130,16 @@ impl WhatsAppAdapter {
 
     pub fn config(&self) -> &WhatsAppConfig {
         &self.config
+    }
+
+    fn phone_endpoint(&self, phone_id: &str, endpoint: &str) -> String {
+        let base = self
+            .config
+            .api_base_url
+            .as_deref()
+            .unwrap_or(DEFAULT_WHATSAPP_API_BASE)
+            .trim_end_matches('/');
+        format!("{}/{}/{}", base, phone_id, endpoint.trim_start_matches('/'))
     }
 
     /// Convert common Markdown shapes to WhatsApp's lightweight formatting.
@@ -248,7 +262,7 @@ impl WhatsAppAdapter {
             .as_deref()
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
-        let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
+        let url = self.phone_endpoint(phone_id, "messages");
         let body = build_text_body(to, text);
 
         let resp = self
@@ -415,7 +429,7 @@ impl WhatsAppAdapter {
             .as_deref()
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
-        let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
+        let url = self.phone_endpoint(phone_id, "messages");
         let body = serde_json::json!({
             "messaging_product": "whatsapp",
             "status": "read",
@@ -456,7 +470,7 @@ impl WhatsAppAdapter {
             .as_deref()
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
-        let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
+        let url = self.phone_endpoint(phone_id, "messages");
         let body = build_reaction_body(to, message_id, emoji);
 
         let resp = self
@@ -494,7 +508,7 @@ impl WhatsAppAdapter {
             .as_deref()
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
-        let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
+        let url = self.phone_endpoint(phone_id, "messages");
         let body = build_link_media_body(to, media_type, media_url, caption);
 
         let resp = self
@@ -573,12 +587,15 @@ fn build_uploaded_media_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{body_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn config() -> WhatsAppConfig {
         WhatsAppConfig {
             token: "token".to_string(),
             phone_number_id: Some("phone-1".to_string()),
             business_account_id: None,
+            api_base_url: None,
             verify_token: None,
             reply_prefix: None,
             require_mention: false,
@@ -756,6 +773,59 @@ mod tests {
         );
         assert_eq!(cleaned, "what is the weather?");
     }
+
+    #[tokio::test]
+    async fn send_file_uploads_then_sends_native_image_payload() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/phone-1/media"))
+            .and(header("authorization", "Bearer token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "media-123"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/phone-1/messages"))
+            .and(header("authorization", "Bearer token"))
+            .and(body_json(serde_json::json!({
+                "messaging_product": "whatsapp",
+                "to": "15551234567",
+                "type": "image",
+                "image": {
+                    "id": "media-123",
+                    "caption": "native caption"
+                }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "messages": [{"id": "wamid.1"}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let image_path = dir.path().join("photo.png");
+        tokio::fs::write(&image_path, b"fake-png")
+            .await
+            .expect("write image");
+        let adapter = WhatsAppAdapter::new(WhatsAppConfig {
+            api_base_url: Some(server.uri()),
+            ..config()
+        })
+        .expect("adapter");
+
+        adapter
+            .send_file(
+                "+1 (555) 123-4567",
+                image_path.to_str().expect("utf8 path"),
+                Some("native caption"),
+            )
+            .await
+            .expect("send native image");
+        server.verify().await;
+    }
 }
 
 #[async_trait]
@@ -820,7 +890,7 @@ impl PlatformAdapter for WhatsAppAdapter {
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
 
         // Step 1: Upload media to WhatsApp Cloud API
-        let upload_url = format!("{}/{}/media", WHATSAPP_API_BASE, phone_id);
+        let upload_url = self.phone_endpoint(phone_id, "media");
         let part = reqwest::multipart::Part::bytes(file_bytes)
             .file_name(file_name.to_string())
             .mime_str(mime)
@@ -859,7 +929,7 @@ impl PlatformAdapter for WhatsAppAdapter {
             _ => "document",
         };
 
-        let send_url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
+        let send_url = self.phone_endpoint(phone_id, "messages");
         let mut media_obj = serde_json::json!({ "id": media_id });
         if let Some(cap) = caption {
             media_obj["caption"] = serde_json::Value::String(cap.to_string());
