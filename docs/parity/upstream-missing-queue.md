@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-30T00:48:32.546716+00:00`
+Generated: `2026-06-30T00:53:29.424303+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7644`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-30T00:48:32.546716+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 97 |
-| pending | 40 |
-| ported | 519 |
+| pending | 38 |
+| ported | 521 |
 | superseded | 6988 |
 
 ## First 100 Pending Commits
@@ -50,8 +50,6 @@ Generated: `2026-06-30T00:48:32.546716+00:00`
 | `cb982ad997c5` | #20 | fix(windows): hide console-window flash on backend git/gh/wmic/bash subprocess spawns |
 | `1ffa01f35fb8` | #20 | test(windows): cover no-window backend subprocess flags |
 | `eeca59f48919` | #20 | fix(windows): hide remaining backend console-flash legs missed on main |
-| `a10727a555ad` | #26 | fix(browser): extend first-open timeout and surface daemon errors |
-| `7bb8aa3bd55d` | #20 | test(browser): cover open timeout diagnostics and failed navigate title |
 | `b31b0b9d95d1` | #22 | docs: reconcile docs with code across last 3 releases (#54254) |
 | `9a0010fd469f` | #20 | fix(windows): cover remaining console-flash spawn legs (#54417) |
 | `e5d22ab80d97` | #20 | fix(daytona): quote single-upload mkdir parent path (#54440) |
