@@ -9,6 +9,8 @@
 //! Configuration:
 //!   - `brv` CLI must be installed (npm install -g byterover-cli)
 //!   - `BRV_API_KEY` (optional, for cloud sync)
+//!   - `$HERMES_HOME/byterover.json` with `auto_extract: false` disables
+//!     background turn/memory/compression curation while keeping tools enabled.
 //!   - Working directory: `$HERMES_HOME/byterover/`
 
 use std::process::Command;
@@ -17,11 +19,43 @@ use std::sync::Mutex;
 use serde_json::{json, Value};
 
 use crate::memory_manager::MemoryProviderPlugin;
+use crate::memory_plugins::config_io;
 
 const QUERY_TIMEOUT_SECS: u64 = 10;
 const CURATE_TIMEOUT_SECS: u64 = 120;
 const MIN_QUERY_LEN: usize = 10;
 const MIN_OUTPUT_LEN: usize = 20;
+
+fn coerce_bool(value: Option<&Value>, default: bool) -> bool {
+    match value {
+        Some(Value::Bool(value)) => *value,
+        Some(Value::Number(value)) => value.as_i64().map(|n| n != 0).unwrap_or(default),
+        Some(Value::String(value)) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            _ => default,
+        },
+        _ => default,
+    }
+}
+
+fn byterover_config_path_for_home(hermes_home: &str) -> std::path::PathBuf {
+    std::path::Path::new(hermes_home).join("byterover.json")
+}
+
+fn default_byterover_config_path() -> std::path::PathBuf {
+    config_io::default_hermes_home().join("byterover.json")
+}
+
+fn load_auto_extract(hermes_home: &str) -> bool {
+    for key in ["HERMES_BYTEROVER_AUTO_EXTRACT", "BYTEROVER_AUTO_EXTRACT"] {
+        if let Ok(value) = std::env::var(key) {
+            return coerce_bool(Some(&Value::String(value)), true);
+        }
+    }
+    let config = config_io::read_json_object(&byterover_config_path_for_home(hermes_home));
+    coerce_bool(config.get("auto_extract"), true)
+}
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -132,6 +166,7 @@ pub struct ByteRoverPlugin {
     cwd: Mutex<String>,
     session_id: Mutex<String>,
     turn_count: Mutex<u32>,
+    auto_extract: Mutex<bool>,
 }
 
 impl ByteRoverPlugin {
@@ -140,11 +175,16 @@ impl ByteRoverPlugin {
             cwd: Mutex::new(String::new()),
             session_id: Mutex::new(String::new()),
             turn_count: Mutex::new(0),
+            auto_extract: Mutex::new(true),
         }
     }
 
     fn working_dir(&self) -> String {
         self.cwd.lock().unwrap().clone()
+    }
+
+    fn auto_extract_enabled(&self) -> bool {
+        *self.auto_extract.lock().unwrap()
     }
 }
 
@@ -167,6 +207,7 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
         *self.cwd.lock().unwrap() = cwd;
         *self.session_id.lock().unwrap() = session_id.to_string();
         *self.turn_count.lock().unwrap() = 0;
+        *self.auto_extract.lock().unwrap() = load_auto_extract(hermes_home);
 
         tracing::info!(
             "ByteRover memory plugin initialized for session {}",
@@ -210,6 +251,10 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
     fn sync_turn(&self, user_content: &str, assistant_content: &str, _session_id: &str) {
         *self.turn_count.lock().unwrap() += 1;
 
+        if !self.auto_extract_enabled() {
+            tracing::debug!("ByteRover sync_turn skipped because auto_extract is disabled");
+            return;
+        }
         if user_content.trim().len() < MIN_QUERY_LEN {
             return;
         }
@@ -232,6 +277,10 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
     }
 
     fn on_memory_write(&self, action: &str, target: &str, content: &str) {
+        if !self.auto_extract_enabled() {
+            tracing::debug!("ByteRover memory mirror skipped because auto_extract is disabled");
+            return;
+        }
         if !matches!(action, "add" | "replace") || content.is_empty() {
             return;
         }
@@ -254,6 +303,12 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
     }
 
     fn on_pre_compress(&self, messages: &[Value]) -> String {
+        if !self.auto_extract_enabled() {
+            tracing::debug!(
+                "ByteRover pre-compression curation skipped because auto_extract is disabled"
+            );
+            return String::new();
+        }
         if messages.is_empty() {
             return String::new();
         }
@@ -341,18 +396,47 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
 
     fn get_config_schema(&self) -> Option<Value> {
         Some(json!([
-            {"key": "api_key", "description": "ByteRover API key (optional, for cloud sync)", "secret": true, "env_var": "BRV_API_KEY", "url": "https://app.byterover.dev"}
+            {"key": "api_key", "description": "ByteRover API key (optional, for cloud sync)", "secret": true, "env_var": "BRV_API_KEY", "url": "https://app.byterover.dev"},
+            {"key": "auto_extract", "description": "Automatically curate completed turns, explicit memory writes, and pre-compression context", "default": true, "choices": ["true", "false"]}
         ]))
     }
 
-    fn save_config(&self, _config: &Value) -> Result<(), String> {
-        Ok(())
+    fn save_config(&self, config: &Value) -> Result<(), String> {
+        config_io::merge_and_write_owner_only(&default_byterover_config_path(), config)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn test_byterover_plugin_name() {
@@ -394,5 +478,46 @@ mod tests {
         // Not initialized, should return error
         let result = plugin.handle_tool_call("brv_query", &json!({"query": "test"}));
         assert!(result.contains("error"));
+    }
+
+    #[test]
+    fn test_byterover_auto_extract_config_coerces_values() {
+        assert!(!coerce_bool(Some(&json!(false)), true));
+        assert!(!coerce_bool(Some(&json!("off")), true));
+        assert!(coerce_bool(Some(&json!("yes")), false));
+        assert!(coerce_bool(None, true));
+    }
+
+    #[test]
+    fn test_byterover_initialize_honors_auto_extract_config() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _hermes_override = EnvGuard::remove("HERMES_BYTEROVER_AUTO_EXTRACT");
+        let _byterover_override = EnvGuard::remove("BYTEROVER_AUTO_EXTRACT");
+        std::fs::write(
+            tmp.path().join("byterover.json"),
+            r#"{"auto_extract": false}"#,
+        )
+        .expect("write config");
+
+        let plugin = ByteRoverPlugin::new();
+        plugin.initialize("session-1", tmp.path().to_str().expect("tmp"));
+
+        assert!(!plugin.auto_extract_enabled());
+    }
+
+    #[test]
+    fn test_byterover_config_schema_exposes_auto_extract() {
+        let plugin = ByteRoverPlugin::new();
+        let schema = plugin.get_config_schema().expect("schema");
+        let keys = schema
+            .as_array()
+            .expect("schema array")
+            .iter()
+            .filter_map(|entry| entry.get("key").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+
+        assert!(keys.contains(&"auto_extract"));
     }
 }
