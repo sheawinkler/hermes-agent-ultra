@@ -9,19 +9,19 @@
       "kind": "nonzero_tree_drift",
       "message": "max_commits_behind remains nonzero in parity matrix",
       "metric": "max_commits_behind",
-      "value": 5880.0
+      "value": 13736.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_upstream_patch_missing remains nonzero in parity matrix",
       "metric": "max_upstream_patch_missing",
-      "value": 5657.0
+      "value": 12546.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_files_only_upstream remains nonzero in parity matrix",
       "metric": "max_files_only_upstream",
-      "value": 2309.0
+      "value": 3105.0
     }
   ],
   "audit_gate": {
@@ -95,7 +95,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-30T13:35:50.033609+00:00",
+  "generated_at_utc": "2026-06-30T13:55:13.188669+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",

@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Volumes/wd_black/hermes-agent-ultra/repo/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-06-30T13:54:15.387759+00:00",
+  "generated_at_utc": "2026-06-30T13:55:14.388685+00:00",
   "items": [
     {
       "errors": [],
@@ -281,7 +281,7 @@
   "summary": {
     "errors": 0,
     "items": 12,
-    "local_paths": 4051,
+    "local_paths": 4052,
     "review_overdue": 0,
     "unowned": 0,
     "upstream_paths": 5843,

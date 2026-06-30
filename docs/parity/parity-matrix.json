@@ -1,113 +1,133 @@
 {
-  "generated_at_utc": "2026-06-12T11:29:13.798398+00:00",
+  "generated_at_utc": "2026-06-30T13:55:12.385221+00:00",
   "refs": {
-    "local_ref": "main",
-    "local_sha": "17ee23e0adf80f56c1686918dbcc26a30d0c5a8a",
+    "local_ref": "HEAD",
+    "local_sha": "ceef678d1e8ca61f173de77ae7b2654014f13301",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "9c505217044cedc28f174f1b74174d00d9ea1c81",
+    "upstream_sha": "1b3768558e02071b629d1014941ed7b2a0024c34",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5880,
-    "commits_ahead": 1102,
-    "upstream_patch_missing": 5657,
-    "upstream_patch_represented": 2,
-    "local_patch_unique": 895,
-    "files_only_upstream": 2309,
-    "files_only_local": 730,
-    "files_shared_identical": 1623,
-    "files_shared_different": 1108,
-    "tree_files_changed": 4073,
-    "tree_insertions": 997153,
-    "tree_deletions": 554659
+    "commits_behind": 13736,
+    "commits_ahead": 1315,
+    "upstream_patch_missing": 12546,
+    "upstream_patch_represented": 6,
+    "local_patch_unique": 1052,
+    "files_only_upstream": 3105,
+    "files_only_local": 1314,
+    "files_shared_identical": 1480,
+    "files_shared_different": 1258,
+    "tree_files_changed": 5576,
+    "tree_insertions": 1249742,
+    "tree_deletions": 758617
   },
   "top_upstream_only": [
     {
       "path": "apps/desktop",
-      "count": 498
+      "count": 785
     },
     {
       "path": "website/i18n",
-      "count": 315
+      "count": 313
     },
     {
       "path": "tests/hermes_cli",
-      "count": 142
-    },
-    {
-      "path": "web/src",
-      "count": 98
-    },
-    {
-      "path": "tests/agent",
-      "count": 82
+      "count": 205
     },
     {
       "path": "tests/gateway",
-      "count": 74
+      "count": 174
+    },
+    {
+      "path": "tests/agent",
+      "count": 126
+    },
+    {
+      "path": "web/src",
+      "count": 108
     },
     {
       "path": "tests/tools",
-      "count": 53
-    },
-    {
-      "path": "website/docs",
-      "count": 49
+      "count": 81
     },
     {
       "path": "optional-skills/creative",
-      "count": 44
+      "count": 70
     },
     {
-      "path": "gateway/platforms",
+      "path": "website/docs",
+      "count": 56
+    },
+    {
+      "path": "tests/plugins",
+      "count": 54
+    },
+    {
+      "path": "ui-tui/src",
+      "count": 45
+    },
+    {
+      "path": "tests/run_agent",
       "count": 41
+    },
+    {
+      "path": "plugins/platforms",
+      "count": 40
     },
     {
       "path": "hermes_cli/subcommands",
       "count": 39
     },
     {
-      "path": "tests/plugins",
-      "count": 38
-    },
-    {
       "path": "apps/bootstrap-installer",
       "count": 35
     },
     {
-      "path": "ui-tui/src",
-      "count": 34
-    },
-    {
-      "path": "tests/run_agent",
-      "count": 25
-    },
-    {
       "path": "tests/cli",
-      "count": 23
+      "count": 29
     },
     {
-      "path": ".github/workflows",
-      "count": 17
+      "path": "gateway/platforms",
+      "count": 27
     },
     {
       "path": "tests/docker",
-      "count": 13
+      "count": 26
+    },
+    {
+      "path": ".github/workflows",
+      "count": 14
+    },
+    {
+      "path": "tests/tui_gateway",
+      "count": 14
     },
     {
       "path": "website/static",
       "count": 13
     },
     {
+      "path": "hermes_cli/dashboard_auth",
+      "count": 12
+    },
+    {
+      "path": "tests/cron",
+      "count": 12
+    },
+    {
+      "path": "ui-tui/packages",
+      "count": 12
+    },
+    {
       "path": "agent/lsp",
       "count": 11
     },
     {
-      "path": "agent/transports",
+      "path": "agent/pet",
       "count": 11
     },
     {
-      "path": "hermes_cli/dashboard_auth",
+      "path": "agent/transports",
       "count": 11
     },
     {
@@ -123,7 +143,7 @@
       "count": 11
     },
     {
-      "path": "ui-tui/packages",
+      "path": "scripts/whatsapp-bridge",
       "count": 10
     },
     {
@@ -135,106 +155,86 @@
       "count": 9
     },
     {
+      "path": "tools/computer_use",
+      "count": 8
+    },
+    {
+      "path": ".github/pr-screenshots",
+      "count": 7
+    },
+    {
       "path": "hermes_cli/proxy",
       "count": 7
+    },
+    {
+      "path": "gateway/relay",
+      "count": 6
     },
     {
       "path": "plugins/security-guidance",
       "count": 6
     },
     {
-      "path": "tools/computer_use",
-      "count": 6
-    },
-    {
-      "path": ".github/pr-screenshots",
-      "count": 5
-    },
-    {
-      "path": "scripts/whatsapp-bridge",
-      "count": 5
-    },
-    {
-      "path": ".github/ISSUE_TEMPLATE",
-      "count": 4
-    },
-    {
       "path": "apps/shared",
-      "count": 4
+      "count": 5
     },
     {
-      "path": "tests/acp",
-      "count": 4
-    },
-    {
-      "path": "tests/cron",
-      "count": 4
-    },
-    {
-      "path": "optional-skills/gaming",
-      "count": 3
-    },
-    {
-      "path": "optional-skills/software-development",
-      "count": 3
-    },
-    {
-      "path": "plugins/platforms",
-      "count": 3
+      "path": "plugins/cron_providers",
+      "count": 5
     }
   ],
   "top_shared_different": [
     {
       "path": "tests/gateway",
-      "count": 179
+      "count": 205
     },
     {
       "path": "website/docs",
-      "count": 149
+      "count": 183
     },
     {
       "path": "tests/tools",
-      "count": 147
+      "count": 162
     },
     {
       "path": "tests/hermes_cli",
-      "count": 133
+      "count": 142
     },
     {
       "path": "ui-tui/src",
-      "count": 74
+      "count": 88
     },
     {
       "path": "tests/agent",
-      "count": 63
+      "count": 67
     },
     {
       "path": "tests/run_agent",
-      "count": 59
+      "count": 63
     },
     {
       "path": "tests/cli",
-      "count": 31
+      "count": 32
     },
     {
       "path": "ui-tui/packages",
-      "count": 21
+      "count": 26
     },
     {
       "path": "plugins/platforms",
-      "count": 17
-    },
-    {
-      "path": "tests/plugins",
-      "count": 17
+      "count": 20
     },
     {
       "path": "plugins/memory",
-      "count": 14
+      "count": 19
     },
     {
       "path": "plugins/model-providers",
-      "count": 11
+      "count": 16
+    },
+    {
+      "path": "tests/plugins",
+      "count": 16
     },
     {
       "path": "tests/cron",
@@ -245,19 +245,27 @@
       "count": 10
     },
     {
-      "path": "tests/acp",
-      "count": 8
+      "path": "optional-skills/creative",
+      "count": 9
     },
     {
-      "path": "tests/skills",
-      "count": 7
+      "path": "tests/acp",
+      "count": 9
     },
     {
       "path": "plugins/web",
       "count": 6
     },
     {
+      "path": "skills/productivity",
+      "count": 6
+    },
+    {
       "path": "skills/software-development",
+      "count": 6
+    },
+    {
+      "path": "tests/skills",
       "count": 6
     },
     {
@@ -279,6 +287,10 @@
     {
       "path": "website/src",
       "count": 5
+    },
+    {
+      "path": "plugins/image_gen",
+      "count": 4
     },
     {
       "path": "tests/integration",
@@ -309,11 +321,15 @@
       "count": 3
     },
     {
-      "path": "skills/productivity",
+      "path": "skills/research",
       "count": 3
     },
     {
-      "path": "optional-skills/creative",
+      "path": "tests/e2e",
+      "count": 3
+    },
+    {
+      "path": ".github/workflows",
       "count": 2
     },
     {
@@ -327,75 +343,71 @@
     {
       "path": "plugins/disk-cleanup",
       "count": 2
-    },
-    {
-      "path": "skills/autonomous-ai-agents",
-      "count": 2
-    },
-    {
-      "path": "skills/devops",
-      "count": 2
-    },
-    {
-      "path": "skills/research",
-      "count": 2
-    },
-    {
-      "path": "tests/e2e",
-      "count": 2
     }
   ],
   "top_local_only": [
     {
-      "path": "crates/hermes-tools",
-      "count": 92
-    },
-    {
-      "path": "crates/hermes-agent",
-      "count": 54
-    },
-    {
-      "path": "crates/hermes-gateway",
-      "count": 50
+      "path": "third_party/rustsec-patches",
+      "count": 190
     },
     {
       "path": "crates/hermes-cli",
-      "count": 46
+      "count": 182
     },
     {
-      "path": "docs/parity",
-      "count": 44
+      "path": "crates/hermes-tools",
+      "count": 120
+    },
+    {
+      "path": "crates/hermes-gateway",
+      "count": 111
+    },
+    {
+      "path": "crates/hermes-agent",
+      "count": 107
     },
     {
       "path": "skills/creative",
-      "count": 44
+      "count": 70
+    },
+    {
+      "path": "docs/parity",
+      "count": 56
     },
     {
       "path": "crates/hermes-intelligence",
-      "count": 37
-    },
-    {
-      "path": "crates/hermes-parity-tests",
-      "count": 23
-    },
-    {
-      "path": "website/docs",
-      "count": 21
+      "count": 40
     },
     {
       "path": "crates/hermes-config",
-      "count": 18
+      "count": 30
+    },
+    {
+      "path": "website/docs",
+      "count": 25
+    },
+    {
+      "path": "crates/hermes-acp",
+      "count": 22
     },
     {
       "path": "crates/hermes-core",
-      "count": 17
+      "count": 18
     },
     {
       "path": "crates/hermes-eval",
-      "count": 15
+      "count": 16
     },
     {
       "path": "crates/hermes-environments",
+      "count": 15
+    },
+    {
+      "path": "crates/hermes-parity-tests",
+      "count": 13
+    },
+    {
+      "path": "crates/hermes-source-parity-tests",
       "count": 13
     },
     {
@@ -403,11 +415,15 @@
       "count": 13
     },
     {
-      "path": "crates/hermes-acp",
-      "count": 10
+      "path": "crates/hermes-cron",
+      "count": 12
     },
     {
-      "path": "crates/hermes-cron",
+      "path": "docs/releases",
+      "count": 11
+    },
+    {
+      "path": "crates/hermes-mcp",
       "count": 10
     },
     {
@@ -415,7 +431,7 @@
       "count": 10
     },
     {
-      "path": "docs/releases",
+      "path": "docs/roadmaps",
       "count": 10
     },
     {
@@ -427,15 +443,11 @@
       "count": 9
     },
     {
-      "path": "docs/roadmaps",
-      "count": 8
-    },
-    {
-      "path": "crates/hermes-mcp",
-      "count": 7
-    },
-    {
       "path": "optional-skills/creative",
+      "count": 6
+    },
+    {
+      "path": "tests/plugins",
       "count": 6
     },
     {
@@ -447,12 +459,16 @@
       "count": 5
     },
     {
-      "path": "tests/plugins",
+      "path": "tests/run_agent",
       "count": 5
     },
     {
-      "path": "tests/run_agent",
+      "path": "tests/tools",
       "count": 5
+    },
+    {
+      "path": "crates/hermes-protocol-parity-tests",
+      "count": 4
     },
     {
       "path": "optional-skills/mlops",
@@ -463,15 +479,19 @@
       "count": 4
     },
     {
-      "path": "tests/tools",
-      "count": 4
-    },
-    {
-      "path": ".github/workflows",
+      "path": "crates/hermes-app-runtime",
       "count": 3
     },
     {
       "path": "crates/hermes-auth",
+      "count": 3
+    },
+    {
+      "path": "crates/hermes-cli-ui",
+      "count": 3
+    },
+    {
+      "path": "crates/hermes-provider-runtime",
       "count": 3
     },
     {
@@ -483,117 +503,117 @@
       "count": 3
     },
     {
-      "path": "skills/gaming",
+      "path": "skills/devops",
       "count": 3
-    },
-    {
-      "path": "crates/hermes-rl",
-      "count": 2
-    },
-    {
-      "path": "docs/alpha",
-      "count": 2
-    },
-    {
-      "path": "docs/plans",
-      "count": 2
-    },
-    {
-      "path": "plugins/model-providers",
-      "count": 2
-    },
-    {
-      "path": "skills/mcp",
-      "count": 2
     }
   ],
   "top_missing_from_local": [
     {
       "path": "apps/desktop",
-      "count": 498
+      "count": 785
     },
     {
       "path": "website/i18n",
-      "count": 315
+      "count": 313
     },
     {
       "path": "tests/hermes_cli",
-      "count": 142
-    },
-    {
-      "path": "web/src",
-      "count": 98
-    },
-    {
-      "path": "tests/agent",
-      "count": 82
+      "count": 205
     },
     {
       "path": "tests/gateway",
-      "count": 74
+      "count": 174
+    },
+    {
+      "path": "tests/agent",
+      "count": 126
+    },
+    {
+      "path": "web/src",
+      "count": 108
     },
     {
       "path": "tests/tools",
-      "count": 53
-    },
-    {
-      "path": "website/docs",
-      "count": 49
+      "count": 81
     },
     {
       "path": "optional-skills/creative",
-      "count": 44
+      "count": 70
     },
     {
-      "path": "gateway/platforms",
+      "path": "website/docs",
+      "count": 56
+    },
+    {
+      "path": "tests/plugins",
+      "count": 54
+    },
+    {
+      "path": "ui-tui/src",
+      "count": 45
+    },
+    {
+      "path": "tests/run_agent",
       "count": 41
+    },
+    {
+      "path": "plugins/platforms",
+      "count": 40
     },
     {
       "path": "hermes_cli/subcommands",
       "count": 39
     },
     {
-      "path": "tests/plugins",
-      "count": 38
-    },
-    {
       "path": "apps/bootstrap-installer",
       "count": 35
     },
     {
-      "path": "ui-tui/src",
-      "count": 34
-    },
-    {
-      "path": "tests/run_agent",
-      "count": 25
-    },
-    {
       "path": "tests/cli",
-      "count": 23
+      "count": 29
     },
     {
-      "path": ".github/workflows",
-      "count": 17
+      "path": "gateway/platforms",
+      "count": 27
     },
     {
       "path": "tests/docker",
-      "count": 13
+      "count": 26
+    },
+    {
+      "path": ".github/workflows",
+      "count": 14
+    },
+    {
+      "path": "tests/tui_gateway",
+      "count": 14
     },
     {
       "path": "website/static",
       "count": 13
     },
     {
+      "path": "hermes_cli/dashboard_auth",
+      "count": 12
+    },
+    {
+      "path": "tests/cron",
+      "count": 12
+    },
+    {
+      "path": "ui-tui/packages",
+      "count": 12
+    },
+    {
       "path": "agent/lsp",
       "count": 11
     },
     {
-      "path": "agent/transports",
+      "path": "agent/pet",
       "count": 11
     },
     {
-      "path": "hermes_cli/dashboard_auth",
+      "path": "agent/transports",
       "count": 11
     },
     {
@@ -609,7 +629,7 @@
       "count": 11
     },
     {
-      "path": "ui-tui/packages",
+      "path": "scripts/whatsapp-bridge",
       "count": 10
     },
     {
@@ -621,105 +641,97 @@
       "count": 9
     },
     {
+      "path": "tools/computer_use",
+      "count": 8
+    },
+    {
+      "path": ".github/pr-screenshots",
+      "count": 7
+    },
+    {
       "path": "hermes_cli/proxy",
       "count": 7
+    },
+    {
+      "path": "gateway/relay",
+      "count": 6
     },
     {
       "path": "plugins/security-guidance",
       "count": 6
     },
     {
-      "path": "tools/computer_use",
-      "count": 6
-    },
-    {
-      "path": ".github/pr-screenshots",
-      "count": 5
-    },
-    {
-      "path": "scripts/whatsapp-bridge",
-      "count": 5
-    },
-    {
-      "path": ".github/ISSUE_TEMPLATE",
-      "count": 4
-    },
-    {
       "path": "apps/shared",
-      "count": 4
+      "count": 5
     },
     {
-      "path": "tests/acp",
-      "count": 4
-    },
-    {
-      "path": "tests/cron",
-      "count": 4
-    },
-    {
-      "path": "optional-skills/gaming",
-      "count": 3
-    },
-    {
-      "path": "optional-skills/software-development",
-      "count": 3
-    },
-    {
-      "path": "plugins/platforms",
-      "count": 3
+      "path": "plugins/cron_providers",
+      "count": 5
     }
   ],
   "top_unique_to_local": [
     {
-      "path": "crates/hermes-tools",
-      "count": 92
-    },
-    {
-      "path": "crates/hermes-agent",
-      "count": 54
-    },
-    {
-      "path": "crates/hermes-gateway",
-      "count": 50
+      "path": "third_party/rustsec-patches",
+      "count": 190
     },
     {
       "path": "crates/hermes-cli",
-      "count": 46
+      "count": 182
     },
     {
-      "path": "docs/parity",
-      "count": 44
+      "path": "crates/hermes-tools",
+      "count": 120
+    },
+    {
+      "path": "crates/hermes-gateway",
+      "count": 111
+    },
+    {
+      "path": "crates/hermes-agent",
+      "count": 107
     },
     {
       "path": "skills/creative",
-      "count": 44
+      "count": 70
+    },
+    {
+      "path": "docs/parity",
+      "count": 56
     },
     {
       "path": "crates/hermes-intelligence",
-      "count": 37
-    },
-    {
-      "path": "crates/hermes-parity-tests",
-      "count": 23
-    },
-    {
-      "path": "website/docs",
-      "count": 21
+      "count": 40
     },
     {
       "path": "crates/hermes-config",
-      "count": 18
+      "count": 30
+    },
+    {
+      "path": "website/docs",
+      "count": 25
+    },
+    {
+      "path": "crates/hermes-acp",
+      "count": 22
     },
     {
       "path": "crates/hermes-core",
-      "count": 17
+      "count": 18
     },
     {
       "path": "crates/hermes-eval",
-      "count": 15
+      "count": 16
     },
     {
       "path": "crates/hermes-environments",
+      "count": 15
+    },
+    {
+      "path": "crates/hermes-parity-tests",
+      "count": 13
+    },
+    {
+      "path": "crates/hermes-source-parity-tests",
       "count": 13
     },
     {
@@ -727,11 +739,15 @@
       "count": 13
     },
     {
-      "path": "crates/hermes-acp",
-      "count": 10
+      "path": "crates/hermes-cron",
+      "count": 12
     },
     {
-      "path": "crates/hermes-cron",
+      "path": "docs/releases",
+      "count": 11
+    },
+    {
+      "path": "crates/hermes-mcp",
       "count": 10
     },
     {
@@ -739,7 +755,7 @@
       "count": 10
     },
     {
-      "path": "docs/releases",
+      "path": "docs/roadmaps",
       "count": 10
     },
     {
@@ -751,15 +767,11 @@
       "count": 9
     },
     {
-      "path": "docs/roadmaps",
-      "count": 8
-    },
-    {
-      "path": "crates/hermes-mcp",
-      "count": 7
-    },
-    {
       "path": "optional-skills/creative",
+      "count": 6
+    },
+    {
+      "path": "tests/plugins",
       "count": 6
     },
     {
@@ -771,12 +783,16 @@
       "count": 5
     },
     {
-      "path": "tests/plugins",
+      "path": "tests/run_agent",
       "count": 5
     },
     {
-      "path": "tests/run_agent",
+      "path": "tests/tools",
       "count": 5
+    },
+    {
+      "path": "crates/hermes-protocol-parity-tests",
+      "count": 4
     },
     {
       "path": "optional-skills/mlops",
@@ -787,15 +803,19 @@
       "count": 4
     },
     {
-      "path": "tests/tools",
-      "count": 4
-    },
-    {
-      "path": ".github/workflows",
+      "path": "crates/hermes-app-runtime",
       "count": 3
     },
     {
       "path": "crates/hermes-auth",
+      "count": 3
+    },
+    {
+      "path": "crates/hermes-cli-ui",
+      "count": 3
+    },
+    {
+      "path": "crates/hermes-provider-runtime",
       "count": 3
     },
     {
@@ -807,28 +827,8 @@
       "count": 3
     },
     {
-      "path": "skills/gaming",
+      "path": "skills/devops",
       "count": 3
-    },
-    {
-      "path": "crates/hermes-rl",
-      "count": 2
-    },
-    {
-      "path": "docs/alpha",
-      "count": 2
-    },
-    {
-      "path": "docs/plans",
-      "count": 2
-    },
-    {
-      "path": "plugins/model-providers",
-      "count": 2
-    },
-    {
-      "path": "skills/mcp",
-      "count": 2
     }
   ],
   "workstream_matrix": [
@@ -836,9 +836,9 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 519,
-      "shared_different": 723,
-      "local_only": 34,
+      "upstream_only": 846,
+      "shared_different": 786,
+      "local_only": 40,
       "risk": "critical",
       "effort": "XL"
     },
@@ -846,9 +846,9 @@
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 991,
+      "upstream_only": 1345,
       "shared_different": 12,
-      "local_only": 214,
+      "local_only": 449,
       "risk": "critical",
       "effort": "XL"
     },
@@ -856,9 +856,9 @@
       "workstream": "WS5",
       "issue": 9,
       "name": "UX parity",
-      "upstream_only": 541,
-      "shared_different": 268,
-      "local_only": 106,
+      "upstream_only": 570,
+      "shared_different": 326,
+      "local_only": 127,
       "risk": "high",
       "effort": "XL"
     },
@@ -866,9 +866,9 @@
       "workstream": "WS3",
       "issue": 7,
       "name": "Tools and adapters parity",
-      "upstream_only": 117,
-      "shared_different": 78,
-      "local_only": 120,
+      "upstream_only": 174,
+      "shared_different": 96,
+      "local_only": 158,
       "risk": "high",
       "effort": "L"
     },
@@ -876,11 +876,11 @@
       "workstream": "WS4",
       "issue": 8,
       "name": "Skills parity",
-      "upstream_only": 72,
-      "shared_different": 27,
-      "local_only": 94,
+      "upstream_only": 101,
+      "shared_different": 38,
+      "local_only": 123,
       "risk": "medium",
-      "effort": "M"
+      "effort": "L"
     },
     {
       "workstream": "WS2",
@@ -888,7 +888,7 @@
       "name": "Core runtime parity",
       "upstream_only": 69,
       "shared_different": 0,
-      "local_only": 157,
+      "local_only": 412,
       "risk": "critical",
       "effort": "M"
     },
@@ -904,33 +904,37 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 5657,
-    "upstream_patch_represented": 2,
-    "local_patch_unique": 895,
+    "upstream_patch_missing": 12546,
+    "upstream_patch_represented": 6,
+    "local_patch_unique": 1052,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
-      "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
-      "268a4aa1c1ad05867efc84f69d941c37b36c0ef8",
-      "5eefdd9c0234b39e246a782aeb4c968f5b51b6d5",
-      "fa8f0c6fae3c86ec83dba0827f023dddcbfa5589",
-      "d6d9f1062954dccd8f32405932ada23159190b1f",
-      "ed5f16323f65fac497117166b85c30bd83f6177d",
-      "7f1c1aa4d9d7c3b7b08ec2b9ec5832a9c08a8776",
-      "2c53a3344d164b21dea74d37bb0aab8a1932208d",
-      "dcb8c5c67a451e2e0995bd04e5a083c48e80c282",
-      "74520392f20980d8631193670312993dedf4fc8a",
-      "73533fc7284ef1cc51c672d300472a247fb49654",
-      "400b5235b8a77a31a25c676b72327cc180b144fd",
-      "9357db2844d2b70262d1ad8bae985cb2d210035c",
-      "e25c319fa39edf3122a2c808f9a585fdb079800f",
-      "2f48c58b85b81ef45e3e25bb1279494e67fa6021",
-      "88b6eb9ad1be4c778c589218c7c759c4e0d31c7e",
-      "d1ce3586463d72923749a2ac788ef8ca0f90358b",
-      "bace220d29e400bc14a5c6066a699260a0ec4c6f",
-      "a6ffa994cd433c13377546a98a527c993572a41c",
-      "18b29b124a0b562c331506aaf49e6c67d2d90f12"
+      "21d80ca68346dfdb8d3556015a723a9217f8566f",
+      "122d8788ae2308dd222eafec393a6862a2e39574",
+      "a49596cbb2c17686f2c6de47393e3c419e4c9444",
+      "6d346250b18df94878f7bcc27604c6e9f51208b0",
+      "bab9c75b5b40bfa8788aaec8a3c6f606bb60d240",
+      "45d0b0b1427b965bd7a61f1510dee5cf2479aa0a",
+      "10b4cfeace2487980cf682808e0613dd099f2167",
+      "bf4223f3818fb5654550b059e416425cb06ab5e2",
+      "cde7e64418e00a1337325e1259a7f8ba7e563315",
+      "3078053795e838e47797ede02b44e6dead731aac",
+      "ebb46ba0e6a70dc1caa0005ca4449a63e0657ad1",
+      "bc71dffd4cb7586bd82501f6897ccca1255c2e1c",
+      "e1710378b7388714b75c8c96ecb917193faf92fc",
+      "f4ff1f496b259d10316f81af52d16756ab274666",
+      "58d5fa1e4cec2783962328d887b12810d6de0c8c",
+      "96cff783357c785ea1ba8a1e61f923364e29f2bd",
+      "4ece87efb0ddb477565a90917538cd6497ce708f",
+      "587d1cf720950dbb7f9b4afb527d2d4898574c7f",
+      "c7fa4447b831e2320b7d07e451bbef63dbf28cf3",
+      "17608c11422bc1bea8c8c2e2032c41cd4ac57a7a"
     ],
     "upstream_patch_represented_sample": [
+      "1f6a1f0028e1d5bcf1a3621f53ad1e16b6398ad0",
+      "612321631faa9021379e62d467626e52154d3983",
+      "4b35836ba42a59a669699197573a969431b4df44",
+      "3baafea380ec18a6179fe3e82d742557d66389e4",
       "e444d8f29cead99781cbd4306160b81887b3f4e5",
       "408aa4fbc4839b1f770849e4e28c700b6617d07e"
     ],
@@ -959,8 +963,8 @@
     "local_patch_equivalent_sample": [
       "6b69de4772eac5f982c097553dc6bcfeb60350e6"
     ],
-    "intentional_divergence_items": 8,
-    "intentional_divergence_covered_files": 1050
+    "intentional_divergence_items": 12,
+    "intentional_divergence_covered_files": 1264
   },
   "intentional_divergence": [
     {
@@ -1005,7 +1009,7 @@
       "status": "approved",
       "workstream": "WS4",
       "summary": "Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring).",
-      "matched_files": 193,
+      "matched_files": 262,
       "matched_sample": [
         "optional-skills/autonomous-ai-agents/honcho/SKILL.md",
         "optional-skills/creative/DESCRIPTION.md",
@@ -1034,8 +1038,23 @@
       "status": "approved",
       "workstream": "WS3",
       "summary": "Keep platform adapter parity in the Rust gateway instead of vendoring upstream Python platform-plugin trees.",
-      "matched_files": 5,
+      "matched_files": 39,
       "matched_sample": [
+        "plugins/platforms/dingtalk/__init__.py",
+        "plugins/platforms/dingtalk/adapter.py",
+        "plugins/platforms/dingtalk/plugin.yaml",
+        "plugins/platforms/email/__init__.py",
+        "plugins/platforms/email/adapter.py",
+        "plugins/platforms/email/plugin.yaml",
+        "plugins/platforms/feishu/__init__.py",
+        "plugins/platforms/feishu/adapter.py",
+        "plugins/platforms/feishu/feishu_comment.py",
+        "plugins/platforms/feishu/feishu_comment_rules.py",
+        "plugins/platforms/feishu/feishu_meeting_invite.py",
+        "plugins/platforms/feishu/plugin.yaml",
+        "plugins/platforms/matrix/__init__.py",
+        "plugins/platforms/matrix/adapter.py",
+        "plugins/platforms/matrix/plugin.yaml",
         "plugins/platforms/mattermost/__init__.py",
         "plugins/platforms/mattermost/adapter.py",
         "plugins/platforms/mattermost/plugin.yaml",
@@ -1044,16 +1063,42 @@
       ]
     },
     {
+      "id": "rust-chronos-managed-cron-provider",
+      "status": "approved",
+      "workstream": "WS3",
+      "summary": "Own Chronos managed-cron behavior in the Rust cron scheduler and API server instead of vendoring the upstream Python cron plugin.",
+      "matched_files": 5,
+      "matched_sample": [
+        "plugins/cron_providers/__init__.py",
+        "plugins/cron_providers/chronos/__init__.py",
+        "plugins/cron_providers/chronos/_nas_client.py",
+        "plugins/cron_providers/chronos/plugin.yaml",
+        "plugins/cron_providers/chronos/verify.py"
+      ]
+    },
+    {
+      "id": "rust-runtime-no-raft-platform-plugin",
+      "status": "temporary",
+      "workstream": "WS3",
+      "summary": "Track the upstream Raft Python platform plugin as non-runtime until a Rust-native Raft adapter is scoped.",
+      "matched_files": 3,
+      "matched_sample": [
+        "plugins/platforms/raft/__init__.py",
+        "plugins/platforms/raft/adapter.py",
+        "plugins/platforms/raft/plugin.yaml"
+      ]
+    },
+    {
       "id": "upstream-python-plugin-backend-drift-20260527",
       "status": "temporary",
       "workstream": "WS3",
-      "summary": "Track newly added upstream Python plugin/backend trees separately from surgical Rust issue-triage fixes.",
+      "summary": "Track upstream Python backend plugin trees that are not yet closed as Rust-native runtime surfaces.",
       "matched_files": 10,
       "matched_sample": [
+        "plugins/dashboard_auth/drain/__init__.py",
+        "plugins/dashboard_auth/drain/plugin.yaml",
         "plugins/dashboard_auth/nous/__init__.py",
         "plugins/dashboard_auth/nous/plugin.yaml",
-        "plugins/image_gen/krea/__init__.py",
-        "plugins/image_gen/krea/plugin.yaml",
         "plugins/security-guidance/LICENSE",
         "plugins/security-guidance/NOTICE",
         "plugins/security-guidance/README.md",
@@ -1075,7 +1120,7 @@
       "status": "approved",
       "workstream": "WS5",
       "summary": "Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported.",
-      "matched_files": 832,
+      "matched_files": 918,
       "matched_sample": [
         "ui-tui/README.md",
         "ui-tui/babel.compiler.config.cjs",
@@ -1084,19 +1129,54 @@
         "ui-tui/package.json",
         "ui-tui/packages/hermes-ink/index.d.ts",
         "ui-tui/packages/hermes-ink/package-lock.json",
+        "ui-tui/packages/hermes-ink/package.json",
         "ui-tui/packages/hermes-ink/src/entry-exports.ts",
         "ui-tui/packages/hermes-ink/src/ink/app-mouse.test.ts",
         "ui-tui/packages/hermes-ink/src/ink/app-rawmode-mouse.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/app-stdin-recovery.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/colorize.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/colorize.ts",
         "ui-tui/packages/hermes-ink/src/ink/components/AlternateScreen.tsx",
         "ui-tui/packages/hermes-ink/src/ink/components/App.tsx",
         "ui-tui/packages/hermes-ink/src/ink/components/CursorAdvanceContext.ts",
         "ui-tui/packages/hermes-ink/src/ink/components/Link.tsx",
         "ui-tui/packages/hermes-ink/src/ink/components/ScrollBox.tsx",
-        "ui-tui/packages/hermes-ink/src/ink/events/input-event.ts",
-        "ui-tui/packages/hermes-ink/src/ink/hit-test.test.ts",
-        "ui-tui/packages/hermes-ink/src/ink/hit-test.ts",
-        "ui-tui/packages/hermes-ink/src/ink/hooks/use-cursor-advance.ts",
-        "ui-tui/packages/hermes-ink/src/ink/hyperlinkHover.ts"
+        "ui-tui/packages/hermes-ink/src/ink/components/Text.test.ts"
+      ]
+    },
+    {
+      "id": "rust-memory-provider-plugin-parity",
+      "status": "approved",
+      "workstream": "WS3",
+      "summary": "Keep Honcho and Mem0 memory provider behavior in Rust-native memory/provider surfaces instead of vendoring Python plugin trees.",
+      "matched_files": 13,
+      "matched_sample": [
+        "plugins/memory/honcho/README.md",
+        "plugins/memory/honcho/__init__.py",
+        "plugins/memory/honcho/cli.py",
+        "plugins/memory/honcho/client.py",
+        "plugins/memory/honcho/oauth.py",
+        "plugins/memory/honcho/oauth_flow.py",
+        "plugins/memory/honcho/session.py",
+        "plugins/memory/mem0/README.md",
+        "plugins/memory/mem0/__init__.py",
+        "plugins/memory/mem0/_backend.py",
+        "plugins/memory/mem0/_oss_providers.py",
+        "plugins/memory/mem0/_setup.py",
+        "plugins/memory/mem0/plugin.yaml"
+      ]
+    },
+    {
+      "id": "rust-image-provider-plugin-parity",
+      "status": "approved",
+      "workstream": "WS5",
+      "summary": "Keep OpenRouter and Krea image generation provider behavior in the Rust image backend instead of vendoring upstream Python plugin trees.",
+      "matched_files": 4,
+      "matched_sample": [
+        "plugins/image_gen/krea/__init__.py",
+        "plugins/image_gen/krea/plugin.yaml",
+        "plugins/image_gen/openrouter/__init__.py",
+        "plugins/image_gen/openrouter/plugin.yaml"
       ]
     }
   ]
