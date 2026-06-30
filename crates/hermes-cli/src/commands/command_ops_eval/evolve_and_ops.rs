@@ -92,6 +92,7 @@ async fn run_current_hermes_cli_command(args: &[&str]) -> Result<String, AgentEr
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .suppress_windows_console()
         .output()
         .await
         .map_err(|e| AgentError::Io(format!("run current hermes command failed: {e}")))?;

@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use hermes_core::subprocess::CommandNoWindowExt;
 use serde::{Deserialize, Serialize};
 
 pub const CODING_TOOLSET: &str = "coding";
@@ -555,6 +556,7 @@ fn append_git_snapshot(root: &Path, lines: &mut Vec<String>) {
         .arg("-C")
         .arg(root)
         .args(["status", "--short", "--branch"])
+        .suppress_windows_console()
         .output();
     let Ok(output) = status else {
         return;
@@ -603,6 +605,7 @@ fn git_last_commit(root: &Path) -> Option<String> {
         .arg("-C")
         .arg(root)
         .args(["log", "-1", "--oneline"])
+        .suppress_windows_console()
         .output()
         .ok()?;
     if !output.status.success() {

@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use async_trait::async_trait;
-use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
+use hermes_core::{
+    subprocess::CommandNoWindowExt, tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema,
+};
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
@@ -433,6 +435,7 @@ fn git_output(root: &Path, args: &[&str]) -> Option<String> {
         .arg("-C")
         .arg(root)
         .args(args)
+        .suppress_windows_console()
         .output()
         .ok()?;
     if !output.status.success() {

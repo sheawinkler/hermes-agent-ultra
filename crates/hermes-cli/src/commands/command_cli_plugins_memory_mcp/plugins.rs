@@ -486,6 +486,7 @@ async fn git_checkout_ref(repo_dir: &std::path::Path, git_ref: &str) -> Result<(
     let dir = repo_dir.to_string_lossy().to_string();
     let fetch = tokio::process::Command::new("git")
         .args(["-C", &dir, "fetch", "--depth", "1", "origin", git_ref])
+        .suppress_windows_console()
         .output()
         .await
         .map_err(|e| e.to_string())?;
@@ -495,6 +496,7 @@ async fn git_checkout_ref(repo_dir: &std::path::Path, git_ref: &str) -> Result<(
     }
     let co = tokio::process::Command::new("git")
         .args(["-C", &dir, "checkout", git_ref])
+        .suppress_windows_console()
         .output()
         .await
         .map_err(|e| e.to_string())?;

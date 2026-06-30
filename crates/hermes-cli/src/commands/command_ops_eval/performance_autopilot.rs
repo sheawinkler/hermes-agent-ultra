@@ -31,6 +31,7 @@ async fn run_autopilot_probe_command_with_timeout(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .suppress_windows_console()
         .kill_on_drop(true);
     let output = tokio::time::timeout(timeout, child.output()).await;
     let finished = chrono::Utc::now();

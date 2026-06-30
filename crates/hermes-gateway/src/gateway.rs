@@ -24,6 +24,7 @@ use hermes_config::{
     QuickCommandConfig,
 };
 use hermes_core::errors::GatewayError;
+use hermes_core::subprocess::CommandNoWindowExt;
 use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
 use hermes_core::types::{Message, MessageRole};
 use hermes_intelligence::{

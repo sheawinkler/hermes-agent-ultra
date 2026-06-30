@@ -9,6 +9,7 @@
 use std::collections::VecDeque;
 use std::path::{Component, Path, PathBuf};
 
+use hermes_core::subprocess::CommandNoWindowExt;
 use hermes_intelligence::estimate_tokens_rough;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -349,6 +350,7 @@ async fn expand_git_reference(
     let output = match TokioCommand::new("git")
         .args(args)
         .current_dir(cwd)
+        .suppress_windows_console()
         .output()
         .await
     {

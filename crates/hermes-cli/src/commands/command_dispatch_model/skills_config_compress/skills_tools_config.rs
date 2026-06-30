@@ -118,6 +118,7 @@ async fn run_skills_subcommand_via_cli(
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    cmd.suppress_windows_console();
     let output = cmd
         .output()
         .await

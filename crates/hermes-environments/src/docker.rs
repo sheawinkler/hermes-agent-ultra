@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use tokio::process::Command as TokioCommand;
 
-use hermes_core::{AgentError, CommandOutput, TerminalBackend};
+use hermes_core::{subprocess::CommandNoWindowExt, AgentError, CommandOutput, TerminalBackend};
 
 /// A [`TerminalBackend`] that runs commands inside a Docker container.
 pub struct DockerBackend {
@@ -165,6 +165,7 @@ impl DockerBackend {
 
         let output = TokioCommand::new("docker")
             .args(&args)
+            .suppress_windows_console()
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to create Docker container: {}", e)))?;
@@ -233,6 +234,7 @@ impl DockerBackend {
         let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
             let output = TokioCommand::new("docker")
                 .args(&args)
+                .suppress_windows_console()
                 .output()
                 .await
                 .map_err(|e| AgentError::Io(format!("Failed to execute docker command: {}", e)))?;
@@ -343,6 +345,7 @@ impl TerminalBackend for DockerBackend {
 
         let output = TokioCommand::new("docker")
             .args(["exec", container_id.as_str(), "sh", "-c", &cat_cmd])
+            .suppress_windows_console()
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to read file via docker: {}", e)))?;
@@ -372,6 +375,7 @@ impl TerminalBackend for DockerBackend {
             let mkdir_cmd = format!("mkdir -p {}", shlex_quote(&parent_dir));
             let mkdir_output = TokioCommand::new("docker")
                 .args(["exec", container_id.as_str(), "sh", "-c", &mkdir_cmd])
+                .suppress_windows_console()
                 .output()
                 .await
                 .map_err(|e| {
@@ -398,6 +402,7 @@ impl TerminalBackend for DockerBackend {
 
         let output = TokioCommand::new("docker")
             .args(["exec", container_id.as_str(), "sh", "-c", &write_cmd])
+            .suppress_windows_console()
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to write file via docker: {}", e)))?;
@@ -418,6 +423,7 @@ impl TerminalBackend for DockerBackend {
 
         let output = TokioCommand::new("docker")
             .args(["exec", container_id.as_str(), "test", "-e", path])
+            .suppress_windows_console()
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to check file via docker: {}", e)))?;

@@ -6,7 +6,7 @@ use std::process::Stdio;
 use tokio::process::Command as TokioCommand;
 
 use crate::tools::code_execution::CodeExecutionBackend;
-use hermes_core::ToolError;
+use hermes_core::{subprocess::CommandNoWindowExt, ToolError};
 
 /// Code execution backend using local non-Python interpreters.
 pub struct LocalCodeExecutionBackend {
@@ -115,6 +115,7 @@ impl CodeExecutionBackend for LocalCodeExecutionBackend {
 
         apply_code_subprocess_home(&mut cmd);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.suppress_windows_console();
 
         let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
             let child = cmd.spawn().map_err(|e| {

@@ -1,8 +1,8 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-30T07:33:13.879112+00:00`
+Generated: `2026-06-30T08:36:56.665532+00:00`
 
-- Range: `origin/main..upstream/main`; total commits tracked: `7672`.
+- Range: `main..upstream/main`; total commits tracked: `7672`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
@@ -17,9 +17,9 @@ Generated: `2026-06-30T07:33:13.879112+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 97 |
-| pending | 29 |
-| ported | 533 |
-| superseded | 7013 |
+| pending | 20 |
+| ported | 540 |
+| superseded | 7015 |
 
 ## First 100 Pending Commits
 
@@ -28,10 +28,6 @@ Generated: `2026-06-30T07:33:13.879112+00:00`
 | `50f685521734` | #20 | feat(moa): make /moa one-shot only; route preset switching through the model picker |
 | `f67c0b3e60ba` | #21 | docs(hermes-agent skill): cover v0.13–v0.17 features, fix stale claims, tighten (#53566) |
 | `917f6bdb00b8` | #20 | fix(tools): let vision pick any provider+model, not just OpenRouter (#53606) |
-| `ef17cd204d75` | #20 | fix(windows): stop subprocess console-window popups + add CI guard (#53791) |
-| `5db1430af9ec` | #20 | fix(windows): stop terminal-window popups from background spawns (#53810) |
-| `2ecca1e7d3e7` | #23 | fix(windows): capture is not a no-window boundary; route flashing spawns through chokepoint (#53829) |
-| `d3d621f7c38b` | #20 | revert(windows): roll back terminal-popup PRs #53791 #53810 #53829 (#53853) |
 | `163cb24d45d8` | #22 | feat(moa): render reference-model blocks in TUI and desktop, not just CLI (#53855) |
 | `a94f657a5059` | #20 | fix(tui): route completion RPCs to the pool so they can't freeze the TUI (#53895) |
 | `d43e0cf304a1` | #20 | fix(agent): config-driven intent-ack continuation for all api_modes (#27881) (#53943) |
@@ -39,12 +35,7 @@ Generated: `2026-06-30T07:33:13.879112+00:00`
 | `fde1c8570ffe` | #20 | fix(tui_gateway): suppress WS peer-hangup teardown error flood (#50005) (#54126) |
 | `6d879d486b19` | #20 | fix(dashboard): close PTY WebSocket on child EOF to stop FD leak (#54028) (#54123) |
 | `5c2c85c5452f` | #20 | fix(tui): start MCP discovery for websocket sessions |
-| `cb982ad997c5` | #20 | fix(windows): hide console-window flash on backend git/gh/wmic/bash subprocess spawns |
-| `1ffa01f35fb8` | #20 | test(windows): cover no-window backend subprocess flags |
-| `eeca59f48919` | #20 | fix(windows): hide remaining backend console-flash legs missed on main |
 | `b31b0b9d95d1` | #22 | docs: reconcile docs with code across last 3 releases (#54254) |
-| `9a0010fd469f` | #20 | fix(windows): cover remaining console-flash spawn legs (#54417) |
-| `ee22d853eb13` | #26 | fix(windows): hide pdftoppm console flash on PDF attach |
 | `dff491a2b993` | #22 | feat(cli): add headless `hermes serve` backend; desktop no longer launches `dashboard` |
 | `476875acb9f0` | #22 | Add dashboard backup upload and download |
 | `fd324562d3ad` | #20 | feat(desktop): add context usage breakdown popover |

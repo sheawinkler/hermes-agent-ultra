@@ -14,6 +14,7 @@ use hermes_config::managed_gateway::{
     has_direct_modal_credentials, is_managed_tool_gateway_ready, managed_nous_tools_enabled,
     resolve_modal_backend_state, ModalMode, ResolveOptions, SelectedBackend,
 };
+use hermes_core::subprocess::CommandNoWindowExt;
 
 const REQUIREMENT_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUIREMENT_CACHE_TTL: Duration = Duration::from_secs(5);
@@ -287,6 +288,7 @@ fn command_success_with_timeout(executable: &Path, args: &[&str], timeout: Durat
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .suppress_windows_console()
         .spawn()
     {
         Ok(child) => child,

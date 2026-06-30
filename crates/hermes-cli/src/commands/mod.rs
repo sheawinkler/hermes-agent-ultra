@@ -28,6 +28,7 @@ use hermes_core::auth_gate::{
     oauth_runtime_gate_for_provider as shared_oauth_runtime_gate_for_provider,
     oauth_runtime_gate_manifest_default, OAuthRuntimeGateManifest,
 };
+use hermes_core::subprocess::CommandNoWindowExt;
 use hermes_core::AgentError;
 use hermes_cron::{
     BlueprintCommandAction, CronJob, DeliverConfig, DeliverTarget, SuggestionJobSpec,

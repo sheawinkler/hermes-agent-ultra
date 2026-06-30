@@ -1320,7 +1320,9 @@ fn try_launch_chrome_debug(port: u16, system: &str) -> bool {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            command.creation_flags(0x00000008 | 0x00000200);
+            command.creation_flags(hermes_core::subprocess::windows_no_window_creation_flags(
+                0x00000008 | 0x00000200,
+            ));
         }
         if command.spawn().is_ok() {
             return true;

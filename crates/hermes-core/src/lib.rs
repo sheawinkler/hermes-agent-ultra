@@ -8,6 +8,7 @@ pub mod credits;
 pub mod errors;
 pub mod providers;
 pub mod schema_sanitizer;
+pub mod subprocess;
 pub mod subprocess_env;
 pub mod tool_call_parser;
 pub mod tool_schema;

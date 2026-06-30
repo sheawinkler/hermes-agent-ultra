@@ -178,6 +178,7 @@ impl MatrixAdapter {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .suppress_windows_console()
             .spawn()
             .map_err(|e| format!("spawn failed for '{}': {e}", cfg.command))?;
 

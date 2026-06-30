@@ -24,6 +24,8 @@ use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
 use tracing::{error, info, trace};
 
+use hermes_core::subprocess::CommandNoWindowExt;
+
 use crate::McpError;
 
 const MCP_PROTOCOL_VERSION_HEADER_VALUE: &str = "2025-03-26";
@@ -395,6 +397,7 @@ impl McpTransport for StdioTransport {
         for (key, value) in &sanitized_env {
             cmd.env(key, value);
         }
+        cmd.suppress_windows_console();
 
         let child = cmd.spawn().map_err(|e| {
             McpError::ConnectionError(format!("Failed to spawn process '{}': {}", self.command, e))

@@ -16,6 +16,7 @@
 use std::process::Command;
 use std::sync::Mutex;
 
+use hermes_core::subprocess::CommandNoWindowExt;
 use serde_json::{json, Value};
 
 use crate::memory_manager::MemoryProviderPlugin;
@@ -134,7 +135,11 @@ fn run_brv(args: &[&str], _timeout_secs: u64, cwd: &str) -> (bool, String) {
 
     let _ = std::fs::create_dir_all(cwd);
 
-    let result = Command::new(&brv_path).args(args).current_dir(cwd).output();
+    let result = Command::new(&brv_path)
+        .args(args)
+        .current_dir(cwd)
+        .suppress_windows_console()
+        .output();
 
     match result {
         Ok(output) => {
