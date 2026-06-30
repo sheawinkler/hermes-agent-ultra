@@ -233,18 +233,42 @@ impl MatrixAdapter {
     }
 
     /// Extract room IDs from the `invite` section of a sync response.
+    #[cfg(test)]
     fn parse_invites(&self, sync_response: &serde_json::Value) -> Vec<String> {
-        let allowed_users = matrix_invite_allowed_users_from_env();
-        let allow_all = matrix_invite_allow_all_from_env();
-        self.parse_invites_with_auth(sync_response, &allowed_users, allow_all)
+        self.parse_invite_join_requests(sync_response)
+            .into_iter()
+            .map(|invite| invite.room_id)
+            .collect()
     }
 
+    fn parse_invite_join_requests(
+        &self,
+        sync_response: &serde_json::Value,
+    ) -> Vec<MatrixInviteJoinRequest> {
+        let allowed_users = matrix_invite_allowed_users_from_env();
+        let allow_all = matrix_invite_allow_all_from_env();
+        self.parse_invite_join_requests_with_auth(sync_response, &allowed_users, allow_all)
+    }
+
+    #[cfg(test)]
     fn parse_invites_with_auth(
         &self,
         sync_response: &serde_json::Value,
         allowed_users: &[String],
         allow_all: bool,
     ) -> Vec<String> {
+        self.parse_invite_join_requests_with_auth(sync_response, allowed_users, allow_all)
+            .into_iter()
+            .map(|invite| invite.room_id)
+            .collect()
+    }
+
+    fn parse_invite_join_requests_with_auth(
+        &self,
+        sync_response: &serde_json::Value,
+        allowed_users: &[String],
+        allow_all: bool,
+    ) -> Vec<MatrixInviteJoinRequest> {
         sync_response
             .get("rooms")
             .and_then(|r| r.get("invite"))
@@ -254,7 +278,11 @@ impl MatrixAdapter {
                     .filter_map(|(room_id, invite)| {
                         let sender = self.invite_sender(invite);
                         matrix_invite_sender_allowed(sender, allowed_users, allow_all)
-                            .then(|| room_id.clone())
+                            .then(|| MatrixInviteJoinRequest {
+                                room_id: room_id.clone(),
+                                is_direct: self.invite_is_direct(invite),
+                                inviter: sender.map(str::to_string),
+                            })
                     })
                     .collect()
             })
@@ -290,6 +318,25 @@ impl MatrixAdapter {
                             .iter()
                             .find_map(|event| event.get("sender").and_then(|v| v.as_str()))
                     })
+            })
+    }
+
+    fn invite_is_direct(&self, invite: &serde_json::Value) -> bool {
+        invite
+            .pointer("/invite_state/events")
+            .and_then(|events| events.as_array())
+            .is_some_and(|events| {
+                events.iter().any(|event| {
+                    event.get("type").and_then(|v| v.as_str()) == Some("m.room.member")
+                        && event.get("state_key").and_then(|v| v.as_str())
+                            == Some(self.config.user_id.as_str())
+                        && event.pointer("/content/membership").and_then(|v| v.as_str())
+                            == Some("invite")
+                        && event
+                            .pointer("/content/is_direct")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false)
+                })
             })
     }
 

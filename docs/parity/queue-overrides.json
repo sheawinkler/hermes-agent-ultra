@@ -6403,6 +6403,66 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust Telegram intake: unauthorized users are rejected in should_process_update before TelegramAdapter::parse_update and before CLI text batching/route_message. The model now includes sender_chat for from-less channel-post authorization, and tests cover unauthorized users, allowed group senders, callback tap users, and sender_chat allowlists."
+    },
+    "e55ddc3e33b28cf036371b8d81c73109521ac3f1": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as Rust MCP background-discovery noninteractive guard: McpManager::connect_all_parallel now marks spawned discovery configs with a runtime-only suppress_interactive_oauth flag, and StdioTransport injects HERMES_MCP_BACKGROUND_DISCOVERY/HERMES_MCP_SUPPRESS_INTERACTIVE_OAUTH/MCP_NONINTERACTIVE into child env without changing normal explicit MCP connect/login paths. Transport test covers marker isolation."
+    },
+    "11b0be8d15fc18f6a6741317cbb3f197ac7df989": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Matrix sync: pending invite rooms are scheduled as detached, deduped auto-join tasks with a timeout instead of blocking sync_once/gateway readiness. Wiremock test proves sync_once returns before a delayed join finishes and duplicate pending joins only issue one join request."
+    },
+    "14baeefe1d0b80e67429ffb47934acc4cd399fd1": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Matrix invite handling: direct invite metadata from invite_state is carried into the detached join request, and successful direct invite joins persist m.direct account data for the inviter/room so future identity classification can use direct-room account state. Focused test covers m.direct append/write behavior."
+    },
+    "244a6f2ceb7f58c16b3cb2186584c39524e37874": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by local Rust-first product shape: upstream fixes an Electron desktop Open setup guide button plus Python web_server route, but this repo has no apps/desktop or shipped Python web_server runtime. Rust CLI/TUI/gateway docs and setup surfaces own plugin setup guidance."
+    },
+    "fc86e35764f7b339d505092dbad3686cfa44c576": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by local Rust-first product shape: upstream remote desktop git cockpit depends on apps/desktop React stores and Python web_git/web_server endpoints absent from the shipped Rust runtime. Rust CLI/TUI/tool surfaces own git and project workflows without the Electron cockpit."
+    },
+    "4e9439cc3b33d74ad511f320dc1c5c0a66423127": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by local Rust-first product shape: upstream composer context picking through remote-aware desktop FS is an apps/desktop React behavior. This repo has no apps/desktop runtime; Rust CLI/TUI context and file access are mediated through typed tools and session state instead."
+    },
+    "453f134b3bc213f05db52b22c6a0eb18ef115339": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by local Rust-first product shape: upstream centralizes desktop remote-git REST routing across apps/desktop and Python web_server surfaces that are absent from the shipped Rust runtime. Rust project/git operations remain CLI/TUI/tool owned."
+    },
+    "db16854f343c67548933ac2e0e1d4d586bdeaaa6": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust Telegram inbound-media design: the adapter does not silently download/cache user attachments before dispatch. It preserves Telegram file IDs and bounded metadata on IncomingMessage, and oversized documents/videos are dropped by size gates with tests, so the upstream Python empty-turn-on-download-failure path is absent."
+    },
+    "3f543229f28c6a0fb588a73f093b85a183d86595": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust gateway clarify shape: Telegram does not implement the upstream cl:<id> clarify inline-button protocol, so there is no stale clarify button tap to expire. Rust gateway clarify is queued through ChannelClarifyBackend and answered by the next user message, while Telegram approval callbacks already alert when no pending approval exists."
+    },
+    "2ecb6f7fe60f6a240d632bbd51bcbb25ad22c161": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust direct Bot API polling: there is no PTB _send_path_degraded flag or deferred heartbeat gate. Successful getUpdates clears Rust backoff/error counters immediately, while sustained polling failures or 409 conflicts mark the adapter unhealthy for the gateway watcher."
+    },
+    "7e2ca7f68da63a29e1695b5e24901cc57e32f2ac": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust Telegram HTTP transport: outbound sends use a reqwest client and do not expose PTB's bot._request[1] general request pool that can be shutdown/reinitialized after a Python pool timeout. No Rust send pool reset hook exists or is needed for that Python-specific failure mode."
+    },
+    "d5ba374c038a99db99e3036d938271e70a6930fd": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust direct polling: there is no PTB updater.running=true/consumer-task-dead split. Rust owns the getUpdates request directly with a timeout bounded by TELEGRAM_POLL_STALL_GRACE_SECONDS, exponential backoff, consecutive-error health gates, and immediate 409 conflict fail-closed tests."
     }
   },
   "subject_patterns": [

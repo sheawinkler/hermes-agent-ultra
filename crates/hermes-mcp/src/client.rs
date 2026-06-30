@@ -240,6 +240,10 @@ pub struct McpServerConfig {
     /// Optional authentication provider for remote servers.
     #[serde(skip)]
     pub auth_provider: Option<Arc<dyn McpAuthProvider>>,
+    /// Runtime-only guard used by background discovery to prevent OAuth flows
+    /// from competing with the interactive TUI/CLI stdin reader.
+    #[serde(skip)]
+    pub suppress_interactive_oauth: bool,
 }
 
 impl std::fmt::Debug for McpServerConfig {
@@ -255,6 +259,10 @@ impl std::fmt::Debug for McpServerConfig {
             )
             .field("keepalive_interval", &self.keepalive_interval)
             .field("sampling", &self.sampling)
+            .field(
+                "suppress_interactive_oauth",
+                &self.suppress_interactive_oauth,
+            )
             .field(
                 "auth_provider",
                 &self.auth_provider.as_ref().map(|_| "<McpAuthProvider>"),
@@ -272,6 +280,7 @@ impl PartialEq for McpServerConfig {
             && self.supports_parallel_tool_calls == other.supports_parallel_tool_calls
             && self.keepalive_interval == other.keepalive_interval
             && self.sampling == other.sampling
+            && self.suppress_interactive_oauth == other.suppress_interactive_oauth
     }
 }
 
@@ -287,6 +296,7 @@ impl McpServerConfig {
             keepalive_interval: None,
             sampling: None,
             auth_provider: None,
+            suppress_interactive_oauth: false,
         }
     }
 
@@ -301,6 +311,7 @@ impl McpServerConfig {
             keepalive_interval: None,
             sampling: None,
             auth_provider: None,
+            suppress_interactive_oauth: false,
         }
     }
 
@@ -331,6 +342,13 @@ impl McpServerConfig {
     /// Set an authentication provider for remote servers.
     pub fn with_auth(mut self, provider: Arc<dyn McpAuthProvider>) -> Self {
         self.auth_provider = Some(provider);
+        self
+    }
+
+    /// Mark this config as running in background discovery, where OAuth must
+    /// fail soft instead of prompting on stdin.
+    pub fn with_interactive_oauth_suppressed(mut self) -> Self {
+        self.suppress_interactive_oauth = true;
         self
     }
 

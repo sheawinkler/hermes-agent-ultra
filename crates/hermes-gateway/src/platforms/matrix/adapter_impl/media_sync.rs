@@ -173,13 +173,9 @@ impl MatrixAdapter {
 
         let messages = self.parse_sync_events(&body).await;
 
-        // Auto-join on invite
-        let invites = self.parse_invites(&body);
-        for invite_room in invites {
-            info!(room_id = %invite_room, "Auto-joining invited room");
-            if let Err(e) = self.join_room(&invite_room).await {
-                warn!(room_id = %invite_room, error = %e, "Failed to auto-join room");
-            }
+        // Auto-join invites without blocking sync readiness on stale rooms.
+        for invite in self.parse_invite_join_requests(&body) {
+            self.schedule_invite_join(invite);
         }
 
         Ok((messages, next_batch))

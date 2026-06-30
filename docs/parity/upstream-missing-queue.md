@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-29T22:48:58.977453+00:00`
+Generated: `2026-06-30T00:03:35.518867+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7644`.
 
@@ -17,16 +17,14 @@ Generated: `2026-06-29T22:48:58.977453+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 97 |
-| pending | 60 |
-| ported | 511 |
-| superseded | 6976 |
+| pending | 48 |
+| ported | 514 |
+| superseded | 6985 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `244a6f2ceb7f` | #20 | fix(desktop): broken "Open setup guide" button for plugin platforms |
-| `e55ddc3e33b2` | #20 | fix(mcp): suppress interactive OAuth stdin prompts during background discovery (#35927) |
 | `dbe734beff0c` | #20 | fix(dashboard-auth): exclude non-interactive providers from interactive login surfaces (#53239) |
 | `fbf748b28247` | #20 | fix(dashboard-auth): follow redirects on self-hosted OIDC discovery (#53399) |
 | `5636c22828b0` | #20 | feat(photon): upgrade spectrum-ts sidecar to v7.0.0 |
@@ -46,21 +44,14 @@ Generated: `2026-06-29T22:48:58.977453+00:00`
 | `d3d621f7c38b` | #20 | revert(windows): roll back terminal-popup PRs #53791 #53810 #53829 (#53853) |
 | `163cb24d45d8` | #22 | feat(moa): render reference-model blocks in TUI and desktop, not just CLI (#53855) |
 | `a94f657a5059` | #20 | fix(tui): route completion RPCs to the pool so they can't freeze the TUI (#53895) |
-| `db16854f343c` | #20 | fix(telegram): surface failed media downloads to user and agent, not a silent empty turn (#53912) |
 | `6f1a176b3309` | #20 | fix(gateway/discord): REST liveness probe to detect zombie clients (#26656) |
 | `9c6229ce249e` | #20 | fix(security): centralize credential-safe subprocess env (#29157) |
-| `11b0be8d15fc` | #20 | fix(gateway): avoid Matrix pending invite boot loops |
 | `d43e0cf304a1` | #20 | fix(agent): config-driven intent-ack continuation for all api_modes (#27881) (#53943) |
 | `a8c862900b9c` | #20 | fix(tui): sanitize replay history on WebUI/TUI session resume (#29086) (#53939) |
-| `3f543229f28c` | #20 | fix(telegram): notify user when clarify button tap arrives after expiry |
 | `c9df4bc094fb` | #20 | fix(gateway): default restart_drain_timeout to 0 to kill systemd crash loop (#54066) |
-| `2ecb6f7fe60f` | #20 | fix(telegram): clear send_path_degraded on successful reconnect (#35205) (#54076) |
-| `7e2ca7f68da6` | #20 | fix(telegram): reset send pool after pool timeouts |
 | `fde1c8570ffe` | #20 | fix(tui_gateway): suppress WS peer-hangup teardown error flood (#50005) (#54126) |
-| `14baeefe1d0b` | #20 | fix(matrix): record DM rooms in m.direct on invite to prevent group misclassification |
 | `7c0a5def58fb` | #23 | fix(memory/holographic): close DB connection on shutdown instead of leaking to GC (#54133) |
 | `6d879d486b19` | #20 | fix(dashboard): close PTY WebSocket on child EOF to stop FD leak (#54028) (#54123) |
-| `d5ba374c038a` | #20 | fix(telegram): detect wedged getUpdates consumer via pending_update_count |
 | `5c2c85c5452f` | #20 | fix(tui): start MCP discovery for websocket sessions |
 | `61622bb56a7a` | #20 | fix(tui): use role=user for model switch marker to avoid HTTP 400 on strict providers (#48338) |
 | `cb982ad997c5` | #20 | fix(windows): hide console-window flash on backend git/gh/wmic/bash subprocess spawns |
@@ -68,9 +59,6 @@ Generated: `2026-06-29T22:48:58.977453+00:00`
 | `eeca59f48919` | #20 | fix(windows): hide remaining backend console-flash legs missed on main |
 | `a10727a555ad` | #26 | fix(browser): extend first-open timeout and surface daemon errors |
 | `7bb8aa3bd55d` | #20 | test(browser): cover open timeout diagnostics and failed navigate title |
-| `fc86e35764f7` | #20 | feat(desktop): make the git cockpit work over a remote gateway |
-| `4e9439cc3b33` | #20 | fix(desktop): route composer context picking through remote-aware fs |
-| `453f134b3bc2` | #26 | refactor(desktop): centralize remote git REST routing |
 | `b31b0b9d95d1` | #22 | docs: reconcile docs with code across last 3 releases (#54254) |
 | `9a0010fd469f` | #20 | fix(windows): cover remaining console-flash spawn legs (#54417) |
 | `e5d22ab80d97` | #20 | fix(daytona): quote single-upload mkdir parent path (#54440) |

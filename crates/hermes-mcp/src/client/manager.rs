@@ -295,6 +295,7 @@ impl McpManager {
                 continue;
             }
 
+            let config = config.with_interactive_oauth_suppressed();
             let sampling_config = self.sampling_config.clone();
             let sampling_callback = self.sampling_callback.clone();
             tasks.spawn(async move {

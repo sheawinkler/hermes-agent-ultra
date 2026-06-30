@@ -5,15 +5,22 @@ impl MatrixAdapter {
 
     /// Join a room by room ID or alias.
     pub async fn join_room(&self, room_id: &str) -> Result<String, GatewayError> {
+        Self::join_room_with_client(&self.client, &self.config, room_id).await
+    }
+
+    async fn join_room_with_client(
+        client: &Client,
+        config: &MatrixConfig,
+        room_id: &str,
+    ) -> Result<String, GatewayError> {
         let url = format!(
             "{}/_matrix/client/v3/join/{}",
-            self.config.homeserver_url, room_id
+            config.homeserver_url, room_id
         );
 
-        let resp = self
-            .client
+        let resp = client
             .post(&url)
-            .header("Authorization", self.auth_header())
+            .header("Authorization", format!("Bearer {}", config.access_token))
             .json(&serde_json::json!({}))
             .send()
             .await
@@ -38,6 +45,147 @@ impl MatrixAdapter {
 
         info!(room_id = %joined_room, "Joined room");
         Ok(joined_room)
+    }
+
+    fn schedule_invite_join(&self, invite: MatrixInviteJoinRequest) {
+        let room_id = invite.room_id.trim().to_string();
+        if room_id.is_empty() {
+            return;
+        }
+
+        {
+            let mut pending = self.pending_invite_joins.lock().expect("matrix invite joins");
+            if !pending.insert(room_id.clone()) {
+                debug!(room_id = %room_id, "Matrix invite join already pending");
+                return;
+            }
+        }
+
+        let pending = Arc::clone(&self.pending_invite_joins);
+        let client = self.client.clone();
+        let config = self.config.clone();
+        tokio::spawn(async move {
+            info!(room_id = %room_id, "Scheduling Matrix invite auto-join");
+            let join_result = tokio::time::timeout(
+                Duration::from_secs(45),
+                Self::join_room_with_client(&client, &config, &room_id),
+            )
+            .await;
+
+            match join_result {
+                Ok(Ok(_joined_room)) => {
+                    if invite.is_direct {
+                        if let Some(inviter) =
+                            invite.inviter.as_deref().map(str::trim).filter(|s| !s.is_empty())
+                        {
+                            if let Err(err) =
+                                Self::record_dm_room_with_client(&client, &config, &room_id, inviter)
+                                    .await
+                            {
+                                warn!(
+                                    room_id = %room_id,
+                                    inviter = %inviter,
+                                    error = %err,
+                                    "Matrix failed to record direct invite in m.direct"
+                                );
+                            }
+                        }
+                    }
+                }
+                Ok(Err(err)) => {
+                    warn!(room_id = %room_id, error = %err, "Failed to auto-join Matrix invite");
+                }
+                Err(_) => {
+                    warn!(room_id = %room_id, "Timed out auto-joining Matrix invite");
+                }
+            }
+
+            pending
+                .lock()
+                .expect("matrix invite joins")
+                .remove(&room_id);
+        });
+    }
+
+    async fn record_dm_room_with_client(
+        client: &Client,
+        config: &MatrixConfig,
+        room_id: &str,
+        inviter: &str,
+    ) -> Result<(), GatewayError> {
+        let url = format!(
+            "{}/_matrix/client/v3/user/{}/account_data/m.direct",
+            config.homeserver_url,
+            urlencoding::encode(&config.user_id)
+        );
+
+        let mut account_data = match client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", config.access_token))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<serde_json::Map<String, serde_json::Value>>()
+                .await
+                .unwrap_or_default(),
+            Ok(resp) if resp.status().as_u16() == 404 => serde_json::Map::new(),
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                return Err(GatewayError::ConnectionFailed(format!(
+                    "Matrix m.direct read error ({status}): {text}"
+                )));
+            }
+            Err(err) => {
+                return Err(GatewayError::ConnectionFailed(format!(
+                    "Matrix m.direct read failed: {err}"
+                )));
+            }
+        };
+
+        let rooms = account_data
+            .entry(inviter.to_string())
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        if !rooms.is_array() {
+            *rooms = serde_json::Value::Array(Vec::new());
+        }
+        let rooms = rooms.as_array_mut().expect("normalized array");
+        if !rooms.iter().any(|room| room.as_str() == Some(room_id)) {
+            rooms.push(serde_json::Value::String(room_id.to_string()));
+        }
+
+        let resp = client
+            .put(&url)
+            .header("Authorization", format!("Bearer {}", config.access_token))
+            .json(&account_data)
+            .send()
+            .await
+            .map_err(|err| {
+                GatewayError::ConnectionFailed(format!("Matrix m.direct write failed: {err}"))
+            })?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::ConnectionFailed(format!(
+                "Matrix m.direct write error ({status}): {text}"
+            )));
+        }
+
+        info!(
+            room_id = %room_id,
+            inviter = %inviter,
+            "Recorded Matrix direct invite in m.direct"
+        );
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn pending_invite_join_count(&self) -> usize {
+        self.pending_invite_joins
+            .lock()
+            .expect("matrix invite joins")
+            .len()
     }
 
     /// Leave a room.

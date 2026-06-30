@@ -32,6 +32,7 @@ impl MatrixAdapter {
             txn_counter: AtomicU64::new(0),
             stop_signal: Arc::new(Notify::new()),
             sync_running: AtomicBool::new(false),
+            pending_invite_joins: Arc::new(Mutex::new(HashSet::new())),
             decrypt_ffi,
             native_decrypt,
             native_runtime: AsyncMutex::new(None),

@@ -308,21 +308,45 @@ pub struct StdioTransport {
     child: Option<Child>,
     /// Background task draining child stderr to an MCP log file.
     stderr_drain_task: Option<JoinHandle<()>>,
+    /// Background discovery should not let OAuth helpers prompt on stdin.
+    suppress_interactive_oauth: bool,
     /// Whether the transport has been started.
     started: bool,
 }
 
 impl StdioTransport {
     /// Create a new stdio transport for the given command.
-    pub fn new(command: impl Into<String>, args: &[String], env: &HashMap<String, String>) -> Self {
+    pub fn new(
+        command: impl Into<String>,
+        args: &[String],
+        env: &HashMap<String, String>,
+        suppress_interactive_oauth: bool,
+    ) -> Self {
         Self {
             command: command.into(),
             args: args.to_vec(),
             env: env.clone(),
             child: None,
             stderr_drain_task: None,
+            suppress_interactive_oauth,
             started: false,
         }
+    }
+
+    fn effective_child_env(&self, profile: McpSandboxProfile) -> HashMap<String, String> {
+        let mut env = sanitize_child_env(&self.env, profile);
+        if self.suppress_interactive_oauth {
+            env.insert(
+                "HERMES_MCP_BACKGROUND_DISCOVERY".to_string(),
+                "1".to_string(),
+            );
+            env.insert(
+                "HERMES_MCP_SUPPRESS_INTERACTIVE_OAUTH".to_string(),
+                "1".to_string(),
+            );
+            env.insert("MCP_NONINTERACTIVE".to_string(), "1".to_string());
+        }
+        env
     }
 }
 
@@ -349,7 +373,7 @@ impl McpTransport for StdioTransport {
                 }
             )));
         }
-        let sanitized_env = sanitize_child_env(&self.env, sandbox_profile);
+        let sanitized_env = self.effective_child_env(sandbox_profile);
 
         info!(
             "Starting MCP stdio transport: {} {:?}",
@@ -1006,10 +1030,41 @@ mod tests {
     #[test]
     fn test_stdio_transport_new() {
         let env = HashMap::new();
-        let transport = StdioTransport::new("echo", &[], &env);
+        let transport = StdioTransport::new("echo", &[], &env, false);
         assert_eq!(transport.command, "echo");
         assert!(transport.args.is_empty());
+        assert!(!transport.suppress_interactive_oauth);
         assert!(!transport.started);
+    }
+
+    #[test]
+    fn stdio_transport_marks_background_discovery_noninteractive() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/bin".to_string());
+        let manual = StdioTransport::new("echo", &[], &env, false);
+        let background = StdioTransport::new("echo", &[], &env, true);
+
+        assert!(!manual
+            .effective_child_env(McpSandboxProfile::Balanced)
+            .contains_key("HERMES_MCP_SUPPRESS_INTERACTIVE_OAUTH"));
+
+        let child_env = background.effective_child_env(McpSandboxProfile::Balanced);
+        assert_eq!(
+            child_env
+                .get("HERMES_MCP_BACKGROUND_DISCOVERY")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            child_env
+                .get("HERMES_MCP_SUPPRESS_INTERACTIVE_OAUTH")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            child_env.get("MCP_NONINTERACTIVE").map(String::as_str),
+            Some("1")
+        );
     }
 
     #[test]
