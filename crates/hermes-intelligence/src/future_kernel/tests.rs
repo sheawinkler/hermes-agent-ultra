@@ -9,6 +9,10 @@ mod tests {
             .with_timezone(&Utc)
     }
 
+    fn dummy_openai_key() -> String {
+        format!("sk-{}", "a".repeat(30))
+    }
+
     #[test]
     fn context_firewall_blocks_secret_and_untrusted_instruction_lanes() {
         let t = now();
@@ -17,7 +21,7 @@ mod tests {
                 "secret",
                 ContextLane::Secret,
                 TrustLevel::Authoritative,
-                "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456",
+                format!("OPENAI_API_KEY={}", dummy_openai_key()),
                 ContextSource::new("env", ".env"),
             )
             .with_allowed_uses([ContextUse::FinalAnswer]),
@@ -290,7 +294,7 @@ mod tests {
                 trust: TrustLevel::Observed,
                 source_locator: "memory://unsafe".to_string(),
                 decision: ContextDecisionKind::Admit,
-                content: "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456".to_string(),
+                content: format!("OPENAI_API_KEY={}", dummy_openai_key()),
             }],
             blocked: vec![],
             warnings: vec![],

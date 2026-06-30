@@ -1401,7 +1401,7 @@ mod tests {
 
     #[test]
     fn format_command_output_redacts_secret_assignments() {
-        let secret = "sk-abcdefghijklmnopqrstuvwxyz123456";
+        let secret = format!("sk-{}", "a".repeat(30));
         let output = CommandOutput {
             exit_code: 0,
             stdout: format!("OPENAI_API_KEY={secret}\nvisible=1"),
@@ -1410,14 +1410,14 @@ mod tests {
 
         let formatted = format_command_output(&output);
 
-        assert!(!formatted.contains(secret));
+        assert!(!formatted.contains(&secret));
         assert!(formatted.contains("OPENAI_API_KEY=<redacted>"));
         assert!(formatted.contains("visible=1"));
     }
 
     #[test]
     fn format_command_output_redacts_bare_secret_lines() {
-        let secret = "ghp_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ";
+        let secret = format!("ghp_{}", "A".repeat(36));
         let output = CommandOutput {
             exit_code: 1,
             stdout: String::new(),
@@ -1426,7 +1426,7 @@ mod tests {
 
         let formatted = format_command_output(&output);
 
-        assert!(!formatted.contains(secret));
+        assert!(!formatted.contains(&secret));
         assert!(formatted.contains("before"));
         assert!(formatted.contains("[redacted secret output]"));
         assert!(formatted.contains("after"));
