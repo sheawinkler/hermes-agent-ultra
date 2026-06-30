@@ -87,6 +87,24 @@ def git_show_file(repo_root: pathlib.Path, ref: str, path: str) -> str | None:
     return proc.stdout
 
 
+def git_show_text_surface(repo_root: pathlib.Path, ref: str, paths: list[str]) -> str | None:
+    parts: list[str] = []
+    for path in paths:
+        if path.endswith(".rs"):
+            single = git_show_file(repo_root, ref, path)
+            if single is not None:
+                parts.append(single)
+                continue
+        listed = run(["git", "ls-tree", "-r", "--name-only", ref, "--", path], repo_root)
+        if listed.returncode != 0 or not listed.stdout.strip():
+            continue
+        for rel in sorted(line for line in listed.stdout.splitlines() if line.endswith(".rs")):
+            content = git_show_file(repo_root, ref, rel)
+            if content is not None:
+                parts.append(content)
+    return "\n".join(parts) if parts else None
+
+
 def rust_fn_block(source: str, fn_name: str) -> str:
     m = re.search(rf"(?m)^(?:pub\s+)?(?:async\s+)?fn\s+{re.escape(fn_name)}\b", source)
     if not m:
@@ -209,7 +227,11 @@ def collect_python_cli_surface(repo_root: pathlib.Path, ref: str) -> dict[str, A
 def collect_cli_surface(repo_root: pathlib.Path, ref: str) -> dict[str, Any] | None:
     cli_rs = git_show_file(repo_root, ref, "crates/hermes-cli/src/cli.rs")
     main_rs = git_show_file(repo_root, ref, "crates/hermes-cli/src/main.rs")
-    commands_rs = git_show_file(repo_root, ref, "crates/hermes-cli/src/commands.rs")
+    commands_rs = git_show_text_surface(
+        repo_root,
+        ref,
+        ["crates/hermes-cli/src/commands.rs", "crates/hermes-cli/src/commands"],
+    )
     if not cli_rs or not main_rs or not commands_rs:
         return collect_python_cli_surface(repo_root, ref)
 

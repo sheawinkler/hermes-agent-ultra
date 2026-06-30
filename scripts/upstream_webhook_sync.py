@@ -439,6 +439,28 @@ def git_show_file(repo_root: str, ref: str, rel_path: str) -> str | None:
     return out
 
 
+def git_show_text_surface(repo_root: str, ref: str, rel_paths: list[str]) -> str | None:
+    parts: list[str] = []
+    for rel_path in rel_paths:
+        if rel_path.endswith(".rs"):
+            single = git_show_file(repo_root, ref, rel_path)
+            if single is not None:
+                parts.append(single)
+                continue
+        rc, out, _ = run_git(
+            repo_root,
+            ["ls-tree", "-r", "--name-only", ref, "--", rel_path],
+            check=False,
+        )
+        if rc != 0 or not out.strip():
+            continue
+        for rel in sorted(line for line in out.splitlines() if line.endswith(".rs")):
+            content = git_show_file(repo_root, ref, rel)
+            if content is not None:
+                parts.append(content)
+    return "\n".join(parts) if parts else None
+
+
 def rust_fn_block(source: str, fn_name: str) -> str | None:
     fn_re = re.compile(rf"(?m)^(?:pub\s+)?(?:async\s+)?fn\s+{re.escape(fn_name)}\b")
     m = fn_re.search(source)
@@ -493,7 +515,11 @@ def extract_top_level_cli_commands(cli_source: str) -> list[str]:
 def collect_cli_surface(repo_root: str, ref: str) -> dict[str, Any] | None:
     cli_rs = git_show_file(repo_root, ref, "crates/hermes-cli/src/cli.rs")
     main_rs = git_show_file(repo_root, ref, "crates/hermes-cli/src/main.rs")
-    commands_rs = git_show_file(repo_root, ref, "crates/hermes-cli/src/commands.rs")
+    commands_rs = git_show_text_surface(
+        repo_root,
+        ref,
+        ["crates/hermes-cli/src/commands.rs", "crates/hermes-cli/src/commands"],
+    )
     if not cli_rs or not main_rs or not commands_rs:
         return None
 

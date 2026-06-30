@@ -48,6 +48,8 @@ impl App {
             let result = crate::commands::handle_slash_command(self, cmd, &args).await?;
             if result == crate::commands::CommandResult::Quit {
                 self.running = false;
+            } else if let Some(seed) = self.take_pending_agent_seed() {
+                self.submit_user_message(&seed).await?;
             }
         } else {
             // Regular user message
@@ -84,6 +86,8 @@ impl App {
         let result = crate::commands::handle_slash_command(self, slash_cmd, &args).await?;
         if result == crate::commands::CommandResult::Quit {
             self.running = false;
+        } else if let Some(seed) = self.take_pending_agent_seed() {
+            self.submit_user_message(&seed).await?;
         }
         Ok(())
     }

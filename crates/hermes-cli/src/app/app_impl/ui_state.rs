@@ -105,6 +105,17 @@ impl App {
         self.pending_input_prefill.take()
     }
 
+    pub fn queue_pending_agent_seed(&mut self, value: impl Into<String>) {
+        let value = value.into();
+        if !value.trim().is_empty() {
+            self.pending_agent_seed = Some(value);
+        }
+    }
+
+    pub fn take_pending_agent_seed(&mut self) -> Option<String> {
+        self.pending_agent_seed.take()
+    }
+
     fn composer_drafts_path(&self) -> PathBuf {
         self.state_root.join(COMPOSER_DRAFTS_FILE)
     }

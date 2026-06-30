@@ -511,6 +511,22 @@ mod tests {
         assert!(state.show_timestamps);
         assert_eq!(state.status_message, "Timestamps visible");
 
+        let (message, persist) = state.apply_timestamps_command(&["off".to_string()]);
+        assert_eq!(message, "Timestamps hidden");
+        assert_eq!(persist, Some(false));
+        assert!(!state.show_timestamps);
+        let (message, persist) = state.apply_timestamps_command(&["on".to_string()]);
+        assert_eq!(message, "Timestamps visible");
+        assert_eq!(persist, Some(true));
+        assert!(state.show_timestamps);
+        let (message, persist) = state.apply_timestamps_command(&["status".to_string()]);
+        assert_eq!(message, "Timestamps visible");
+        assert_eq!(persist, None);
+        let (message, persist) = state.apply_timestamps_command(&["bogus".to_string()]);
+        assert_eq!(message, "Usage: /timestamps [on|off|toggle|status]");
+        assert_eq!(persist, None);
+        assert!(state.show_timestamps);
+
         assert!(state
             .handle_insert_control_chord(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL)));
         assert!(state.expanded_tool_cards.contains("__all__"));

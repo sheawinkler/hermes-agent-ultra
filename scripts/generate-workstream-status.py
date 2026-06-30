@@ -65,6 +65,12 @@ def fetch_remote_branch(remote: str, branch: str) -> None:
 
 
 def read_text(path: Path) -> str:
+    if path.is_dir():
+        return "\n".join(
+            p.read_text(encoding="utf-8")
+            for p in sorted(path.rglob("*.rs"))
+            if p.is_file()
+        )
     return path.read_text(encoding="utf-8")
 
 
@@ -134,7 +140,7 @@ class WsStatus:
 def build_status(upstream_ref: str) -> tuple[dict, str]:
     cli_main = REPO_ROOT / "crates/hermes-cli/src/main.rs"
     cli_app = REPO_ROOT / "crates/hermes-cli/src/app.rs"
-    cli_cmds = REPO_ROOT / "crates/hermes-cli/src/commands.rs"
+    cli_cmds = REPO_ROOT / "crates/hermes-cli/src/commands"
     runtime_wiring = REPO_ROOT / "crates/hermes-cli/src/runtime_tool_wiring.rs"
     workflows_ci = REPO_ROOT / ".github/workflows/ci.yml"
     divergence_file = REPO_ROOT / "docs/parity/intentional-divergence.json"

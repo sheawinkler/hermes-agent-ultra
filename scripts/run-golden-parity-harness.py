@@ -95,15 +95,25 @@ def parse_args() -> argparse.Namespace:
 
 
 def parse_local_slash_commands(commands_rs: pathlib.Path) -> set[str]:
-    raw = commands_rs.read_text(encoding="utf-8")
+    raw = read_rust_surface(commands_rs)
     matches = re.findall(r'\(\s*"(/[^"]+)"\s*,', raw)
     return {m.strip() for m in matches if m.strip().startswith("/")}
 
 
 def parse_local_command_descriptions(commands_rs: pathlib.Path) -> dict[str, str]:
-    raw = commands_rs.read_text(encoding="utf-8")
+    raw = read_rust_surface(commands_rs)
     pairs = re.findall(r'\(\s*"(/[^"]+)"\s*,\s*"([^"]*)"\s*,?\s*\)', raw)
     return {cmd.strip(): desc.strip() for cmd, desc in pairs if cmd.strip().startswith("/")}
+
+
+def read_rust_surface(path: pathlib.Path) -> str:
+    if path.is_dir():
+        return "\n".join(
+            p.read_text(encoding="utf-8")
+            for p in sorted(path.rglob("*.rs"))
+            if p.is_file()
+        )
+    return path.read_text(encoding="utf-8")
 
 
 def parse_upstream_slash_commands(upstream_root: pathlib.Path) -> set[str]:
@@ -140,7 +150,7 @@ def load_allow_missing(args: argparse.Namespace, repo_root: pathlib.Path) -> int
 
 
 def build_report(repo_root: pathlib.Path, upstream_root: pathlib.Path, allow_missing: int) -> HarnessReport:
-    commands_rs = repo_root / "crates/hermes-cli/src/commands.rs"
+    commands_rs = repo_root / "crates/hermes-cli/src/commands"
     local = parse_local_slash_commands(commands_rs)
     local_desc = parse_local_command_descriptions(commands_rs)
     upstream = parse_upstream_slash_commands(upstream_root)

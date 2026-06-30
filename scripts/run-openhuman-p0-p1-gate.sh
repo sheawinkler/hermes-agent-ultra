@@ -14,7 +14,7 @@ required_commands=(
 )
 
 for cmd in "${required_commands[@]}"; do
-  if ! rg -n --fixed-strings "\"${cmd}\"," crates/hermes-cli/src/commands.rs >/dev/null; then
+  if ! rg -n --fixed-strings "\"${cmd}\"," crates/hermes-cli/src/commands >/dev/null; then
     echo "[gate] missing slash command registration: ${cmd}" >&2
     exit 1
   fi
@@ -29,7 +29,7 @@ required_tests=(
 )
 
 for test_name in "${required_tests[@]}"; do
-  if ! rg -n "fn ${test_name}\(" crates/hermes-cli/src/commands.rs crates/hermes-cli/src/tui.rs >/dev/null; then
+  if ! rg -n "fn ${test_name}\(" crates/hermes-cli/src/commands crates/hermes-cli/src/tui.rs crates/hermes-cli/src/tui >/dev/null; then
     echo "[gate] missing required test: ${test_name}" >&2
     exit 1
   fi

@@ -152,6 +152,7 @@ mod tests {
             pending_image_hint: None,
             session_objective: None,
             pending_input_prefill: None,
+            pending_agent_seed: None,
             pending_system_notes: Vec::new(),
             quorum_armed_once: false,
             pet_settings: PetSettings::default(),
