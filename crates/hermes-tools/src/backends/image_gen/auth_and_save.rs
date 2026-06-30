@@ -23,6 +23,45 @@ async fn save_openrouter_compat_generated_image(
     }
 }
 
+async fn save_provider_image_from_response(
+    client: &Client,
+    first: &Value,
+    output_dir: &Path,
+    provider: &str,
+) -> Result<PathBuf, ToolError> {
+    if let Some(b64) = first
+        .get("b64_json")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let data_uri = format!("data:image/png;base64,{b64}");
+        return save_openrouter_compat_generated_image(client, &data_uri, output_dir, provider)
+            .await;
+    }
+    if let Some(url) = first
+        .get("url")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return save_openrouter_compat_generated_image(client, url, output_dir, provider).await;
+    }
+    if let Some(public_url) = first
+        .get("file_output")
+        .and_then(|file| file.get("public_url"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return save_openrouter_compat_generated_image(client, public_url, output_dir, provider)
+            .await;
+    }
+    Err(ToolError::ExecutionFailed(format!(
+        "{provider} response contained neither b64_json nor URL"
+    )))
+}
+
 fn save_openrouter_compat_data_uri(
     data_uri: &str,
     output_dir: &Path,

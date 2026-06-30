@@ -33,6 +33,12 @@ impl EnvScope {
             "HERMES_CODEX_IMAGE_CHAT_MODEL",
             "OPENAI_CODEX_IMAGE_CHAT_MODEL",
             "HERMES_AUTH_FILE",
+            "OPENAI_API_KEY",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_IMAGE_BASE_URL",
+            "HERMES_OPENAI_IMAGE_BASE_URL",
+            "OPENAI_BASE_URL",
+            "HERMES_OPENAI_BASE_URL",
             "OPENROUTER_API_KEY",
             "OPENROUTER_IMAGE_MODEL",
             "OPENROUTER_IMAGE_BASE_URL",
@@ -50,6 +56,14 @@ impl EnvScope {
             "KREA_USE_GATEWAY",
             "HERMES_KREA_USE_GATEWAY",
             "KREA_GATEWAY_URL",
+            "XAI_API_KEY",
+            "HERMES_XAI_API_KEY",
+            "XAI_IMAGE_MODEL",
+            "XAI_IMAGE_RESOLUTION",
+            "XAI_IMAGE_BASE_URL",
+            "HERMES_XAI_IMAGE_BASE_URL",
+            "XAI_BASE_URL",
+            "HERMES_XAI_BASE_URL",
             "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
             "TOOL_GATEWAY_USER_TOKEN",
             "TOOL_GATEWAY_DOMAIN",
@@ -291,6 +305,12 @@ fn selected_image_provider_reads_env_and_config() {
 
     std::env::set_var("HERMES_IMAGE_GEN_PROVIDER", "krea-ai");
     assert_eq!(selected_image_provider(), Some("krea"));
+
+    std::env::set_var("HERMES_IMAGE_GEN_PROVIDER", "openai");
+    assert_eq!(selected_image_provider(), Some("openai"));
+
+    std::env::set_var("HERMES_IMAGE_GEN_PROVIDER", "grok-imagine");
+    assert_eq!(selected_image_provider(), Some("xai"));
 }
 
 #[test]
@@ -643,6 +663,114 @@ async fn codex_image_generate_posts_responses_and_saves_png() {
 }
 
 #[tokio::test]
+async fn openai_image_generate_posts_images_api_and_saves_b64() {
+    use wiremock::matchers::{body_partial_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let _g = EnvScope::new();
+    let server = MockServer::start().await;
+    std::env::set_var("OPENAI_API_KEY", "sk-openai-test");
+    std::env::set_var("OPENAI_IMAGE_BASE_URL", server.uri());
+    std::env::set_var("OPENAI_IMAGE_MODEL", "gpt-image-2-low");
+
+    let image_b64 = STANDARD.encode(b"openai-image-data");
+    Mock::given(method("POST"))
+        .and(path("/images/generations"))
+        .and(header("Authorization", "Bearer sk-openai-test"))
+        .and(body_partial_json(json!({
+            "model": OPENAI_IMAGE_API_MODEL,
+            "prompt": "paint a direct provider",
+            "size": "1024x1024",
+            "n": 1,
+            "quality": "low"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{
+                "b64_json": image_b64,
+                "revised_prompt": "paint a direct provider, polished"
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    let backend = OpenAiImageGenBackend::from_env_or_config().unwrap();
+    assert_eq!(backend.config().model(), "gpt-image-2-low");
+    assert_eq!(backend.config().quality(), "low");
+
+    let output = backend
+        .generate(ImageGenerateRequest {
+            prompt: "paint a direct provider".to_string(),
+            size: Some("square".to_string()),
+            style: None,
+            n: None,
+            image_url: None,
+            reference_image_urls: Vec::new(),
+        })
+        .await
+        .unwrap();
+    let payload: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["provider"], "openai");
+    assert_eq!(payload["transport"], "direct");
+    assert_eq!(payload["model"], "gpt-image-2-low");
+    assert_eq!(payload["api_model"], OPENAI_IMAGE_API_MODEL);
+    assert_eq!(payload["quality"], "low");
+    assert_eq!(
+        payload["revised_prompt"],
+        "paint a direct provider, polished"
+    );
+    let image = payload["image"].as_str().expect("image path");
+    assert!(image.contains("cache/images/openai_gen_"));
+    assert_eq!(std::fs::read(image).unwrap(), b"openai-image-data");
+
+    let runtime: ImageGenRuntimeBackend = backend.into();
+    assert_eq!(runtime.provider_label(), "openai");
+    assert_eq!(runtime.required_env_vars(), vec!["OPENAI_API_KEY"]);
+}
+
+#[tokio::test]
+async fn openai_image_edit_uses_multipart_images_endpoint() {
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let _g = EnvScope::new();
+    let server = MockServer::start().await;
+    std::env::set_var("OPENAI_API_KEY", "sk-openai-edit");
+    std::env::set_var("OPENAI_IMAGE_BASE_URL", server.uri());
+
+    let image_b64 = STANDARD.encode(b"openai-edit-data");
+    Mock::given(method("POST"))
+        .and(path("/images/edits"))
+        .and(header("Authorization", "Bearer sk-openai-edit"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{"b64_json": image_b64}]
+        })))
+        .mount(&server)
+        .await;
+
+    let source = STANDARD.encode(b"source-image");
+    let backend = OpenAiImageGenBackend::from_env_or_config().unwrap();
+    let output = backend
+        .generate(ImageGenerateRequest {
+            prompt: "edit the source".to_string(),
+            size: Some("portrait".to_string()),
+            style: None,
+            n: None,
+            image_url: Some(format!("data:image/png;base64,{source}")),
+            reference_image_urls: Vec::new(),
+        })
+        .await
+        .unwrap();
+    let payload: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(payload["provider"], "openai");
+    assert_eq!(payload["modality"], "image");
+    assert_eq!(payload["size"], "1024x1536");
+    assert_eq!(payload["source_images"], 1);
+    let image = payload["image"].as_str().expect("image path");
+    assert_eq!(std::fs::read(image).unwrap(), b"openai-edit-data");
+}
+
+#[tokio::test]
 async fn openrouter_image_generate_posts_chat_completions_and_saves_data_uri() {
     use wiremock::matchers::{body_partial_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -707,6 +835,103 @@ async fn openrouter_image_generate_posts_chat_completions_and_saves_data_uri() {
     let image = payload["image"].as_str().expect("image path");
     assert!(image.contains("cache/images/openrouter_gen_"));
     assert_eq!(std::fs::read(image).unwrap(), b"test-image-data");
+}
+
+#[tokio::test]
+async fn xai_image_generate_posts_json_and_saves_b64() {
+    use wiremock::matchers::{body_partial_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let _g = EnvScope::new();
+    let server = MockServer::start().await;
+    std::env::set_var("XAI_API_KEY", "xai-test-key");
+    std::env::set_var("XAI_IMAGE_BASE_URL", server.uri());
+    std::env::set_var("XAI_IMAGE_RESOLUTION", "2k");
+
+    let image_b64 = STANDARD.encode(b"xai-image-data");
+    Mock::given(method("POST"))
+        .and(path("/images/generations"))
+        .and(header("Authorization", "Bearer xai-test-key"))
+        .and(header("User-Agent", "hermes-agent/image_gen"))
+        .and(body_partial_json(json!({
+            "model": DEFAULT_XAI_IMAGE_MODEL,
+            "prompt": "grok a skyline",
+            "aspect_ratio": "16:9",
+            "resolution": "2k"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{"b64_json": image_b64}],
+            "usage": {"input_tokens": 7}
+        })))
+        .mount(&server)
+        .await;
+
+    let backend = XaiImageGenBackend::from_env_or_auth_store().unwrap();
+    assert_eq!(backend.config().model(), DEFAULT_XAI_IMAGE_MODEL);
+    assert_eq!(backend.config().resolution(), "2k");
+    let mut request = image_request("grok a skyline");
+    request.size = Some("landscape".to_string());
+    let output = backend.generate(request).await.unwrap();
+    let payload: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["provider"], "xai");
+    assert_eq!(payload["transport"], "direct");
+    assert_eq!(payload["model"], DEFAULT_XAI_IMAGE_MODEL);
+    assert_eq!(payload["aspect_ratio"], "landscape");
+    assert_eq!(payload["xai_aspect_ratio"], "16:9");
+    assert_eq!(payload["resolution"], "2k");
+    assert_eq!(payload["usage"]["input_tokens"], 7);
+    let image = payload["image"].as_str().expect("image path");
+    assert!(image.contains("cache/images/xai_gen_"));
+    assert_eq!(std::fs::read(image).unwrap(), b"xai-image-data");
+
+    let runtime: ImageGenRuntimeBackend = backend.into();
+    assert_eq!(runtime.provider_label(), "xai");
+    assert_eq!(runtime.required_env_vars(), vec!["XAI_API_KEY"]);
+}
+
+#[tokio::test]
+async fn xai_image_edit_uses_quality_model_and_json_image_field() {
+    use wiremock::matchers::{body_partial_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let _g = EnvScope::new();
+    let server = MockServer::start().await;
+    std::env::set_var("XAI_API_KEY", "xai-edit-key");
+    std::env::set_var("XAI_IMAGE_BASE_URL", server.uri());
+    let image_b64 = STANDARD.encode(b"xai-edit-image");
+    let source_b64 = STANDARD.encode(b"source-image");
+    let source_uri = format!("data:image/png;base64,{source_b64}");
+
+    Mock::given(method("POST"))
+        .and(path("/images/edits"))
+        .and(header("Authorization", "Bearer xai-edit-key"))
+        .and(body_partial_json(json!({
+            "model": DEFAULT_XAI_IMAGE_EDIT_MODEL,
+            "prompt": "make it cinematic",
+            "image": {"url": source_uri, "type": "image_url"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{
+                "b64_json": image_b64,
+                "file_output": {"public_url_error": "disabled"}
+            }]
+        })))
+        .mount(&server)
+        .await;
+
+    let backend = XaiImageGenBackend::from_env_or_auth_store().unwrap();
+    let mut request = image_request("make it cinematic");
+    request.image_url = Some(source_uri);
+    let output = backend.generate(request).await.unwrap();
+    let payload: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(payload["provider"], "xai");
+    assert_eq!(payload["model"], DEFAULT_XAI_IMAGE_EDIT_MODEL);
+    assert_eq!(payload["modality"], "image");
+    assert_eq!(payload["source_images"], 1);
+    assert_eq!(payload["file_output"]["public_url_error"], "disabled");
+    let image = payload["image"].as_str().expect("image path");
+    assert_eq!(std::fs::read(image).unwrap(), b"xai-edit-image");
 }
 
 #[tokio::test]

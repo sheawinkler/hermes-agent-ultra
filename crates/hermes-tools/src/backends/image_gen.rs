@@ -48,6 +48,10 @@ const DEFAULT_CODEX_IMAGE_CHAT_MODEL: &str = "gpt-5.5";
 const DEFAULT_CODEX_IMAGE_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const CODEX_IMAGE_INSTRUCTIONS: &str = "You are an assistant that must fulfill image generation requests by using the image_generation tool when provided.";
 const CODEX_CLOUDFLARE_ORIGINATOR: &str = "codex_cli_rs";
+const DEFAULT_OPENAI_IMAGE_BASE_URL: &str = "https://api.openai.com/v1";
+const OPENAI_IMAGE_API_MODEL: &str = "gpt-image-2";
+const DEFAULT_OPENAI_IMAGE_MODEL: &str = "gpt-image-2-medium";
+const OPENAI_MAX_REFERENCE_IMAGES: usize = 16;
 const DEFAULT_OPENROUTER_COMPAT_IMAGE_MODEL: &str = "google/gemini-2.5-flash-image";
 const DEFAULT_OPENROUTER_IMAGE_BASE_URL: &str = "https://openrouter.ai/api/v1";
 const DEFAULT_NOUS_IMAGE_BASE_URL: &str = "https://inference.nousresearch.com/v1";
@@ -67,6 +71,12 @@ const KREA_POLL_MAX_INTERVAL: Duration = Duration::from_secs(5);
 const KREA_POLL_TIMEOUT: Duration = Duration::from_secs(180);
 const KREA_POLL_BACKOFF: f64 = 1.3;
 const KREA_RETRYABLE_POLL_STATUSES: &[u16] = &[408, 409, 425, 429, 500, 502, 503, 504];
+const DEFAULT_XAI_IMAGE_BASE_URL: &str = "https://api.x.ai/v1";
+const DEFAULT_XAI_IMAGE_MODEL: &str = "grok-imagine-image";
+const DEFAULT_XAI_IMAGE_EDIT_MODEL: &str = "grok-imagine-image-quality";
+const DEFAULT_XAI_IMAGE_RESOLUTION: &str = "1k";
+const XAI_MAX_SOURCE_IMAGES: usize = 3;
+const XAI_IMAGE_TIMEOUT_SECS: u64 = 120;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct KreaModelSpec {
@@ -175,6 +185,15 @@ pub struct OpenAICodexImageGenConfig {
     access_token: Option<String>,
     base_url: String,
     chat_model: String,
+    tier_id: String,
+    quality: String,
+    output_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenAiImageGenConfig {
+    api_key: Option<String>,
+    base_url: String,
     tier_id: String,
     quality: String,
     output_dir: PathBuf,
@@ -315,6 +334,14 @@ pub struct OpenAICodexImageGenBackend {
     config: OpenAICodexImageGenConfig,
 }
 
+/// Direct OpenAI image generation over `/images/generations` and
+/// `/images/edits`.
+#[derive(Debug)]
+pub struct OpenAiImageGenBackend {
+    client: Client,
+    config: OpenAiImageGenConfig,
+}
+
 /// OpenRouter-compatible image generation over `/chat/completions`.
 ///
 /// This serves both OpenRouter and Nous Portal: both accept `modalities:
@@ -333,6 +360,24 @@ pub struct OpenRouterCompatImageGenBackend {
 pub struct KreaImageGenBackend {
     client: Client,
     config: KreaImageGenConfig,
+}
+
+/// xAI Grok Imagine image generation over `/images/generations` and
+/// `/images/edits`.
+#[derive(Debug)]
+pub struct XaiImageGenBackend {
+    client: Client,
+    config: XaiImageGenConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XaiImageGenConfig {
+    api_key: Option<String>,
+    base_url: String,
+    source: String,
+    model: String,
+    resolution: String,
+    output_dir: PathBuf,
 }
 
 /// Image generation backend using fal.ai (direct or via Nous-managed
@@ -533,6 +578,88 @@ impl OpenAICodexImageGenBackend {
 
     fn responses_url(&self) -> String {
         format!("{}/responses", self.config.base_url.trim_end_matches('/'))
+    }
+}
+
+impl OpenAiImageGenConfig {
+    pub fn new(api_key: Option<String>) -> Self {
+        let tier = resolve_openai_image_tier();
+        Self {
+            api_key,
+            base_url: resolve_openai_image_base_url(),
+            tier_id: tier.id.to_string(),
+            quality: tier.quality.to_string(),
+            output_dir: hermes_config::hermes_home().join("cache").join("images"),
+        }
+    }
+
+    pub fn from_env_or_config() -> Result<Self, ToolError> {
+        let cfg = Self::new(resolve_openai_image_api_key());
+        if cfg.api_key.as_deref().is_none_or(str::is_empty) {
+            return Err(ToolError::ExecutionFailed(
+                "OpenAI image generation requires credentials. Set OPENAI_API_KEY or configure image_gen.openai.api_key.".into(),
+            ));
+        }
+        Ok(cfg)
+    }
+
+    pub fn unconfigured() -> Self {
+        Self::new(None)
+    }
+
+    pub fn model(&self) -> &str {
+        &self.tier_id
+    }
+
+    pub fn quality(&self) -> &str {
+        &self.quality
+    }
+}
+
+impl OpenAiImageGenBackend {
+    pub fn new(api_key: String) -> Self {
+        Self::from_config(OpenAiImageGenConfig::new(Some(api_key)))
+    }
+
+    pub fn from_config(config: OpenAiImageGenConfig) -> Self {
+        Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(300))
+                .build()
+                .unwrap_or_else(|err| {
+                    tracing::warn!("failed to build OpenAI image HTTP client: {}", err);
+                    Client::new()
+                }),
+            config,
+        }
+    }
+
+    pub fn from_env_or_config() -> Result<Self, ToolError> {
+        Ok(Self::from_config(
+            OpenAiImageGenConfig::from_env_or_config()?
+        ))
+    }
+
+    pub fn unconfigured() -> Self {
+        Self::from_config(OpenAiImageGenConfig::unconfigured())
+    }
+
+    pub fn config(&self) -> &OpenAiImageGenConfig {
+        &self.config
+    }
+
+    fn generations_url(&self) -> String {
+        format!(
+            "{}/images/generations",
+            self.config.base_url.trim_end_matches('/')
+        )
+    }
+
+    fn edits_url(&self) -> String {
+        format!(
+            "{}/images/edits",
+            self.config.base_url.trim_end_matches('/')
+        )
     }
 }
 
@@ -749,13 +876,102 @@ impl KreaImageGenBackend {
     }
 }
 
+impl XaiImageGenConfig {
+    pub fn new(api_key: Option<String>, source: impl Into<String>) -> Self {
+        Self {
+            api_key,
+            base_url: resolve_xai_image_base_url(),
+            source: source.into(),
+            model: resolve_xai_image_model(),
+            resolution: resolve_xai_image_resolution(),
+            output_dir: hermes_config::hermes_home().join("cache").join("images"),
+        }
+    }
+
+    pub fn from_env_or_auth_store() -> Result<Self, ToolError> {
+        let cfg = resolve_xai_image_config();
+        if cfg.api_key.as_deref().is_none_or(str::is_empty) {
+            return Err(ToolError::ExecutionFailed(
+                "No xAI credentials found. Sign in via `hermes auth add xai-oauth` or set XAI_API_KEY.".into(),
+            ));
+        }
+        Ok(cfg)
+    }
+
+    pub fn unconfigured() -> Self {
+        Self::new(None, "unconfigured")
+    }
+
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into().trim_end_matches('/').to_string();
+        self
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    pub fn resolution(&self) -> &str {
+        &self.resolution
+    }
+}
+
+impl XaiImageGenBackend {
+    pub fn new(config: XaiImageGenConfig) -> Self {
+        Self::from_config(config)
+    }
+
+    pub fn from_config(config: XaiImageGenConfig) -> Self {
+        Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(XAI_IMAGE_TIMEOUT_SECS))
+                .build()
+                .unwrap_or_else(|err| {
+                    tracing::warn!("failed to build xAI image HTTP client: {}", err);
+                    Client::new()
+                }),
+            config,
+        }
+    }
+
+    pub fn from_env_or_auth_store() -> Result<Self, ToolError> {
+        Ok(Self::from_config(
+            XaiImageGenConfig::from_env_or_auth_store()?,
+        ))
+    }
+
+    pub fn unconfigured() -> Self {
+        Self::from_config(XaiImageGenConfig::unconfigured())
+    }
+
+    pub fn config(&self) -> &XaiImageGenConfig {
+        &self.config
+    }
+
+    fn generations_url(&self) -> String {
+        format!(
+            "{}/images/generations",
+            self.config.base_url.trim_end_matches('/')
+        )
+    }
+
+    fn edits_url(&self) -> String {
+        format!(
+            "{}/images/edits",
+            self.config.base_url.trim_end_matches('/')
+        )
+    }
+}
+
 /// Configured built-in image generation backend.
 #[derive(Debug)]
 pub enum ImageGenRuntimeBackend {
     Fal(FalImageGenBackend),
     OpenAICodex(OpenAICodexImageGenBackend),
+    OpenAi(OpenAiImageGenBackend),
     OpenRouterCompat(OpenRouterCompatImageGenBackend),
     Krea(KreaImageGenBackend),
+    Xai(XaiImageGenBackend),
 }
 
 impl ImageGenRuntimeBackend {
@@ -763,6 +979,9 @@ impl ImageGenRuntimeBackend {
         match selected_image_provider() {
             Some("openai-codex") => OpenAICodexImageGenBackend::from_env_or_auth_store()
                 .unwrap_or_else(|_| OpenAICodexImageGenBackend::unconfigured())
+                .into(),
+            Some("openai") => OpenAiImageGenBackend::from_env_or_config()
+                .unwrap_or_else(|_| OpenAiImageGenBackend::unconfigured())
                 .into(),
             Some("openrouter") => OpenRouterCompatImageGenBackend::from_env_or_config(
                 OpenRouterCompatImageProviderKind::OpenRouter,
@@ -785,6 +1004,9 @@ impl ImageGenRuntimeBackend {
             Some("krea") => KreaImageGenBackend::from_env_or_managed()
                 .unwrap_or_else(|_| KreaImageGenBackend::unconfigured())
                 .into(),
+            Some("xai") => XaiImageGenBackend::from_env_or_auth_store()
+                .unwrap_or_else(|_| XaiImageGenBackend::unconfigured())
+                .into(),
             _ => FalImageGenBackend::from_env_or_managed()
                 .unwrap_or_else(|_| FalImageGenBackend::new(String::new()))
                 .into(),
@@ -795,8 +1017,10 @@ impl ImageGenRuntimeBackend {
         match self {
             Self::Fal(_) => "fal",
             Self::OpenAICodex(_) => "openai-codex",
+            Self::OpenAi(_) => "openai",
             Self::OpenRouterCompat(backend) => backend.config.provider.provider_id(),
             Self::Krea(_) => "krea",
+            Self::Xai(_) => "xai",
         }
     }
 
@@ -804,6 +1028,7 @@ impl ImageGenRuntimeBackend {
         match self {
             Self::Fal(_) => vec!["FAL_KEY".into()],
             Self::OpenAICodex(_) => vec!["HERMES_OPENAI_CODEX_API_KEY".into()],
+            Self::OpenAi(_) => vec!["OPENAI_API_KEY".into()],
             Self::OpenRouterCompat(backend) => backend
                 .config
                 .provider
@@ -812,6 +1037,7 @@ impl ImageGenRuntimeBackend {
                 .map(|name| (*name).to_string())
                 .collect(),
             Self::Krea(_) => vec!["KREA_API_KEY".into()],
+            Self::Xai(_) => vec!["XAI_API_KEY".into()],
         }
     }
 }
@@ -828,6 +1054,12 @@ impl From<OpenAICodexImageGenBackend> for ImageGenRuntimeBackend {
     }
 }
 
+impl From<OpenAiImageGenBackend> for ImageGenRuntimeBackend {
+    fn from(value: OpenAiImageGenBackend) -> Self {
+        Self::OpenAi(value)
+    }
+}
+
 impl From<OpenRouterCompatImageGenBackend> for ImageGenRuntimeBackend {
     fn from(value: OpenRouterCompatImageGenBackend) -> Self {
         Self::OpenRouterCompat(value)
@@ -837,6 +1069,12 @@ impl From<OpenRouterCompatImageGenBackend> for ImageGenRuntimeBackend {
 impl From<KreaImageGenBackend> for ImageGenRuntimeBackend {
     fn from(value: KreaImageGenBackend) -> Self {
         Self::Krea(value)
+    }
+}
+
+impl From<XaiImageGenBackend> for ImageGenRuntimeBackend {
+    fn from(value: XaiImageGenBackend) -> Self {
+        Self::Xai(value)
     }
 }
 

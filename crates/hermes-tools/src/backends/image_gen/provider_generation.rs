@@ -184,6 +184,135 @@ impl ImageGenBackend for OpenAICodexImageGenBackend {
 }
 
 #[async_trait]
+impl ImageGenBackend for OpenAiImageGenBackend {
+    async fn generate(&self, request: ImageGenerateRequest) -> Result<String, ToolError> {
+        let prompt = request.prompt.trim();
+        if prompt.is_empty() {
+            return Err(ToolError::InvalidParams(
+                "Prompt is required and must be a non-empty string.".into(),
+            ));
+        }
+        let token = self
+            .config
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed(
+                    "OpenAI image generation requires credentials. Set OPENAI_API_KEY or configure image_gen.openai.api_key.".into(),
+                )
+            })?;
+        let size = openai_image_size_from_tool_size(request.size.as_deref());
+        let source_images = request.source_image_urls();
+        let is_edit = !source_images.is_empty();
+
+        let response = if is_edit {
+            let form = openai_image_edit_form(
+                &self.client,
+                &source_images,
+                prompt,
+                size,
+                self.config.quality.as_str(),
+            )
+            .await?;
+            self.client
+                .post(self.edits_url())
+                .header("Authorization", format!("Bearer {token}"))
+                .multipart(form)
+                .send()
+                .await
+                .map_err(|e| {
+                    if e.is_timeout() {
+                        ToolError::ExecutionFailed("OpenAI image edit timed out".into())
+                    } else {
+                        ToolError::ExecutionFailed(format!("OpenAI image edit failed: {e}"))
+                    }
+                })?
+        } else {
+            let body = openai_image_generation_payload(prompt, size, self.config.quality.as_str());
+            self.client
+                .post(self.generations_url())
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| {
+                    if e.is_timeout() {
+                        ToolError::ExecutionFailed("OpenAI image generation timed out".into())
+                    } else {
+                        ToolError::ExecutionFailed(format!("OpenAI image generation failed: {e}"))
+                    }
+                })?
+        };
+
+        let status = response.status();
+        let text = response.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read OpenAI image response: {e}"))
+        })?;
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "OpenAI image generation failed ({status}): {}",
+                openrouter_compat_error_message(&text)
+            )));
+        }
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("OpenAI returned invalid JSON: {e}"))
+        })?;
+        let first = data
+            .get("data")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .ok_or_else(|| ToolError::ExecutionFailed("OpenAI returned no image data".into()))?;
+        let image_path =
+            save_provider_image_from_response(&self.client, first, &self.config.output_dir, "openai")
+                .await?;
+        let image = image_path.to_string_lossy().to_string();
+        let aspect = openai_tool_aspect_from_size(size);
+        let revised_prompt = first
+            .get("revised_prompt")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let modality = if is_edit { "image" } else { "text" };
+        let mut response = json!({
+            "success": true,
+            "image": image,
+            "images": [{
+                "url": image,
+                "path": image_path.to_string_lossy(),
+                "width": 0,
+                "height": 0,
+            }],
+            "provider": "openai",
+            "transport": "direct",
+            "model": self.config.tier_id,
+            "api_model": OPENAI_IMAGE_API_MODEL,
+            "prompt": prompt,
+            "aspect_ratio": aspect,
+            "size": size,
+            "quality": self.config.quality,
+            "modality": modality,
+            "source_images": source_images.len().min(OPENAI_MAX_REFERENCE_IMAGES),
+        });
+        if let Some(revised_prompt) = revised_prompt {
+            response["revised_prompt"] = Value::String(revised_prompt.to_string());
+        }
+        Ok(response.to_string())
+    }
+
+    fn capabilities(&self) -> ImageGenCapabilities {
+        ImageGenCapabilities {
+            provider: Some("openai".to_string()),
+            model: Some(self.config.tier_id.clone()),
+            modalities: vec!["text".to_string(), "image".to_string()],
+            max_reference_images: OPENAI_MAX_REFERENCE_IMAGES,
+        }
+    }
+}
+
+#[async_trait]
 impl ImageGenBackend for OpenRouterCompatImageGenBackend {
     async fn generate(&self, request: ImageGenerateRequest) -> Result<String, ToolError> {
         let prompt = request.prompt.trim();
@@ -314,6 +443,144 @@ impl ImageGenBackend for OpenRouterCompatImageGenBackend {
             model: Some(self.config.model.clone()),
             modalities: vec!["text".to_string(), "image".to_string()],
             max_reference_images: OPENROUTER_COMPAT_MAX_REFERENCE_IMAGES,
+        }
+    }
+}
+
+#[async_trait]
+impl ImageGenBackend for XaiImageGenBackend {
+    async fn generate(&self, request: ImageGenerateRequest) -> Result<String, ToolError> {
+        let prompt = request.prompt.trim();
+        if prompt.is_empty() {
+            return Err(ToolError::InvalidParams(
+                "Prompt is required and must be a non-empty string.".into(),
+            ));
+        }
+        let token = self
+            .config
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed(
+                    "No xAI credentials found. Sign in via `hermes auth add xai-oauth` or set XAI_API_KEY.".into(),
+                )
+            })?;
+        let aspect = xai_aspect_from_tool_size(request.size.as_deref());
+        let mut sources = request.source_image_urls();
+        if sources.len() > XAI_MAX_SOURCE_IMAGES {
+            return Err(ToolError::InvalidParams(format!(
+                "xAI image editing supports at most {XAI_MAX_SOURCE_IMAGES} source images"
+            )));
+        }
+        let is_edit = !sources.is_empty();
+        let (url, body, model) = if is_edit {
+            let fields = xai_image_fields(&mut sources)?;
+            (
+                self.edits_url(),
+                xai_image_edit_payload(prompt, fields.as_slice()),
+                DEFAULT_XAI_IMAGE_EDIT_MODEL.to_string(),
+            )
+        } else {
+            (
+                self.generations_url(),
+                xai_image_generation_payload(
+                    self.config.model.as_str(),
+                    prompt,
+                    aspect,
+                    self.config.resolution.as_str(),
+                ),
+                self.config.model.clone(),
+            )
+        };
+        let response = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "hermes-agent/image_gen")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    ToolError::ExecutionFailed(format!(
+                        "xAI image generation timed out ({XAI_IMAGE_TIMEOUT_SECS}s)"
+                    ))
+                } else if e.is_connect() {
+                    ToolError::ExecutionFailed(format!("xAI connection error: {e}"))
+                } else {
+                    ToolError::ExecutionFailed(format!("xAI image generation failed: {e}"))
+                }
+            })?;
+        let status = response.status();
+        let text = response.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read xAI image response: {e}"))
+        })?;
+        if !status.is_success() {
+            let message = openrouter_compat_error_message(&text);
+            return Err(ToolError::ExecutionFailed(format!(
+                "xAI image generation failed ({status}): {message}"
+            )));
+        }
+        let data: Value = serde_json::from_str(&text)
+            .map_err(|e| ToolError::ExecutionFailed(format!("xAI returned invalid JSON: {e}")))?;
+        let first = data
+            .get("data")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .ok_or_else(|| ToolError::ExecutionFailed("xAI returned no image data".into()))?;
+        let image_ref = match first
+            .get("file_output")
+            .and_then(|value| value.get("public_url"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            Some(public_url) => public_url.to_string(),
+            None => save_provider_image_from_response(&self.client, first, &self.config.output_dir, "xai")
+                .await?
+                .to_string_lossy()
+                .to_string(),
+        };
+        let modality = if is_edit { "image" } else { "text" };
+        let mut response = json!({
+            "success": true,
+            "image": image_ref,
+            "images": [{
+                "url": image_ref,
+                "width": 0,
+                "height": 0,
+            }],
+            "provider": "xai",
+            "transport": if self.config.source == "env" { "direct" } else { "auth-store" },
+            "model": model,
+            "prompt": prompt,
+            "aspect_ratio": xai_tool_aspect_from_xai(aspect),
+            "xai_aspect_ratio": aspect,
+            "resolution": if is_edit { Value::Null } else { Value::String(self.config.resolution.clone()) },
+            "modality": modality,
+            "source_images": sources.len(),
+        });
+        if let Some(usage) = data.get("usage") {
+            response["usage"] = usage.clone();
+        }
+        if let Some(file_output) = first.get("file_output") {
+            response["file_output"] = file_output.clone();
+            if let Some(public_url) = file_output.get("public_url") {
+                response["public_url"] = public_url.clone();
+            }
+        }
+        Ok(response.to_string())
+    }
+
+    fn capabilities(&self) -> ImageGenCapabilities {
+        ImageGenCapabilities {
+            provider: Some("xai".to_string()),
+            model: Some(self.config.model.clone()),
+            modalities: vec!["text".to_string(), "image".to_string()],
+            max_reference_images: XAI_MAX_SOURCE_IMAGES - 1,
         }
     }
 }
@@ -581,8 +848,10 @@ impl ImageGenBackend for ImageGenRuntimeBackend {
     async fn generate(&self, request: ImageGenerateRequest) -> Result<String, ToolError> {
         match self {
             Self::Fal(backend) => backend.generate(request).await,
+            Self::OpenAi(backend) => backend.generate(request).await,
             Self::OpenAICodex(backend) => backend.generate(request).await,
             Self::OpenRouterCompat(backend) => backend.generate(request).await,
+            Self::Xai(backend) => backend.generate(request).await,
             Self::Krea(backend) => backend.generate(request).await,
         }
     }
@@ -590,8 +859,10 @@ impl ImageGenBackend for ImageGenRuntimeBackend {
     fn capabilities(&self) -> ImageGenCapabilities {
         match self {
             Self::Fal(backend) => backend.capabilities(),
+            Self::OpenAi(backend) => backend.capabilities(),
             Self::OpenAICodex(backend) => backend.capabilities(),
             Self::OpenRouterCompat(backend) => backend.capabilities(),
+            Self::Xai(backend) => backend.capabilities(),
             Self::Krea(backend) => backend.capabilities(),
         }
     }

@@ -386,3 +386,36 @@ fn test_exact_file_functional_classifications_are_current_shared_diffs() {
         );
     }
 }
+
+#[test]
+fn test_shared_diff_backlog_has_no_pending_entries() {
+    let backlog = read_json("docs/parity/shared-diff-backlog.json");
+
+    assert_eq!(
+        backlog["summary"]["pending_classification"].as_u64(),
+        Some(0),
+        "shared-diff backlog must have zero pending classifications"
+    );
+    assert_eq!(
+        backlog["summary"]["pending_review"].as_u64(),
+        Some(0),
+        "shared-diff backlog must have zero pending functional reviews"
+    );
+
+    let pending: Vec<&str> = backlog["entries"]
+        .as_array()
+        .expect("entries should be array")
+        .iter()
+        .filter(|entry| {
+            entry["status"]
+                .as_str()
+                .is_some_and(|status| status.starts_with("pending_"))
+        })
+        .filter_map(|entry| entry["path"].as_str())
+        .collect();
+    assert!(
+        pending.is_empty(),
+        "shared-diff backlog has pending entries: {}",
+        pending.join(", ")
+    );
+}
