@@ -6499,6 +6499,16 @@
       "owner": "rust-runtime",
       "notes": "Ported in Rust Feishu shutdown semantics: real stop() sets a closing guard so post-shutdown calls cannot resurrect outbound work, while start() clears the guard before reconnect token refresh. Focused async tests cover refusal and re-arm state."
     },
+    "a10727a555ad5e5c4155b3b74d19959c36c436db": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as Rust CDP diagnostics rather than Python agent-browser daemon plumbing: local browser commands now have bounded CDP timeouts, first-navigation open timeout floors, endpoint/remote-debugging hints, sandbox hints, and browser_navigate failures labeled as Failed to open."
+    },
+    "7bb8aa3bd55d0d4b39bc9e026d780d92fe0b306a": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported with Rust tests for browser open-timeout floors, timeout diagnostics, sandbox hint formatting, bounded CDP timeout behavior, and failed-navigate labeling. The upstream desktop chip text is represented in the Rust tool error surface because this repo does not ship the Electron chip UI."
+    },
     "1289f12812a9c6a3f3e6fbdf39e39ed7e1b7bd50": {
       "disposition": "superseded",
       "owner": "rust-runtime",

@@ -21,6 +21,7 @@ impl CdpBrowserBackend {
         Self {
             endpoint,
             client: reqwest::Client::new(),
+            first_navigation: AtomicBool::new(true),
         }
     }
 
@@ -33,7 +34,7 @@ impl CdpBrowserBackend {
     }
 
     /// Send a CDP command via HTTP (simplified - real impl would use WebSocket).
-    async fn cdp_command(&self, method: &str, params: Value) -> Result<Value, ToolError> {
+    async fn cdp_command_http(&self, method: &str, params: Value) -> Result<Value, ToolError> {
         // Get the first available page target
         let targets_resp = self
             .client
@@ -66,15 +67,48 @@ impl CdpBrowserBackend {
             "status": "sent",
         }))
     }
+
+    async fn cdp_command_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout_duration: Duration,
+    ) -> Result<Value, ToolError> {
+        match tokio::time::timeout(timeout_duration, self.cdp_command_http(method, params)).await {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(err)) => Err(format_cdp_command_error(method, &self.endpoint, err)),
+            Err(_) => Err(ToolError::ExecutionFailed(format_cdp_timeout_error(
+                method,
+                &self.endpoint,
+                timeout_duration,
+            ))),
+        }
+    }
+
+    async fn cdp_command(&self, method: &str, params: Value) -> Result<Value, ToolError> {
+        self.cdp_command_with_timeout(method, params, cdp_command_timeout())
+            .await
+    }
 }
 
 #[async_trait]
 impl BrowserBackend for CdpBrowserBackend {
     async fn navigate(&self, url: &str) -> Result<String, ToolError> {
         validate_url_does_not_exfiltrate_secret(url)?;
+        let first_open = self.first_navigation.swap(false, Ordering::SeqCst);
         let result = self
-            .cdp_command("Page.navigate", json!({"url": url}))
-            .await?;
+            .cdp_command_with_timeout(
+                "Page.navigate",
+                json!({"url": url}),
+                cdp_open_timeout(first_open),
+            )
+            .await
+            .map_err(|err| {
+                ToolError::ExecutionFailed(format!(
+                    "Failed to open {url}: {}",
+                    tool_error_message(err)
+                ))
+            })?;
         Ok(json!({"status": "navigated", "url": url, "cdp": result}).to_string())
     }
 
@@ -268,4 +302,3 @@ impl BrowserBackend for CamoFoxBrowserBackend {
         self.inner.console(action).await
     }
 }
-

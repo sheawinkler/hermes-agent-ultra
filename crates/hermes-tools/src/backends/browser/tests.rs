@@ -39,6 +39,8 @@ impl EnvScope {
             "BROWSER_CDP_URL",
             "CAMOFOX_REWRITE_LOOPBACK_URLS",
             "CAMOFOX_LOOPBACK_HOST_ALIAS",
+            "HERMES_BROWSER_COMMAND_TIMEOUT_SECONDS",
+            "BROWSER_COMMAND_TIMEOUT",
         ];
         let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
         for k in &keys {
@@ -678,6 +680,99 @@ fn browser_backend_choice_accepts_browser_cloud_provider() {
     let _scope = EnvScope::new();
     std::env::set_var("BROWSER_CLOUD_PROVIDER", "browserbase");
     assert_eq!(browser_backend_choice_from_env(), "browserbase");
+}
+
+#[test]
+fn browser_cdp_open_timeout_uses_first_open_floor_and_env_ceiling() {
+    let _scope = EnvScope::new();
+
+    std::env::set_var("HERMES_BROWSER_COMMAND_TIMEOUT_SECONDS", "30");
+    assert_eq!(
+        cdp_open_timeout(true),
+        std::time::Duration::from_secs(MIN_FIRST_CDP_OPEN_TIMEOUT_SECS)
+    );
+    assert_eq!(
+        cdp_open_timeout(false),
+        std::time::Duration::from_secs(MIN_CDP_OPEN_TIMEOUT_SECS)
+    );
+
+    std::env::set_var("HERMES_BROWSER_COMMAND_TIMEOUT_SECONDS", "180");
+    assert_eq!(cdp_open_timeout(true), std::time::Duration::from_secs(180));
+    assert_eq!(cdp_open_timeout(false), std::time::Duration::from_secs(180));
+}
+
+#[test]
+fn browser_cdp_timeout_error_includes_actionable_hints() {
+    let rendered = format_cdp_timeout_error(
+        "Page.navigate",
+        "http://127.0.0.1:9222",
+        std::time::Duration::from_secs(120),
+    );
+
+    assert!(rendered.contains("timed out after 120 seconds"));
+    assert!(rendered.contains("http://127.0.0.1:9222"));
+    assert!(rendered.contains("--remote-debugging-port=9222"));
+    assert!(rendered.contains("first browser open"));
+}
+
+#[test]
+fn browser_cdp_command_error_includes_sandbox_hint_when_relevant() {
+    let err = format_cdp_command_error(
+        "Page.navigate",
+        "http://127.0.0.1:9222",
+        ToolError::ExecutionFailed("No usable sandbox!".to_string()),
+    );
+    let rendered = err.to_string();
+
+    assert!(rendered.contains("No usable sandbox"));
+    assert!(rendered.contains("--no-sandbox,--disable-dev-shm-usage"));
+}
+
+#[tokio::test]
+async fn browser_cdp_timeout_path_surfaces_endpoint_and_hints() {
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let (_stream, _) = listener.accept().await.expect("accept");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    });
+
+    let backend = CdpBrowserBackend::new(format!("http://{addr}"));
+    let err = backend
+        .cdp_command_with_timeout(
+            "Page.navigate",
+            json!({"url": "https://example.com"}),
+            std::time::Duration::from_millis(25),
+        )
+        .await
+        .expect_err("timeout");
+    let rendered = err.to_string();
+
+    assert!(rendered.contains("timed out after 0.025 seconds"));
+    assert!(rendered.contains(&addr.to_string()));
+    assert!(rendered.contains("--remote-debugging-port=9222"));
+}
+
+#[tokio::test]
+async fn browser_navigate_failure_is_labeled_failed_to_open() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    drop(listener);
+
+    let backend = CdpBrowserBackend::new(format!("http://{addr}"));
+    let err = backend
+        .navigate("https://example.com")
+        .await
+        .expect_err("closed CDP endpoint");
+    let rendered = err.to_string();
+
+    assert!(rendered.contains("Failed to open https://example.com"));
+    assert!(rendered.contains("--remote-debugging-port=9222"));
+    assert!(!backend.first_navigation.load(Ordering::SeqCst));
 }
 
 #[tokio::test]

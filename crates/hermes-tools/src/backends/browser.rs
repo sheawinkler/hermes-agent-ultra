@@ -12,8 +12,12 @@ use regex::Regex;
 use serde_json::{json, Value};
 use std::net::IpAddr;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::Duration;
 use tokio::sync::Mutex;
 use url::Url;
 use uuid::Uuid;
@@ -28,6 +32,9 @@ const BROWSER_USE_MANAGED_TIMEOUT_MINUTES: u64 = 5;
 const BROWSER_USE_MANAGED_PROXY_COUNTRY_CODE: &str = "us";
 const FIRECRAWL_BROWSER_BASE_URL_DEFAULT: &str = "https://api.firecrawl.dev";
 const FIRECRAWL_BROWSER_DEFAULT_TTL_SECS: u64 = 300;
+const DEFAULT_CDP_COMMAND_TIMEOUT_SECS: u64 = 30;
+const MIN_CDP_OPEN_TIMEOUT_SECS: u64 = 60;
+const MIN_FIRST_CDP_OPEN_TIMEOUT_SECS: u64 = 120;
 #[cfg(test)]
 const CAMOFOX_STATE_DIR_NAME: &str = "browser_auth";
 #[cfg(test)]
@@ -201,6 +208,87 @@ fn env_bool(name: &str, default: bool) -> bool {
             )
         })
         .unwrap_or(default)
+}
+
+fn env_duration_seconds(name: &str) -> Option<Duration> {
+    let seconds = env_optional_nonempty(name)?.parse::<f64>().ok()?;
+    if seconds.is_finite() && seconds > 0.0 {
+        Some(Duration::from_secs_f64(seconds))
+    } else {
+        None
+    }
+}
+
+fn cdp_command_timeout() -> Duration {
+    env_duration_seconds("HERMES_BROWSER_COMMAND_TIMEOUT_SECONDS")
+        .or_else(|| env_duration_seconds("BROWSER_COMMAND_TIMEOUT"))
+        .unwrap_or_else(|| Duration::from_secs(DEFAULT_CDP_COMMAND_TIMEOUT_SECS))
+}
+
+fn cdp_open_timeout(first_open: bool) -> Duration {
+    let floor_secs = if first_open {
+        MIN_FIRST_CDP_OPEN_TIMEOUT_SECS
+    } else {
+        MIN_CDP_OPEN_TIMEOUT_SECS
+    };
+    cdp_command_timeout().max(Duration::from_secs(floor_secs))
+}
+
+fn duration_label(duration: Duration) -> String {
+    let seconds = duration.as_secs_f64();
+    if (seconds.fract()).abs() < f64::EPSILON {
+        format!("{} seconds", seconds as u64)
+    } else {
+        format!("{seconds:.3} seconds")
+    }
+}
+
+fn browser_cdp_hint(method: &str, detail: &str) -> Vec<&'static str> {
+    let combined = detail.to_ascii_lowercase();
+    let mut hints = vec![
+        "Start Chrome/Chromium with --remote-debugging-port=9222 or set CHROME_CDP_URL/BROWSER_CDP_URL.",
+    ];
+    if method == "Page.navigate" {
+        hints.push("If this was the first browser open, Chrome may still be cold-starting; retry after the daemon is ready.");
+    }
+    if combined.contains("sandbox") || combined.contains("no usable sandbox") {
+        hints.push(
+            "For Docker/root/AppArmor launches, start Chromium with --no-sandbox,--disable-dev-shm-usage.",
+        );
+    }
+    hints
+}
+
+fn format_cdp_timeout_error(method: &str, endpoint: &str, timeout_duration: Duration) -> String {
+    let mut parts = vec![format!(
+        "Browser CDP command '{method}' timed out after {} while contacting {endpoint}.",
+        duration_label(timeout_duration)
+    )];
+    parts.extend(browser_cdp_hint(method, "").into_iter().map(str::to_string));
+    parts.join("\n")
+}
+
+fn tool_error_message(err: ToolError) -> String {
+    match err {
+        ToolError::ExecutionFailed(message)
+        | ToolError::InvalidParams(message)
+        | ToolError::NotFound(message)
+        | ToolError::Timeout(message)
+        | ToolError::SchemaViolation(message) => message,
+    }
+}
+
+fn format_cdp_command_error(method: &str, endpoint: &str, err: ToolError) -> ToolError {
+    let detail = tool_error_message(err);
+    let mut parts = vec![format!(
+        "Browser CDP command '{method}' failed while contacting {endpoint}: {detail}"
+    )];
+    parts.extend(
+        browser_cdp_hint(method, &detail)
+            .into_iter()
+            .map(str::to_string),
+    );
+    ToolError::ExecutionFailed(parts.join("\n"))
 }
 
 fn cdp_override_from_env() -> bool {
@@ -485,6 +573,7 @@ pub struct CdpBrowserBackend {
     /// CDP WebSocket endpoint URL (e.g., ws://localhost:9222/devtools/page/...)
     endpoint: String,
     client: reqwest::Client,
+    first_navigation: AtomicBool,
 }
 
 /// CamoFox anti-detection browser backend (compat layer).
