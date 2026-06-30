@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-30T00:03:35.518867+00:00`
+Generated: `2026-06-30T00:32:30.634245+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7644`.
 
@@ -17,23 +17,19 @@ Generated: `2026-06-30T00:03:35.518867+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 97 |
-| pending | 48 |
-| ported | 514 |
-| superseded | 6985 |
+| pending | 42 |
+| ported | 517 |
+| superseded | 6988 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `dbe734beff0c` | #20 | fix(dashboard-auth): exclude non-interactive providers from interactive login surfaces (#53239) |
-| `fbf748b28247` | #20 | fix(dashboard-auth): follow redirects on self-hosted OIDC discovery (#53399) |
 | `5636c22828b0` | #20 | feat(photon): upgrade spectrum-ts sidecar to v7.0.0 |
 | `4345b3e767c7` | #20 | fix(photon): upgrade spectrum-ts sidecar to v8.0.0 |
 | `882730026739` | #20 | fix(photon): correlate tapbacks to bot message context |
-| `1b75b3fd90d3` | #23 | feat(memory): add Supermemory setup connection summary |
 | `50f685521734` | #20 | feat(moa): make /moa one-shot only; route preset switching through the model picker |
 | `f67c0b3e60ba` | #21 | docs(hermes-agent skill): cover v0.13–v0.17 features, fix stale claims, tighten (#53566) |
-| `52a09d8faf6b` | #23 | fix(byterover): honor auto extract config |
 | `b296915c82c9` | #20 | fix(feishu): route blocking SDK calls through an adapter-owned executor |
 | `7ee0b689739e` | #20 | fix(gateway,feishu): refuse executor resurrection during real shutdown |
 | `cd592c105cbb` | #20 | feat(send_message): native WhatsApp media delivery via Baileys bridge (#53598) |
@@ -50,7 +46,6 @@ Generated: `2026-06-30T00:03:35.518867+00:00`
 | `a8c862900b9c` | #20 | fix(tui): sanitize replay history on WebUI/TUI session resume (#29086) (#53939) |
 | `c9df4bc094fb` | #20 | fix(gateway): default restart_drain_timeout to 0 to kill systemd crash loop (#54066) |
 | `fde1c8570ffe` | #20 | fix(tui_gateway): suppress WS peer-hangup teardown error flood (#50005) (#54126) |
-| `7c0a5def58fb` | #23 | fix(memory/holographic): close DB connection on shutdown instead of leaking to GC (#54133) |
 | `6d879d486b19` | #20 | fix(dashboard): close PTY WebSocket on child EOF to stop FD leak (#54028) (#54123) |
 | `5c2c85c5452f` | #20 | fix(tui): start MCP discovery for websocket sessions |
 | `61622bb56a7a` | #20 | fix(tui): use role=user for model switch marker to avoid HTTP 400 on strict providers (#48338) |
@@ -69,7 +64,6 @@ Generated: `2026-06-30T00:03:35.518867+00:00`
 | `adacb16d6243` | #26 | fix(desktop): make agent terminal tabs fully readable |
 | `dff491a2b993` | #22 | feat(cli): add headless `hermes serve` backend; desktop no longer launches `dashboard` |
 | `476875acb9f0` | #22 | Add dashboard backup upload and download |
-| `1289f12812a9` | #20 | fix(memory): lazy-install supermemory + mem0 SDKs like honcho/hindsight |
 | `34e616e778d0` | #22 | feat(slack): nudge stale installs to add mpim scopes; mark message.mpim required |
 | `fd324562d3ad` | #20 | feat(desktop): add context usage breakdown popover |
 | `290fa7fd2baa` | #20 | fix(gateway): skip confirmed-dead delivery targets (deleted groups, blocked bots) (#55115) |

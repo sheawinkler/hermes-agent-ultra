@@ -500,6 +500,57 @@ mod tests {
     }
 
     #[test]
+    fn memory_supermemory_setup_target_writes_runtime_config() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home = TempHomeGuard::new(tmp.path());
+        let _api_key = EnvVarGuard::set("SUPERMEMORY_API_KEY", "sm-test-key");
+        let _base_url = EnvVarGuard::set("SUPERMEMORY_BASE_URL", "https://api.supermemory.ai");
+        let _container = EnvVarGuard::set("SUPERMEMORY_CONTAINER_TAG", "hermes-tests");
+
+        let path = setup_memory_provider_target("supermemory", true).expect("setup supermemory");
+
+        assert_eq!(path, tmp.path().join("supermemory.json"));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
+                .expect("json");
+        assert_eq!(parsed["api_key"], "sm-test-key");
+        assert_eq!(parsed["container_tag"], "hermes-tests");
+        assert!(parsed["auto_recall"].as_bool().expect("auto_recall"));
+        assert!(parsed["auto_capture"].as_bool().expect("auto_capture"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn memory_byterover_setup_target_writes_auto_extract_config() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home = TempHomeGuard::new(tmp.path());
+        let _api_key = EnvVarGuard::set("BRV_API_KEY", "brv-test-key");
+
+        let path = setup_memory_provider_target("byterover", true).expect("setup byterover");
+
+        assert_eq!(path, tmp.path().join("byterover.json"));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
+                .expect("json");
+        assert_eq!(parsed["api_key"], "brv-test-key");
+        assert!(parsed["auto_extract"].as_bool().expect("auto_extract"));
+    }
+
+    #[test]
     fn memory_setup_prompt_classifies_secret_labels() {
         assert!(memory_setup_label_is_secret("Mem0 API key"));
         assert!(memory_setup_label_is_secret("Honcho local JWT/API key"));

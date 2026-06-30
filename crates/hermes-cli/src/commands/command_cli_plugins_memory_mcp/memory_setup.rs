@@ -40,6 +40,15 @@ fn memory_setup_label_is_secret(label: &str) -> bool {
         || lower.contains("secret")
 }
 
+fn memory_setup_bool_value(raw: &str, default: bool) -> bool {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        "" => default,
+        _ => default,
+    }
+}
+
 fn active_honcho_host_key_for_cli() -> String {
     if let Ok(explicit) = std::env::var("HERMES_HONCHO_HOST") {
         let explicit = explicit.trim();
@@ -268,6 +277,79 @@ fn setup_mem0_provider(yes: bool) -> Result<PathBuf, AgentError> {
         .save_config(&config)
         .map_err(AgentError::Config)?;
     Ok(hermes_config::hermes_home().join("mem0.json"))
+}
+
+fn setup_supermemory_provider(yes: bool) -> Result<PathBuf, AgentError> {
+    const API_KEY_URL: &str = "https://app.supermemory.ai/integrations?connect=hermes";
+
+    let api_key_default = std::env::var("SUPERMEMORY_API_KEY").unwrap_or_default();
+    let base_url_default = std::env::var("SUPERMEMORY_BASE_URL")
+        .unwrap_or_else(|_| "https://api.supermemory.ai".to_string());
+    let container_default =
+        std::env::var("SUPERMEMORY_CONTAINER_TAG").unwrap_or_else(|_| "hermes".to_string());
+
+    if !yes {
+        println!("Get your Supermemory API key at {API_KEY_URL}");
+    }
+    let api_key =
+        prompt_memory_setup_value("Supermemory API key", Some(&api_key_default), yes)?;
+    if api_key.trim().is_empty() {
+        return Err(AgentError::Config(format!(
+            "Supermemory setup requires SUPERMEMORY_API_KEY or an API key from {API_KEY_URL}."
+        )));
+    }
+    let base_url = prompt_memory_setup_value("Supermemory API base URL", Some(&base_url_default), yes)?;
+    let container_tag =
+        prompt_memory_setup_value("Supermemory container tag", Some(&container_default), yes)?;
+    let auto_recall = memory_setup_bool_value(
+        &prompt_memory_setup_value("Supermemory auto_recall (true|false)", Some("true"), yes)?,
+        true,
+    );
+    let auto_capture = memory_setup_bool_value(
+        &prompt_memory_setup_value("Supermemory auto_capture (true|false)", Some("true"), yes)?,
+        true,
+    );
+
+    let config = serde_json::json!({
+        "api_key": api_key,
+        "base_url": base_url,
+        "container_tag": container_tag,
+        "auto_recall": auto_recall,
+        "auto_capture": auto_capture,
+        "search_mode": "hybrid"
+    });
+    hermes_agent::memory_plugins::supermemory::SupermemoryMemoryPlugin::new()
+        .save_config(&config)
+        .map_err(AgentError::Config)?;
+
+    let container = config
+        .get("container_tag")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("hermes");
+    println!(
+        "Supermemory setup summary: container={container}, auto_recall={}, auto_capture={}",
+        if auto_recall { "on" } else { "off" },
+        if auto_capture { "on" } else { "off" }
+    );
+    Ok(hermes_config::hermes_home().join("supermemory.json"))
+}
+
+fn setup_byterover_provider(yes: bool) -> Result<PathBuf, AgentError> {
+    let api_key_default = std::env::var("BRV_API_KEY").unwrap_or_default();
+    let api_key = prompt_memory_setup_value("ByteRover API key", Some(&api_key_default), yes)?;
+    let auto_extract = memory_setup_bool_value(
+        &prompt_memory_setup_value("ByteRover auto_extract (true|false)", Some("true"), yes)?,
+        true,
+    );
+
+    let config = serde_json::json!({
+        "auto_extract": auto_extract,
+        "api_key": api_key
+    });
+    hermes_agent::memory_plugins::byterover::ByteRoverPlugin::new()
+        .save_config(&config)
+        .map_err(AgentError::Config)?;
+    Ok(hermes_config::hermes_home().join("byterover.json"))
 }
 
 fn setup_honcho_provider(yes: bool) -> Result<PathBuf, AgentError> {
@@ -513,12 +595,13 @@ fn setup_openviking_provider(yes: bool) -> Result<PathBuf, AgentError> {
 
 fn setup_memory_provider_target(provider: &str, yes: bool) -> Result<PathBuf, AgentError> {
     match provider.trim().to_ascii_lowercase().as_str() {
+        "byterover" | "brv" => setup_byterover_provider(yes),
         "mem0" => setup_mem0_provider(yes),
+        "supermemory" | "sm" => setup_supermemory_provider(yes),
         "honcho" => setup_honcho_provider(yes),
         "openviking" | "ov" => setup_openviking_provider(yes),
         other => Err(AgentError::Config(format!(
-            "Unsupported memory provider setup target '{other}'. Supported: honcho, mem0, openviking"
+            "Unsupported memory provider setup target '{other}'. Supported: byterover, honcho, mem0, openviking, supermemory"
         ))),
     }
 }
-

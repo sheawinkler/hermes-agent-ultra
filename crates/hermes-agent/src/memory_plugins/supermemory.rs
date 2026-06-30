@@ -19,6 +19,7 @@ use crate::memory_plugins::config_io;
 const DEFAULT_CONTAINER_TAG: &str = "hermes";
 const DEFAULT_MAX_RECALL: usize = 10;
 const DEFAULT_BASE_URL: &str = "https://api.supermemory.ai";
+const SUPERMEMORY_API_KEY_URL: &str = "https://app.supermemory.ai/integrations?connect=hermes";
 const SUPERMEMORY_SOURCE: &str = "hermes";
 
 // ---------------------------------------------------------------------------
@@ -120,6 +121,11 @@ impl SupermemoryConfig {
         let config_path = std::path::Path::new(hermes_home).join("supermemory.json");
         if let Ok(content) = std::fs::read_to_string(&config_path) {
             if let Ok(raw) = serde_json::from_str::<Value>(&content) {
+                if let Some(api_key) = raw.get("api_key").and_then(|v| v.as_str()) {
+                    if !api_key.trim().is_empty() {
+                        config.api_key = api_key.trim().to_string();
+                    }
+                }
                 if let Some(tag) = raw.get("container_tag").and_then(|v| v.as_str()) {
                     if !tag.is_empty() {
                         config.container_tag = sanitize_tag(tag);
@@ -770,10 +776,12 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
 
     fn get_config_schema(&self) -> Option<Value> {
         Some(json!([
-            {"key": "api_key", "description": "Supermemory API key", "secret": true, "required": true, "env_var": "SUPERMEMORY_API_KEY", "url": "https://supermemory.ai"},
+            {"key": "api_key", "description": "Supermemory API key", "secret": true, "required": true, "env_var": "SUPERMEMORY_API_KEY", "url": SUPERMEMORY_API_KEY_URL},
             {"key": "base_url", "description": "Supermemory API base URL", "default": DEFAULT_BASE_URL},
             {"key": "container_tag", "description": "Container tag", "default": DEFAULT_CONTAINER_TAG},
-            {"key": "search_mode", "description": "hybrid|memories|documents", "default": "hybrid"}
+            {"key": "search_mode", "description": "hybrid|memories|documents", "default": "hybrid"},
+            {"key": "auto_recall", "description": "Automatically inject relevant Supermemory context before turns", "default": true, "choices": ["true", "false"]},
+            {"key": "auto_capture", "description": "Automatically capture completed turns and explicit memory writes", "default": true, "choices": ["true", "false"]}
         ]))
     }
 
@@ -899,6 +907,46 @@ mod tests {
         .expect("write config");
 
         assert!(SupermemoryMemoryPlugin::new().is_available());
+    }
+
+    #[test]
+    fn test_supermemory_initialize_reads_api_key_from_config_file() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _api = EnvGuard::remove("SUPERMEMORY_API_KEY");
+        std::fs::write(
+            tmp.path().join("supermemory.json"),
+            r#"{"api_key":"sm-file-secret","container_tag":"my-tag"}"#,
+        )
+        .expect("write config");
+
+        let plugin = SupermemoryMemoryPlugin::new();
+        plugin.initialize("session-1", tmp.path().to_str().expect("tmp"));
+
+        assert!(*plugin.active.lock().expect("active"));
+        let config = plugin.config_snapshot().expect("config");
+        assert_eq!(config.api_key, "sm-file-secret");
+        assert_eq!(config.container_tag, "my_tag");
+    }
+
+    #[test]
+    fn test_supermemory_config_schema_uses_integration_url_and_auto_flags() {
+        let schema = SupermemoryMemoryPlugin::new()
+            .get_config_schema()
+            .expect("schema");
+        let entries = schema.as_array().expect("schema array");
+        let api_key = entries
+            .iter()
+            .find(|entry| entry.get("key").and_then(Value::as_str) == Some("api_key"))
+            .expect("api key schema");
+        assert_eq!(api_key["url"], SUPERMEMORY_API_KEY_URL);
+        let keys = entries
+            .iter()
+            .filter_map(|entry| entry.get("key").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert!(keys.contains(&"auto_recall"));
+        assert!(keys.contains(&"auto_capture"));
     }
 
     #[test]

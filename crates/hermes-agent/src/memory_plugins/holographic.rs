@@ -757,4 +757,17 @@ mod tests {
         assert_eq!(id1, id2);
         assert_eq!(plugin.fact_count(), 1);
     }
+
+    #[test]
+    fn test_shutdown_drops_sqlite_connection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin = HolographicMemoryPlugin::new();
+        plugin.initialize("test-session", tmp.path().to_str().unwrap());
+        assert!(plugin.with_conn(|conn| conn.is_autocommit()).is_some());
+
+        plugin.shutdown();
+
+        assert!(plugin.with_conn(|conn| conn.is_autocommit()).is_none());
+        assert_eq!(plugin.fact_count(), 0);
+    }
 }
