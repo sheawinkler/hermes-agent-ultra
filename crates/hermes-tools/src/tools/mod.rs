@@ -16,6 +16,7 @@ pub mod delegation;
 pub mod disk_cleanup;
 pub mod env_passthrough;
 pub mod file;
+pub mod harness_cockpit;
 pub mod homeassistant;
 pub mod image_gen;
 pub mod integrations_snapshot;

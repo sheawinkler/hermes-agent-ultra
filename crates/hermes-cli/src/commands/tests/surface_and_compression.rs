@@ -32,6 +32,32 @@
         assert!(results.contains(&"/objective"));
     }
 
+    #[tokio::test]
+    async fn harness_command_reports_issue_backed_cockpit_and_teach_skill() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/harness"));
+        assert!(autocomplete("/har").contains(&"/harness"));
+
+        handle_slash_command(&mut app, "/harness", &["json"])
+            .await
+            .expect("harness json");
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("https://github.com/sheawinkler/hermes-agent-ultra/issues/702"));
+        assert!(output.contains("\"teach\""));
+        assert!(output.contains("\"Rust dashboard OIDC loader\""));
+
+        handle_slash_command(&mut app, "/harness", &["skills"])
+            .await
+            .expect("harness skills");
+        let skills_output = latest_ui_assistant_text(&app);
+        assert!(skills_output.contains("\"mattpocock\""));
+        assert!(skills_output.contains("\"teach\""));
+    }
+
     #[test]
     fn test_handoff_and_subgoal_commands_are_registered_and_completable() {
         assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/handoff"));

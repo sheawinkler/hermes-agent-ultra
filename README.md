@@ -46,6 +46,7 @@ Ultra keeps parity work separate from intentional extensions.
 - `Live session eval harness`: score real saved sessions and gate quality trends from actual usage
 - `RTK raw-mode controls`: inspect unwrapped tool payloads when debugging integrations
 - `Memory fusion`: ContextLattice + external memory providers with scoring/fusion logic
+- `One-true-harness cockpit`: `/harness` and `harness_cockpit` unify skills, proof, OIDC, replay, objectives, onboarding, and chaos probes
 - `Advanced sync gates`: differential parity checks, red-team/adversarial gating, elite sync gate
 - `Operational tooling`: deep doctor snapshots, replay traces, queue-based upstream webhook sync
 - `Rust-only implementation strategy`: parity in Rust first; no direct Python runtime vendoring
@@ -260,6 +261,9 @@ Subdirectory discovery is enabled so context follows the code path being edited.
 
 Skills commands support multi-registry search/install and local tap flows.
 
+- Default GitHub skill taps include OpenAI, Anthropic, VoltAgent, Matt Pocock,
+  Addy Osmani, Google, Obsidian, design-skill, Loopy, GitHub Copilot, gstack,
+  and MiniMax roots where those repos expose a clear skill directory.
 - Registry-aware installs include:
   - `official/...`
   - `skills.sh/...`
@@ -268,6 +272,30 @@ Skills commands support multi-registry search/install and local tap flows.
   - `clawhub/...`
   - `claude-marketplace/...`
 - Mandatory skill security scanning runs before install and before use.
+
+Use `/harness` in the TUI or the `harness_cockpit` tool for the curated
+one-true-harness index, including Matt Pocock `teach`, `domain-modeling`,
+`grill-with-docs`, `codebase-design`, and architecture-deepening workflows.
+
+## Dashboard OIDC
+
+`hermes-http` supports a Rust-native dashboard OIDC mode while preserving
+`HERMES_HTTP_API_KEY` bearer access for machine clients.
+
+Minimum OIDC env:
+
+```bash
+HERMES_DASHBOARD_AUTH_PROVIDER=oidc
+HERMES_DASHBOARD_OIDC_ISSUER=https://issuer.example
+HERMES_DASHBOARD_OIDC_CLIENT_ID=hermes-dashboard
+HERMES_DASHBOARD_SESSION_SECRET='replace-with-strong-random-secret'
+```
+
+Optional env includes `HERMES_DASHBOARD_OIDC_CLIENT_SECRET`,
+`HERMES_DASHBOARD_OIDC_REDIRECT_URI`, `HERMES_DASHBOARD_OIDC_SCOPES`,
+`HERMES_DASHBOARD_OIDC_ALLOWED_EMAILS`, `HERMES_DASHBOARD_OIDC_ALLOWED_DOMAINS`,
+`HERMES_DASHBOARD_COOKIE_SECURE`, and explicit authorization/token/JWKS endpoint
+overrides.
 
 OpenHuman runbooks and matrices:
 - `docs/implementation/openhuman-p0-p1-runbook.md`

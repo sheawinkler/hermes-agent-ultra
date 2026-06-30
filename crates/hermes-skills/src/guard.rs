@@ -260,7 +260,10 @@ pub fn resolve_trust_level(source: &str) -> SkillTrustLevel {
         "openai/skills",
         "anthropic/skills",
         "anthropics/skills",
+        "addyosmani/agent-skills",
+        "google/skills",
         "huggingface/skills",
+        "mattpocock/skills",
         "nvidia/skills",
     ];
 
@@ -1173,6 +1176,18 @@ mod tests {
         );
         assert_eq!(
             resolve_trust_level("skills-sh/NVIDIA/skills/cuopt"),
+            SkillTrustLevel::Trusted
+        );
+        assert_eq!(
+            resolve_trust_level("mattpocock/skills/domain-modeling"),
+            SkillTrustLevel::Trusted
+        );
+        assert_eq!(
+            resolve_trust_level("google/skills/cloud"),
+            SkillTrustLevel::Trusted
+        );
+        assert_eq!(
+            resolve_trust_level("addyosmani/agent-skills/code-review-and-quality"),
             SkillTrustLevel::Trusted
         );
         assert_eq!(

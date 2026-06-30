@@ -194,6 +194,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "Set/show objective contract + profile/policies (`status|verify|plan|constraints|counterfactual|wait|unwait|profile|context|simulator|ensemble|ledger|dag|eval|clear`)",
     ),
     (
+        "/harness",
+        "Show the one-true-harness cockpit: skills, proof, OIDC, replay, objectives, onboarding, and chaos surfaces",
+    ),
+    (
         "/claims",
         "Claim verifier controls (`status|on|off`) for verified/inferred/unproven final tagging",
     ),
@@ -397,6 +401,11 @@ const DEFAULT_SKILL_TAPS: &[&str] = &[
     "https://github.com/anthropics/skills::skills",
     "https://github.com/VoltAgent/awesome-agent-skills::skills",
     "https://github.com/mattpocock/skills::skills",
+    "https://github.com/addyosmani/agent-skills::skills",
+    "https://github.com/google/skills::skills",
+    "https://github.com/kepano/obsidian-skills::skills",
+    "https://github.com/bergside/awesome-design-skills::skills",
+    "https://github.com/Forward-Future/loopy::skills",
     "https://github.com/github/awesome-copilot::skills",
     "https://github.com/garrytan/gstack::",
     "https://github.com/MiniMax-AI/cli::skill",

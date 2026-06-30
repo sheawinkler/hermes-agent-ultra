@@ -26,6 +26,8 @@ use axum::middleware::Next;
 use axum::response::IntoResponse;
 use tokio::sync::Mutex;
 
+use crate::dashboard_oidc::{self, DashboardAuthConfig};
+
 #[derive(Clone)]
 pub struct HttpSecurity {
     pub api_key: Option<Arc<str>>,
@@ -33,6 +35,7 @@ pub struct HttpSecurity {
     pub rate_limit_per_minute: u32,
     /// When `Some` and non-empty, client IP must be in this set (not applied to `/health`).
     pub allowed_ips: Option<Vec<IpAddr>>,
+    pub dashboard_auth: DashboardAuthConfig,
 }
 
 /// Guards policy lifecycle HTTP APIs (admin token + actor allowlist).
@@ -153,11 +156,13 @@ impl HttpSecurity {
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
         let allowed_ips = parse_allowed_ips_from_env();
+        let dashboard_auth = DashboardAuthConfig::from_env();
         Self {
             api_key,
             metrics_require_auth,
             rate_limit_per_minute,
             allowed_ips,
+            dashboard_auth,
         }
     }
 }
@@ -263,21 +268,9 @@ pub async fn request_guard(
         return (StatusCode::FORBIDDEN, "client IP not in allowlist").into_response();
     }
 
-    if let Some(key) = security.api_key.as_ref() {
-        let token = req
-            .headers()
-            .get(AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.strip_prefix("Bearer ").map(str::trim));
-        let ok = token == Some(key.as_ref());
-        if !ok {
-            hermes_telemetry::record_http_reject();
-            return (
-                StatusCode::UNAUTHORIZED,
-                "missing or invalid Authorization: Bearer token",
-            )
-                .into_response();
-        }
+    if let Some((status, reason)) = request_auth_rejection(&security, path, req.headers()) {
+        hermes_telemetry::record_http_reject();
+        return (status, reason).into_response();
     }
 
     let ck = client_key(&req);
@@ -289,9 +282,55 @@ pub async fn request_guard(
     next.run(req).await
 }
 
+fn bearer_authorized(security: &HttpSecurity, headers: &HeaderMap) -> bool {
+    security.api_key.as_ref().is_some_and(|key| {
+        headers
+            .get(AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.strip_prefix("Bearer ").map(str::trim))
+            == Some(key.as_ref())
+    })
+}
+
+fn request_auth_rejection(
+    security: &HttpSecurity,
+    path: &str,
+    headers: &HeaderMap,
+) -> Option<(StatusCode, String)> {
+    let bearer_ok = bearer_authorized(security, headers);
+    if security.dashboard_auth.oidc_enabled()
+        && !dashboard_oidc::oidc_exempt_path(path)
+        && !bearer_ok
+    {
+        let Some(ref oidc) = security.dashboard_auth.oidc else {
+            let reason = security
+                .dashboard_auth
+                .config_error
+                .clone()
+                .unwrap_or_else(|| "dashboard OIDC is not configured".to_string());
+            return Some((StatusCode::SERVICE_UNAVAILABLE, reason));
+        };
+        if let Err(err) = dashboard_oidc::verify_session_from_headers(headers, oidc) {
+            return Some((
+                StatusCode::UNAUTHORIZED,
+                format!("dashboard OIDC session required: {err}"),
+            ));
+        }
+    }
+
+    if security.api_key.is_some() && !bearer_ok && !security.dashboard_auth.oidc_enabled() {
+        return Some((
+            StatusCode::UNAUTHORIZED,
+            "missing or invalid Authorization: Bearer token".to_string(),
+        ));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dashboard_oidc::DashboardAuthMode;
     use axum::http::HeaderValue;
 
     #[test]
@@ -330,5 +369,33 @@ mod tests {
         assert!(p.check_actor("ops").is_ok());
         assert!(p.check_actor("trainer").is_ok());
         assert!(p.check_actor("hacker").is_err());
+    }
+
+    #[test]
+    fn oidc_auth_fails_closed_but_allows_machine_bearer_and_auth_routes() {
+        let security = HttpSecurity {
+            api_key: Some(Arc::from("machine-secret")),
+            metrics_require_auth: false,
+            rate_limit_per_minute: 0,
+            allowed_ips: None,
+            dashboard_auth: DashboardAuthConfig {
+                mode: DashboardAuthMode::Oidc,
+                oidc: None,
+                config_error: Some("HERMES_DASHBOARD_OIDC_ISSUER is required".to_string()),
+            },
+        };
+        let empty_headers = HeaderMap::new();
+        let rejection = request_auth_rejection(&security, "/v1/rpc", &empty_headers)
+            .expect("missing OIDC config should fail closed");
+        assert_eq!(rejection.0, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(rejection.1.contains("HERMES_DASHBOARD_OIDC_ISSUER"));
+
+        let mut bearer_headers = HeaderMap::new();
+        bearer_headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer machine-secret"),
+        );
+        assert!(request_auth_rejection(&security, "/v1/rpc", &bearer_headers).is_none());
+        assert!(request_auth_rejection(&security, "/auth/status", &empty_headers).is_none());
     }
 }

@@ -5,6 +5,7 @@
 //!
 //! Policy HTTP routes are intentionally omitted (Hermes Python does not expose them).
 
+pub mod dashboard_oidc;
 mod security;
 
 pub use security::parse_allowed_ips;
@@ -410,6 +411,10 @@ pub fn router(state: HttpServerState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/metrics", get(metrics_prometheus))
+        .route("/auth/status", get(dashboard_oidc::auth_status))
+        .route("/auth/logout", get(dashboard_oidc::auth_logout))
+        .route("/auth/oidc/login", get(dashboard_oidc::oidc_login))
+        .route("/auth/oidc/callback", get(dashboard_oidc::oidc_callback))
         .route("/v1/sessions/{session_id}/messages", post(send_message))
         .route("/v1/commands", post(exec_command))
         .route("/v1/rpc", post(exec_rpc))
