@@ -12,7 +12,7 @@ use hermes_core::AgentError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
-use url::Url;
+use url::{form_urlencoded, Url};
 
 const TOKEN_STORE_ENVELOPE_VERSION: u8 = 1;
 const TOKEN_STORE_KEY_BYTES: usize = 32;
@@ -339,6 +339,15 @@ pub struct OAuth2Endpoints {
     pub client_id: String,
     pub redirect_uri: String,
     pub scopes: Vec<String>,
+    pub client_secret: Option<String>,
+    pub client_auth_method: OAuth2ClientAuthMethod,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OAuth2ClientAuthMethod {
+    #[default]
+    ClientSecretBasic,
+    ClientSecretPost,
 }
 
 /// Build the browser `authorization_url` (code challenge S256 + state CSRF token).
@@ -374,6 +383,48 @@ struct TokenEndpointJson {
     scope: Option<String>,
 }
 
+fn oauth_basic_component(value: &str) -> String {
+    form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
+fn oauth_client_secret(endpoints: &OAuth2Endpoints) -> Option<&str> {
+    endpoints
+        .client_secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_oauth_client_auth(
+    request: reqwest::RequestBuilder,
+    endpoints: &OAuth2Endpoints,
+    form: &mut Vec<(&'static str, String)>,
+) -> reqwest::RequestBuilder {
+    let Some(secret) = oauth_client_secret(endpoints) else {
+        return request;
+    };
+    match endpoints.client_auth_method {
+        OAuth2ClientAuthMethod::ClientSecretPost => {
+            form.push(("client_secret", secret.to_string()));
+            request
+        }
+        OAuth2ClientAuthMethod::ClientSecretBasic => {
+            let userpass = format!(
+                "{}:{}",
+                oauth_basic_component(&endpoints.client_id),
+                oauth_basic_component(secret)
+            );
+            request.header(
+                "Authorization",
+                format!(
+                    "Basic {}",
+                    base64::engine::general_purpose::STANDARD.encode(userpass)
+                ),
+            )
+        }
+    }
+}
+
 /// Exchange `authorization_code` + PKCE verifier at `token_url` (RFC 6749, form body).
 pub async fn exchange_authorization_code(
     provider_id: &str,
@@ -382,16 +433,18 @@ pub async fn exchange_authorization_code(
     code_verifier: &str,
 ) -> Result<OAuthCredential, AgentError> {
     let client = reqwest::Client::new();
-    let pairs = [
-        ("grant_type", "authorization_code"),
-        ("code", code),
-        ("redirect_uri", endpoints.redirect_uri.as_str()),
-        ("client_id", endpoints.client_id.as_str()),
-        ("code_verifier", code_verifier),
+    let mut pairs = vec![
+        ("grant_type", "authorization_code".to_string()),
+        ("code", code.to_string()),
+        ("redirect_uri", endpoints.redirect_uri.clone()),
+        ("client_id", endpoints.client_id.clone()),
+        ("code_verifier", code_verifier.to_string()),
     ];
-    let resp = client
+    let request = client
         .post(&endpoints.token_url)
-        .header("Accept", "application/json")
+        .header("Accept", "application/json");
+    let request = apply_oauth_client_auth(request, endpoints, &mut pairs);
+    let resp = request
         .form(&pairs)
         .send()
         .await
@@ -427,14 +480,16 @@ pub async fn exchange_refresh_token(
     refresh_token: &str,
 ) -> Result<OAuthCredential, AgentError> {
     let client = reqwest::Client::new();
-    let pairs = [
-        ("grant_type", "refresh_token"),
-        ("refresh_token", refresh_token),
-        ("client_id", endpoints.client_id.as_str()),
+    let mut pairs = vec![
+        ("grant_type", "refresh_token".to_string()),
+        ("refresh_token", refresh_token.to_string()),
+        ("client_id", endpoints.client_id.clone()),
     ];
-    let resp = client
+    let request = client
         .post(&endpoints.token_url)
-        .header("Accept", "application/json")
+        .header("Accept", "application/json");
+    let request = apply_oauth_client_auth(request, endpoints, &mut pairs);
+    let resp = request
         .form(&pairs)
         .send()
         .await
@@ -478,6 +533,8 @@ mod tests {
             client_id: "cid".to_string(),
             redirect_uri: "http://127.0.0.1/cb".to_string(),
             scopes: vec!["openid".to_string()],
+            client_secret: None,
+            client_auth_method: OAuth2ClientAuthMethod::default(),
         };
         let pkce = generate_pkce_pair();
         let url = build_authorization_url(&endpoints, &pkce, "state-xyz").unwrap();
@@ -496,6 +553,8 @@ mod tests {
             client_id: "cid".to_string(),
             redirect_uri: "http://hermes.internal:9119/auth/callback".to_string(),
             scopes: vec!["openid".to_string()],
+            client_secret: None,
+            client_auth_method: OAuth2ClientAuthMethod::default(),
         };
         let pkce = generate_pkce_pair();
         let url = build_authorization_url(&endpoints, &pkce, "state-xyz").unwrap();

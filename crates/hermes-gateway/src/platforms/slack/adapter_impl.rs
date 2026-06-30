@@ -9,6 +9,13 @@ pub struct SlackAdapter {
     client: Client,
     stop_signal: Arc<Notify>,
     group_dm_scope_warned: Mutex<BTreeSet<String>>,
+    user_token_warned: Mutex<BTreeSet<String>>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SlackAuthHealthWarnings {
+    pub missing_group_dm_scopes: bool,
+    pub user_token: bool,
 }
 
 impl SlackAdapter {
@@ -25,6 +32,7 @@ impl SlackAdapter {
             client,
             stop_signal: Arc::new(Notify::new()),
             group_dm_scope_warned: Mutex::new(BTreeSet::new()),
+            user_token_warned: Mutex::new(BTreeSet::new()),
         })
     }
 
@@ -237,10 +245,10 @@ impl SlackAdapter {
             .ok_or_else(|| GatewayError::ConnectionFailed("No URL in Socket Mode response".into()))
     }
 
-    pub(crate) async fn warn_if_missing_group_dm_scopes_from_auth_test(
+    pub(crate) async fn warn_if_slack_auth_test_health_issues(
         &self,
         base_url: &str,
-    ) -> Result<bool, GatewayError> {
+    ) -> Result<SlackAuthHealthWarnings, GatewayError> {
         let resp = self
             .client
             .post(&format!("{}/auth.test", base_url.trim_end_matches('/')))
@@ -265,10 +273,19 @@ impl SlackAdapter {
                 body.error.unwrap_or_else(|| "unknown".into())
             )));
         }
-        Ok(self.warn_if_missing_group_dm_scopes(
+        let missing_group_dm_scopes = self.warn_if_missing_group_dm_scopes(
             &scopes,
             body.team.as_deref().or(body.team_id.as_deref()),
-        ))
+        );
+        let user_token = self.warn_if_user_token(
+            body.user_id.as_deref(),
+            body.bot_id.as_deref(),
+            body.team.as_deref().or(body.team_id.as_deref()),
+        );
+        Ok(SlackAuthHealthWarnings {
+            missing_group_dm_scopes,
+            user_token,
+        })
     }
 
     pub(crate) fn warn_if_missing_group_dm_scopes(
@@ -294,6 +311,37 @@ impl SlackAdapter {
         warn!(
             workspace = %team_key,
             "Slack Group DMs will not work: the app is missing `mpim:history` scope and `message.mpim` event subscription. Add `mpim:history` and `mpim:read` to bot scopes, add `message.mpim` to event subscriptions, then reinstall the app to the workspace."
+        );
+        true
+    }
+
+    pub(crate) fn warn_if_user_token(
+        &self,
+        user_id: Option<&str>,
+        bot_id: Option<&str>,
+        team_name: Option<&str>,
+    ) -> bool {
+        let Some(user_id) = user_id.map(str::trim).filter(|value| !value.is_empty()) else {
+            return false;
+        };
+        if bot_id.map(str::trim).is_some_and(|value| !value.is_empty()) {
+            return false;
+        }
+        let team_key = team_name
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("this workspace")
+            .to_string();
+        let Ok(mut warned) = self.user_token_warned.lock() else {
+            return false;
+        };
+        if !warned.insert(team_key.clone()) {
+            return false;
+        }
+        warn!(
+            workspace = %team_key,
+            user_id = %user_id,
+            "Slack token authenticated as a user, not a bot. auth.test returned user_id without bot_id; use the Bot User OAuth Token (xoxb-...) for SLACK_BOT_TOKEN or mentions of that human can be misrouted as bot mentions."
         );
         true
     }

@@ -6558,6 +6558,31 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust Gateway route handling: agent processing errors now trigger a best-effort user error notification, notification-send failures are logged with the original error preserved, and focused tests cover user notice delivery plus send-failure preservation."
+    },
+    "53a75f147f641d10ac678092e8a67700d7edf2a7": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in hermes-auth: OAuth2Endpoints supports optional client_secret with RFC form-encoded client_secret_basic or client_secret_post token endpoint auth, while preserving public-client PKCE behavior. Focused Rust tests cover authorization-code Basic auth and refresh-token POST secret flows."
+    },
+    "184c10cf97002c95b233830d62d6fb355a82708a": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust SlackAdapter: startup auth.test health audit warns once when Slack returns user_id without bot_id, preserving the existing group-DM scope audit in a single auth.test call. Unit and wiremock tests cover user-token detection, bot-token suppression, once-only warning, and combined auth.test warning behavior."
+    },
+    "b7322f946db6ac22353714a136ae3d7950b38745": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream desktop pet roam behavior is an Electron/React-only UX delta under apps/desktop. Hermes Agent Ultra does not ship that desktop pet runtime; Rust CLI/TUI/gateway surfaces own the shipped interactive UX, so no Rust runtime port is applicable."
+    },
+    "30cd39dc5609a91d5eeee85f78495ffdbecdd157": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream stroll-direction coin refactor only changes the absent Electron desktop pet roam implementation. Hermes Agent Ultra has no apps/desktop pet surface, so the Rust product boundary supersedes this non-shipped GUI-only delta."
+    },
+    "05ac16778bda321bd4726c17bd7061b110255582": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust platform config: PlatformConfig exposes a first-class typing_indicator flag defaulting true, merge/deserialization preserve explicit false, Python-style root platform blocks lift the key under platforms, and tests cover default, explicit-disable, compatibility lift, and JSON/YAML roundtrip behavior. Rust has no generic Python-style keep-typing loop to spawn, so this is the applicable runtime gate contract."
     }
   },
   "subject_patterns": [

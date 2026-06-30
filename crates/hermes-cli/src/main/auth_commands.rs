@@ -214,6 +214,8 @@ async fn refresh_oauth_store_credential(
         client_id,
         redirect_uri: "http://127.0.0.1/oauth/callback-unused".to_string(),
         scopes: Vec::new(),
+        client_secret: None,
+        client_auth_method: hermes_auth::OAuth2ClientAuthMethod::default(),
     };
     let mut refreshed = exchange_refresh_token(provider, &endpoints, refresh_token).await?;
     refreshed.provider = provider.to_string();
