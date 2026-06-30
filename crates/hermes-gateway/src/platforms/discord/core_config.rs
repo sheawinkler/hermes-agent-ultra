@@ -12,6 +12,18 @@ pub struct DiscordConfig {
     #[serde(default)]
     pub proxy: AdapterProxyConfig,
 
+    /// Optional Discord REST API base URL override for tests/private gateways.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base_url: Option<String>,
+
+    /// REST liveness probe interval in seconds. Set to 0 to disable.
+    #[serde(default = "default_liveness_interval_seconds")]
+    pub liveness_interval_seconds: f64,
+
+    /// Consecutive liveness failures required before marking the adapter unhealthy.
+    #[serde(default = "default_liveness_failure_threshold")]
+    pub liveness_failure_threshold: u32,
+
     /// Whether the bot must be @mentioned in group channels.
     #[serde(default)]
     pub require_mention: bool,
@@ -40,6 +52,14 @@ fn default_intents() -> u64 {
 
 fn default_reply_to_mode() -> String {
     "first".to_string()
+}
+
+fn default_liveness_interval_seconds() -> f64 {
+    60.0
+}
+
+fn default_liveness_failure_threshold() -> u32 {
+    3
 }
 
 /// Optional Discord send metadata carried by higher-level gateway helpers.

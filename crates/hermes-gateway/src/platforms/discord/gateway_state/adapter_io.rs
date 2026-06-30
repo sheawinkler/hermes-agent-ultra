@@ -6,12 +6,23 @@ impl DiscordAdapter {
         base.validate_token()?;
 
         let client = base.build_client()?;
+        let api_base_url = config
+            .api_base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(DISCORD_API_BASE)
+            .trim_end_matches('/')
+            .to_string();
 
         Ok(Self {
             base,
             config,
+            api_base_url,
             client,
             stop_signal: Arc::new(Notify::new()),
+            liveness_failed: Arc::new(AtomicBool::new(false)),
+            liveness_task: Mutex::new(None),
             thread_participation: Mutex::new(DiscordThreadParticipationTracker::new("discord")),
             non_conversational_messages: Mutex::new(DiscordNonConversationalMessageTracker::new(
                 "discord",
@@ -91,6 +102,67 @@ impl DiscordAdapter {
         format!("Bot {}", self.config.token)
     }
 
+    fn api_url(&self, path: &str) -> String {
+        format!("{}/{}", self.api_base_url, path.trim_start_matches('/'))
+    }
+
+    fn liveness_interval(&self) -> Option<std::time::Duration> {
+        let seconds = self.config.liveness_interval_seconds;
+        (seconds.is_finite() && seconds > 0.0)
+            .then(|| std::time::Duration::from_secs_f64(seconds))
+    }
+
+    fn liveness_threshold(&self) -> Option<u32> {
+        (self.config.liveness_failure_threshold > 0)
+            .then_some(self.config.liveness_failure_threshold)
+    }
+
+    fn ensure_liveness_healthy(&self) -> Result<(), GatewayError> {
+        if self.liveness_failed.load(Ordering::SeqCst) {
+            return Err(GatewayError::ConnectionFailed(
+                "Discord REST liveness probe marked adapter unhealthy; gateway reconnect watcher should restart it"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn start_liveness_probe(&self) {
+        let Some(interval) = self.liveness_interval() else {
+            return;
+        };
+        let Some(threshold) = self.liveness_threshold() else {
+            return;
+        };
+        let Ok(mut slot) = self.liveness_task.lock() else {
+            debug!("discord liveness task lock poisoned");
+            return;
+        };
+        if slot.as_ref().is_some_and(|task| !task.is_finished()) {
+            return;
+        }
+        self.liveness_failed.store(false, Ordering::SeqCst);
+        let client = self.client.clone();
+        let token = self.config.token.clone();
+        let api_base_url = self.api_base_url.clone();
+        let failed = Arc::clone(&self.liveness_failed);
+        *slot = Some(tokio::spawn(async move {
+            run_discord_liveness_probe_loop(client, token, api_base_url, interval, threshold, failed)
+                .await;
+        }));
+    }
+
+    fn stop_liveness_probe(&self) {
+        self.liveness_failed.store(false, Ordering::SeqCst);
+        let Ok(mut slot) = self.liveness_task.lock() else {
+            debug!("discord liveness task lock poisoned");
+            return;
+        };
+        if let Some(task) = slot.take() {
+            task.abort();
+        }
+    }
+
     // -----------------------------------------------------------------------
     // REST API: Sending messages
     // -----------------------------------------------------------------------
@@ -112,6 +184,7 @@ impl DiscordAdapter {
         content: &str,
         metadata: Option<&DiscordSendMetadata>,
     ) -> Result<Vec<String>, GatewayError> {
+        self.ensure_liveness_healthy()?;
         let target_channel_id = target_channel_id_for_metadata(channel_id, metadata);
         let formatted_content = format_discord_outgoing_content(content);
         let chunks = split_message(&formatted_content, MAX_MESSAGE_LENGTH);
@@ -121,10 +194,7 @@ impl DiscordAdapter {
         let mut suppress_reply_references = false;
 
         for (index, chunk) in chunks.iter().enumerate() {
-            let url = format!(
-                "{}/channels/{}/messages",
-                DISCORD_API_BASE, target_channel_id
-            );
+            let url = self.api_url(&format!("channels/{}/messages", target_channel_id));
             let include_reply_reference = !suppress_reply_references
                 && reply_to_message_id.is_some()
                 && reply_to_mode.references_chunk(index);
@@ -216,7 +286,8 @@ impl DiscordAdapter {
                 "Discord forum post requires content".into(),
             ));
         };
-        let url = format!("{}/channels/{}/threads", DISCORD_API_BASE, forum_channel_id);
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!("channels/{}/threads", forum_channel_id));
         let body = forum_thread_payload(first_chunk, None, auto_archive_duration);
 
         let resp = self
@@ -271,10 +342,8 @@ impl DiscordAdapter {
         message_id: &str,
         content: &str,
     ) -> Result<(), GatewayError> {
-        let url = format!(
-            "{}/channels/{}/messages/{}",
-            DISCORD_API_BASE, channel_id, message_id
-        );
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!("channels/{}/messages/{}", channel_id, message_id));
 
         let formatted_content = format_discord_outgoing_content(content);
         let body = with_default_allowed_mentions(serde_json::json!({
@@ -326,10 +395,8 @@ impl DiscordAdapter {
         metadata: Option<&DiscordSendMetadata>,
     ) -> Result<String, GatewayError> {
         let target_channel_id = target_channel_id_for_metadata(channel_id, metadata);
-        let url = format!(
-            "{}/channels/{}/messages",
-            DISCORD_API_BASE, target_channel_id
-        );
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!("channels/{}/messages", target_channel_id));
 
         let mut body = with_default_allowed_mentions(serde_json::json!({ "embeds": embeds }));
         if let Some(text) = content {
@@ -389,10 +456,8 @@ impl DiscordAdapter {
         metadata: Option<&DiscordSendMetadata>,
     ) -> Result<String, GatewayError> {
         let target_channel_id = target_channel_id_for_metadata(channel_id, metadata);
-        let url = format!(
-            "{}/channels/{}/messages",
-            DISCORD_API_BASE, target_channel_id
-        );
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!("channels/{}/messages", target_channel_id));
 
         let file_bytes = tokio::fs::read(file_path).await.map_err(|e| {
             GatewayError::SendFailed(format!("Failed to read file {}: {}", file_path, e))
@@ -508,10 +573,11 @@ impl DiscordAdapter {
         message_id: &str,
         emoji: &str,
     ) -> Result<(), GatewayError> {
-        let url = format!(
-            "{}/channels/{}/messages/{}/reactions/{}/@me",
-            DISCORD_API_BASE, channel_id, message_id, emoji
-        );
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!(
+            "channels/{}/messages/{}/reactions/{}/@me",
+            channel_id, message_id, emoji
+        ));
 
         let resp = self
             .client
@@ -540,10 +606,11 @@ impl DiscordAdapter {
         message_id: &str,
         emoji: &str,
     ) -> Result<(), GatewayError> {
-        let url = format!(
-            "{}/channels/{}/messages/{}/reactions/{}/@me",
-            DISCORD_API_BASE, channel_id, message_id, emoji
-        );
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!(
+            "channels/{}/messages/{}/reactions/{}/@me",
+            channel_id, message_id, emoji
+        ));
 
         let resp = self
             .client
@@ -578,10 +645,11 @@ impl DiscordAdapter {
         name: &str,
         auto_archive_duration: Option<u32>,
     ) -> Result<DiscordThread, GatewayError> {
-        let url = format!(
-            "{}/channels/{}/messages/{}/threads",
-            DISCORD_API_BASE, channel_id, message_id
-        );
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!(
+            "channels/{}/messages/{}/threads",
+            channel_id, message_id
+        ));
 
         let mut body = serde_json::json!({ "name": name });
         if let Some(dur) = auto_archive_duration {
@@ -631,7 +699,8 @@ impl DiscordAdapter {
             GatewayError::Platform("application_id required for slash commands".into())
         })?;
 
-        let url = format!("{}/applications/{}/commands", DISCORD_API_BASE, app_id);
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!("applications/{}/commands", app_id));
 
         let resp = self
             .client
@@ -668,10 +737,11 @@ impl DiscordAdapter {
             GatewayError::Platform("application_id required for slash commands".into())
         })?;
 
-        let url = format!(
-            "{}/applications/{}/guilds/{}/commands",
-            DISCORD_API_BASE, app_id, guild_id
-        );
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!(
+            "applications/{}/guilds/{}/commands",
+            app_id, guild_id
+        ));
 
         let resp = self
             .client
@@ -712,10 +782,11 @@ impl DiscordAdapter {
         interaction_token: &str,
         content: &str,
     ) -> Result<(), GatewayError> {
-        let url = format!(
-            "{}/interactions/{}/{}/callback",
-            DISCORD_API_BASE, interaction_id, interaction_token
-        );
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!(
+            "interactions/{}/{}/callback",
+            interaction_id, interaction_token
+        ));
 
         let body = serde_json::json!({
             "type": 4, // CHANNEL_MESSAGE_WITH_SOURCE
@@ -751,10 +822,11 @@ impl DiscordAdapter {
         interaction_id: &str,
         interaction_token: &str,
     ) -> Result<(), GatewayError> {
-        let url = format!(
-            "{}/interactions/{}/{}/callback",
-            DISCORD_API_BASE, interaction_id, interaction_token
-        );
+        self.ensure_liveness_healthy()?;
+        let url = self.api_url(&format!(
+            "interactions/{}/{}/callback",
+            interaction_id, interaction_token
+        ));
 
         let body = serde_json::json!({
             "type": 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
@@ -834,4 +906,64 @@ impl DiscordAdapter {
             t: None,
         }
     }
+}
+
+async fn run_discord_liveness_probe_loop(
+    client: Client,
+    token: String,
+    api_base_url: String,
+    interval: std::time::Duration,
+    threshold: u32,
+    failed: Arc<AtomicBool>,
+) {
+    let mut failures = 0u32;
+    loop {
+        tokio::time::sleep(interval).await;
+        match probe_discord_rest_liveness(&client, &token, &api_base_url).await {
+            Ok(()) => {
+                failures = 0;
+            }
+            Err(err) => {
+                failures = failures.saturating_add(1);
+                warn!(
+                    failures,
+                    threshold,
+                    error = %err,
+                    "Discord REST liveness probe failed"
+                );
+                if failures >= threshold {
+                    failed.store(true, Ordering::SeqCst);
+                    error!(
+                        failures,
+                        "Discord REST liveness threshold reached; adapter marked unhealthy for reconnect"
+                    );
+                    return;
+                }
+            }
+        }
+    }
+}
+
+async fn probe_discord_rest_liveness(
+    client: &Client,
+    token: &str,
+    api_base_url: &str,
+) -> Result<(), GatewayError> {
+    let url = format!("{}/users/@me", api_base_url.trim_end_matches('/'));
+    let resp = client
+        .get(url)
+        .header("Authorization", format!("Bot {token}"))
+        .send()
+        .await
+        .map_err(|err| {
+            GatewayError::ConnectionFailed(format!("Discord liveness REST request failed: {err}"))
+        })?;
+    if resp.status().is_success() {
+        return Ok(());
+    }
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    Err(GatewayError::ConnectionFailed(format!(
+        "Discord liveness REST status {status}: {text}"
+    )))
 }

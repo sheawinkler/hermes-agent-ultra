@@ -316,7 +316,7 @@ struct CompressionOutcome {
     summary_warning: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct SessionRuntimeState {
     model: Option<String>,
     provider: Option<String>,
@@ -380,26 +380,6 @@ impl MessageDeduplicator {
     }
 }
 
-impl Default for SessionRuntimeState {
-    fn default() -> Self {
-        Self {
-            model: None,
-            provider: None,
-            profile: None,
-            branch: None,
-            personality: None,
-            home: None,
-            service_tier: None,
-            tool_progress: None,
-            budget: None,
-            verbose: false,
-            yolo: false,
-            reasoning: false,
-            pending_system_notes: Vec::new(),
-        }
-    }
-}
-
 include!("gateway/profile_overlay.rs");
 
 // ---------------------------------------------------------------------------
@@ -446,17 +426,12 @@ pub struct Gateway {
     busy_sessions: Arc<RwLock<BusySessionCoordinator>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum GroupAccessMode {
+    #[default]
     Open,
     Allowlist,
     Disabled,
-}
-
-impl Default for GroupAccessMode {
-    fn default() -> Self {
-        Self::Open
-    }
 }
 
 #[derive(Debug, Clone, Default)]

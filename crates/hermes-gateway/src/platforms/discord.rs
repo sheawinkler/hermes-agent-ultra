@@ -10,6 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
@@ -17,7 +18,7 @@ use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter, SendMessageOptions};
@@ -75,11 +76,13 @@ impl PlatformAdapter for DiscordAdapter {
             describe_secret(&self.config.token)
         );
         self.base.mark_running();
+        self.start_liveness_probe();
         Ok(())
     }
 
     async fn stop(&self) -> Result<(), GatewayError> {
         info!("Discord adapter stopping");
+        self.stop_liveness_probe();
         self.base.mark_stopped();
         self.stop_signal.notify_one();
         Ok(())
@@ -165,7 +168,7 @@ impl PlatformAdapter for DiscordAdapter {
     }
 
     fn is_running(&self) -> bool {
-        self.base.is_running()
+        self.base.is_running() && !self.liveness_failed.load(Ordering::SeqCst)
     }
 
     fn splits_long_messages(&self) -> bool {
