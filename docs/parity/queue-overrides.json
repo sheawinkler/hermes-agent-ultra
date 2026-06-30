@@ -6489,6 +6489,16 @@
       "owner": "rust-runtime",
       "notes": "Ported/already covered in Rust Holographic memory: shutdown deterministically drops the rusqlite Connection by clearing the guarded Option instead of relying on later process teardown. Added a focused regression test that initialized connections are gone after shutdown."
     },
+    "b296915c82c9da02bd6edacf52490e68f85e1f16": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as a Rust-native Feishu lifecycle guard instead of Python executor plumbing: the adapter has no blocking SDK executor, but stop() now marks the runtime closing and outbound API/token/file/image-url paths refuse work before network or local file IO until start/reconnect re-arms the adapter."
+    },
+    "7ee0b689739e80c75d7c32f42cf2a79a2207c0a0": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Feishu shutdown semantics: real stop() sets a closing guard so post-shutdown calls cannot resurrect outbound work, while start() clears the guard before reconnect token refresh. Focused async tests cover refusal and re-arm state."
+    },
     "1289f12812a9c6a3f3e6fbdf39e39ed7e1b7bd50": {
       "disposition": "superseded",
       "owner": "rust-runtime",

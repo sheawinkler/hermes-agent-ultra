@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-30T00:32:30.634245+00:00`
+Generated: `2026-06-30T00:48:32.546716+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7644`.
 
@@ -17,8 +17,8 @@ Generated: `2026-06-30T00:32:30.634245+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 97 |
-| pending | 42 |
-| ported | 517 |
+| pending | 40 |
+| ported | 519 |
 | superseded | 6988 |
 
 ## First 100 Pending Commits
@@ -30,8 +30,6 @@ Generated: `2026-06-30T00:32:30.634245+00:00`
 | `882730026739` | #20 | fix(photon): correlate tapbacks to bot message context |
 | `50f685521734` | #20 | feat(moa): make /moa one-shot only; route preset switching through the model picker |
 | `f67c0b3e60ba` | #21 | docs(hermes-agent skill): cover v0.13–v0.17 features, fix stale claims, tighten (#53566) |
-| `b296915c82c9` | #20 | fix(feishu): route blocking SDK calls through an adapter-owned executor |
-| `7ee0b689739e` | #20 | fix(gateway,feishu): refuse executor resurrection during real shutdown |
 | `cd592c105cbb` | #20 | feat(send_message): native WhatsApp media delivery via Baileys bridge (#53598) |
 | `917f6bdb00b8` | #20 | fix(tools): let vision pick any provider+model, not just OpenRouter (#53606) |
 | `ef17cd204d75` | #20 | fix(windows): stop subprocess console-window popups + add CI guard (#53791) |
