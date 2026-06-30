@@ -210,6 +210,13 @@ pub struct RelatesTo {
     pub key: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MatrixInviteJoinRequest {
+    room_id: String,
+    is_direct: bool,
+    inviter: Option<String>,
+}
+
 #[derive(Debug)]
 struct MatrixDecryptFfiOutput {
     body: String,
@@ -740,6 +747,7 @@ pub struct MatrixAdapter {
     txn_counter: AtomicU64,
     stop_signal: Arc<Notify>,
     sync_running: AtomicBool,
+    pending_invite_joins: Arc<Mutex<HashSet<String>>>,
     pub e2ee: MatrixE2ee,
     decrypt_ffi: Option<MatrixDecryptFfiConfig>,
     native_decrypt: Option<MatrixNativeDecryptConfig>,

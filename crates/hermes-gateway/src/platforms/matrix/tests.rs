@@ -329,6 +329,172 @@ fn parse_invites_filters_inviter_when_allowlist_is_configured() {
 }
 
 #[tokio::test]
+async fn sync_once_schedules_direct_invite_join_without_blocking() {
+    let server = MockServer::start().await;
+    let sync_body = serde_json::json!({
+        "next_batch": "s1",
+        "rooms": {
+            "invite": {
+                "!dm:test": {
+                    "invite_state": {
+                        "events": [{
+                            "type": "m.room.member",
+                            "state_key": "@bot:test",
+                            "sender": "@alice:test",
+                            "content": {
+                                "membership": "invite",
+                                "is_direct": true
+                            }
+                        }]
+                    }
+                }
+            }
+        }
+    });
+    Mock::given(method("GET"))
+        .and(path("/_matrix/client/v3/sync"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(sync_body))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/_matrix/client/v3/join/!dm:test"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_millis(250))
+                .set_body_json(serde_json::json!({"room_id": "!dm:test"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/_matrix/client/v3/user/%40bot%3Atest/account_data/m.direct",
+        ))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+            "errcode": "M_NOT_FOUND"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(
+            "/_matrix/client/v3/user/%40bot%3Atest/account_data/m.direct",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let adapter = MatrixAdapter::new(MatrixConfig {
+        homeserver_url: server.uri(),
+        user_id: "@bot:test".into(),
+        access_token: "tok".into(),
+        room_id: None,
+        proxy: AdapterProxyConfig::default(),
+    })
+    .expect("matrix adapter");
+
+    let (messages, next_batch) = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        adapter.sync_once(None),
+    )
+    .await
+    .expect("sync_once should not wait for delayed invite join")
+    .expect("sync_once");
+
+    assert!(messages.is_empty());
+    assert_eq!(next_batch.as_deref(), Some("s1"));
+    assert_eq!(adapter.pending_invite_join_count(), 1);
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while adapter.pending_invite_join_count() != 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("invite join task should drain");
+}
+
+#[tokio::test]
+async fn schedule_invite_join_dedupes_room_until_task_finishes() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/_matrix/client/v3/join/!dupe:test"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_millis(100))
+                .set_body_json(serde_json::json!({"room_id": "!dupe:test"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let adapter = MatrixAdapter::new(MatrixConfig {
+        homeserver_url: server.uri(),
+        user_id: "@bot:test".into(),
+        access_token: "tok".into(),
+        room_id: None,
+        proxy: AdapterProxyConfig::default(),
+    })
+    .expect("matrix adapter");
+
+    let invite = MatrixInviteJoinRequest {
+        room_id: "!dupe:test".into(),
+        is_direct: false,
+        inviter: None,
+    };
+    adapter.schedule_invite_join(invite.clone());
+    adapter.schedule_invite_join(invite);
+
+    assert_eq!(adapter.pending_invite_join_count(), 1);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while adapter.pending_invite_join_count() != 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("invite join task should drain");
+}
+
+#[tokio::test]
+async fn record_dm_room_appends_invite_to_existing_m_direct() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/_matrix/client/v3/user/%40bot%3Atest/account_data/m.direct",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "@alice:test": ["!old:test"],
+            "@bob:test": "!bad-shape:test"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(
+            "/_matrix/client/v3/user/%40bot%3Atest/account_data/m.direct",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = MatrixConfig {
+        homeserver_url: server.uri(),
+        user_id: "@bot:test".into(),
+        access_token: "tok".into(),
+        room_id: None,
+        proxy: AdapterProxyConfig::default(),
+    };
+    let client = reqwest::Client::new();
+
+    MatrixAdapter::record_dm_room_with_client(&client, &config, "!new:test", "@alice:test")
+        .await
+        .expect("record m.direct");
+}
+
+#[tokio::test]
 async fn test_parse_sync_encrypted_event_metadata() {
     let config = MatrixConfig {
         homeserver_url: "https://matrix.test".into(),

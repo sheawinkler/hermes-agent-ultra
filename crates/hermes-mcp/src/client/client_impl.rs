@@ -776,6 +776,7 @@ impl McpClient {
                 command,
                 &self.config.args,
                 &self.config.env,
+                self.config.suppress_interactive_oauth,
             )))
         } else if self.config.is_http() {
             let url = self
