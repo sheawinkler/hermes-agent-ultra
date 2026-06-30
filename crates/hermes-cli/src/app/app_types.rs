@@ -288,6 +288,8 @@ pub struct App {
     pub session_objective: Option<String>,
     /// User text staged back into the composer by commands such as `/undo`.
     pending_input_prefill: Option<String>,
+    /// One-shot user prompt queued by slash commands such as `/prompt`.
+    pending_agent_seed: Option<String>,
     /// System notes injected once before the next submitted user message.
     pending_system_notes: Vec<String>,
     /// One-shot quorum arm state set by `/quorum run`.
@@ -331,6 +333,7 @@ impl std::fmt::Debug for App {
             .field("pending_image_hint", &self.pending_image_hint)
             .field("session_objective", &self.session_objective)
             .field("pending_input_prefill", &self.pending_input_prefill)
+            .field("pending_agent_seed", &self.pending_agent_seed)
             .field("pending_system_notes", &self.pending_system_notes)
             .field("quorum_armed_once", &self.quorum_armed_once)
             .field("pet_settings", &self.pet_settings)
@@ -366,6 +369,7 @@ impl Clone for App {
             pending_image_hint: self.pending_image_hint.clone(),
             session_objective: self.session_objective.clone(),
             pending_input_prefill: self.pending_input_prefill.clone(),
+            pending_agent_seed: self.pending_agent_seed.clone(),
             pending_system_notes: self.pending_system_notes.clone(),
             quorum_armed_once: self.quorum_armed_once,
             pet_settings: self.pet_settings.clone(),
@@ -418,4 +422,3 @@ pub struct UiTranscriptMessage {
 // ---------------------------------------------------------------------------
 // App implementation
 // ---------------------------------------------------------------------------
-

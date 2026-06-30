@@ -101,6 +101,22 @@ mod tests {
         }
     }
 
+    fn write_fake_editor(path: &Path, body: &str, mode: &str) {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        let script = if mode == "clear" {
+            "#!/bin/sh\n: > \"$1\"\n".to_string()
+        } else {
+            format!("#!/bin/sh\ncat >> \"$1\" <<'EOF'\n{body}\nEOF\n")
+        };
+        std::fs::write(path, script).expect("write fake editor");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod fake editor");
+        }
+    }
+
     struct ReasoningFullResetGuard;
 
     impl ReasoningFullResetGuard {
@@ -615,6 +631,104 @@ mod tests {
             latest_ui_assistant_text(&app),
             hermes_core::version::version_label()
         );
+    }
+
+    #[tokio::test]
+    async fn moa_without_prompt_is_usage_only() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        let before_model = app.current_model.clone();
+
+        let result = handle_slash_command(&mut app, "/moa", &[])
+            .await
+            .expect("moa usage command");
+
+        assert_eq!(result, CommandResult::Handled);
+        assert_eq!(app.current_model, before_model);
+        let text = latest_ui_assistant_text(&app);
+        assert!(text.contains("Usage: /moa <prompt>"));
+        assert!(text.contains("Use /model to switch"));
+    }
+
+    #[tokio::test]
+    async fn prompt_command_reads_editor_and_queues_agent_seed() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let _visual_guard = EnvVarGuard::remove("VISUAL");
+        let editor = tmp.path().join("fake-editor.sh");
+        write_fake_editor(&editor, "rest of prompt\nUse tests.", "append");
+        let _editor_guard = EnvVarGuard::set("EDITOR", editor.as_os_str());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_slash_command(&mut app, "/prompt", &["DRAFT:"])
+            .await
+            .expect("prompt command");
+
+        assert_eq!(result, CommandResult::Handled);
+        let seed = app.take_pending_agent_seed().expect("queued seed");
+        assert!(seed.starts_with("DRAFT:"));
+        assert!(seed.contains("rest of prompt"));
+        assert!(seed.contains("Use tests."));
+        assert!(!seed.contains("#!"));
+        assert!(latest_ui_assistant_text(&app).contains("Prompt captured from editor"));
+    }
+
+    #[tokio::test]
+    async fn prompt_command_empty_editor_buffer_cancels_seed() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let _visual_guard = EnvVarGuard::remove("VISUAL");
+        let editor = tmp.path().join("fake-editor-clear.sh");
+        write_fake_editor(&editor, "", "clear");
+        let _editor_guard = EnvVarGuard::set("EDITOR", editor.as_os_str());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_slash_command(&mut app, "/compose", &[])
+            .await
+            .expect("prompt command");
+
+        assert_eq!(result, CommandResult::Handled);
+        assert!(app.take_pending_agent_seed().is_none());
+        assert!(latest_ui_assistant_text(&app).contains("Empty prompt"));
+    }
+
+    #[tokio::test]
+    async fn learn_command_records_learning_request_for_next_turn() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_slash_command(&mut app, "/learn", &["docs", "and", "chat"])
+            .await
+            .expect("learn command");
+
+        assert_eq!(result, CommandResult::Handled);
+        assert_eq!(app.pending_system_note_count(), 1);
+        assert!(latest_ui_assistant_text(&app).contains("Learning request captured"));
+    }
+
+    #[tokio::test]
+    async fn hatch_command_enables_pet_and_queues_design_brief() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_slash_command(&mut app, "/hatch", &["hyped", "otter", "navigator"])
+            .await
+            .expect("hatch command");
+
+        assert_eq!(result, CommandResult::Handled);
+        assert!(app.pet_settings().enabled);
+        assert_eq!(app.pet_settings().species, "otter");
+        assert_eq!(app.pet_settings().mood, "hyped");
+        assert_eq!(app.pending_system_note_count(), 1);
+        assert!(latest_ui_assistant_text(&app).contains("Pet hatch request captured"));
     }
 
     #[tokio::test]

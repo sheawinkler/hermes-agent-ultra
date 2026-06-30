@@ -221,6 +221,26 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                             }
                                         }
                                         handled_by_tui = true;
+                                    } else if cmd.eq_ignore_ascii_case("/timestamps")
+                                        || cmd.eq_ignore_ascii_case("/ts")
+                                    {
+                                        let (mut message, persist) =
+                                            state.apply_timestamps_command(&args);
+                                        if let Some(show_timestamps) = persist {
+                                            let value =
+                                                if show_timestamps { "true" } else { "false" };
+                                            if let Err(err) = hermes_config::set_user_config_value(
+                                                &app.state_root,
+                                                "display.timestamps",
+                                                value,
+                                            ) {
+                                                message.push_str(&format!(
+                                                    "\nFailed to save display.timestamps: {err}"
+                                                ));
+                                            }
+                                        }
+                                        app.push_ui_assistant(message);
+                                        handled_by_tui = true;
                                     } else if cmd.eq_ignore_ascii_case("/model") {
                                         if args.is_empty() || (args.len() == 1 && args[0].eq_ignore_ascii_case("list")) {
                                             open_model_provider_modal(&mut state, &app).await;
@@ -595,4 +615,3 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
 
     Ok(())
 }
-

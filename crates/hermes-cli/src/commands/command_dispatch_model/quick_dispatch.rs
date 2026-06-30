@@ -190,6 +190,7 @@ async fn dispatch_slash_command(
             Ok(CommandResult::Handled)
         }
         "/history" => handle_history_command(app),
+        "/prompt" | "/compose" => handle_prompt_command(app, args),
         "/recap" => handle_recap_command(app, args),
         "/context" => handle_context_command(app, args),
         "/title" => handle_session_compat_command(app, canonical_command(cmd), args),
@@ -207,6 +208,7 @@ async fn dispatch_slash_command(
         "/objective" => handle_objective_command(app, args),
         "/claims" => handle_claims_command(app, args),
         "/quorum" => handle_quorum_command(app, args).await,
+        "/moa" => handle_moa_command(app, args).await,
         "/swarm" => handle_swarm_command(app, args).await,
         "/simulate" => handle_simulate_command(app, args),
         "/specpatch" => handle_specpatch_command(app, args).await,
@@ -223,9 +225,11 @@ async fn dispatch_slash_command(
             emit_command_output(app, hermes_core::version::version_label());
             Ok(CommandResult::Handled)
         }
-        "/fast" | "/skin" | "/voice" => {
+        "/fast" | "/timestamps" | "/skin" | "/voice" => {
             handle_runtime_ui_mode_command(app, canonical_command(cmd), args)
         }
+        "/hatch" => handle_hatch_command(app, args),
+        "/learn" => handle_learn_command(app, args),
         "/pet" => handle_pet_command(app, args),
         "/skills" => handle_skills_command(app, args).await,
         "/tools" => handle_tools_command(app, args),
@@ -330,6 +334,202 @@ async fn dispatch_slash_command(
             Ok(CommandResult::Handled)
         }
     }
+}
+
+const PROMPT_EDITOR_HEADER: &str = "#! Compose your prompt below. Lines starting with '#!' are ignored.\n#! Save and quit to send; leave empty to cancel.\n\n";
+
+fn prompt_editor_command() -> String {
+    std::env::var("VISUAL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("EDITOR")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                "notepad".to_string()
+            } else {
+                "nano".to_string()
+            }
+        })
+}
+
+fn strip_prompt_editor_header(raw: &str) -> String {
+    raw.lines()
+        .filter(|line| !line.starts_with("#!"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+fn compose_prompt_in_editor(initial_text: &str) -> Result<Option<String>, AgentError> {
+    let editor = prompt_editor_command();
+    let mut parts = shlex::split(&editor).unwrap_or_else(|| vec![editor.clone()]);
+    if parts.is_empty() {
+        return Err(AgentError::Config("No editor command configured".to_string()));
+    }
+
+    let path = std::env::temp_dir().join(format!(
+        "hermes_prompt_{}_{}.md",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    let mut seed = PROMPT_EDITOR_HEADER.to_string();
+    if !initial_text.is_empty() {
+        seed.push_str(initial_text);
+    }
+    std::fs::write(&path, seed).map_err(|err| {
+        AgentError::Io(format!(
+            "Failed to create prompt draft {}: {}",
+            path.display(),
+            err
+        ))
+    })?;
+
+    let program = parts.remove(0);
+    let status = match Command::new(&program)
+        .args(parts)
+        .arg(&path)
+        .suppress_windows_console()
+        .status()
+    {
+        Ok(status) => status,
+        Err(err) => {
+            let _ = std::fs::remove_file(&path);
+            return Err(AgentError::Io(format!(
+                "Could not launch editor `{program}`: {err}"
+            )));
+        }
+    };
+    if !status.success() {
+        let _ = std::fs::remove_file(&path);
+        return Err(AgentError::ToolExecution(format!(
+            "Editor `{program}` exited with status {status}"
+        )));
+    }
+
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            let _ = std::fs::remove_file(&path);
+            return Err(AgentError::Io(format!(
+                "Failed to read prompt draft {}: {}",
+                path.display(),
+                err
+            )));
+        }
+    };
+    let _ = std::fs::remove_file(&path);
+    let prompt = strip_prompt_editor_header(&raw);
+    Ok((!prompt.is_empty()).then_some(prompt))
+}
+
+fn handle_prompt_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    match compose_prompt_in_editor(&args.join(" ")) {
+        Ok(Some(prompt)) => {
+            app.queue_pending_agent_seed(prompt);
+            emit_command_output(app, "Prompt captured from editor; sending as next turn.");
+        }
+        Ok(None) => {
+            emit_command_output(app, "Empty prompt; nothing sent.");
+        }
+        Err(err) => {
+            emit_command_output(app, format!("Could not open prompt editor: {err}"));
+        }
+    }
+    Ok(CommandResult::Handled)
+}
+
+async fn handle_moa_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let prompt = args.join(" ");
+    if prompt.trim().is_empty() {
+        emit_command_output(
+            app,
+            "Usage: /moa <prompt>\nRuns one prompt through moa:default and restores your prior model. Use /model to switch to a MoA preset for the session.",
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    app.submit_moa_oneshot(&prompt).await?;
+    Ok(CommandResult::Handled)
+}
+
+fn handle_hatch_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let description = args.join(" ").trim().to_string();
+    if description.is_empty() {
+        emit_command_output(app, "Usage: /hatch <pet description>");
+        return Ok(CommandResult::Handled);
+    }
+
+    let description_lc = description.to_ascii_lowercase();
+    let mut settings = app.pet_settings().clone();
+    settings.enabled = true;
+    if let Some(species) = PetSettings::species_catalog()
+        .iter()
+        .find(|species| description_lc.contains(**species))
+    {
+        settings.species = (*species).to_string();
+    }
+    if let Some(mood) = PetSettings::mood_catalog()
+        .iter()
+        .find(|mood| description_lc.contains(**mood))
+    {
+        settings.mood = (*mood).to_string();
+    } else if ["energetic", "excited", "spark", "chaos", "sigma"]
+        .iter()
+        .any(|needle| description_lc.contains(needle))
+    {
+        settings.mood = "hyped".to_string();
+    } else if ["calm", "zen", "cozy", "soft"]
+        .iter()
+        .any(|needle| description_lc.contains(needle))
+    {
+        settings.mood = "chill".to_string();
+    }
+    app.set_pet_settings(settings.clone())?;
+    app.queue_next_turn_system_note(format!(
+        "Petdex hatch request: turn this description into a concise reusable companion design with species, mood, visual motif, and behavior notes: {description}"
+    ));
+    emit_command_output(
+        app,
+        format!(
+            "Pet hatch request captured.\n{}\nNext turn will receive the petdex design brief.",
+            render_pet_status(&settings)
+        ),
+    );
+    Ok(CommandResult::Handled)
+}
+
+fn handle_learn_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let subject = args.join(" ").trim().to_string();
+    if subject.is_empty() {
+        emit_command_output(app, "Usage: /learn <what to learn from>");
+        return Ok(CommandResult::Handled);
+    }
+
+    let objective_id = load_objective_contract()?
+        .map(|contract| contract.id)
+        .unwrap_or_else(|| app.session_id.clone());
+    let _ = append_objective_learning_entry(ObjectiveLearningLedgerEntry {
+        recorded_at: String::new(),
+        objective_id,
+        objective_state: "learning_capture".to_string(),
+        decision: "learn_command".to_string(),
+        evidence_files: vec![],
+        evidence_commands: vec![format!("/learn {subject}")],
+        notes: subject.clone(),
+    });
+    app.queue_next_turn_system_note(format!(
+        "Learning capture request: distill reusable project knowledge, skill steps, and future-agent guidance from this material. Mark unverified claims explicitly: {subject}"
+    ));
+    emit_command_output(
+        app,
+        "Learning request captured. It was recorded in the objective learning ledger and queued for the next turn.",
+    );
+    Ok(CommandResult::Handled)
 }
 
 fn resolve_cli_skill_slash_command(

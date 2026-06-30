@@ -103,6 +103,34 @@ impl App {
         );
     }
 
+    fn emit_moa_reference_event(
+        shared: &Arc<StdMutex<Option<StreamHandle>>>,
+        index: usize,
+        count: usize,
+        model: &str,
+        text: &str,
+    ) {
+        let label = App::preview_for_status(model, 96);
+        let text = App::preview_for_status(text, 1200);
+        if label.is_empty() || text.is_empty() {
+            return;
+        }
+        if App::oneshot_lifecycle_stdout_enabled(shared) {
+            println!("[moa reference {}/{}] {}: {}", index, count, label, text);
+        }
+        App::push_stream_extra_event(
+            shared,
+            serde_json::json!({
+                "ui_event": "moa_reference",
+                "index": index,
+                "count": count,
+                "label": label,
+                "model": model,
+                "text": text,
+            }),
+        );
+    }
+
     fn oneshot_lifecycle_stdout_enabled(shared: &Arc<StdMutex<Option<StreamHandle>>>) -> bool {
         let stream_attached = shared
             .lock()

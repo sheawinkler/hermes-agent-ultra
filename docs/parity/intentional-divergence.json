@@ -71,12 +71,21 @@
       "summary": "Keep platform adapter parity in the Rust gateway instead of vendoring upstream Python platform-plugin trees.",
       "owner": "sheawinkler",
       "ticket": 7,
-      "last_reviewed": "2026-05-26",
-      "review_date": "2026-08-26",
-      "rationale": "Mattermost and ntfy platform behavior are represented by Rust-native gateway adapters and adapter contracts; upstream Python plugin files are not vendored into the Rust runtime path.",
+      "last_reviewed": "2026-06-30",
+      "review_date": "2026-09-30",
+      "rationale": "Platform behavior is represented by Rust-native gateway adapters, delivery helpers, auth/config readers, and adapter contracts; upstream Python plugin files are reference-only and must not become runtime execution paths in the Rust-first repo.",
       "path_prefixes": [
         "plugins/platforms/mattermost/",
-        "plugins/platforms/ntfy/"
+        "plugins/platforms/ntfy/",
+        "plugins/platforms/dingtalk/",
+        "plugins/platforms/email/",
+        "plugins/platforms/feishu/",
+        "plugins/platforms/matrix/",
+        "plugins/platforms/slack/",
+        "plugins/platforms/sms/",
+        "plugins/platforms/telegram/",
+        "plugins/platforms/wecom/",
+        "plugins/platforms/whatsapp/"
       ]
     },
     {
@@ -86,11 +95,12 @@
       "summary": "Own Chronos managed-cron behavior in the Rust cron scheduler and API server instead of vendoring the upstream Python cron plugin.",
       "owner": "sheawinkler",
       "ticket": 570,
-      "last_reviewed": "2026-06-20",
-      "review_date": "2026-09-20",
+      "last_reviewed": "2026-06-30",
+      "review_date": "2026-09-30",
       "rationale": "Hermes Ultra implements NAS-mediated Chronos provisioning, callback JWT verification, stale/duplicate fire suppression, background dispatch, and post-fire re-arm in hermes-cron plus the Rust API server. The upstream plugins/cron Python files are reference-only and must not become Rust runtime execution paths.",
       "path_prefixes": [
-        "plugins/cron/"
+        "plugins/cron/",
+        "plugins/cron_providers/"
       ]
     },
     {
@@ -111,16 +121,16 @@
       "id": "upstream-python-plugin-backend-drift-20260527",
       "status": "temporary",
       "workstream": "WS3",
-      "summary": "Track newly added upstream Python plugin/backend trees separately from surgical Rust issue-triage fixes.",
+      "summary": "Track upstream Python backend plugin trees that are not yet closed as Rust-native runtime surfaces.",
       "owner": "sheawinkler",
       "ticket": 319,
-      "last_reviewed": "2026-06-11",
-      "review_date": "2026-07-11",
-      "rationale": "dashboard_auth/nous, image_gen/krea, and security-guidance remain upstream-only Python plugin trees after the v0.18.0 release review. Hermes Ultra keeps runtime behavior Rust-native; these paths stay tracked for a dedicated plugin parity slice instead of being silently vendored.",
+      "last_reviewed": "2026-06-30",
+      "review_date": "2026-07-30",
+      "rationale": "dashboard_auth/nous, dashboard_auth/drain, and security-guidance remain upstream-only Python plugin trees after this review. Hermes Ultra keeps runtime behavior Rust-native; these paths stay tracked for dedicated parity slices instead of being silently vendored.",
       "path_prefixes": [
         "plugins/dashboard_auth/nous/",
-        "plugins/image_gen/krea/",
-        "plugins/security-guidance/"
+        "plugins/security-guidance/",
+        "plugins/dashboard_auth/drain/"
       ]
     },
     {
@@ -151,6 +161,36 @@
         "web/",
         "ui-tui/",
         "website/"
+      ]
+    },
+    {
+      "id": "rust-memory-provider-plugin-parity",
+      "status": "approved",
+      "workstream": "WS3",
+      "summary": "Keep Honcho and Mem0 memory provider behavior in Rust-native memory/provider surfaces instead of vendoring Python plugin trees.",
+      "owner": "sheawinkler",
+      "ticket": 700,
+      "last_reviewed": "2026-06-30",
+      "review_date": "2026-09-30",
+      "rationale": "Honcho and Mem0 are tracked as rust-native memory_plugin entries in the adapter feature matrix and covered by Rust memory/config contracts; upstream Python plugin files are reference-only.",
+      "path_prefixes": [
+        "plugins/memory/honcho/",
+        "plugins/memory/mem0/"
+      ]
+    },
+    {
+      "id": "rust-image-provider-plugin-parity",
+      "status": "approved",
+      "workstream": "WS5",
+      "summary": "Keep OpenRouter and Krea image generation provider behavior in the Rust image backend instead of vendoring upstream Python plugin trees.",
+      "owner": "sheawinkler",
+      "ticket": 700,
+      "last_reviewed": "2026-06-30",
+      "review_date": "2026-09-30",
+      "rationale": "crates/hermes-tools/src/backends/image_gen.rs implements OpenRouter-compatible image output, Nous-compatible routing, and Krea direct/managed transports with Rust tests; upstream Python image plugin files are reference-only.",
+      "path_prefixes": [
+        "plugins/image_gen/openrouter/",
+        "plugins/image_gen/krea/"
       ]
     }
   ]

@@ -65,7 +65,7 @@ INTENTS: list[IntentSpec] = [
         upstream_scope=["tests/skills", "skills", "optional-skills"],
         local_evidence_globs=[
             "crates/hermes-skills/src/**/*.rs",
-            "crates/hermes-cli/src/commands.rs",
+            "crates/hermes-cli/src/commands/**/*.rs",
         ],
     ),
     IntentSpec(
@@ -73,7 +73,7 @@ INTENTS: list[IntentSpec] = [
         upstream_scope=["tests/cron"],
         local_evidence_globs=[
             "crates/hermes-cron/src/**/*.rs",
-            "crates/hermes-cli/src/commands.rs",
+            "crates/hermes-cli/src/commands/**/*.rs",
         ],
     ),
     IntentSpec(

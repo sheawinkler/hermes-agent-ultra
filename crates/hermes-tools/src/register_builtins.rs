@@ -205,7 +205,18 @@ fn register_builtin_tools_with_data_dir(
                 vision_backend.clone(),
             )),
             "👁️",
-            vec!["HERMES_OPENAI_API_KEY".into(), "OPENAI_API_KEY".into()],
+            vec![
+                "AUXILIARY_VISION_API_KEY".into(),
+                "AUXILIARY_VISION_PROVIDER".into(),
+                "AUXILIARY_VISION_MODEL".into(),
+                "AUXILIARY_VISION_BASE_URL".into(),
+                "HERMES_OPENAI_API_KEY".into(),
+                "OPENAI_API_KEY".into(),
+                "OPENROUTER_API_KEY".into(),
+                "NOUS_API_KEY".into(),
+                "GEMINI_API_KEY".into(),
+                "XAI_API_KEY".into(),
+            ],
         );
         reg(
             registry,

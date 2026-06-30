@@ -54,6 +54,24 @@ def git_show_file(repo_root: pathlib.Path, ref: str, path: str) -> str | None:
     return proc.stdout
 
 
+def git_show_text_surface(repo_root: pathlib.Path, ref: str, paths: list[str]) -> str | None:
+    parts: list[str] = []
+    for path in paths:
+        if path.endswith(".rs"):
+            single = git_show_file(repo_root, ref, path)
+            if single is not None:
+                parts.append(single)
+                continue
+        listed = run(["git", "ls-tree", "-r", "--name-only", ref, "--", path], repo_root)
+        if listed.returncode != 0 or not listed.stdout.strip():
+            continue
+        for rel in sorted(line for line in listed.stdout.splitlines() if line.endswith(".rs")):
+            content = git_show_file(repo_root, ref, rel)
+            if content is not None:
+                parts.append(content)
+    return "\n".join(parts) if parts else None
+
+
 def extract_upstream_slash_commands(py_source: str) -> list[str]:
     names = sorted(set(re.findall(r'CommandDef\("([a-z0-9_-]+)"', py_source)))
     return [f"/{name}" for name in names]
@@ -119,7 +137,11 @@ def main() -> int:
         return 1
 
     upstream_source = git_show_file(repo_root, args.upstream_ref, "hermes_cli/commands.py")
-    local_source = git_show_file(repo_root, args.local_ref, "crates/hermes-cli/src/commands.rs")
+    local_source = git_show_text_surface(
+        repo_root,
+        args.local_ref,
+        ["crates/hermes-cli/src/commands.rs", "crates/hermes-cli/src/commands"],
+    )
     if upstream_source is None or local_source is None:
         report = {
             "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -187,4 +209,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

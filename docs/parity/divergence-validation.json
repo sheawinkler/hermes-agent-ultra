@@ -1,6 +1,6 @@
 {
-  "divergence_file": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-06-12T11:29:22.730907+00:00",
+  "divergence_file": "/Volumes/wd_black/hermes-agent-ultra/repo/docs/parity/intentional-divergence.json",
+  "generated_at_utc": "2026-06-30T13:55:14.388685+00:00",
   "items": [
     {
       "errors": [],
@@ -58,7 +58,7 @@
       "errors": [],
       "id": "rust-skills-catalog-governance",
       "last_reviewed": "2026-04-21",
-      "matched_files": 955,
+      "matched_files": 1018,
       "matched_sample": [
         "optional-skills/DESCRIPTION.md",
         "optional-skills/autonomous-ai-agents/DESCRIPTION.md",
@@ -91,33 +91,83 @@
     {
       "errors": [],
       "id": "rust-gateway-platform-plugin-parity",
-      "last_reviewed": "2026-05-26",
-      "matched_files": 6,
+      "last_reviewed": "2026-06-30",
+      "matched_files": 40,
       "matched_sample": [
+        "plugins/platforms/dingtalk/__init__.py",
+        "plugins/platforms/dingtalk/adapter.py",
+        "plugins/platforms/dingtalk/plugin.yaml",
+        "plugins/platforms/email/__init__.py",
+        "plugins/platforms/email/adapter.py",
+        "plugins/platforms/email/plugin.yaml",
+        "plugins/platforms/feishu/__init__.py",
+        "plugins/platforms/feishu/adapter.py",
+        "plugins/platforms/feishu/feishu_comment.py",
+        "plugins/platforms/feishu/feishu_comment_rules.py",
+        "plugins/platforms/feishu/feishu_meeting_invite.py",
+        "plugins/platforms/feishu/plugin.yaml",
+        "plugins/platforms/matrix/__init__.py",
+        "plugins/platforms/matrix/adapter.py",
+        "plugins/platforms/matrix/plugin.yaml",
         "plugins/platforms/mattermost/__init__.py",
         "plugins/platforms/mattermost/adapter.py",
         "plugins/platforms/mattermost/plugin.yaml",
         "plugins/platforms/ntfy/__init__.py",
-        "plugins/platforms/ntfy/adapter.py",
-        "plugins/platforms/ntfy/plugin.yaml"
+        "plugins/platforms/ntfy/adapter.py"
       ],
       "overdue": false,
       "owner": "sheawinkler",
-      "review_date": "2026-08-26",
+      "review_date": "2026-09-30",
       "status": "approved",
       "ticket": 7,
       "warnings": []
     },
     {
       "errors": [],
+      "id": "rust-chronos-managed-cron-provider",
+      "last_reviewed": "2026-06-30",
+      "matched_files": 5,
+      "matched_sample": [
+        "plugins/cron_providers/__init__.py",
+        "plugins/cron_providers/chronos/__init__.py",
+        "plugins/cron_providers/chronos/_nas_client.py",
+        "plugins/cron_providers/chronos/plugin.yaml",
+        "plugins/cron_providers/chronos/verify.py"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-09-30",
+      "status": "approved",
+      "ticket": 570,
+      "warnings": []
+    },
+    {
+      "errors": [],
+      "id": "rust-runtime-no-raft-platform-plugin",
+      "last_reviewed": "2026-06-20",
+      "matched_files": 3,
+      "matched_sample": [
+        "plugins/platforms/raft/__init__.py",
+        "plugins/platforms/raft/adapter.py",
+        "plugins/platforms/raft/plugin.yaml"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-07-20",
+      "status": "temporary",
+      "ticket": 570,
+      "warnings": []
+    },
+    {
+      "errors": [],
       "id": "upstream-python-plugin-backend-drift-20260527",
-      "last_reviewed": "2026-06-11",
+      "last_reviewed": "2026-06-30",
       "matched_files": 10,
       "matched_sample": [
+        "plugins/dashboard_auth/drain/__init__.py",
+        "plugins/dashboard_auth/drain/plugin.yaml",
         "plugins/dashboard_auth/nous/__init__.py",
         "plugins/dashboard_auth/nous/plugin.yaml",
-        "plugins/image_gen/krea/__init__.py",
-        "plugins/image_gen/krea/plugin.yaml",
         "plugins/security-guidance/LICENSE",
         "plugins/security-guidance/NOTICE",
         "plugins/security-guidance/README.md",
@@ -127,7 +177,7 @@
       ],
       "overdue": false,
       "owner": "sheawinkler",
-      "review_date": "2026-07-11",
+      "review_date": "2026-07-30",
       "status": "temporary",
       "ticket": 319,
       "warnings": []
@@ -151,7 +201,7 @@
       "errors": [],
       "id": "rust-cli-tui-primary-ux-surface",
       "last_reviewed": "2026-04-21",
-      "matched_files": 1227,
+      "matched_files": 1261,
       "matched_sample": [
         "ui-tui/.gitignore",
         "ui-tui/.prettierrc",
@@ -172,7 +222,7 @@
         "ui-tui/packages/hermes-ink/src/ink/Ansi.tsx",
         "ui-tui/packages/hermes-ink/src/ink/app-mouse.test.ts",
         "ui-tui/packages/hermes-ink/src/ink/app-rawmode-mouse.test.ts",
-        "ui-tui/packages/hermes-ink/src/ink/bidi.ts"
+        "ui-tui/packages/hermes-ink/src/ink/app-stdin-recovery.test.ts"
       ],
       "overdue": false,
       "owner": "sheawinkler",
@@ -180,15 +230,61 @@
       "status": "approved",
       "ticket": 22,
       "warnings": []
+    },
+    {
+      "errors": [],
+      "id": "rust-memory-provider-plugin-parity",
+      "last_reviewed": "2026-06-30",
+      "matched_files": 14,
+      "matched_sample": [
+        "plugins/memory/honcho/README.md",
+        "plugins/memory/honcho/__init__.py",
+        "plugins/memory/honcho/cli.py",
+        "plugins/memory/honcho/client.py",
+        "plugins/memory/honcho/oauth.py",
+        "plugins/memory/honcho/oauth_flow.py",
+        "plugins/memory/honcho/plugin.yaml",
+        "plugins/memory/honcho/session.py",
+        "plugins/memory/mem0/README.md",
+        "plugins/memory/mem0/__init__.py",
+        "plugins/memory/mem0/_backend.py",
+        "plugins/memory/mem0/_oss_providers.py",
+        "plugins/memory/mem0/_setup.py",
+        "plugins/memory/mem0/plugin.yaml"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-09-30",
+      "status": "approved",
+      "ticket": 700,
+      "warnings": []
+    },
+    {
+      "errors": [],
+      "id": "rust-image-provider-plugin-parity",
+      "last_reviewed": "2026-06-30",
+      "matched_files": 4,
+      "matched_sample": [
+        "plugins/image_gen/krea/__init__.py",
+        "plugins/image_gen/krea/plugin.yaml",
+        "plugins/image_gen/openrouter/__init__.py",
+        "plugins/image_gen/openrouter/plugin.yaml"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-09-30",
+      "status": "approved",
+      "ticket": 700,
+      "warnings": []
     }
   ],
   "summary": {
     "errors": 0,
-    "items": 8,
-    "local_paths": 3461,
+    "items": 12,
+    "local_paths": 4052,
     "review_overdue": 0,
     "unowned": 0,
-    "upstream_paths": 5040,
+    "upstream_paths": 5843,
     "warnings": 1
   }
 }

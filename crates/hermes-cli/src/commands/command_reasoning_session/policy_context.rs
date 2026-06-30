@@ -594,6 +594,7 @@ fn handle_runtime_ui_mode_command(
             args.first().copied().unwrap_or("status"),
             app.current_model
         ),
+        "/timestamps" => "Transcript timestamps are controlled by the interactive TUI. Use `/timestamps [on|off|toggle|status]` or Ctrl+T while the TUI is active.".to_string(),
         "/voice" => "Voice mode uses provider/platform capabilities; no separate TUI voice engine is active in this session.".to_string(),
         _ => "Unsupported runtime UI mode command.".to_string(),
     };

@@ -520,15 +520,17 @@ fn scrub_subprocess_env(cmd: &mut TokioCommand, configured_passthrough: &[String
     let passthrough = subprocess_env_passthrough_set(configured_passthrough);
     let mut forced = Vec::new();
     for (key, _) in std::env::vars() {
-        if should_strip_subprocess_env(&key) && !is_subprocess_env_passthrough(&key, &passthrough) {
-            cmd.env_remove(key);
-        } else if let Some(target) = key.strip_prefix(SUBPROCESS_ENV_FORCE_PREFIX) {
+        if let Some(target) = key.strip_prefix(SUBPROCESS_ENV_FORCE_PREFIX) {
             cmd.env_remove(&key);
             if !target.is_empty() && should_strip_subprocess_env(target) {
                 if let Ok(value) = std::env::var(&key) {
                     forced.push((target.to_string(), value));
                 }
             }
+        } else if should_strip_subprocess_env(&key)
+            && !is_subprocess_env_passthrough(&key, &passthrough)
+        {
+            cmd.env_remove(key);
         }
     }
     for (target, value) in forced {

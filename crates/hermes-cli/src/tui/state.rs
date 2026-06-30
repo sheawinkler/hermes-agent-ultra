@@ -964,6 +964,35 @@ impl TuiState {
         byte.min(line_end)
     }
 
+    fn apply_timestamps_command(&mut self, args: &[String]) -> (String, Option<bool>) {
+        let mode = args.first().map(|value| value.trim().to_ascii_lowercase());
+        let persist = match mode.as_deref() {
+            None | Some("") | Some("toggle") => {
+                self.show_timestamps = !self.show_timestamps;
+                Some(self.show_timestamps)
+            }
+            Some("on") | Some("true") | Some("yes") => {
+                self.show_timestamps = true;
+                Some(true)
+            }
+            Some("off") | Some("false") | Some("no") => {
+                self.show_timestamps = false;
+                Some(false)
+            }
+            Some("status") | Some("show") => None,
+            Some(_) => {
+                self.status_message = "Usage: /timestamps [on|off|toggle|status]".to_string();
+                return (self.status_message.clone(), None);
+            }
+        };
+        self.status_message = if self.show_timestamps {
+            "Timestamps visible".to_string()
+        } else {
+            "Timestamps hidden".to_string()
+        };
+        (self.status_message.clone(), persist)
+    }
+
     fn input_line_text(&self) -> Vec<Line<'static>> {
         if self.input.is_empty() {
             vec![Line::from(String::new())]
@@ -1167,4 +1196,3 @@ impl TuiState {
         self.pet_frame = self.pet_frame.wrapping_add(1);
     }
 }
-

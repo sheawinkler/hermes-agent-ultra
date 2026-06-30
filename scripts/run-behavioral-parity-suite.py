@@ -45,14 +45,37 @@ def missing_tokens(raw: str, tokens: list[str]) -> list[str]:
     return [token for token in tokens if token not in raw]
 
 
+def read_rust_surface(path: Path) -> str:
+    parts: list[str] = []
+    if path.is_file():
+        parts.append(path.read_text(encoding="utf-8"))
+    if path.is_dir():
+        parts.extend(
+            p.read_text(encoding="utf-8")
+            for p in sorted(path.rglob("*.rs"))
+            if p.is_file()
+        )
+    elif path.suffix == ".rs":
+        split_dir = path.with_suffix("")
+        if split_dir.is_dir():
+            parts.extend(
+                p.read_text(encoding="utf-8")
+                for p in sorted(split_dir.rglob("*.rs"))
+                if p.is_file()
+            )
+    if not parts:
+        return path.read_text(encoding="utf-8")
+    return "\n".join(parts)
+
+
 def main() -> int:
     args = parse_args()
     repo_root = Path(args.repo_root).resolve()
-    commands_rs = repo_root / "crates/hermes-cli/src/commands.rs"
+    commands_rs = repo_root / "crates/hermes-cli/src/commands"
     tui_rs = repo_root / "crates/hermes-cli/src/tui.rs"
 
-    commands_raw = commands_rs.read_text(encoding="utf-8")
-    tui_raw = tui_rs.read_text(encoding="utf-8")
+    commands_raw = read_rust_surface(commands_rs)
+    tui_raw = read_rust_surface(tui_rs)
 
     missing_command_tokens = missing_tokens(commands_raw, REQUIRED_COMMAND_TOKENS)
     missing_tui_tokens = missing_tokens(tui_raw, REQUIRED_TUI_TOKENS)

@@ -784,13 +784,19 @@ fn test_execute_command_force_prefix_reinjects_blocked_var() {
 fn test_execute_command_cleans_profile_reintroduced_blocked_vars() {
     let _lock = lock_env();
     let td = tempdir().unwrap();
+    let profile = td.path().join(".profile");
     std::fs::write(
-        td.path().join(".profile"),
+        &profile,
         "export OPENAI_API_KEY=from-profile\nexport SAFE_PASSTHRU_TEST=ok\n",
     )
     .unwrap();
-    let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
-    let backend = LocalBackend::default();
+    let backend = LocalBackend::new_with_shell_init(
+        10,
+        1_048_576,
+        vec![profile.to_string_lossy().to_string()],
+        false,
+        Vec::new(),
+    );
 
     let output = block_on(backend.execute_command(
         "printf '%s|%s' \"${OPENAI_API_KEY:-}\" \"${SAFE_PASSTHRU_TEST:-}\"",

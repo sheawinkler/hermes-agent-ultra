@@ -16,6 +16,8 @@ from typing import Any
 
 RUST_TEST_ATTR_RE = re.compile(r"#\[\s*(?:tokio::)?test(?:\([^]]*\))?\s*\]")
 RUST_FN_RE = re.compile(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+RUST_INCLUDE_RE = re.compile(r'include!\("([^"]+)"\)')
+RUST_MOD_RE = re.compile(r"(?m)^\s*mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;")
 HARNESS_HARDENING_MOVES = [
     {
         "title": "Coverage trend ledger",
@@ -58,6 +60,7 @@ def rel(path: Path, repo_root: Path) -> str:
 
 
 def scan_rust_tests(repo_root: Path) -> dict[str, set[str]]:
+    source_by_file: dict[str, str] = {}
     tests_by_file: dict[str, set[str]] = {}
     for path in sorted((repo_root / "crates").glob("**/*.rs")) + sorted(
         (repo_root / "tests").glob("**/*.rs")
@@ -65,13 +68,62 @@ def scan_rust_tests(repo_root: Path) -> dict[str, set[str]]:
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
+        rel_path = rel(path, repo_root)
+        source_by_file[rel_path] = text
         names: set[str] = set()
         for match in RUST_FN_RE.finditer(text):
             prefix = text[max(0, match.start() - 700) : match.start()]
             if RUST_TEST_ATTR_RE.search(prefix):
                 names.add(match.group(1))
         if names:
-            tests_by_file[rel(path, repo_root)] = names
+            tests_by_file[rel_path] = names
+
+    def module_child_candidates(file: str, module: str) -> list[str]:
+        path = Path(file)
+        if path.name == "mod.rs":
+            base = path.parent
+        else:
+            base = path.with_suffix("")
+        candidates = [
+            (base / f"{module}.rs").as_posix(),
+            (base / module / "mod.rs").as_posix(),
+        ]
+        if path.stem == "tests" or path.stem.endswith("_tests"):
+            candidates.extend(
+                [
+                    (path.parent / "tests" / f"{module}.rs").as_posix(),
+                    (path.parent / "tests" / module / "mod.rs").as_posix(),
+                ]
+            )
+        return candidates
+
+    def included_test_names(file: str, seen: set[str]) -> set[str]:
+        if file in seen:
+            return set()
+        seen.add(file)
+        text = source_by_file.get(file, "")
+        names = set(tests_by_file.get(file, set()))
+        parent = Path(file).parent
+        for include in RUST_INCLUDE_RE.findall(text):
+            child = (parent / include).as_posix()
+            if child in source_by_file:
+                names.update(included_test_names(child, seen))
+        for module in RUST_MOD_RE.findall(text):
+            for child in module_child_candidates(file, module):
+                if child in source_by_file:
+                    names.update(included_test_names(child, seen))
+        return names
+
+    for file in sorted(source_by_file):
+        if "include!(" not in source_by_file[file] and not RUST_MOD_RE.search(source_by_file[file]):
+            continue
+        names = included_test_names(file, set())
+        if names:
+            tests_by_file.setdefault(file, set()).update(names)
+            path = Path(file)
+            if path.name == "mod.rs":
+                alias = (path.parent.parent / f"{path.parent.name}.rs").as_posix()
+                tests_by_file.setdefault(alias, set()).update(names)
     return tests_by_file
 
 

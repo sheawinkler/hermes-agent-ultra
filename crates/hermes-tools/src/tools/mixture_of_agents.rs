@@ -106,6 +106,17 @@ impl ToolHandler for MixtureOfAgentsHandler {
         });
         let model_results = join_all(reference_futures).await;
 
+        let successful_references: Vec<Value> = model_results
+            .iter()
+            .filter_map(|outcome| {
+                outcome.content.as_ref().map(|content| {
+                    json!({
+                        "model": outcome.model,
+                        "content": content,
+                    })
+                })
+            })
+            .collect();
         let successful_responses: Vec<String> = model_results
             .iter()
             .filter_map(|outcome| outcome.content.clone())
@@ -155,6 +166,7 @@ impl ToolHandler for MixtureOfAgentsHandler {
                 started,
                 final_response,
                 successful_responses.len(),
+                successful_references,
                 failed_models,
             ),
             Err(error) => moa_failure_json(
@@ -455,6 +467,7 @@ fn moa_success_json(
     started: Instant,
     response: String,
     reference_responses_count: usize,
+    reference_responses: Vec<Value>,
     failed_models: Vec<Value>,
 ) -> Result<String, ToolError> {
     serde_json::to_string(&json!({
@@ -467,6 +480,7 @@ fn moa_success_json(
             "aggregator_model": config.aggregator_model,
         },
         "reference_responses_count": reference_responses_count,
+        "reference_responses": reference_responses,
         "failed_models_count": failed_models.len(),
         "failed_models": failed_models,
         "processing_time": elapsed_seconds(started),
@@ -790,6 +804,10 @@ mod tests {
         assert_eq!(output["strategy"], "mixture_of_agents");
         assert_eq!(output["response"], "aggregated answer");
         assert_eq!(output["reference_responses_count"], 2);
+        assert_eq!(output["reference_responses"][0]["model"], "ref-a");
+        assert_eq!(output["reference_responses"][0]["content"], "ref-a answer");
+        assert_eq!(output["reference_responses"][1]["model"], "ref-b");
+        assert_eq!(output["reference_responses"][1]["content"], "ref-b answer");
         assert_eq!(output["failed_models_count"], 0);
 
         let requests = server.received_requests().await.expect("requests");
@@ -857,6 +875,11 @@ mod tests {
         assert_eq!(output["success"], true);
         assert_eq!(output["response"], "still aggregated");
         assert_eq!(output["reference_responses_count"], 1);
+        assert_eq!(output["reference_responses"][0]["model"], "ref-ok");
+        assert_eq!(
+            output["reference_responses"][0]["content"],
+            "usable reference"
+        );
         assert_eq!(output["failed_models_count"], 1);
         assert_eq!(output["failed_models"][0]["model"], "ref-fail");
     }

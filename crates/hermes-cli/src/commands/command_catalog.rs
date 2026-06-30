@@ -52,6 +52,11 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "Clear screen/session state and start a fresh session",
     ),
     ("/retry", "Retry the last user message"),
+    (
+        "/prompt",
+        "Stage a markdown prompt draft in the composer (`/prompt [initial text]`)",
+    ),
+    ("/compose", "Alias for /prompt"),
     ("/undo", "Undo the last N user turns and prefill the latest undone prompt"),
     ("/rewind", "Alias for /undo [N]"),
     ("/history", "Show recent conversation history"),
@@ -101,6 +106,11 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/version", "Show Hermes Agent Ultra version and build label"),
     ("/v", "Alias for /version"),
     ("/fast", "Toggle fast-mode hints"),
+    (
+        "/timestamps",
+        "Toggle transcript timestamps (`/timestamps [on|off|status]`)",
+    ),
+    ("/ts", "Alias for /timestamps"),
     ("/skin", "Show available skin/theme options"),
     ("/skins", "Alias for /skin"),
     ("/voice", "Show voice mode status"),
@@ -108,7 +118,16 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "/pet",
         "Animated companion controls (`status|on|off|toggle|list|set|mood|dock|speed`)",
     ),
+    (
+        "/hatch",
+        "Generate a petdex companion request from a description",
+    ),
+    ("/generate-pet", "Alias for /hatch"),
     ("/skills", "List available skills"),
+    (
+        "/learn",
+        "Capture a reusable learning request and inject it into the next turn",
+    ),
     ("/skill", "Alias for /skills"),
     (
         "/bundles",
@@ -181,6 +200,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     (
         "/quorum",
         "Optional multi-voter deep-reasoning mode (`status|on|off|models|run`)",
+    ),
+    (
+        "/moa",
+        "Run one prompt through the default Mixture of Agents preset, then restore your model",
     ),
     (
         "/swarm",

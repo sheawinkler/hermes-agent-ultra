@@ -152,6 +152,7 @@ mod tests {
             pending_image_hint: None,
             session_objective: None,
             pending_input_prefill: None,
+            pending_agent_seed: None,
             pending_system_notes: Vec::new(),
             quorum_armed_once: false,
             pet_settings: PetSettings::default(),
@@ -927,6 +928,40 @@ mod tests {
     }
 
     #[test]
+    fn moa_oneshot_restores_previous_model_after_failed_turn() {
+        let _guard = env_test_lock();
+        let prev_home = std::env::var("HERMES_HOME").ok();
+        let prev_passes = std::env::var("HERMES_QUORUM_VOTER_PASSES").ok();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::env::set_var("HERMES_HOME", tmp.path());
+        std::env::set_var("HERMES_QUORUM_VOTER_PASSES", "1");
+
+        let mut app = build_minimal_test_app_with_state_root(tmp.path().to_path_buf());
+        app.current_model = "lm-studio:local-model".to_string();
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let result = runtime.block_on(app.submit_moa_oneshot("compare these plans"));
+
+        assert!(result.is_err(), "NoBackendProvider should fail the turn");
+        assert_eq!(
+            app.current_model, "lm-studio:local-model",
+            "one-shot /moa must restore the prior model even when inference fails"
+        );
+        assert!(app
+            .messages
+            .iter()
+            .any(|message| message.content.as_deref() == Some("compare these plans")));
+
+        match prev_home {
+            Some(v) => std::env::set_var("HERMES_HOME", v),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+        match prev_passes {
+            Some(v) => std::env::set_var("HERMES_QUORUM_VOTER_PASSES", v),
+            None => std::env::remove_var("HERMES_QUORUM_VOTER_PASSES"),
+        }
+    }
+
+    #[test]
     fn test_clear_quorum_system_hints_inplace_preserves_other_system_messages() {
         let mut app = build_minimal_test_app();
         app.messages = vec![
@@ -1023,4 +1058,3 @@ mod tests {
     include!("tests/session_runtime.rs");
 
 }
-

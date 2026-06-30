@@ -766,11 +766,6 @@
       "owner": "rust-runtime",
       "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
     },
-    "1fe013ee16f": {
-      "disposition": "superseded",
-      "owner": "rust-runtime",
-      "notes": "Pet generation polish/hatch CPU work targets Python pet orchestration plus Electron desktop components. Ultra lacks those surfaces; Rust image generation backends cover applicable image runtime behavior."
-    },
     "1febb0824000": {
       "disposition": "ported",
       "notes": "Rust Anthropic/OpenRouter request shaping covers modern thinking controls and strips unsupported fast-model controls in provider_profiles and provider.rs tests, including test_anthropic_strips_sampling_and_unsupported_fast_controls."
@@ -5597,11 +5592,6 @@
       "owner": "rust-runtime",
       "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
     },
-    "e32ebc6aa26f": {
-      "disposition": "ported",
-      "owner": "rust-runtime",
-      "notes": "Rust gateway now registers /learn as a first-class slash command that builds a standards-guided skill-learning prompt and forwards it into the normal agent loop. The prompt uses existing agent tools, skill_manage, and the hardline Hermes skill-authoring rules; gateway tests cover registration, bypass behavior, and prompt contents."
-    },
     "e3505c7f73a4": {
       "disposition": "ported",
       "owner": "rust-runtime",
@@ -6683,6 +6673,41 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream fix targets a Python/TUI pdftoppm subprocess. Hermes Agent Ultra has no Rust pdftoppm PDF attach subprocess surface; the broader Rust helper subprocess chokepoint now covers actual shipped helper spawns that can flash on Windows."
+    },
+    "50f685521734237faf0d902fa7d347492d9ea96a": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: /moa is a one-shot slash command that requires a prompt, routes exactly one turn through the default virtual MoA preset, preserves the model-picker path for sticky moa:default selection, and restores the prior model after the turn even when inference fails. Covered by CLI command usage and app one-shot restore tests."
+    },
+    "163cb24d45d83e551d65da74678c191ceabecd5c": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: MoA/quorum fan-out emits structured moa_reference stream events with index/count/model/text for successful reference voters, TUI consumes them as visible reference activity/thinking, and the mixture_of_agents tool returns reference_responses with model labels and content for downstream renderers. Covered by TUI stream-event and MoA tool mock HTTP tests."
+    },
+    "917f6bdb00b8b4d0f1c678702c639a5bc966a8eb": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: vision_analyze no longer depends solely on HERMES_OPENAI_API_KEY/OPENAI_API_KEY. The OpenAI-compatible vision backend resolves AUXILIARY_VISION_PROVIDER/MODEL/BASE_URL/API_KEY, supports custom endpoints and provider keys such as OpenRouter/Nous/Gemini/xAI/Z.ai/GMI/HuggingFace, and builtin registration advertises those env surfaces. Covered by vision endpoint resolver tests."
+    },
+    "9e96e709951824be8336c5a733bb0d98d6ab32da": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: /prompt and /compose are first-class CLI/TUI slash commands that open $VISUAL/$EDITOR on a temporary markdown draft, strip #! instruction lines, cancel empty buffers, and queue the saved prompt as the next normal agent turn. Covered by fake-editor command tests for readback, header stripping, initial text, alias, and empty-buffer cancellation."
+    },
+    "5ff11a689b561fdb1404aede3fafa543bbbb86bf": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: /timestamps and /ts are registered slash commands; the interactive TUI supports on/off/toggle/status without mutating prompt text and non-TUI surfaces return an explicit TUI-control message. Covered by TUI state tests and split-module slash parity gates."
+    },
+    "e32ebc6aa26fff446bcc7e11a254d2d4c671f3b2": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust: /learn is a first-class slash command that records an objective learning ledger entry, queues a next-turn system note to distill reusable project knowledge/skill guidance, and is exposed in CLI command catalogs. Covered by command tests for ledger capture and next-turn note queuing."
+    },
+    "1fe013ee16f19f6390f2efce39397447e7ec2f67": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported/superseded in Rust: /hatch and /generate-pet are first-class slash commands that capture a petdex hatch request, enable the Rust TUI pet, infer known species/mood from the description, persist pet settings, and queue a next-turn companion design brief instead of shipping upstream Electron/Python hatch UI internals. Covered by command tests for species/mood persistence and queued design brief."
     }
   },
   "subject_patterns": [

@@ -61,6 +61,8 @@ const COMMAND_CATALOG_SECTIONS: &[CommandCatalogSection] = &[
             "/goal",
             "/subgoal",
             "/plan",
+            "/prompt",
+            "/learn",
             "/ask",
             "/steer",
             "/btw",
@@ -84,6 +86,7 @@ const COMMAND_CATALOG_SECTIONS: &[CommandCatalogSection] = &[
             "/plugins",
             "/memory",
             "/mcp",
+            "/hatch",
             "/platforms",
             "/integrations",
             "/reload",
@@ -152,6 +155,9 @@ pub fn canonical_command(cmd: &str) -> &str {
         "/clear" => "/new",
         "/compact" => "/compress",
         "/skill" => "/skills",
+        "/compose" => "/prompt",
+        "/ts" => "/timestamps",
+        "/generate-pet" => "/hatch",
         "/codex_runtime" => "/codex-runtime",
         "/curator" => "/skills",
         "/agent" => "/status",
@@ -339,6 +345,9 @@ mod tests {
     fn canonical_command_maps_known_aliases() {
         assert_eq!(canonical_command("/pilot"), "/autopilot");
         assert_eq!(canonical_command("/clear"), "/new");
+        assert_eq!(canonical_command("/compose"), "/prompt");
+        assert_eq!(canonical_command("/ts"), "/timestamps");
+        assert_eq!(canonical_command("/generate-pet"), "/hatch");
         assert_eq!(canonical_command("/custom"), "/custom");
     }
 

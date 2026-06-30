@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-30T08:36:56.665532+00:00`
+Generated: `2026-06-30T10:16:53.317320+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `7672`.
 
@@ -17,18 +17,15 @@ Generated: `2026-06-30T08:36:56.665532+00:00`
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 97 |
-| pending | 20 |
-| ported | 540 |
+| pending | 17 |
+| ported | 543 |
 | superseded | 7015 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `50f685521734` | #20 | feat(moa): make /moa one-shot only; route preset switching through the model picker |
 | `f67c0b3e60ba` | #21 | docs(hermes-agent skill): cover v0.13–v0.17 features, fix stale claims, tighten (#53566) |
-| `917f6bdb00b8` | #20 | fix(tools): let vision pick any provider+model, not just OpenRouter (#53606) |
-| `163cb24d45d8` | #22 | feat(moa): render reference-model blocks in TUI and desktop, not just CLI (#53855) |
 | `a94f657a5059` | #20 | fix(tui): route completion RPCs to the pool so they can't freeze the TUI (#53895) |
 | `d43e0cf304a1` | #20 | fix(agent): config-driven intent-ack continuation for all api_modes (#27881) (#53943) |
 | `a8c862900b9c` | #20 | fix(tui): sanitize replay history on WebUI/TUI session resume (#29086) (#53939) |
