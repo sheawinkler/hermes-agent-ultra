@@ -83,19 +83,19 @@
       "valid_entries_with_rust_tests": 124
     },
     {
-      "entries": 101,
+      "entries": 119,
       "missing_rust_test_refs": [],
       "missing_rust_tests_entries": [],
       "path": "docs/parity/ui-tui-source-coverage.json",
       "referenced_rust_tests": 55,
       "status_counts": {
-        "covered_by_rust_primary_tui_contracts": 101
+        "covered_by_rust_primary_tui_contracts": 119
       },
-      "valid_entries_with_rust_tests": 101
+      "valid_entries_with_rust_tests": 119
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-30T13:24:01.603648+00:00",
+  "generated_at_utc": "2026-06-30T13:35:50.033609+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -625,9 +625,9 @@
     "upstream_missing_queue": "docs/parity/upstream-missing-queue.json"
   },
   "summary": {
-    "coverage_manifest_entries": 435,
-    "coverage_manifest_entries_with_valid_rust_tests": 435,
-    "covered_behavior_rows": 445,
+    "coverage_manifest_entries": 453,
+    "coverage_manifest_entries_with_valid_rust_tests": 453,
+    "covered_behavior_rows": 463,
     "divergence_errors": 0,
     "divergence_review_overdue": 0,
     "divergence_unowned": 0,
@@ -640,6 +640,6 @@
     "test_intents_mapped": 10,
     "test_intents_total": 10,
     "tracked_behavior_coverage_ratio": 1.0,
-    "tracked_behavior_rows": 445
+    "tracked_behavior_rows": 463
   }
 }

@@ -1,6 +1,6 @@
 # Test Coverage Audit
 
-Generated: `2026-06-30T13:24:01.603648+00:00`
+Generated: `2026-06-30T13:35:50.033609+00:00`
 
 ## Gate
 
@@ -12,13 +12,13 @@ Generated: `2026-06-30T13:24:01.603648+00:00`
 
 | Metric | Value |
 | --- | ---: |
-| `tracked_behavior_rows` | 445 |
-| `covered_behavior_rows` | 445 |
+| `tracked_behavior_rows` | 463 |
+| `covered_behavior_rows` | 463 |
 | `tracked_behavior_coverage_ratio` | 1.0 |
 | `rust_test_files` | 416 |
 | `rust_test_functions` | 7208 |
-| `coverage_manifest_entries` | 435 |
-| `coverage_manifest_entries_with_valid_rust_tests` | 435 |
+| `coverage_manifest_entries` | 453 |
+| `coverage_manifest_entries_with_valid_rust_tests` | 453 |
 | `missing_rust_test_refs` | 0 |
 | `queue_pending` | 17 |
 | `queue_total` | 7672 |
@@ -31,7 +31,7 @@ Generated: `2026-06-30T13:24:01.603648+00:00`
 | --- | ---: | ---: | ---: | ---: |
 | `docs/parity/python-test-suite-coverage.json` | 210 | 210 | 91 | 0 |
 | `docs/parity/hermes-cli-test-coverage.json` | 124 | 124 | 83 | 0 |
-| `docs/parity/ui-tui-source-coverage.json` | 101 | 101 | 55 | 0 |
+| `docs/parity/ui-tui-source-coverage.json` | 119 | 119 | 55 | 0 |
 
 ## Test Intent Domains
 
