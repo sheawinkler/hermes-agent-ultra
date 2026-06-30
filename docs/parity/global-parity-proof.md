@@ -1,6 +1,6 @@
 # Global Parity Proof
 
-Generated: `2026-06-30T01:08:06.945164+00:00`
+Generated: `2026-06-30T01:23:08.904982+00:00`
 
 ## Gate Status
 
@@ -38,7 +38,7 @@ Generated: `2026-06-30T01:08:06.945164+00:00`
 | `max_deep_problem_solving_gaps` | 0.0 |
 | `max_deep_problem_solving_unverified_cases` | 0.0 |
 | `max_deep_problem_solving_missing_rust_refs` | 0.0 |
-| `max_queue_pending_commits` | 37.0 |
+| `max_queue_pending_commits` | 35.0 |
 
 ## GPAR Ticket Completion
 
@@ -93,13 +93,13 @@ Generated: `2026-06-30T01:08:06.945164+00:00`
 
 ## Queue Summary
 
-- Upstream missing commits tracked: `7644`.
+- Upstream missing commits tracked: `7651`.
 - By target ticket:
-  - `#20`: `3489`
+  - `#20`: `3494`
   - `#21`: `131`
   - `#22`: `1003`
   - `#23`: `503`
   - `#24`: `25`
   - `#25`: `162`
-  - `#26`: `2331`
+  - `#26`: `2333`
 

@@ -1,25 +1,25 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-06-30T01:08:06.689673+00:00`
+Generated: `2026-06-30T01:23:08.771275+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `7644`.
+- Range: `origin/main..upstream/main`; total commits tracked: `7651`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 3489 |
+| #20 | GPAR-01 tests+CI parity | 3494 |
 | #21 | GPAR-02 skills parity | 131 |
 | #22 | GPAR-03 UX parity | 1003 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 503 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 25 |
 | #25 | GPAR-06 packaging/docs/install parity | 162 |
-| #26 | GPAR-07 upstream queue backfill | 2331 |
+| #26 | GPAR-07 upstream queue backfill | 2333 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | mirrored | 97 |
-| pending | 37 |
-| ported | 522 |
-| superseded | 6988 |
+| pending | 35 |
+| ported | 523 |
+| superseded | 6996 |
 
 ## First 100 Pending Commits
 
@@ -38,15 +38,12 @@ Generated: `2026-06-30T01:08:06.689673+00:00`
 | `d3d621f7c38b` | #20 | revert(windows): roll back terminal-popup PRs #53791 #53810 #53829 (#53853) |
 | `163cb24d45d8` | #22 | feat(moa): render reference-model blocks in TUI and desktop, not just CLI (#53855) |
 | `a94f657a5059` | #20 | fix(tui): route completion RPCs to the pool so they can't freeze the TUI (#53895) |
-| `6f1a176b3309` | #20 | fix(gateway/discord): REST liveness probe to detect zombie clients (#26656) |
 | `9c6229ce249e` | #20 | fix(security): centralize credential-safe subprocess env (#29157) |
 | `d43e0cf304a1` | #20 | fix(agent): config-driven intent-ack continuation for all api_modes (#27881) (#53943) |
 | `a8c862900b9c` | #20 | fix(tui): sanitize replay history on WebUI/TUI session resume (#29086) (#53939) |
-| `c9df4bc094fb` | #20 | fix(gateway): default restart_drain_timeout to 0 to kill systemd crash loop (#54066) |
 | `fde1c8570ffe` | #20 | fix(tui_gateway): suppress WS peer-hangup teardown error flood (#50005) (#54126) |
 | `6d879d486b19` | #20 | fix(dashboard): close PTY WebSocket on child EOF to stop FD leak (#54028) (#54123) |
 | `5c2c85c5452f` | #20 | fix(tui): start MCP discovery for websocket sessions |
-| `61622bb56a7a` | #20 | fix(tui): use role=user for model switch marker to avoid HTTP 400 on strict providers (#48338) |
 | `cb982ad997c5` | #20 | fix(windows): hide console-window flash on backend git/gh/wmic/bash subprocess spawns |
 | `1ffa01f35fb8` | #20 | test(windows): cover no-window backend subprocess flags |
 | `eeca59f48919` | #20 | fix(windows): hide remaining backend console-flash legs missed on main |
@@ -62,3 +59,4 @@ Generated: `2026-06-30T01:08:06.689673+00:00`
 | `476875acb9f0` | #22 | Add dashboard backup upload and download |
 | `34e616e778d0` | #22 | feat(slack): nudge stale installs to add mpim scopes; mark message.mpim required |
 | `fd324562d3ad` | #20 | feat(desktop): add context usage breakdown popover |
+| `f3d2dfbec670` | #20 | fix(dashboard_auth): allow any http:// host in self-hosted OIDC redirect_uri (#55099) |

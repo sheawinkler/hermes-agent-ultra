@@ -1,3 +1,7 @@
+use tokio::time::{sleep, Duration, Instant};
+use wiremock::matchers::{header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
 #[test]
 fn media_methods_accept_metadata_contract() {
     let adapter = DiscordAdapter::new(test_config()).unwrap();
@@ -26,6 +30,70 @@ fn media_methods_accept_metadata_contract() {
         Some(&metadata),
     );
     drop(voice);
+}
+
+#[tokio::test]
+async fn discord_liveness_probe_uses_rest_users_me_and_bot_auth() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/@me"))
+        .and(header("Authorization", "Bot test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "bot-self",
+            "username": "Hermes"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = reqwest::Client::new();
+    probe_discord_rest_liveness(&client, "test-token", &server.uri())
+        .await
+        .expect("liveness probe should succeed");
+}
+
+#[tokio::test]
+async fn discord_liveness_failure_marks_adapter_offline_for_reconnect_watcher() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/@me"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("proxy wedged"))
+        .mount(&server)
+        .await;
+
+    let mut cfg = test_config();
+    cfg.api_base_url = Some(server.uri());
+    cfg.liveness_interval_seconds = 0.01;
+    cfg.liveness_failure_threshold = 2;
+    let adapter = DiscordAdapter::new(cfg).expect("adapter");
+    adapter.start().await.expect("start");
+    assert!(adapter.is_running());
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while adapter.is_running() && Instant::now() < deadline {
+        sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        !adapter.is_running(),
+        "liveness failures should mark adapter offline for platform_reconnect_watcher"
+    );
+    adapter.stop().await.expect("stop");
+}
+
+#[tokio::test]
+async fn discord_liveness_probe_disabled_by_zero_knob() {
+    let mut cfg = test_config();
+    cfg.liveness_interval_seconds = 0.0;
+    cfg.liveness_failure_threshold = 1;
+    let adapter = DiscordAdapter::new(cfg).expect("adapter");
+    adapter.start().await.expect("start");
+    assert!(adapter.is_running());
+    assert!(adapter
+        .liveness_task
+        .lock()
+        .expect("liveness lock")
+        .is_none());
+    adapter.stop().await.expect("stop");
 }
 
 #[test]

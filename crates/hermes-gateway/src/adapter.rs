@@ -22,7 +22,7 @@ pub use hermes_core::traits::PlatformAdapter;
 // ---------------------------------------------------------------------------
 
 /// Proxy configuration for a platform adapter.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AdapterProxyConfig {
     /// HTTP proxy URL (e.g., "http://proxy:8080").
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -31,15 +31,6 @@ pub struct AdapterProxyConfig {
     /// SOCKS5 proxy URL (e.g., "socks5://proxy:1080").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub socks_proxy: Option<String>,
-}
-
-impl Default for AdapterProxyConfig {
-    fn default() -> Self {
-        Self {
-            http_proxy: None,
-            socks_proxy: None,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

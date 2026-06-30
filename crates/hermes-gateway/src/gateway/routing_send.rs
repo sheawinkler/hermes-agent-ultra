@@ -483,7 +483,7 @@ impl Gateway {
             match Self::summarize_removed_messages(middle) {
                 Ok(summary) => compressed.push(Message::assistant(&summary)),
                 Err(err) => {
-                    compressed.push(Message::assistant(&format!(
+                    compressed.push(Message::assistant(format!(
                         "[CONTEXT COMPACTION] Summary generation was unavailable. {removed_messages} message(s) were removed to free context space but could not be summarized. Continue from recent messages and current workspace state."
                     )));
                     summary_warning = Some(format!(

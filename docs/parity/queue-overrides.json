@@ -6518,6 +6518,21 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Superseded by Rust-native memory providers: Mem0 and Supermemory use direct reqwest HTTP clients and compiled Rust code, not optional Python SDK imports. There is no runtime SDK lazy-install step to add; Supermemory setup/config activation was strengthened separately in Rust."
+    },
+    "6f1a176b3309d0474e0ef329834b622603c60471": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust DiscordAdapter: configurable REST liveness probe uses Discord users/@me through reqwest, honors liveness_interval_seconds/liveness_failure_threshold config knobs, marks the adapter unhealthy after repeated failures so the existing platform_reconnect_watcher restarts it, gates outbound REST sends while unhealthy, and supports api_base_url for deterministic tests. Focused Rust tests cover authenticated /users/@me probing, unhealthy transition, and disabled zero-knob behavior."
+    },
+    "c9df4bc094fb27ddfc8b278380d9598dc534587b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust gateway lifecycle: Hermes Agent Ultra has no configurable restart_drain_timeout/systemd drain window. Gateway::stop_all finalizes active sessions and stops adapters immediately, avoiding the stale systemd TimeoutStopSec crash-loop class entirely; existing hook_lifecycle coverage proves stop_all emits shutdown finalization for active sessions."
+    },
+    "61622bb56a7a24c0fc39e8a5a46537dfd2b2d9b6": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust model-switch architecture: CLI/TUI and gateway model switches update runtime config/defaults without appending a model-switch marker into model-facing history, so strict providers never see a mid-conversation system message. Added gateway_model_switch_does_not_inject_mid_history_system_marker regression coverage."
     }
   },
   "subject_patterns": [

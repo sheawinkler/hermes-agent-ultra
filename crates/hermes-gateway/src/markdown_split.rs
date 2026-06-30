@@ -146,7 +146,7 @@ fn close_and_reopen_formatting(text: &str) -> (String, String) {
             // Count single * that aren't part of **
             let double_count = text.matches("**").count() * 2;
             let single_count = text.matches('*').count() - double_count;
-            if single_count % 2 != 0 {
+            if !single_count.is_multiple_of(2) {
                 open_marks.push(mark);
             }
         } else if count % 2 != 0 {

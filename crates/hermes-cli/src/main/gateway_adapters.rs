@@ -197,6 +197,18 @@ async fn register_gateway_adapters(
                     token,
                     application_id: extra_string(platform_cfg, "application_id"),
                     proxy: Default::default(),
+                    api_base_url: extra_string(platform_cfg, "api_base_url"),
+                    liveness_interval_seconds: platform_cfg
+                        .extra
+                        .get("liveness_interval_seconds")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(60.0),
+                    liveness_failure_threshold: platform_cfg
+                        .extra
+                        .get("liveness_failure_threshold")
+                        .and_then(|v| v.as_u64())
+                        .and_then(|v| u32::try_from(v).ok())
+                        .unwrap_or(3),
                     require_mention: platform_cfg.require_mention.unwrap_or(false),
                     intents: platform_cfg
                         .extra

@@ -241,6 +241,54 @@ async fn gateway_model_switch_session_scope_does_not_persist_and_warns_on_large_
 }
 
 #[tokio::test]
+async fn gateway_model_switch_does_not_inject_mid_history_system_marker() {
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(TestAdapter {
+        messages: sent.clone(),
+    });
+    let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+    let session_key = session_mgr.compose_session_key("test", "chat-model-role", "user1");
+    session_mgr
+        .get_or_create_session("test", "chat-model-role", "user1")
+        .await;
+    session_mgr
+        .add_message(&session_key, Message::user("hello before switch"))
+        .await;
+    session_mgr
+        .add_message(&session_key, Message::assistant("assistant before switch"))
+        .await;
+    let mut dm_manager = DmManager::with_pair_behavior();
+    dm_manager.authorize_user("user1");
+    let gw = Gateway::new(
+        session_mgr.clone(),
+        dm_manager,
+        GatewayConfig {
+            model: Some("dynamic".to_string()),
+            ..GatewayConfig::default()
+        },
+    );
+    gw.register_adapter("test", adapter).await;
+
+    let switch = IncomingMessage {
+        platform: "test".into(),
+        chat_id: "chat-model-role".into(),
+        user_id: "user1".into(),
+        text: "/model qwen3.6-35b --provider vllm --session".into(),
+        message_id: None,
+        thread_id: None,
+        is_dm: true,
+    };
+    assert!(gw.route_message(&switch).await.is_ok());
+
+    let messages = session_mgr.get_messages(&session_key).await;
+    assert_eq!(messages.len(), 2);
+    assert!(
+        messages.iter().all(|message| message.role != MessageRole::System),
+        "Rust gateway must not inject a mid-conversation system marker after /model; strict providers reject that shape"
+    );
+}
+
+#[tokio::test]
 async fn gateway_verbose_command_is_config_gated_and_cycles_tool_progress() {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let adapter = Arc::new(TestAdapter {

@@ -773,10 +773,8 @@ impl MediaCache {
                     if let Ok(metadata) = entry.metadata().await {
                         if let Ok(modified) = metadata.modified() {
                             let age = now.duration_since(modified).unwrap_or_default().as_secs();
-                            if age > ttl_seconds {
-                                if fs::remove_file(&path).await.is_ok() {
-                                    *removed += 1;
-                                }
+                            if age > ttl_seconds && fs::remove_file(&path).await.is_ok() {
+                                *removed += 1;
                             }
                         }
                     }

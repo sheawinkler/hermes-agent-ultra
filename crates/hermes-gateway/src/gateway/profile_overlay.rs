@@ -51,7 +51,7 @@ fn resolve_gateway_profile_path(profiles_dir: &Path, name: &str) -> Option<PathB
 }
 
 fn yaml_string(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
-    map.get(&serde_yaml::Value::String(key.to_string()))
+    map.get(serde_yaml::Value::String(key.to_string()))
         .and_then(serde_yaml::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
