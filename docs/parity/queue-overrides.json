@@ -6583,6 +6583,16 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported in Rust platform config: PlatformConfig exposes a first-class typing_indicator flag defaulting true, merge/deserialization preserve explicit false, Python-style root platform blocks lift the key under platforms, and tests cover default, explicit-disable, compatibility lift, and JSON/YAML roundtrip behavior. Rust has no generic Python-style keep-typing loop to spawn, so this is the applicable runtime gate contract."
+    },
+    "481caa66f23c75eede53867e99a68400012cf501": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust display/gateway surfaces: hermes-cli-ui and hermes-intelligence build friendly human-phrased labels for built-in tools, display.friendly_tool_labels defaults on with env/config-set opt-out, gateway tool-start events and progress messages use the label path, verbose mode remains raw/debug-oriented, and focused Rust tests cover default labels plus legacy-off behavior."
+    },
+    "04639adace67c7765eb14a32c78ae4fb62da7fe6": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream already-installed theme picker flags are confined to the absent Electron desktop app under apps/desktop. Hermes Agent Ultra does not ship that theme marketplace/install picker surface; Rust CLI/gateway/TUI UX is the shipped product boundary, so no Rust runtime port applies."
     }
   },
   "subject_patterns": [

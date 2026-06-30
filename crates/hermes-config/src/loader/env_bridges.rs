@@ -229,6 +229,9 @@ fn bridge_display_config_to_env(display: &DisplayConfig) {
     if let Some(enabled) = display.memory_notifications {
         set_env_if_missing("HERMES_MEMORY_NOTIFICATIONS_ENABLED", enabled.to_string());
     }
+    if !display.friendly_tool_labels_enabled() {
+        set_env_if_missing("HERMES_FRIENDLY_TOOL_LABELS", "false".to_string());
+    }
 }
 
 fn apply_display_env_overrides(config: &mut DisplayConfig) {
@@ -243,6 +246,11 @@ fn apply_display_env_overrides(config: &mut DisplayConfig) {
     if let Some(v) = env_var_nonempty("HERMES_MEMORY_NOTIFICATIONS_ENABLED") {
         if let Some(parsed) = parse_bool_env("HERMES_MEMORY_NOTIFICATIONS_ENABLED", &v) {
             config.memory_notifications = Some(parsed);
+        }
+    }
+    if let Some(v) = env_var_nonempty("HERMES_FRIENDLY_TOOL_LABELS") {
+        if let Some(parsed) = parse_bool_env("HERMES_FRIENDLY_TOOL_LABELS", &v) {
+            config.friendly_tool_labels = parsed;
         }
     }
 }

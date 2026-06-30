@@ -1,4 +1,4 @@
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, model_switch.persist_switch_by_default, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, display.busy_input_mode|busy_ack_enabled|memory_notifications, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries|preflight_context_compress, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, prefill_messages_file, model_switch.persist_switch_by_default, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, display.busy_input_mode|busy_ack_enabled|memory_notifications|friendly_tool_labels, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, kanban.dispatch_in_gateway, agent.api_max_retries|preflight_context_compress, delegation.model|provider|base_url|api_key|max_spawn_depth, llm.<provider>.api_key|api_key_env|base_url|model|models|discover_models|api_mode|command|args|request_timeout_seconds|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -179,6 +179,10 @@ fn apply_user_config_patch_dotted(
         ["display", "memory_notifications"] => {
             config.display.memory_notifications =
                 Some(parse_config_bool("display.memory_notifications", value)?);
+        }
+        ["display", "friendly_tool_labels"] => {
+            config.display.friendly_tool_labels =
+                parse_config_bool("display.friendly_tool_labels", value)?;
         }
         ["sessions", "auto_prune"] => {
             let normalized = value.trim().to_ascii_lowercase();
@@ -495,6 +499,9 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
         ["display", "busy_ack_enabled"] => Ok(config.display.busy_ack_enabled().to_string()),
         ["display", "memory_notifications"] => {
             Ok(config.display.memory_notifications_enabled().to_string())
+        }
+        ["display", "friendly_tool_labels"] => {
+            Ok(config.display.friendly_tool_labels_enabled().to_string())
         }
         ["sessions", "auto_prune"] => Ok(config.sessions.auto_prune.to_string()),
         ["sessions", "retention_days"] => Ok(config.sessions.retention_days.to_string()),

@@ -314,6 +314,79 @@ fn read_file_preview(map: &Map<String, Value>) -> Option<String> {
     })
 }
 
+pub fn tool_friendly_verb(tool_name: &str) -> Option<&'static str> {
+    match tool_name {
+        "web_search" => Some("Searching the web"),
+        "web_extract" => Some("Reading"),
+        "web_crawl" => Some("Crawling"),
+        "browser_navigate" => Some("Browsing"),
+        "browser_click" => Some("Clicking"),
+        "browser_type" => Some("Typing"),
+        "browser_scroll" => Some("Scrolling"),
+        "browser_snapshot" => Some("Capturing"),
+        "read_file" => Some("Reading"),
+        "write_file" => Some("Writing"),
+        "patch" => Some("Editing"),
+        "search_files" => Some("Searching files"),
+        "terminal" => Some("Running"),
+        "execute_code" => Some("Running code"),
+        "image_generate" => Some("Generating image"),
+        "video_generate" => Some("Generating video"),
+        "text_to_speech" => Some("Generating speech"),
+        "vision_analyze" => Some("Looking at the image"),
+        "video_analyze" => Some("Looking at the video"),
+        "session_search" => Some("Searching past sessions"),
+        "skill_view" => Some("Reading skill"),
+        "skills_list" => Some("Listing skills"),
+        "skill_manage" => Some("Updating skill"),
+        "delegate_task" => Some("Delegating"),
+        "schedule_cronjob" | "cronjob" => Some("Scheduling"),
+        "list_cronjobs" => Some("Listing cron jobs"),
+        "remove_cronjob" => Some("Removing cron job"),
+        "clarify" => Some("Asking"),
+        "memory" => Some("Updating memory"),
+        "todo" => Some("Updating tasks"),
+        "send_message" => Some("Sending message"),
+        _ => None,
+    }
+}
+
+pub fn tool_friendly_connector(tool_name: &str) -> &'static str {
+    match tool_name {
+        "web_search" | "search_files" | "spotify_search" => " for ",
+        _ => " ",
+    }
+}
+
+pub fn tool_friendly_drops_preview(tool_name: &str) -> bool {
+    matches!(tool_name, "skills_list" | "session_search")
+}
+
+pub fn build_tool_label_from_preview(tool_name: &str, preview: Option<&str>) -> Option<String> {
+    let verb = tool_friendly_verb(tool_name)?;
+    if tool_friendly_drops_preview(tool_name) {
+        return Some(verb.to_string());
+    }
+    let preview = preview.map(str::trim).filter(|value| !value.is_empty());
+    Some(match preview {
+        Some(preview) => format!("{verb}{}{preview}", tool_friendly_connector(tool_name)),
+        None => verb.to_string(),
+    })
+}
+
+pub fn build_tool_label_from_value(
+    tool_name: &str,
+    args: &Value,
+    max_len: usize,
+    friendly_labels: bool,
+) -> Option<String> {
+    let preview = build_tool_preview_from_value(tool_name, args, max_len);
+    if !friendly_labels {
+        return preview;
+    }
+    build_tool_label_from_preview(tool_name, preview.as_deref()).or(preview)
+}
+
 fn value_to_scalar_string(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.clone()),
@@ -557,6 +630,17 @@ pub fn build_gateway_tool_progress_message(
     mode: &str,
     max_len: usize,
 ) -> Option<String> {
+    build_gateway_tool_progress_message_with_labels(platform, tool_name, args, mode, max_len, true)
+}
+
+pub fn build_gateway_tool_progress_message_with_labels(
+    platform: &str,
+    tool_name: &str,
+    args: &Value,
+    mode: &str,
+    max_len: usize,
+    friendly_labels: bool,
+) -> Option<String> {
     let mode = mode.trim().to_ascii_lowercase();
     if matches!(mode.as_str(), "" | "off" | "none" | "false" | "0") {
         return None;
@@ -591,10 +675,17 @@ pub fn build_gateway_tool_progress_message(
         ));
     }
 
-    match build_tool_preview_from_value(tool_name, args, max_len.max(40)) {
-        Some(preview) if !preview.trim().is_empty() => {
-            Some(format!("{emoji} {tool_name}: {preview}"))
-        }
+    if !friendly_labels {
+        return match build_tool_preview_from_value(tool_name, args, max_len.max(40)) {
+            Some(preview) if !preview.trim().is_empty() => {
+                Some(format!("{emoji} {tool_name}: {preview}"))
+            }
+            _ => Some(format!("{emoji} {tool_name}")),
+        };
+    }
+
+    match build_tool_label_from_value(tool_name, args, max_len.max(40), true) {
+        Some(label) if !label.trim().is_empty() => Some(format!("{emoji} {label}")),
         _ => Some(format!("{emoji} {tool_name}")),
     }
 }
@@ -665,6 +756,46 @@ mod tests {
             build_tool_preview_from_value("web_search", &json!({"query":"example search"}), 40)
                 .unwrap();
         assert_eq!(fallback, "example search");
+    }
+
+    #[test]
+    fn friendly_tool_labels_phrase_builtin_tools_and_preserve_custom_previews() {
+        let web =
+            build_tool_label_from_value("web_search", &json!({"query":"example search"}), 80, true)
+                .unwrap();
+        assert_eq!(web, "Searching the web for example search");
+
+        let terminal = build_tool_label_from_value(
+            "terminal",
+            &json!({"command":"cd /repo && cargo test --workspace --quiet 2>&1 | tail -20"}),
+            80,
+            true,
+        )
+        .unwrap();
+        assert_eq!(terminal, "Running cargo test --workspace --quiet");
+
+        let skills =
+            build_tool_label_from_value("skills_list", &json!({"category":"creative"}), 80, true)
+                .unwrap();
+        assert_eq!(skills, "Listing skills");
+
+        let disabled = build_tool_label_from_value(
+            "web_search",
+            &json!({"query":"example search"}),
+            80,
+            false,
+        )
+        .unwrap();
+        assert_eq!(disabled, "example search");
+
+        let custom = build_tool_label_from_value(
+            "custom_provider_search",
+            &json!({"query":"semantic index"}),
+            80,
+            true,
+        )
+        .unwrap();
+        assert_eq!(custom, "semantic index");
     }
 
     #[test]
@@ -765,10 +896,25 @@ mod tests {
         )
         .unwrap();
 
-        assert!(msg.starts_with("💻 terminal: "));
+        assert!(msg.starts_with("💻 Running "));
         assert!(!msg.contains("```bash"));
         assert!(msg.contains("cargo test --workspace"));
         assert!(!msg.contains("tail -20"));
+    }
+
+    #[test]
+    fn gateway_tool_progress_can_disable_friendly_labels_for_legacy_debug() {
+        let msg = build_gateway_tool_progress_message_with_labels(
+            "sms",
+            "web_search",
+            &json!({"query":"example search"}),
+            "all",
+            80,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(msg, "🔍 web_search: example search");
     }
 
     #[test]

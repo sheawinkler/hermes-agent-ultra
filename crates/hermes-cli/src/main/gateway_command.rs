@@ -319,14 +319,17 @@ async fn run_gateway(
                             &ctx.platform,
                             ctx.tool_progress.as_deref(),
                         );
+                        let friendly_tool_labels =
+                            config.display.friendly_tool_labels_enabled();
                         let tool_progress_seen = Arc::new(Mutex::new(HashSet::<String>::new()));
                         let gateway_for_tool_progress = gateway_for_review.clone();
                         let platform_for_tool_progress = ctx.platform.clone();
                         let chat_for_tool_progress = ctx.chat_id.clone();
                         let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
                             Box::new(move |name: &str, args: &serde_json::Value| {
-                                let preview = build_tool_preview_from_value(name, args, 60)
-                                    .unwrap_or_default();
+                                let preview =
+                                    build_tool_label_from_value(name, args, 60, friendly_tool_labels)
+                                        .unwrap_or_default();
                                 let mut event = serde_json::json!({
                                     "phase": "start",
                                     "name": name,
@@ -343,12 +346,14 @@ async fn run_gateway(
                                     name,
                                     &tool_progress_seen,
                                 ) {
-                                    if let Some(message) = build_gateway_tool_progress_message(
+                                    if let Some(message) =
+                                        build_gateway_tool_progress_message_with_labels(
                                         &platform_for_tool_progress,
                                         name,
                                         args,
                                         &tool_progress_mode,
                                         60,
+                                        friendly_tool_labels,
                                     ) {
                                         let gw = gateway_for_tool_progress.clone();
                                         let platform = platform_for_tool_progress.clone();
@@ -602,14 +607,17 @@ async fn run_gateway(
                             &ctx.platform,
                             ctx.tool_progress.as_deref(),
                         );
+                        let friendly_tool_labels =
+                            config.display.friendly_tool_labels_enabled();
                         let tool_progress_seen = Arc::new(Mutex::new(HashSet::<String>::new()));
                         let gateway_for_tool_progress = gateway_for_review.clone();
                         let platform_for_tool_progress = ctx.platform.clone();
                         let chat_for_tool_progress = ctx.chat_id.clone();
                         let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
                             Box::new(move |name: &str, args: &serde_json::Value| {
-                                let preview = build_tool_preview_from_value(name, args, 60)
-                                    .unwrap_or_default();
+                                let preview =
+                                    build_tool_label_from_value(name, args, 60, friendly_tool_labels)
+                                        .unwrap_or_default();
                                 let mut event = serde_json::json!({
                                     "phase": "start",
                                     "name": name,
@@ -626,12 +634,14 @@ async fn run_gateway(
                                     name,
                                     &tool_progress_seen,
                                 ) {
-                                    if let Some(message) = build_gateway_tool_progress_message(
+                                    if let Some(message) =
+                                        build_gateway_tool_progress_message_with_labels(
                                         &platform_for_tool_progress,
                                         name,
                                         args,
                                         &tool_progress_mode,
                                         60,
+                                        friendly_tool_labels,
                                     ) {
                                         let gw = gateway_for_tool_progress.clone();
                                         let platform = platform_for_tool_progress.clone();
@@ -1463,4 +1473,3 @@ async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
     println!("Next step: `hermes gateway start`");
     Ok(())
 }
-

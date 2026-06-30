@@ -166,6 +166,83 @@ pub fn build_tool_preview(
     }
 }
 
+/// Friendly verb phrase for a built-in tool, when the Rust surface knows its semantics.
+pub fn tool_friendly_verb(tool_name: &str) -> Option<&'static str> {
+    match tool_name {
+        "web_search" => Some("Searching the web"),
+        "web_extract" => Some("Reading"),
+        "web_crawl" => Some("Crawling"),
+        "browser_navigate" => Some("Browsing"),
+        "browser_click" => Some("Clicking"),
+        "browser_type" => Some("Typing"),
+        "browser_scroll" => Some("Scrolling"),
+        "browser_snapshot" => Some("Capturing"),
+        "read_file" => Some("Reading"),
+        "write_file" => Some("Writing"),
+        "patch" => Some("Editing"),
+        "search_files" => Some("Searching files"),
+        "terminal" => Some("Running"),
+        "execute_code" => Some("Running code"),
+        "image_generate" => Some("Generating image"),
+        "video_generate" => Some("Generating video"),
+        "text_to_speech" => Some("Generating speech"),
+        "vision_analyze" => Some("Looking at the image"),
+        "video_analyze" => Some("Looking at the video"),
+        "session_search" => Some("Searching past sessions"),
+        "skill_view" => Some("Reading skill"),
+        "skills_list" => Some("Listing skills"),
+        "skill_manage" => Some("Updating skill"),
+        "delegate_task" => Some("Delegating"),
+        "schedule_cronjob" | "cronjob" => Some("Scheduling"),
+        "list_cronjobs" => Some("Listing cron jobs"),
+        "remove_cronjob" => Some("Removing cron job"),
+        "clarify" => Some("Asking"),
+        "memory" => Some("Updating memory"),
+        "todo" => Some("Updating tasks"),
+        "send_message" => Some("Sending message"),
+        _ => None,
+    }
+}
+
+pub fn tool_friendly_connector(tool_name: &str) -> &'static str {
+    match tool_name {
+        "web_search" | "search_files" | "spotify_search" => " for ",
+        _ => " ",
+    }
+}
+
+pub fn tool_friendly_drops_preview(tool_name: &str) -> bool {
+    matches!(tool_name, "skills_list" | "session_search")
+}
+
+/// Build a human-phrased status label while preserving raw previews for custom tools.
+pub fn build_tool_label(
+    tool_name: &str,
+    args: &serde_json::Value,
+    max_len: usize,
+    friendly_labels: bool,
+) -> Option<String> {
+    let preview = build_tool_preview(tool_name, args, max_len);
+    if !friendly_labels {
+        return preview;
+    }
+
+    let Some(verb) = tool_friendly_verb(tool_name) else {
+        return preview;
+    };
+    if tool_friendly_drops_preview(tool_name) {
+        return Some(verb.to_string());
+    }
+    let preview = preview
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    Some(match preview {
+        Some(preview) => format!("{verb}{}{preview}", tool_friendly_connector(tool_name)),
+        None => verb.to_string(),
+    })
+}
+
 /// Format a tool call for display.
 pub fn format_tool_call(name: &str, args: &serde_json::Value) -> String {
     let preview = build_tool_preview(name, args, 60);
@@ -1016,6 +1093,54 @@ mod tests {
         let args = serde_json::json!({"path":"./src/main.ts", "offset":25, "limit":10});
         let preview = build_tool_preview("read_file", &args, 0);
         assert_eq!(preview, Some("main.ts L25-34".to_string()));
+    }
+
+    #[test]
+    fn test_build_tool_label_phrases_builtins_and_preserves_fallbacks() {
+        let web = build_tool_label(
+            "web_search",
+            &serde_json::json!({"query": "rust crates"}),
+            80,
+            true,
+        );
+        assert_eq!(web, Some("Searching the web for rust crates".to_string()));
+
+        let terminal = build_tool_label(
+            "terminal",
+            &serde_json::json!({
+                "command": "cd /repo && cargo test --workspace --quiet 2>&1 | tail -20"
+            }),
+            80,
+            true,
+        );
+        assert_eq!(
+            terminal,
+            Some("Running cargo test --workspace --quiet".to_string())
+        );
+
+        let skills = build_tool_label(
+            "skills_list",
+            &serde_json::json!({"category": "creative"}),
+            80,
+            true,
+        );
+        assert_eq!(skills, Some("Listing skills".to_string()));
+
+        let disabled = build_tool_label(
+            "web_search",
+            &serde_json::json!({"query": "rust crates"}),
+            80,
+            false,
+        );
+        assert_eq!(disabled, Some("rust crates".to_string()));
+
+        let custom = build_tool_label(
+            "custom_provider_search",
+            &serde_json::json!({"query": "semantic index"}),
+            80,
+            true,
+        );
+        assert_eq!(custom, Some("semantic index".to_string()));
     }
 
     #[test]
