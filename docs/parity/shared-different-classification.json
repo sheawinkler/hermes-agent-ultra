@@ -18,6 +18,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": ".github/workflows/ci.yml",
+      "rationale": "Local CI is intentionally Rust-first and repo-specific; workflow differences enforce cargo/check/parity gates and do not add a shipped runtime behavior to vendor from upstream.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": ".github/workflows/uv-lockfile-check.yml",
       "rationale": "The upstream Python uv lock check is retained but adapted to skip cleanly when this Rust-first repo has no root pyproject.toml or uv.lock, while still failing partial uv project files.",
       "ticket": 305
@@ -67,6 +74,13 @@
     {
       "classification": "policy_only",
       "owner": "sheawinkler",
+      "path": "docs/chronos-managed-cron-contract.md",
+      "rationale": "Cron contract prose documents the local Rust hermes-cron and gateway integration; it is not runtime code and does not require upstream Python content.",
+      "ticket": 25
+    },
+    {
+      "classification": "policy_only",
+      "owner": "sheawinkler",
       "path": "docs/design/profile-builder.md",
       "rationale": "Profile-builder design prose is Python/web-server documentation; Ultra keeps the Rust CLI profile create/clone/no-skills contracts in crates/hermes-cli with hermes-cli coverage, so the shared diff is not runtime code to vendor.",
       "ticket": 25
@@ -81,8 +95,29 @@
     {
       "classification": "policy_only",
       "owner": "sheawinkler",
+      "path": "docs/rca-ssl-cacert-post-git-pull.md",
+      "rationale": "SSL/cacert RCA prose is local operational documentation and does not change Hermes runtime behavior.",
+      "ticket": 25
+    },
+    {
+      "classification": "policy_only",
+      "owner": "sheawinkler",
+      "path": "docs/relay-connector-contract.md",
+      "rationale": "Relay connector contract prose documents the local Rust relay/gateway boundary and is not a runtime implementation file.",
+      "ticket": 25
+    },
+    {
+      "classification": "policy_only",
+      "owner": "sheawinkler",
       "path": "docs/security/network-egress-isolation.md",
       "rationale": "The network-egress guide is deployment hardening documentation adapted to Hermes Agent Ultra Docker/OrbStack usage and does not change runtime behavior.",
+      "ticket": 25
+    },
+    {
+      "classification": "policy_only",
+      "owner": "sheawinkler",
+      "path": "docs/session-lifecycle.md",
+      "rationale": "Session lifecycle prose documents the local Rust session owners, rules, and contract tests; it is not runtime code and intentionally maps upstream Python session docs to Rust surfaces.",
       "ticket": 25
     },
     {
@@ -221,6 +256,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "plugins/dashboard_auth/self_hosted/__init__.py",
+      "rationale": "Self-hosted dashboard OIDC remains a Python dashboard-auth plugin reference in this Rust-first repo; the shipped Rust runtime does not load Python dashboard auth providers, and existing Rust auth surfaces are CLI/MCP/HTTP/gateway credential and bearer-token paths.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "plugins/disk-cleanup",
       "rationale": "Ultra supersedes the upstream Python disk-cleanup plugin with Rust-native cleanup in crates/hermes-tools/src/tools/disk_cleanup.rs, including safe path scope, cron/output-only cleanup categorization, tracked.json persistence, quick/dry-run/status handling, registry post-tool auto-tracking, TUI session-end quick cleanup, and the /disk-cleanup command.",
       "ticket": 25
@@ -345,6 +387,13 @@
       "ticket": 304
     },
     {
+      "classification": "policy_only",
+      "owner": "sheawinkler",
+      "path": "plugins/hermes-achievements/README.md",
+      "rationale": "Achievements README content is plugin documentation; the runtime-relevant local dashboard bundle is tracked separately and covered by plugin/dashboard contract checks.",
+      "ticket": 25
+    },
+    {
       "classification": "functional",
       "owner": "sheawinkler",
       "path": "plugins/image_gen",
@@ -354,8 +403,29 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "plugins/image_gen/fal/__init__.py",
+      "rationale": "FAL image generation is implemented by the Rust FalImageGenBackend with direct and Nous-managed routing, queue polling, image persistence, provider selection, and focused hermes-tools tests; the Python plugin file is reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "plugins/image_gen/openai-codex/__init__.py",
       "rationale": "OpenAI Codex image generation is implemented in Rust OpenAICodexImageGenBackend with image_gen provider selection, gpt-image-2 tier precedence, gpt-5.5 Codex Responses host payload, auth-store/env token lookup, Cloudflare headers, raw SSE image extraction, cache/images PNG persistence, and focused wiremocked tests; the Python plugin remains reference-only compatibility material.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/image_gen/openai/__init__.py",
+      "rationale": "OpenAI image generation is implemented by the Rust OpenAiImageGenBackend with direct Images API generation/edit routing, env/config credentials, multipart reference-image edits, b64/url persistence, and focused hermes-tools tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/image_gen/xai/__init__.py",
+      "rationale": "xAI image generation is implemented by the Rust XaiImageGenBackend with env/auth-store credentials, text generation and image-edit payloads, response normalization, persistence/public-url handling, and focused hermes-tools tests.",
       "ticket": 25
     },
     {
@@ -417,8 +487,22 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "plugins/memory/hindsight/plugin.yaml",
+      "rationale": "Hindsight plugin metadata is reference catalog material; Rust Hindsight MemoryProviderPlugin implements config, auto-recall, auto-retain, session switching, retention, reflection, and focused provider tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "plugins/memory/hindsight/README.md",
       "rationale": "Hindsight is implemented as a Rust MemoryProviderPlugin with retain, recall, reflect, config loading, auto-recall, auto-retain, session switching, and focused Rust tests; local docs intentionally describe Ultra's Rust local-external/cloud contract instead of Python embedded daemon management.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/holographic/__init__.py",
+      "rationale": "Holographic memory behavior is owned by the Rust memory provider implementation and tests; the Python module remains reference-only in the Rust-only runtime.",
       "ticket": 25
     },
     {
@@ -466,8 +550,36 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "plugins/memory/mem0/plugin.yaml",
+      "rationale": "Mem0 plugin metadata is reference catalog material; the Rust Mem0 MemoryProviderPlugin owns list/search/add/update/delete tools, config activation, credential handling, and focused tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "policy_only",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/mem0/README.md",
+      "rationale": "Mem0 README prose is documentation; Rust Mem0 provider behavior, config activation, tool schemas, ID validation, OSS mode, and API contracts are covered in crates/hermes-agent tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "plugins/memory/openviking/__init__.py",
       "rationale": "OpenViking is implemented as a Rust MemoryProviderPlugin with REST context operations, resource upload handling, session commit, session switching, and URI regression coverage; the Python provider remains reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/openviking/plugin.yaml",
+      "rationale": "OpenViking plugin metadata is reference catalog material; Rust OpenViking MemoryProviderPlugin implements REST context operations, uploads, session commits, writer drains, and focused regression tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "policy_only",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/openviking/README.md",
+      "rationale": "OpenViking README prose is documentation; Rust OpenViking provider behavior and session/message contracts are covered by crates/hermes-agent tests.",
       "ticket": 25
     },
     {
@@ -508,6 +620,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "plugins/model-providers/anthropic/__init__.py",
+      "rationale": "Anthropic provider behavior is implemented through Rust provider registry, setup/auth detection, Anthropic Messages request shaping, OAuth import, and request-body tests; Python provider files are not loaded at runtime.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "plugins/model-providers/azure-foundry/__init__.py",
       "rationale": "Local Azure Foundry provider profile intentionally uses Azure AI Foundry naming while preserving the upstream OpenAI-compatible endpoint contract.",
       "ticket": 304
@@ -518,6 +637,20 @@
       "path": "plugins/model-providers/azure-foundry/plugin.yaml",
       "rationale": "Local Azure Foundry manifest intentionally uses Azure AI Foundry naming while preserving provider registration metadata.",
       "ticket": 304
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/model-providers/bedrock/__init__.py",
+      "rationale": "Bedrock provider behavior is implemented by Rust Bedrock Converse/SigV4/bearer auth paths plus setup/provider defaults and tests; the Python provider file is reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/model-providers/copilot-acp/__init__.py",
+      "rationale": "Copilot ACP provider behavior is implemented in Rust auth/provider setup and ACP credential discovery tests; Python provider code is not loaded by the Rust runtime.",
+      "ticket": 25
     },
     {
       "classification": "intentional_divergence",
@@ -553,6 +686,13 @@
       "path": "plugins/model-providers/nous/__init__.py",
       "rationale": "Local Nous provider keeps a static Hermes product tag because the upstream agent.portal_tags helper is not present in this Rust checkout; focused contracts cover the emitted tag.",
       "ticket": 304
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/model-providers/ollama-cloud/__init__.py",
+      "rationale": "Ollama Cloud provider behavior is implemented by Rust provider normalization, ACP auth env-key support, setup/provider defaults, and runtime provider config; the Python profile is reference-only.",
+      "ticket": 25
     },
     {
       "classification": "intentional_divergence",
@@ -637,6 +777,13 @@
       "path": "plugins/platforms/google_chat/oauth.py",
       "rationale": "Ultra implements the upstream private-token write contract locally with os.replace because the upstream utils.py helper is absent from the Rust-first tree.",
       "ticket": 304
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/platforms/homeassistant/adapter.py",
+      "rationale": "Home Assistant integration is implemented by Rust gateway and tool backends, including notification delivery target parsing, REST entity/service tools, registration, and upstream core tool contracts; the Python adapter is reference-only.",
+      "ticket": 25
     },
     {
       "classification": "policy_only",
@@ -769,6 +916,13 @@
       "owner": "sheawinkler",
       "path": "plugins/web",
       "rationale": "Web-search plugin differences affect provider routing, credential handling, and tool result behavior.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/web/ddgs/provider.py",
+      "rationale": "DuckDuckGo search is implemented by Rust DuckDuckGoSearchBackend with HERMES_WEB_SEARCH_BACKEND=ddgs selection, timeout/env aliases, result normalization, and web backend tests; the Python DDGS provider is reference-only.",
       "ticket": 25
     },
     {
@@ -965,6 +1119,13 @@
       "owner": "sheawinkler",
       "path": "tests/acp/test_server.py",
       "rationale": "Upstream ACP server lifecycle intent is covered by Rust ACP JSON-RPC server and handler tests: initialize/authenticate, camelCase wire aliases, session create/load/resume/fork/list/cancel, list filtering and pagination, prompt content aliases, refusal handling for missing sessions, usage serialization, slash commands, and MCP/server event flushing.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/acp/test_session.py",
+      "rationale": "Upstream ACP session behavior is covered by Rust ACP protocol/server/session contracts for new/load/resume/fork/list/cancel, session ownership, prompt lifecycle, and event emission; the Python test is reference-only.",
       "ticket": 25
     },
     {
@@ -1404,6 +1565,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/feishu_helpers.py",
+      "rationale": "Python Feishu test helpers are superseded by Rust Feishu adapter fixtures and gateway platform contracts; the Rust runtime does not use Python helper modules.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/restart_test_helpers.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
@@ -1544,6 +1712,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_cancel_background_drain.py",
+      "rationale": "Background cancel/drain intent is covered by Rust gateway background worker, busy-session, and primary-platform contract tests for deferred/background delivery and cancellation boundaries.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_channel_directory.py",
       "rationale": "Upstream channel-directory cache behavior is covered by Rust tests for missing/corrupt load fallback, atomic writes, session-derived channel discovery with topic composite IDs, exact/display/guild/prefix/id resolution, channel-type lookup, display formatting, provider error isolation, provider/session merge dedupe, and Slack users.conversations pagination.",
       "ticket": 302
@@ -1567,6 +1742,20 @@
       "owner": "sheawinkler",
       "path": "tests/gateway/test_compress_command.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_compress_focus.py",
+      "rationale": "Compression command/focus intent is covered by Rust compression engine tests plus CLI and gateway /compress tests for summaries, fallback warnings, and runtime compression controls.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_compress_plugin_engine.py",
+      "rationale": "Compression plugin-engine intent is covered by Rust hermes-agent compression, auxiliary configuration, gateway /compress routing, and CLI compression-rule tests; Python plugin mechanics are reference-only.",
       "ticket": 25
     },
     {
@@ -1852,8 +2041,29 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_feishu_bot_auth_bypass.py",
+      "rationale": "Feishu bot/auth-bypass intent is covered by Rust Feishu adapter event parsing plus gateway platform access-policy tests; Python gateway tests are reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_feishu_comment_rules.py",
+      "rationale": "Feishu comment and mention handling is covered by Rust Feishu adapter tests for event parsing, mention stripping, and message routing contracts.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_feishu_comment.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_feishu_onboard.py",
+      "rationale": "Feishu onboarding/setup intent is covered by Rust CLI gateway adapter configuration and Feishu adapter construction/startup tests; Python onboarding helpers are not runtime code.",
       "ticket": 25
     },
     {
@@ -1889,6 +2099,13 @@
       "owner": "sheawinkler",
       "path": "tests/gateway/test_gateway_shutdown.py",
       "rationale": "Upstream gateway shutdown/resource-drain intent is covered by Rust Gateway stop_all/session-finalize contracts and existing runtime shutdown tests for active session finalization, adapter stop isolation, idle expiry finalization, and hook containment; Rust process/tool cleanup uses native runtime registries instead of Python runner mocks.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_goal_verdict_send.py",
+      "rationale": "Goal/verdict send behavior is covered by Rust gateway command parsing, delivery routing, status/profile tests, and primary-platform send contracts rather than Python gateway tests.",
       "ticket": 25
     },
     {
@@ -2006,6 +2223,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_model_command_custom_providers.py",
+      "rationale": "Gateway model-command custom-provider intent is covered by Rust model/provider normalization, setup provider defaults, runtime env application, and gateway slash command tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_model_switch_persistence.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
@@ -2029,6 +2253,20 @@
       "owner": "sheawinkler",
       "path": "tests/gateway/test_pairing.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_pending_drain_no_recursion.py",
+      "rationale": "Pending-drain recursion intent is covered by Rust BusySessionCoordinator and gateway delivery contracts that replay queued work without recursive Python callback paths.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_pending_drain_race.py",
+      "rationale": "Pending-drain race intent is covered by Rust gateway busy-session queue, reset/finish, and primary-platform contract tests for deterministic deferred-message delivery.",
       "ticket": 25
     },
     {
@@ -2069,6 +2307,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_post_delivery_callback_chaining.py",
+      "rationale": "Post-delivery callback chaining is covered by Rust gateway delivery/routing contracts and platform adapter send tests; Python callback chaining is not part of the Rust runtime.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_proxy_mode.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
@@ -2090,6 +2335,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_reasoning_command.py",
+      "rationale": "Reasoning command behavior is covered by Rust CLI/gateway slash command handling, model/provider reasoning controls, TUI rendering tests, and reasoning-content parser tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_reload_skills_discord_resync.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
@@ -2099,6 +2351,13 @@
       "owner": "sheawinkler",
       "path": "tests/gateway/test_replay_entry_fields.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_reply_to_injection.py",
+      "rationale": "Reply-to injection intent is covered by Rust platform config/env bridging, Telegram/Discord reply_to_mode parsing, routing, and adapter send tests.",
       "ticket": 25
     },
     {
@@ -2181,6 +2440,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_runtime_env_reload_config_authority.py",
+      "rationale": "Runtime env reload/config authority is covered by Rust config/env bridge tests, gateway runtime controls, and provider setup diagnostics; Python reload tests are reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_send_image_file.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
@@ -2195,8 +2461,22 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_send_retry.py",
+      "rationale": "Send retry/fallback intent is covered by Rust platform adapters, Telegram thread/reply fallback, Matrix/Mattermost reconnect backoff, Signal rate-limit feedback, and primary-platform send contracts.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_session_boundary_hooks.py",
       "rationale": "Upstream gateway session-boundary lifecycle intent is covered by Rust hermes-gateway contracts for reset ordering, old logical session finalize hooks, new logical session reset hooks, hook error containment, shutdown finalization for active sessions, and idle-expiry finalization before session removal.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_session_boundary_security_state.py",
+      "rationale": "Session-boundary security state is covered by Rust gateway lifecycle cleanup, approval/session isolation, and platform routing tests that clear per-session state deterministically.",
       "ticket": 25
     },
     {
@@ -2279,6 +2559,13 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_setup_feishu.py",
+      "rationale": "Feishu setup intent is covered by Rust CLI gateway adapter configuration, FeishuConfig construction, and adapter startup/error contracts; Python setup tests are reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_shutdown_cache_cleanup.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "ticket": 25
@@ -2309,6 +2596,20 @@
       "owner": "sheawinkler",
       "path": "tests/gateway/test_slack_approval_buttons.py",
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_slack_channel_skills.py",
+      "rationale": "Slack channel skill-routing intent is covered by Rust Slack adapter tests, gateway channel/session routing, and toolset/skill exposure contracts.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_slack_mention.py",
+      "rationale": "Slack mention handling is covered by Rust Slack adapter event parsing, access-policy, and primary-platform gateway contracts; Python Slack tests are reference-only.",
       "ticket": 25
     },
     {
@@ -2447,6 +2748,20 @@
     {
       "classification": "intentional_divergence",
       "owner": "sheawinkler",
+      "path": "tests/gateway/test_telegram_mention_boundaries.py",
+      "rationale": "Telegram mention-boundary behavior is covered by Rust Telegram mention entity/pattern gating, exclusive bot mentions, allowed chats/topics, and CLI config hydration tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_telegram_network_reconnect.py",
+      "rationale": "Telegram reconnect behavior is covered by Rust poll_with_backoff, deleteWebhook-before-polling, fallback IP/DNS override, and CLI polling pause-threshold tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
       "path": "tests/gateway/test_telegram_network.py",
       "rationale": "Upstream Telegram network fallback intent is covered by Rust Telegram fallback IP parsing/deduplication and reqwest DNS override wiring for api.telegram.org while preserving proxy configuration.",
       "ticket": 25
@@ -2470,6 +2785,13 @@
       "owner": "sheawinkler",
       "path": "tests/gateway/test_telegram_reply_mode.py",
       "rationale": "Upstream Telegram reply_to_mode behavior is covered by Rust Telegram reply-mode parsing, chunk-reference policy tests for off/first/all/invalid modes, CLI config hydration, and env/YAML boolean-off bridging.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_telegram_reply_quote.py",
+      "rationale": "Telegram reply quote behavior is covered by Rust reply_to_mode config, reply/thread fallback send contracts, chunk reference policy, and Telegram adapter tests.",
       "ticket": 25
     },
     {
@@ -2575,6 +2897,13 @@
       "owner": "sheawinkler",
       "path": "tests/gateway/test_voice_mode_platform_isolation.py",
       "rationale": "Upstream voice-mode platform-isolation intent is covered by Rust VoiceManager platform-keyed joined-channel state and voice command contracts; platform/channel identifiers are normalized separately so same chat/channel IDs on different platforms do not collide.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/gateway/test_weak_credential_guard.py",
+      "rationale": "Weak credential guard intent is covered by Rust credential_guard, approval redaction, tool policy, and web secret-exfiltration tests; Python gateway guard tests are reference-only.",
       "ticket": 25
     },
     {

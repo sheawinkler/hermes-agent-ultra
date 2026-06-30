@@ -19,10 +19,12 @@ fn normalize_image_provider(value: &str) -> Option<&'static str> {
         "codex" | "openai-codex" | "openai_codex" | "chatgpt" | "chatgpt-codex" => {
             Some("openai-codex")
         }
+        "openai" | "openai-images" | "openai_image" | "openai-image" => Some("openai"),
         "fal" | "fal-ai" | "fal_ai" => Some("fal"),
         "openrouter" | "open-router" | "or" => Some("openrouter"),
         "nous" | "nous-portal" | "nous_api" | "nous-api" | "nousapi" => Some("nous"),
         "krea" | "krea-ai" | "krea_ai" => Some("krea"),
+        "xai" | "x.ai" | "grok" | "grok-imagine" => Some("xai"),
         _ => None,
     }
 }
@@ -106,6 +108,127 @@ fn scoped_image_provider_config(
 ) -> Option<serde_yaml::Value> {
     let cfg = load_image_gen_config()?;
     yaml_get(&cfg, provider.config_key()).cloned()
+}
+
+fn scoped_image_named_config(provider: &str) -> Option<serde_yaml::Value> {
+    let cfg = load_image_gen_config()?;
+    yaml_get(&cfg, provider).cloned()
+}
+
+fn resolve_named_image_base_url(provider: &str, env_keys: &[&str], default: &str) -> String {
+    if let Some(value) = scoped_image_named_config(provider)
+        .as_ref()
+        .and_then(|cfg| yaml_get_any_str(cfg, &["base_url", "api_base_url"]))
+    {
+        return value.trim_end_matches('/').to_string();
+    }
+    for key in env_keys {
+        if let Some(value) = env_optional_nonempty(key) {
+            return value.trim_end_matches('/').to_string();
+        }
+    }
+    default.to_string()
+}
+
+fn resolve_named_image_api_key(provider: &str, env_keys: &[&str]) -> Option<String> {
+    if let Some(value) = scoped_image_named_config(provider)
+        .as_ref()
+        .and_then(resolve_api_key_from_yaml_provider_section)
+    {
+        return Some(value);
+    }
+    for key in env_keys {
+        if let Some(value) = env_optional_nonempty(key) {
+            return Some(value);
+        }
+    }
+    read_provider_auth_string(provider, &["api_key", "access_token", "token", "bearer_token"])
+        .or_else(|| read_provider_auth_tokens_string(provider, "access_token"))
+}
+
+fn resolve_openai_image_base_url() -> String {
+    resolve_named_image_base_url(
+        "openai",
+        &[
+            "HERMES_OPENAI_IMAGE_BASE_URL",
+            "OPENAI_IMAGE_BASE_URL",
+            "HERMES_OPENAI_BASE_URL",
+            "OPENAI_BASE_URL",
+        ],
+        DEFAULT_OPENAI_IMAGE_BASE_URL,
+    )
+}
+
+fn resolve_openai_image_api_key() -> Option<String> {
+    resolve_named_image_api_key("openai", &["HERMES_OPENAI_API_KEY", "OPENAI_API_KEY"])
+}
+
+fn resolve_xai_image_base_url() -> String {
+    resolve_named_image_base_url(
+        "xai",
+        &["HERMES_XAI_IMAGE_BASE_URL", "XAI_IMAGE_BASE_URL", "HERMES_XAI_BASE_URL", "XAI_BASE_URL"],
+        DEFAULT_XAI_IMAGE_BASE_URL,
+    )
+}
+
+fn resolve_xai_image_config() -> XaiImageGenConfig {
+    if let Some(api_key) = env_optional_nonempty("HERMES_XAI_API_KEY")
+        .or_else(|| env_optional_nonempty("XAI_API_KEY"))
+    {
+        return XaiImageGenConfig::new(Some(api_key), "env");
+    }
+    if let Some(api_key) = scoped_image_named_config("xai")
+        .as_ref()
+        .and_then(resolve_api_key_from_yaml_provider_section)
+    {
+        return XaiImageGenConfig::new(Some(api_key), "config");
+    }
+    if let Some(api_key) =
+        read_provider_auth_string("xai", &["api_key", "access_token", "token", "bearer_token"])
+            .or_else(|| read_provider_auth_tokens_string("xai", "access_token"))
+            .or_else(|| {
+                read_provider_auth_string(
+                    "xai-oauth",
+                    &["api_key", "access_token", "token", "bearer_token"],
+                )
+            })
+            .or_else(|| read_provider_auth_tokens_string("xai-oauth", "access_token"))
+    {
+        return XaiImageGenConfig::new(Some(api_key), "auth-store");
+    }
+    XaiImageGenConfig::unconfigured()
+}
+
+fn resolve_xai_image_model() -> String {
+    if let Some(value) = env_optional_nonempty("XAI_IMAGE_MODEL") {
+        return normalize_xai_image_model(value.as_str()).to_string();
+    }
+    scoped_image_named_config("xai")
+        .as_ref()
+        .and_then(|cfg| yaml_get_str(cfg, "model"))
+        .map(normalize_xai_image_model)
+        .unwrap_or(DEFAULT_XAI_IMAGE_MODEL)
+        .to_string()
+}
+
+fn normalize_xai_image_model(value: &str) -> &'static str {
+    match value.trim() {
+        DEFAULT_XAI_IMAGE_EDIT_MODEL => DEFAULT_XAI_IMAGE_EDIT_MODEL,
+        _ => DEFAULT_XAI_IMAGE_MODEL,
+    }
+}
+
+fn resolve_xai_image_resolution() -> String {
+    let value = env_optional_nonempty("XAI_IMAGE_RESOLUTION").or_else(|| {
+        scoped_image_named_config("xai")
+            .as_ref()
+            .and_then(|cfg| yaml_get_str(cfg, "resolution"))
+            .map(ToOwned::to_owned)
+    });
+    match value.as_deref().map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("2k") => "2k".to_string(),
+        _ => DEFAULT_XAI_IMAGE_RESOLUTION.to_string(),
+    }
 }
 
 fn resolve_openrouter_compat_model(provider: OpenRouterCompatImageProviderKind) -> String {
@@ -211,6 +334,247 @@ fn openrouter_compat_aspect_from_tool_size(size: Option<&str>) -> &'static str {
         Some("portrait") | Some("9:16") | Some("1024x1536") => "9:16",
         _ => "1:1",
     }
+}
+
+fn resolve_openai_image_tier() -> CodexImageTier {
+    if let Some(value) = env_optional_nonempty("OPENAI_IMAGE_MODEL") {
+        if let Some(tier) = codex_image_tier(&value) {
+            return tier;
+        }
+    }
+    if let Some(cfg) = load_image_gen_config() {
+        if let Some(openai) = yaml_get(&cfg, "openai") {
+            if let Some(value) = yaml_get_str(openai, "model") {
+                if let Some(tier) = codex_image_tier(value) {
+                    return tier;
+                }
+            }
+        }
+        if let Some(value) = yaml_get_str(&cfg, "model") {
+            if let Some(tier) = codex_image_tier(value) {
+                return tier;
+            }
+        }
+    }
+    codex_image_tier(DEFAULT_OPENAI_IMAGE_MODEL).expect("default OpenAI image model tier")
+}
+
+fn openai_image_size_from_tool_size(size: Option<&str>) -> &'static str {
+    codex_image_size_from_tool_size(size)
+}
+
+fn openai_tool_aspect_from_size(size: &str) -> &'static str {
+    match size {
+        "1536x1024" => "landscape",
+        "1024x1536" => "portrait",
+        _ => "square",
+    }
+}
+
+fn openai_image_generation_payload(prompt: &str, size: &str, quality: &str) -> Value {
+    json!({
+        "model": OPENAI_IMAGE_API_MODEL,
+        "prompt": prompt,
+        "size": size,
+        "n": 1,
+        "quality": quality,
+    })
+}
+
+async fn openai_image_edit_form(
+    client: &Client,
+    sources: &[String],
+    prompt: &str,
+    size: &str,
+    quality: &str,
+) -> Result<reqwest::multipart::Form, ToolError> {
+    let mut form = reqwest::multipart::Form::new()
+        .text("model", OPENAI_IMAGE_API_MODEL.to_string())
+        .text("prompt", prompt.to_string())
+        .text("size", size.to_string())
+        .text("quality", quality.to_string())
+        .text("n", "1".to_string());
+    for source in sources.iter().take(OPENAI_MAX_REFERENCE_IMAGES) {
+        let loaded = load_image_source_bytes(client, source).await?;
+        let field = if sources.len() == 1 { "image" } else { "image[]" };
+        let part = reqwest::multipart::Part::bytes(loaded.bytes)
+            .file_name(loaded.filename)
+            .mime_str(loaded.mime)
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("Could not set image multipart MIME: {e}"))
+            })?;
+        form = form.part(field, part);
+    }
+    Ok(form)
+}
+
+struct LoadedImageSource {
+    bytes: Vec<u8>,
+    filename: String,
+    mime: &'static str,
+}
+
+async fn load_image_source_bytes(
+    client: &Client,
+    source: &str,
+) -> Result<LoadedImageSource, ToolError> {
+    let source = source.trim();
+    if source.is_empty() {
+        return Err(ToolError::InvalidParams(
+            "image source must be a non-empty URL, data URI, or local path".into(),
+        ));
+    }
+    if source.starts_with("http://") || source.starts_with("https://") {
+        let resp = client.get(source).send().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Could not download source image {source}: {e}"))
+        })?;
+        let status = resp.status();
+        let content_type = resp
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .map(ToOwned::to_owned);
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Could not download source image {source}: HTTP {status}"
+            )));
+        }
+        let bytes = resp.bytes().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Could not read source image {source}: {e}"))
+        })?;
+        let filename = url::Url::parse(source)
+            .ok()
+            .and_then(|url| {
+                Path::new(url.path())
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(ToOwned::to_owned)
+            })
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "image.png".to_string());
+        let mime = extension_for_mime(content_type.as_deref());
+        return Ok(LoadedImageSource {
+            bytes: bytes.to_vec(),
+            filename,
+            mime: mime_to_content_type(mime),
+        });
+    }
+    if source.starts_with("data:") {
+        let (header, encoded) = source.split_once(',').ok_or_else(|| {
+            ToolError::InvalidParams("image data URI did not contain base64 data".into())
+        })?;
+        let mime = header
+            .strip_prefix("data:")
+            .and_then(|value| value.split_once(';').map(|(mime, _)| mime))
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("image/png");
+        let bytes = STANDARD.decode(encoded.trim()).map_err(|e| {
+            ToolError::InvalidParams(format!("image data URI was not valid base64: {e}"))
+        })?;
+        return Ok(LoadedImageSource {
+            bytes,
+            filename: format!("image.{}", extension_for_mime(Some(mime))),
+            mime: mime_to_content_type(extension_for_mime(Some(mime))),
+        });
+    }
+    let path = Path::new(source);
+    let bytes = std::fs::read(path).map_err(|e| {
+        ToolError::ExecutionFailed(format!("Could not read source image {}: {e}", path.display()))
+    })?;
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "image.png".to_string());
+    Ok(LoadedImageSource {
+        bytes,
+        filename,
+        mime: mime_type_for_path(path),
+    })
+}
+
+fn mime_to_content_type(ext: &str) -> &'static str {
+    match ext {
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        _ => "image/png",
+    }
+}
+
+fn xai_aspect_from_tool_size(size: Option<&str>) -> &'static str {
+    match size.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("landscape") | Some("16:9") | Some("1536x1024") => "16:9",
+        Some("portrait") | Some("9:16") | Some("1024x1536") => "9:16",
+        Some("4:3") => "4:3",
+        Some("3:4") => "3:4",
+        Some("3:2") => "3:2",
+        Some("2:3") => "2:3",
+        _ => "1:1",
+    }
+}
+
+fn xai_tool_aspect_from_xai(aspect: &str) -> &'static str {
+    match aspect {
+        "16:9" => "landscape",
+        "9:16" => "portrait",
+        "4:3" => "4:3",
+        "3:4" => "3:4",
+        "3:2" => "3:2",
+        "2:3" => "2:3",
+        _ => "square",
+    }
+}
+
+fn xai_image_generation_payload(
+    model: &str,
+    prompt: &str,
+    aspect_ratio: &str,
+    resolution: &str,
+) -> Value {
+    json!({
+        "model": model,
+        "prompt": prompt,
+        "aspect_ratio": aspect_ratio,
+        "resolution": resolution,
+    })
+}
+
+fn xai_image_edit_payload(prompt: &str, images: &[Value]) -> Value {
+    let mut payload = Map::new();
+    payload.insert("model".to_string(), json!(DEFAULT_XAI_IMAGE_EDIT_MODEL));
+    payload.insert("prompt".to_string(), json!(prompt));
+    if images.len() == 1 {
+        payload.insert("image".to_string(), images[0].clone());
+    } else {
+        payload.insert("images".to_string(), Value::Array(images.to_vec()));
+    }
+    Value::Object(payload)
+}
+
+fn xai_image_fields(sources: &mut [String]) -> Result<Vec<Value>, ToolError> {
+    sources
+        .iter()
+        .map(|source| {
+            let source = source.trim();
+            if source.starts_with("http://") || source.starts_with("https://") || source.starts_with("data:") {
+                return Ok(json!({"url": source, "type": "image_url"}));
+            }
+            let path = Path::new(source);
+            let raw = std::fs::read(path).map_err(|e| {
+                ToolError::ExecutionFailed(format!(
+                    "Could not read xAI source image {}: {e}",
+                    path.display()
+                ))
+            })?;
+            Ok(json!({
+                "url": format!("data:{};base64,{}", mime_type_for_path(path), STANDARD.encode(raw)),
+                "type": "image_url"
+            }))
+        })
+        .collect()
 }
 
 fn openrouter_compat_chat_payload(
@@ -424,5 +788,3 @@ fn krea_error_message(raw: &str) -> String {
         .filter(|message| !message.is_empty())
         .unwrap_or_else(|| raw.chars().take(500).collect())
 }
-
-
