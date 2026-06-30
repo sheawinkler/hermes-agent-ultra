@@ -196,7 +196,7 @@
         "status": "pass"
       },
       {
-        "actual": 38.0,
+        "actual": 37.0,
         "limit": 100,
         "metric": "max_queue_pending_commits",
         "status": "pass"
@@ -248,7 +248,7 @@
       "unverified_cases": 0
     }
   },
-  "generated_at_utc": "2026-06-30T00:53:29.633259+00:00",
+  "generated_at_utc": "2026-06-30T01:08:06.945164+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -274,7 +274,7 @@
     "max_deep_problem_solving_unverified_cases": 0.0,
     "max_divergence_review_overdue": 0.0,
     "max_files_only_upstream": 2309.0,
-    "max_queue_pending_commits": 38.0,
+    "max_queue_pending_commits": 37.0,
     "max_sota_harness_critical_gaps": 0.0,
     "max_sota_harness_missing_rust_refs": 0.0,
     "max_test_coverage_audit_critical_gaps": 0.0,
@@ -299,8 +299,8 @@
   "queue_summary": {
     "by_disposition": {
       "mirrored": 97,
-      "pending": 38,
-      "ported": 521,
+      "pending": 37,
+      "ported": 522,
       "superseded": 6988
     },
     "by_target_ticket": {
@@ -451,7 +451,7 @@
         "status": "pass"
       },
       {
-        "actual": 38.0,
+        "actual": 37.0,
         "limit": 0,
         "metric": "max_queue_pending_commits",
         "status": "fail"
