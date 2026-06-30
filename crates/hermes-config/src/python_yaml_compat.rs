@@ -810,6 +810,24 @@ discord:
     }
 
     #[test]
+    fn root_platform_typing_indicator_lifted_under_platforms() {
+        let raw = r#"
+slack:
+  enabled: true
+  typing_indicator: false
+"#;
+        let mut root: Value = serde_yaml::from_str(raw).unwrap();
+        let Value::Mapping(ref mut m) = root else {
+            panic!();
+        };
+        normalize_config_yaml_root(m);
+        let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+        let slack = cfg.platforms.get("slack").expect("slack");
+        assert!(slack.enabled);
+        assert!(!slack.typing_indicator_enabled());
+    }
+
+    #[test]
     fn session_reset_both_to_session() {
         let raw = r#"
 session_reset:

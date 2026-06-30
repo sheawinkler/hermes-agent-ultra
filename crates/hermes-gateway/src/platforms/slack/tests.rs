@@ -289,6 +289,21 @@ fn slack_group_dm_scope_warning_requires_im_without_mpim() {
     assert!(!adapter.warn_if_missing_group_dm_scopes("", Some("Acme")));
 }
 
+#[test]
+fn slack_user_token_warning_detects_missing_bot_id_once() {
+    let adapter = SlackAdapter::new(slack_test_config()).expect("adapter");
+    assert!(adapter.warn_if_user_token(Some("U123"), None, Some("Acme")));
+    assert!(!adapter.warn_if_user_token(Some("U123"), None, Some("Acme")));
+}
+
+#[test]
+fn slack_user_token_warning_requires_user_without_bot_id() {
+    let adapter = SlackAdapter::new(slack_test_config()).expect("adapter");
+    assert!(!adapter.warn_if_user_token(Some("U123"), Some("B123"), Some("Acme")));
+    assert!(!adapter.warn_if_user_token(None, None, Some("Acme")));
+    assert!(!adapter.warn_if_user_token(Some("  "), None, Some("Acme")));
+}
+
 #[tokio::test]
 async fn slack_auth_test_scope_header_drives_group_dm_warning() {
     let server = MockServer::start().await;
@@ -299,7 +314,9 @@ async fn slack_auth_test_scope_header_drives_group_dm_warning() {
                 .insert_header("x-oauth-scopes", "chat:write,im:history,im:read")
                 .set_body_json(serde_json::json!({
                     "ok": true,
-                    "team": "Acme"
+                    "team": "Acme",
+                    "user_id": "Ubot",
+                    "bot_id": "Bbot"
                 })),
         )
         .expect(1)
@@ -307,10 +324,12 @@ async fn slack_auth_test_scope_header_drives_group_dm_warning() {
         .await;
 
     let adapter = SlackAdapter::new(slack_test_config()).expect("adapter");
-    assert!(adapter
-        .warn_if_missing_group_dm_scopes_from_auth_test(&server.uri())
+    let warnings = adapter
+        .warn_if_slack_auth_test_health_issues(&server.uri())
         .await
-        .expect("auth scope audit"));
+        .expect("auth scope audit");
+    assert!(warnings.missing_group_dm_scopes);
+    assert!(!warnings.user_token);
 }
 
 #[tokio::test]
@@ -323,7 +342,9 @@ async fn slack_auth_test_mpim_scope_present_does_not_warn() {
                 .insert_header("x-oauth-scopes", "chat:write,im:history,mpim:history")
                 .set_body_json(serde_json::json!({
                     "ok": true,
-                    "team": "Acme"
+                    "team": "Acme",
+                    "user_id": "Ubot",
+                    "bot_id": "Bbot"
                 })),
         )
         .expect(1)
@@ -331,10 +352,39 @@ async fn slack_auth_test_mpim_scope_present_does_not_warn() {
         .await;
 
     let adapter = SlackAdapter::new(slack_test_config()).expect("adapter");
-    assert!(!adapter
-        .warn_if_missing_group_dm_scopes_from_auth_test(&server.uri())
+    let warnings = adapter
+        .warn_if_slack_auth_test_health_issues(&server.uri())
         .await
-        .expect("auth scope audit"));
+        .expect("auth scope audit");
+    assert!(!warnings.missing_group_dm_scopes);
+    assert!(!warnings.user_token);
+}
+
+#[tokio::test]
+async fn slack_auth_test_missing_bot_id_drives_user_token_warning() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/auth.test"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-oauth-scopes", "chat:write,im:history,mpim:history")
+                .set_body_json(serde_json::json!({
+                    "ok": true,
+                    "team": "Acme",
+                    "user_id": "Uhuman"
+                })),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let adapter = SlackAdapter::new(slack_test_config()).expect("adapter");
+    let warnings = adapter
+        .warn_if_slack_auth_test_health_issues(&server.uri())
+        .await
+        .expect("auth scope audit");
+    assert!(!warnings.missing_group_dm_scopes);
+    assert!(warnings.user_token);
 }
 
 #[test]

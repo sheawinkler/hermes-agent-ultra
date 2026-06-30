@@ -55,6 +55,10 @@ pub struct PlatformConfig {
     #[serde(default)]
     pub group_sessions_per_user: bool,
 
+    /// Whether adapters should show typing/status indicators while processing.
+    #[serde(default = "default_true")]
+    pub typing_indicator: bool,
+
     /// Home / landing channel for the bot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_channel: Option<String>,
@@ -82,6 +86,7 @@ impl Default for PlatformConfig {
             require_mention: None,
             unauthorized_dm_behavior: UnauthorizedDmBehavior::default(),
             group_sessions_per_user: false,
+            typing_indicator: true,
             home_channel: None,
             allowed_users: Vec::new(),
             admin_users: Vec::new(),
@@ -120,6 +125,9 @@ impl PlatformConfig {
             if let Some(v) = map.get("group_sessions_per_user").and_then(|v| v.as_bool()) {
                 self.group_sessions_per_user = v;
             }
+            if let Some(v) = map.get("typing_indicator").and_then(|v| v.as_bool()) {
+                self.typing_indicator = v;
+            }
             if let Some(v) = map.get("home_channel").and_then(|v| v.as_str()) {
                 self.home_channel = Some(v.to_string());
             }
@@ -141,6 +149,14 @@ impl PlatformConfig {
             }
         }
     }
+
+    pub fn typing_indicator_enabled(&self) -> bool {
+        self.typing_indicator
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +173,7 @@ mod tests {
         assert!(!pc.enabled);
         assert!(pc.token.is_none());
         assert_eq!(pc.unauthorized_dm_behavior, UnauthorizedDmBehavior::Ignore);
+        assert!(pc.typing_indicator_enabled());
     }
 
     #[test]
@@ -176,14 +193,25 @@ mod tests {
             "token": "abc123",
             "extra": {
                 "custom_field": "value"
-            }
+            },
+            "typing_indicator": false
         });
         pc.merge_with_json(&overlay);
         assert!(pc.enabled);
         assert_eq!(pc.token.as_deref(), Some("abc123"));
+        assert!(!pc.typing_indicator_enabled());
         assert_eq!(
             pc.extra.get("custom_field").unwrap().as_str().unwrap(),
             "value"
         );
+    }
+
+    #[test]
+    fn platform_config_typing_indicator_deserializes_top_level() {
+        let pc: PlatformConfig = serde_yaml::from_str("typing_indicator: false").unwrap();
+        assert!(!pc.typing_indicator_enabled());
+
+        let defaulted: PlatformConfig = serde_yaml::from_str("{}").unwrap();
+        assert!(defaulted.typing_indicator_enabled());
     }
 }

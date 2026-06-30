@@ -66,6 +66,10 @@ struct SlackAuthTestResponse {
     pub team: Option<String>,
     #[serde(default)]
     pub team_id: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub bot_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

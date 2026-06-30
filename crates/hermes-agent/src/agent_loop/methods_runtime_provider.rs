@@ -597,6 +597,8 @@ impl AgentLoop {
             client_id: client_id.to_string(),
             redirect_uri: "http://127.0.0.1/unused".to_string(),
             scopes: vec![],
+            client_secret: None,
+            client_auth_method: hermes_auth::OAuth2ClientAuthMethod::default(),
         };
         let cred = exchange_refresh_token(provider_key, &endpoints, refresh_token)
             .await
