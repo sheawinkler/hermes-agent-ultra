@@ -10,7 +10,7 @@ use tokio::process::Command;
 
 use crate::tools::video::VideoBackend;
 use crate::tools::vision::VisionBackend;
-use hermes_core::ToolError;
+use hermes_core::{subprocess::CommandNoWindowExt, ToolError};
 
 /// Video backend that samples frames via ffmpeg and calls a vision backend.
 pub struct VisionFrameSamplingVideoBackend {
@@ -82,6 +82,7 @@ impl VisionFrameSamplingVideoBackend {
             .arg("-frames:v")
             .arg(max_frames.to_string())
             .arg(pattern.to_string_lossy().to_string())
+            .suppress_windows_console()
             .status()
             .await
             .map_err(|e| {

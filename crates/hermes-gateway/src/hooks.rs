@@ -49,6 +49,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use hermes_core::subprocess::CommandNoWindowExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -448,6 +449,7 @@ impl HookHandler for CommandHookHandler {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        cmd.suppress_windows_console();
 
         let mut child = cmd
             .spawn()

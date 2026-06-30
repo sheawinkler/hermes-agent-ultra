@@ -6638,6 +6638,51 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported/superseded by Rust binary image handling: xAI/OpenRouter-compatible image references use std::fs::read/tokio::fs::read byte reads before base64 data-URL encoding, never text decoding. Existing Rust image/video generation tests cover local image paths encoded as data URLs, so the Python windows-footgun suppression is not needed."
+    },
+    "ef17cd204d7583c31fe1ace9255077f8c736b47e": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as a Rust-native Windows subprocess no-window chokepoint: hermes-core exposes CommandNoWindowExt for std and tokio commands, backend helper spawns opt into CREATE_NO_WINDOW on Windows, and hermes-source-parity-tests covers the helper plus key runtime surfaces. The Python CI footgun script is superseded by compiled Rust source-contract coverage."
+    },
+    "5db1430af9ecd7ecc1e5eba93e7e1e965af59927": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust by routing background/helper spawns through CommandNoWindowExt across local/Docker/Singularity/SSH environments, MCP stdio, gateway hooks, cron, CLI probes, plugin git operations, computer-use, code execution, TTS, video/ffmpeg, Teams ffmpeg, and project/context git probes. Foreground terminal semantics stay unchanged while Windows background console flashes are suppressed."
+    },
+    "2ecca1e7d3e7c387b4d350f99dc699e2f43f73c5": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported as a real Rust chokepoint rather than relying on stdout/stderr capture: helper processes explicitly call suppress_windows_console before spawn/output/status, and source parity tests require the no-window helper on the primary backend subprocess surfaces."
+    },
+    "d3d621f7c38bb801d9d734cb2898bd4f9b134709": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream reverted earlier Python no-window wrappers. Hermes Agent Ultra does not inherit those reverted Python helper layers; the Rust runtime now implements the final behavior directly through hermes-core CommandNoWindowExt and explicit source-contract tests."
+    },
+    "cb982ad997c5e04c6b647c4cbb3d1b020ec383fb": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust for backend git/bash/helper spawns: coding context, context references, project workspace facts, plugin clone/update, specpatch git probes, doctor bash probes, background triage self-invocation, and quick exec all route through the no-window helper where applicable."
+    },
+    "1ffa01f35fb8bc0bf8825117788092ff0e08421f": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported with Rust source-contract coverage in crates/hermes-source-parity-tests/tests/windows_subprocess_no_window_contract.rs, proving the std/tokio helper chokepoints exist and key backend subprocess surfaces opt into them."
+    },
+    "eeca59f489194a4ce288b31de12b46c20d05cd48": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported/superseded by Rust helper coverage for the analogous remaining backend legs: TTS command/Piper, video and Teams ffmpeg, computer-use/cua-driver, MCP stdio, gateway Matrix decrypt FFI, and WhatsApp/Discord Python adapter legs are absent from the Rust runtime."
+    },
+    "9a0010fd469f0de6c7e2146f955ed9980d02b397": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported for remaining Rust backend spawn legs, including environment backends, gateway hooks/routing, cron, CLI probes, plugin git operations, source-contract tests, and Chrome debug launch preserving detached/process-group flags while adding CREATE_NO_WINDOW through windows_no_window_creation_flags."
+    },
+    "ee22d853eb131ecdce3a8ba54a9a1c39ee5ca4a1": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream fix targets a Python/TUI pdftoppm subprocess. Hermes Agent Ultra has no Rust pdftoppm PDF attach subprocess surface; the broader Rust helper subprocess chokepoint now covers actual shipped helper spawns that can flash on Windows."
     }
   },
   "subject_patterns": [

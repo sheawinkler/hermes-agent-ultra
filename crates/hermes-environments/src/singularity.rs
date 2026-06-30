@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use tokio::process::Command as TokioCommand;
 
-use hermes_core::{AgentError, CommandOutput, TerminalBackend};
+use hermes_core::{subprocess::CommandNoWindowExt, AgentError, CommandOutput, TerminalBackend};
 
 /// A [`TerminalBackend`] that runs commands inside a Singularity (Apptainer) container.
 ///
@@ -141,6 +141,7 @@ impl TerminalBackend for SingularityBackend {
             if background {
                 cmd.stdin(std::process::Stdio::null());
             }
+            cmd.suppress_windows_console();
 
             let output = cmd.output().await.map_err(|e| {
                 AgentError::Io(format!("Failed to execute singularity command: {}", e))
@@ -210,6 +211,7 @@ impl TerminalBackend for SingularityBackend {
         let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
             let output = TokioCommand::new(&binary)
                 .args(&args)
+                .suppress_windows_console()
                 .output()
                 .await
                 .map_err(|e| {
@@ -262,6 +264,7 @@ impl TerminalBackend for SingularityBackend {
             let binary = self.binary().to_string();
             let mkdir_output = TokioCommand::new(&binary)
                 .args(&mkdir_args)
+                .suppress_windows_console()
                 .output()
                 .await
                 .map_err(|e| {
@@ -301,6 +304,7 @@ impl TerminalBackend for SingularityBackend {
         let binary = self.binary().to_string();
         let output = TokioCommand::new(&binary)
             .args(&args)
+            .suppress_windows_console()
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to write file via singularity: {}", e)))?;
@@ -334,6 +338,7 @@ impl TerminalBackend for SingularityBackend {
         let binary = self.binary().to_string();
         let output = TokioCommand::new(&binary)
             .args(&args)
+            .suppress_windows_console()
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to check file via singularity: {}", e)))?;

@@ -19,7 +19,7 @@ use tokio::process::Command;
 use uuid::Uuid;
 
 use hermes_config::hermes_home;
-use hermes_core::{ToolError, ToolHandler};
+use hermes_core::{subprocess::CommandNoWindowExt, ToolError, ToolHandler};
 
 pub const DEFAULT_TEAMS_PIPELINE_STORE_FILENAME: &str = "teams_pipeline_store.json";
 
@@ -901,6 +901,7 @@ async fn prepare_audio_path(
         .arg("-i")
         .arg(recording_path)
         .arg(&audio_path)
+        .suppress_windows_console()
         .output()
         .await
         .map_err(|e| {

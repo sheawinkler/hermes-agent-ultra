@@ -16,7 +16,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
 
 use hermes_config::{TerminalConfig, TerminalHomeMode};
-use hermes_core::{AgentError, CommandOutput, TerminalBackend};
+use hermes_core::{subprocess::CommandNoWindowExt, AgentError, CommandOutput, TerminalBackend};
 
 const PROCESS_OUTPUT_WINDOW_CHARS: usize = 200_000;
 const PROCESS_PREVIEW_CHARS: usize = 1_000;
@@ -367,6 +367,7 @@ impl LocalBackend {
             let status = std::process::Command::new("kill")
                 .arg("-TERM")
                 .arg(pid.to_string())
+                .suppress_windows_console()
                 .status()
                 .map_err(|e| AgentError::Io(format!("Failed to invoke kill for pid {pid}: {e}")))?;
             if status.success() {
@@ -381,6 +382,7 @@ impl LocalBackend {
         {
             let status = std::process::Command::new("taskkill")
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .suppress_windows_console()
                 .status()
                 .map_err(|e| {
                     AgentError::Io(format!("Failed to invoke taskkill for pid {pid}: {e}"))
@@ -446,6 +448,7 @@ impl TerminalBackend for LocalBackend {
                 if let Some(dir) = workdir {
                     pty_cmd.current_dir(resolve_path(dir)?);
                 }
+                pty_cmd.suppress_windows_console();
 
                 return self
                     .collect_foreground_child(
@@ -492,6 +495,7 @@ impl TerminalBackend for LocalBackend {
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         scrub_subprocess_env(&mut cmd, &self.env_passthrough);
         apply_subprocess_home_policy(&mut cmd, subprocess_home.as_ref());
+        cmd.suppress_windows_console();
 
         if let Some(dir) = workdir {
             cmd.current_dir(resolve_path(dir)?);
@@ -652,6 +656,7 @@ impl TerminalBackend for LocalBackend {
                 if let Some(dir) = workdir {
                     pty_cmd.current_dir(resolve_path(dir)?);
                 }
+                pty_cmd.suppress_windows_console();
 
                 return self
                     .collect_foreground_child(
@@ -683,6 +688,7 @@ impl TerminalBackend for LocalBackend {
         if let Some(dir) = workdir {
             cmd.current_dir(resolve_path(dir)?);
         }
+        cmd.suppress_windows_console();
 
         self.collect_foreground_child(
             cmd,

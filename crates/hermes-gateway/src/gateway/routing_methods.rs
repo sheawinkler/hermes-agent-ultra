@@ -422,6 +422,7 @@ impl Gateway {
             .kill_on_drop(true)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .suppress_windows_console()
             .output();
         let output = match tokio::time::timeout(Duration::from_secs(timeout_secs), child).await {
             Ok(result) => result.map_err(|e| {

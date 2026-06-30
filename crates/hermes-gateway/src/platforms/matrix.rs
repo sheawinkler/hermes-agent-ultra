@@ -47,6 +47,7 @@ use tokio::sync::{Mutex as AsyncMutex, Notify};
 use tracing::{debug, error, info, warn};
 
 use hermes_core::errors::GatewayError;
+use hermes_core::subprocess::CommandNoWindowExt;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 
 use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};

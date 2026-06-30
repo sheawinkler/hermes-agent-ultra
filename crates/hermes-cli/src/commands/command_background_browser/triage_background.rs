@@ -1168,6 +1168,7 @@ fn schedule_background_job_execution(status_path: PathBuf, log_path: PathBuf, ta
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        cmd.suppress_windows_console();
         // Ensure detached children do not survive runtime/session teardown.
         cmd.kill_on_drop(true);
 

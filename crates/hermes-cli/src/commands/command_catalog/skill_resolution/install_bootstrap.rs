@@ -400,6 +400,7 @@ async fn execute_bootstrap_command(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    process.suppress_windows_console();
     let output = process.output().await.map_err(|e| {
         AgentError::Io(format!(
             "Failed to execute bootstrap command '{}': {}",
@@ -522,4 +523,3 @@ async fn maybe_run_skill_bootstrap(
 
     Ok(())
 }
-

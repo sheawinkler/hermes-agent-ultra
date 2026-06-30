@@ -19,7 +19,9 @@ use hermes_agent::agent_loop::ToolRegistry;
 use hermes_agent::skill_orchestrator::parse_frontmatter;
 use hermes_agent::{AgentConfig, AgentLoop};
 use hermes_config::{load_config, load_prefill_messages, GatewayConfig};
-use hermes_core::{AgentResult, LlmProvider, Message, Skill, ToolSchema};
+use hermes_core::{
+    subprocess::CommandNoWindowExt, AgentResult, LlmProvider, Message, Skill, ToolSchema,
+};
 use hermes_skills::SkillGuard;
 use hermes_tools::{ToolRegistry as ToolsetRegistry, ToolsetManager};
 use regex::Regex;
@@ -297,10 +299,12 @@ fn command_for_script_path(script_path: &Path) -> Command {
     if ext == "sh" || ext == "bash" {
         let mut command = Command::new("/bin/bash");
         command.arg(script_path);
+        command.suppress_windows_console();
         command
     } else {
         let mut command = Command::new(python_for_scripts());
         command.arg(script_path);
+        command.suppress_windows_console();
         command
     }
 }
@@ -639,6 +643,7 @@ impl CronRunner {
             let shell = shell_for_inline_script(job);
             let mut command = Command::new(shell);
             command.arg("-lc").arg(script);
+            command.suppress_windows_console();
             command
         };
 

@@ -1,4 +1,6 @@
 /// Handle `hermes doctor`.
+use hermes_core::subprocess::CommandNoWindowExt;
+
 fn build_elite_doctor_diagnostics(cli: &Cli) -> serde_json::Value {
     let provenance_path = provenance_key_path_for_cli(cli);
     let provenance_exists = provenance_path.exists();
@@ -238,6 +240,7 @@ async fn run_doctor(
         print!("  {}... ", name);
         let ok = match tokio::process::Command::new("which")
             .arg(cmd)
+            .suppress_windows_console()
             .output()
             .await
         {
@@ -1218,6 +1221,7 @@ async fn run_legacy_elite_check(cmdline: String, json: bool, strict: bool) -> Re
     }
     let output = tokio::process::Command::new("bash")
         .args(["-lc", &cmdline])
+        .suppress_windows_console()
         .output()
         .await
         .map_err(|e| AgentError::Io(format!("elite-check command failed to start: {}", e)))?;

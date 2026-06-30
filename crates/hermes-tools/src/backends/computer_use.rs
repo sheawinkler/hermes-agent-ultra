@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-use hermes_core::ToolError;
+use hermes_core::{subprocess::CommandNoWindowExt, ToolError};
 
 use crate::tools::computer_use::ComputerUseBackend;
 
@@ -62,6 +62,7 @@ impl CuaDriverBackend {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .suppress_windows_console()
             .spawn()
             .map_err(|err| {
                 ToolError::ExecutionFailed(format!(
@@ -209,6 +210,7 @@ pub async fn resolve_mcp_invocation(driver_cmd: &str) -> (String, Vec<String>) {
         Command::new(driver_cmd)
             .arg("manifest")
             .stdin(Stdio::null())
+            .suppress_windows_console()
             .output(),
     )
     .await

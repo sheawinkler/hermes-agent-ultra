@@ -127,6 +127,7 @@ fn check_codex_binary_status() -> (bool, String) {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .suppress_windows_console()
         .output();
     match output {
         Ok(output) if output.status.success() => {

@@ -22,7 +22,7 @@ use hermes_config::managed_gateway::{
     resolve_managed_tool_gateway, resolve_openai_audio_api_key, ManagedToolGatewayConfig,
     ResolveOptions,
 };
-use hermes_core::ToolError;
+use hermes_core::{subprocess::CommandNoWindowExt, ToolError};
 
 pub const FALLBACK_MAX_TEXT_LENGTH: usize = 4_000;
 pub const DEFAULT_COMMAND_TTS_MAX_TEXT_LENGTH: usize = 15_000;
@@ -691,6 +691,7 @@ impl MultiTtsBackend {
                 cmd.arg("--noise_w").arg(v);
             }
         }
+        cmd.suppress_windows_console();
 
         let mut child = cmd.spawn().map_err(|e| {
             ToolError::ExecutionFailed(format!("Failed to start piper binary '{}': {}", binary, e))
@@ -797,6 +798,7 @@ impl MultiTtsBackend {
         };
         cmd.stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped());
+        cmd.suppress_windows_console();
 
         let duration = command_tts_timeout(&provider.config);
         let output = match timeout(duration, cmd.output()).await {

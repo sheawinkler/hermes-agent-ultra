@@ -184,6 +184,7 @@ async fn run_shell_capture(command: &str) -> Result<(i32, String, String), Agent
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .suppress_windows_console()
         .output()
         .await
         .map_err(|e| AgentError::Io(format!("shell command failed: {}", e)))?;
@@ -330,6 +331,7 @@ async fn count_git_tracked_files(repo_root: &Path) -> Result<usize, AgentError> 
         .arg("ls-files")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .suppress_windows_console()
         .output()
         .await
         .map_err(|e| AgentError::Io(format!("git ls-files failed: {}", e)))?;
@@ -578,4 +580,3 @@ async fn handle_studio_command(app: &mut App, args: &[&str]) -> Result<CommandRe
     }
     Ok(CommandResult::Handled)
 }
-

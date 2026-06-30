@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use std::process::Stdio;
 use tokio::process::Command as TokioCommand;
 
-use hermes_core::{AgentError, CommandOutput, TerminalBackend};
+use hermes_core::{subprocess::CommandNoWindowExt, AgentError, CommandOutput, TerminalBackend};
 
 /// A [`TerminalBackend`] that runs commands on a remote machine via SSH.
 pub struct SshBackend {
@@ -85,6 +85,7 @@ impl SshBackend {
     fn ssh_command(&self, args: &[String]) -> TokioCommand {
         let mut command = TokioCommand::new("ssh");
         command.args(args).stdin(Stdio::null());
+        command.suppress_windows_console();
         command
     }
 }

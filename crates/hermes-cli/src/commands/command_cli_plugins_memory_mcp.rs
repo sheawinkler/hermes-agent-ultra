@@ -1,4 +1,5 @@
 include!("command_cli_plugins_memory_mcp/plugins.rs");
+
 pub async fn handle_cli_plugins(
     action: Option<String>,
     name: Option<String>,
@@ -124,6 +125,7 @@ pub async fn handle_cli_plugins(
                         &plugin_name,
                         &target.to_string_lossy(),
                     ])
+                    .suppress_windows_console()
                     .output()
                     .await
                     .map_err(|e| hermes_core::AgentError::Io(format!("git clone failed: {}", e)))?;
@@ -220,6 +222,7 @@ pub async fn handle_cli_plugins(
                 println!("  Cloning from GitHub: {}", git_url);
                 let output = tokio::process::Command::new("git")
                     .args(["clone", "--depth", "1", &git_url, &target.to_string_lossy()])
+                    .suppress_windows_console()
                     .output()
                     .await
                     .map_err(|e| hermes_core::AgentError::Io(format!("git clone failed: {}", e)))?;
@@ -328,6 +331,7 @@ pub async fn handle_cli_plugins(
 
                                 let output = tokio::process::Command::new("git")
                                     .args(["clone", "--depth", "1", url, &target.to_string_lossy()])
+                                    .suppress_windows_console()
                                     .output()
                                     .await
                                     .map_err(|e| {
@@ -440,6 +444,7 @@ pub async fn handle_cli_plugins(
                         let path_s = path.to_string_lossy().to_string();
                         let before = tokio::process::Command::new("git")
                             .args(["-C", &path_s, "rev-parse", "HEAD"])
+                            .suppress_windows_console()
                             .output()
                             .await
                             .map_err(|e| {
@@ -460,6 +465,7 @@ pub async fn handle_cli_plugins(
 
                         let pull = tokio::process::Command::new("git")
                             .args(["-C", &path_s, "pull", "--ff-only"])
+                            .suppress_windows_console()
                             .output()
                             .await
                             .map_err(|e| {
@@ -477,6 +483,7 @@ pub async fn handle_cli_plugins(
 
                         let after = tokio::process::Command::new("git")
                             .args(["-C", &path_s, "rev-parse", "HEAD"])
+                            .suppress_windows_console()
                             .output()
                             .await
                             .map_err(|e| {
