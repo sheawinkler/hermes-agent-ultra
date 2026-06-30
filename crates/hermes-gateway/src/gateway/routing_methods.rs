@@ -312,8 +312,61 @@ impl Gateway {
             )
             .map(Self::busy_event_to_incoming)
         };
+        if let Err(error) = &processing_result {
+            self.send_processing_error_notification(incoming, error).await;
+        }
         processing_result?;
         Ok(pending)
+    }
+
+    async fn send_processing_error_notification(
+        &self,
+        incoming: &IncomingMessage,
+        original_error: &GatewayError,
+    ) -> bool {
+        let mut detail: String = original_error.to_string().chars().take(300).collect();
+        if detail.trim().is_empty() {
+            detail = "no details available".to_string();
+        }
+        let notice = format!(
+            "Sorry, I encountered an error ({}).\n{}\nTry again or use /reset to start a fresh session.",
+            Self::gateway_error_variant_name(original_error),
+            detail
+        );
+
+        match self
+            .send_message_threaded(
+                &incoming.platform,
+                &incoming.chat_id,
+                &notice,
+                Some(ParseMode::Plain),
+                Self::reply_thread_id(incoming),
+            )
+            .await
+        {
+            Ok(()) => true,
+            Err(notify_error) => {
+                error!(
+                    platform = %incoming.platform,
+                    chat_id = %incoming.chat_id,
+                    original_error = %original_error,
+                    notify_error = %notify_error,
+                    "failed to send gateway error notification"
+                );
+                false
+            }
+        }
+    }
+
+    fn gateway_error_variant_name(error: &GatewayError) -> &'static str {
+        match error {
+            GatewayError::ConnectionFailed(_) => "ConnectionFailed",
+            GatewayError::SendFailed(_) => "SendFailed",
+            GatewayError::Platform(_) => "Platform",
+            GatewayError::Auth(_) => "Auth",
+            GatewayError::RateLimited { .. } => "RateLimited",
+            GatewayError::SessionExpired(_) => "SessionExpired",
+        }
     }
 
     fn quick_command_key(raw: &str) -> String {
@@ -362,6 +415,8 @@ impl Gateway {
         timeout_secs: u64,
     ) -> Result<String, GatewayError> {
         let child = tokio::process::Command::new("sh")
+            .env_clear()
+            .envs(hermes_core::subprocess_env::hermes_subprocess_env(false))
             .arg("-c")
             .arg(command)
             .kill_on_drop(true)

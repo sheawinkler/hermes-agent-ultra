@@ -440,7 +440,9 @@ impl HookHandler for CommandHookHandler {
         .to_string();
 
         let mut cmd = tokio::process::Command::new(&self.argv[0]);
-        cmd.args(&self.argv[1..])
+        cmd.env_clear()
+            .envs(hermes_core::subprocess_env::hermes_subprocess_env(false))
+            .args(&self.argv[1..])
             .current_dir(&self.cwd)
             .env("HERMES_HOOK_EVENT", &event.event_type)
             .stdin(Stdio::piped())
@@ -582,7 +584,7 @@ impl HookHandler for BootMdHook {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use tempfile::TempDir;
 
     /// In-process handler that records every event it sees (for
@@ -660,6 +662,44 @@ mod tests {
 
         fn name(&self) -> &str {
             &self.name
+        }
+    }
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct EnvVarGuard {
+        previous: Vec<(String, Option<String>)>,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl EnvVarGuard {
+        fn set(vars: &[(&str, &str)]) -> Self {
+            let guard = ENV_LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .expect("env lock poisoned");
+            let previous = vars
+                .iter()
+                .map(|(key, _)| ((*key).to_string(), std::env::var(key).ok()))
+                .collect::<Vec<_>>();
+            for (key, value) in vars {
+                std::env::set_var(key, value);
+            }
+            Self {
+                previous,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            for (key, value) in &self.previous {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
         }
     }
 
@@ -1178,6 +1218,34 @@ mod tests {
             .unwrap();
         let written = std::fs::read_to_string(&out).unwrap();
         assert_eq!(written, "agent:step");
+    }
+
+    #[tokio::test]
+    async fn command_hook_sanitizes_credential_environment() {
+        let _env = EnvVarGuard::set(&[
+            ("OPENAI_API_KEY", "sk-should-not-leak"),
+            ("GH_TOKEN", "ghp-should-not-leak"),
+            ("SAFE_HOOK_VAR", "keep-me"),
+        ]);
+        let tmp = TempDir::new().unwrap();
+        let out = tmp.path().join("env_out.txt");
+        let h = CommandHookHandler::new(
+            "env-sanitized-hook",
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf '%s|%s|%s' \"${OPENAI_API_KEY:-}\" \"${GH_TOKEN:-}\" \"${SAFE_HOOK_VAR:-}\" > \"$1\"".into(),
+                "hook-env".into(),
+                out.to_string_lossy().to_string(),
+            ],
+            std::env::temp_dir(),
+            5,
+        );
+        h.handle(&HookEvent::new("agent:step", json!({"i": 7})))
+            .await
+            .unwrap();
+        let written = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(written, "||keep-me");
     }
 
     #[tokio::test]

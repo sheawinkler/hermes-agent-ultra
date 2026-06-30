@@ -488,6 +488,20 @@ mod tests {
         assert!(url.contains("scope=openid"));
     }
 
+    #[test]
+    fn authorization_url_allows_http_redirect_with_arbitrary_host() {
+        let endpoints = OAuth2Endpoints {
+            authorize_url: "https://example.com/oauth/authorize".to_string(),
+            token_url: "https://example.com/oauth/token".to_string(),
+            client_id: "cid".to_string(),
+            redirect_uri: "http://hermes.internal:9119/auth/callback".to_string(),
+            scopes: vec!["openid".to_string()],
+        };
+        let pkce = generate_pkce_pair();
+        let url = build_authorization_url(&endpoints, &pkce, "state-xyz").unwrap();
+        assert!(url.contains("redirect_uri=http%3A%2F%2Fhermes.internal%3A9119%2Fauth%2Fcallback"));
+    }
+
     fn sample_credential(provider: &str, access_token: &str) -> OAuthCredential {
         OAuthCredential {
             provider: provider.to_string(),

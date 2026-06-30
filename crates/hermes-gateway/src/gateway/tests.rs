@@ -9,6 +9,11 @@ struct TestAdapter {
     messages: Arc<Mutex<Vec<(String, String)>>>,
 }
 
+struct FailingSendAdapter {
+    messages: Arc<Mutex<Vec<(String, String)>>>,
+    error: &'static str,
+}
+
 struct StatusUpdateAdapter {
     updates: Arc<Mutex<Vec<(String, String, String)>>>,
 }
@@ -80,6 +85,42 @@ impl Drop for HermesHomeEnvGuard {
         match &self.prev_ultra_home {
             Some(value) => std::env::set_var("HERMES_AGENT_ULTRA_HOME", value),
             None => std::env::remove_var("HERMES_AGENT_ULTRA_HOME"),
+        }
+    }
+}
+
+struct EnvVarsGuard {
+    previous: Vec<(String, Option<String>)>,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl EnvVarsGuard {
+    fn set(vars: &[(&str, &str)]) -> Self {
+        let guard = ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock poisoned");
+        let previous = vars
+            .iter()
+            .map(|(key, _)| ((*key).to_string(), std::env::var(key).ok()))
+            .collect::<Vec<_>>();
+        for (key, value) in vars {
+            std::env::set_var(key, value);
+        }
+        Self {
+            previous,
+            _guard: guard,
+        }
+    }
+}
+
+impl Drop for EnvVarsGuard {
+    fn drop(&mut self) {
+        for (key, value) in &self.previous {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
         }
     }
 }
@@ -188,6 +229,56 @@ impl PlatformAdapter for TestAdapter {
             .lock()
             .unwrap()
             .push((chat_id.to_string(), marker));
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool {
+        true
+    }
+
+    fn platform_name(&self) -> &str {
+        "test"
+    }
+}
+
+#[async_trait]
+impl PlatformAdapter for FailingSendAdapter {
+    async fn start(&self) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    async fn stop(&self) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
+        self.messages
+            .lock()
+            .unwrap()
+            .push((chat_id.to_string(), text.to_string()));
+        Err(GatewayError::SendFailed(self.error.to_string()))
+    }
+
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    async fn send_file(
+        &self,
+        _chat_id: &str,
+        _file_path: &str,
+        _caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
         Ok(())
     }
 
@@ -411,6 +502,38 @@ async fn gateway_quick_exec_returns_stdout_from_config() {
         .expect("reply");
 
     assert_eq!(reply, "ok");
+}
+
+#[tokio::test]
+async fn gateway_quick_exec_sanitizes_credential_environment() {
+    let _env = EnvVarsGuard::set(&[
+        ("OPENAI_API_KEY", "sk-should-not-leak"),
+        ("GH_TOKEN", "ghp-should-not-leak"),
+        ("SAFE_QUICK_ENV", "keep-me"),
+    ]);
+    let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+    let dm_manager = DmManager::with_pair_behavior();
+    let mut cfg = GatewayConfig::default();
+    cfg.quick_commands.insert(
+        "envcheck".to_string(),
+        QuickCommandConfig {
+            kind: "exec".to_string(),
+            command: Some(
+                "printf '%s|%s|%s' \"${OPENAI_API_KEY:-}\" \"${GH_TOKEN:-}\" \"${SAFE_QUICK_ENV:-}\""
+                    .to_string(),
+            ),
+            ..Default::default()
+        },
+    );
+    let gw = Gateway::new(session_mgr, dm_manager, cfg);
+
+    let reply = gw
+        .resolve_quick_command("/envcheck")
+        .await
+        .expect("quick command")
+        .expect("reply");
+
+    assert_eq!(reply, "||keep-me");
 }
 
 #[tokio::test]
@@ -809,6 +932,66 @@ async fn gateway_register_and_list_adapters() {
     let gw = Gateway::with_defaults(session_mgr, GatewayConfig::default());
 
     assert!(gw.adapter_names().await.is_empty());
+}
+
+#[tokio::test]
+async fn gateway_agent_error_sends_user_notification() {
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(TestAdapter {
+        messages: sent.clone(),
+    });
+    let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+    let mut dm_manager = DmManager::with_pair_behavior();
+    dm_manager.authorize_user("user1");
+    let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+    gw.register_adapter("test", adapter).await;
+    gw.set_message_handler(Arc::new(|_messages| {
+        Box::pin(async { Err(GatewayError::Platform("agent boom".to_string())) })
+    }))
+    .await;
+
+    let err = gw
+        .route_message(&test_incoming("explode"))
+        .await
+        .expect_err("handler failure should still propagate");
+
+    assert_eq!(err.to_string(), "Platform error: agent boom");
+    let sent = sent.lock().expect("sent lock");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, "chat1");
+    assert!(sent[0]
+        .1
+        .contains("Sorry, I encountered an error (Platform)."));
+    assert!(sent[0].1.contains("Platform error: agent boom"));
+    assert!(sent[0].1.contains("Try again or use /reset"));
+}
+
+#[tokio::test]
+async fn gateway_error_notification_failure_preserves_original_error() {
+    let attempts = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(FailingSendAdapter {
+        messages: attempts.clone(),
+        error: "notify transport down",
+    });
+    let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+    let mut dm_manager = DmManager::with_pair_behavior();
+    dm_manager.authorize_user("user1");
+    let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+    gw.register_adapter("test", adapter).await;
+    gw.set_message_handler(Arc::new(|_messages| {
+        Box::pin(async { Err(GatewayError::Platform("agent boom".to_string())) })
+    }))
+    .await;
+
+    let err = gw
+        .route_message(&test_incoming("explode"))
+        .await
+        .expect_err("original handler failure should still propagate");
+
+    assert_eq!(err.to_string(), "Platform error: agent boom");
+    let attempts = attempts.lock().expect("attempts lock");
+    assert_eq!(attempts.len(), 1);
+    assert!(attempts[0].1.contains("Platform error: agent boom"));
 }
 
 #[tokio::test]

@@ -58,6 +58,17 @@ pub struct SlackResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct SlackAuthTestResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub team: Option<String>,
+    #[serde(default)]
+    pub team_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct SlackConversationsResponse {
     pub ok: bool,
     #[serde(default)]
@@ -232,4 +243,3 @@ impl SlackMentionPolicy {
         }
     }
 }
-

@@ -32,6 +32,14 @@ fn slack_value_string(value: &serde_json::Value, key: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn parse_slack_scope_header(raw: &str) -> BTreeSet<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 fn slack_mime_key(raw: &str) -> String {
     raw.split(';')
         .next()
@@ -299,4 +307,3 @@ fn slack_image_url_blocks(image_url: &str, caption: Option<&str>) -> (serde_json
     let fallback = caption.unwrap_or(image_url).to_string();
     (serde_json::Value::Array(blocks), fallback)
 }
-

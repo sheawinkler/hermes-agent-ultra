@@ -114,6 +114,34 @@ pub fn relay_inbound_ack_frame(buffer_id: &str) -> Option<Value> {
     (!buffer_id.is_empty()).then(|| json!({"type": "inbound_ack", "bufferId": buffer_id}))
 }
 
+/// Resolve the platform-neutral relay scope discriminator.
+///
+/// `scope_id` is canonical; `guild_id` is a deprecated compatibility alias
+/// retained during the cross-repo relay wire migration.
+pub fn relay_scope_id_from_source(source: &Value) -> Option<String> {
+    source
+        .get("scope_id")
+        .or_else(|| source.get("guild_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+/// Dual-write canonical `scope_id` and deprecated `guild_id` alias.
+pub fn relay_dual_write_scope_id(source: &mut Value, scope_id: &str) -> bool {
+    let scope_id = scope_id.trim();
+    if scope_id.is_empty() {
+        return false;
+    }
+    let Some(map) = source.as_object_mut() else {
+        return false;
+    };
+    map.insert("scope_id".to_string(), Value::String(scope_id.to_string()));
+    map.insert("guild_id".to_string(), Value::String(scope_id.to_string()));
+    true
+}
+
 /// Classify relay socket close events.
 ///
 /// A connector `4401` before the first successful descriptor/handshake remains
@@ -271,6 +299,30 @@ mod tests {
             json!({"type": "inbound_ack", "bufferId": "buf-9"})
         );
         assert!(relay_inbound_ack_frame("   ").is_none());
+    }
+
+    #[test]
+    fn relay_scope_id_prefers_canonical_and_falls_back_to_guild_alias() {
+        assert_eq!(
+            relay_scope_id_from_source(&json!({"scope_id": "S1", "guild_id": "G1"})).as_deref(),
+            Some("S1")
+        );
+        assert_eq!(
+            relay_scope_id_from_source(&json!({"guild_id": "G1"})).as_deref(),
+            Some("G1")
+        );
+        assert!(relay_scope_id_from_source(&json!({"scope_id": "  "})).is_none());
+    }
+
+    #[test]
+    fn relay_scope_id_dual_writes_canonical_and_legacy_keys() {
+        let mut source = json!({"platform": "discord", "chat_id": "C1"});
+        assert!(relay_dual_write_scope_id(&mut source, "S1"));
+        assert_eq!(source["scope_id"], "S1");
+        assert_eq!(source["guild_id"], "S1");
+        assert!(!relay_dual_write_scope_id(&mut source, " "));
+        let mut non_object = json!(null);
+        assert!(!relay_dual_write_scope_id(&mut non_object, "S1"));
     }
 
     #[test]

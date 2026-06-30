@@ -18,6 +18,8 @@ pub struct SessionSource {
     pub chat_type: String,
     pub user_id: Option<String>,
     pub thread_id: Option<String>,
+    pub scope_id: Option<String>,
+    pub guild_id: Option<String>,
 }
 
 impl SessionSource {
@@ -32,6 +34,8 @@ impl SessionSource {
             chat_type: chat_type.into(),
             user_id: None,
             thread_id: None,
+            scope_id: None,
+            guild_id: None,
         }
     }
 
@@ -44,6 +48,25 @@ impl SessionSource {
         self.thread_id = Some(thread_id.into());
         self
     }
+
+    pub fn with_scope(mut self, scope_id: impl Into<String>) -> Self {
+        let scope_id = scope_id.into();
+        self.guild_id = Some(scope_id.clone());
+        self.scope_id = Some(scope_id);
+        self
+    }
+
+    pub fn with_guild_id(self, guild_id: impl Into<String>) -> Self {
+        self.with_scope(guild_id)
+    }
+
+    pub fn scope_id(&self) -> Option<&str> {
+        self.scope_id
+            .as_deref()
+            .or(self.guild_id.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
 }
 
 pub fn build_session_key(source: &SessionSource) -> String {
@@ -52,6 +75,9 @@ pub fn build_session_key(source: &SessionSource) -> String {
         .filter(|part| !part.is_empty())
         .map(str::to_string)
         .collect::<Vec<_>>();
+    if let Some(scope_id) = source.scope_id() {
+        parts.insert(1, scope_id.to_string());
+    }
     if let Some(thread_id) = source
         .thread_id
         .as_deref()
@@ -466,6 +492,20 @@ mod tests {
             build_session_key(&source("10")),
             build_session_key(&source("11"))
         );
+    }
+
+    #[test]
+    fn session_source_scope_id_is_canonical_and_guild_id_is_alias() {
+        let scoped = SessionSource::new("relay", "C1", "channel").with_scope("T1");
+        assert_eq!(scoped.scope_id.as_deref(), Some("T1"));
+        assert_eq!(scoped.guild_id.as_deref(), Some("T1"));
+        assert_eq!(scoped.scope_id(), Some("T1"));
+        assert_eq!(build_session_key(&scoped), "relay:T1:C1");
+
+        let legacy = SessionSource::new("relay", "C1", "channel").with_guild_id("G1");
+        assert_eq!(legacy.scope_id.as_deref(), Some("G1"));
+        assert_eq!(legacy.guild_id.as_deref(), Some("G1"));
+        assert_eq!(build_session_key(&legacy), "relay:G1:C1");
     }
 
     #[test]

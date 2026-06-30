@@ -16,6 +16,12 @@ impl PlatformAdapter for SlackAdapter {
             "Slack adapter starting (token: {})",
             describe_secret(&self.config.token)
         );
+        if let Err(err) = self
+            .warn_if_missing_group_dm_scopes_from_auth_test(SLACK_API_BASE)
+            .await
+        {
+            debug!(error = %err, "Slack auth scope check skipped");
+        }
         self.base.mark_running();
         Ok(())
     }
@@ -115,4 +121,3 @@ impl PlatformAdapter for SlackAdapter {
         "slack"
     }
 }
-

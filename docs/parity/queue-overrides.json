@@ -6533,6 +6533,31 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Superseded by Rust model-switch architecture: CLI/TUI and gateway model switches update runtime config/defaults without appending a model-switch marker into model-facing history, so strict providers never see a mid-conversation system message. Added gateway_model_switch_does_not_inject_mid_history_system_marker regression coverage."
+    },
+    "9c6229ce249e4bbd86a22463be73ac2986db6324": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported with shared Rust subprocess environment policy: hermes_core::subprocess_env strips provider credentials by default, always strips tier-1 live tokens/gateway secrets, preserves safe env vars, normalizes PATH, and is used by gateway command hooks and quick exec. Focused tests cover helper policy plus hook and quick-exec child environments."
+    },
+    "34e616e778d065acea1477ddc6933c30378def89": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust SlackAdapter: startup performs a best-effort auth.test scope audit, warns once per workspace when direct-message scopes exist but mpim:history/message.mpim coverage is missing, and continues startup if the audit fails. Unit and wiremock tests cover stale installs, once-only warnings, auth.test header parsing, and mpim-present suppression."
+    },
+    "3a55f66602898b53524a232e3dbadea3ed9b0cf8": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported with Rust relay/session scope_id migration support: scope_id is canonical, guild_id remains a deprecated alias, relay helpers dual-read and dual-write both keys, SessionSource exposes with_scope/with_guild_id compatibility, and docs/tests cover the wire-contract behavior."
+    },
+    "f3d2dfbec670cd520bf23fe6ec1f4ce918d286bd": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Superseded by Rust OAuth URL construction: hermes-auth does not impose the upstream self-hosted localhost-only http redirect_uri restriction, and the regression test proves arbitrary http:// host callback URLs are preserved in authorization URLs."
+    },
+    "f1cbe4308f54215cec248eba94444a6fb8f1caef": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust Gateway route handling: agent processing errors now trigger a best-effort user error notification, notification-send failures are logged with the original error preserved, and focused tests cover user notice delivery plus send-failure preservation."
     }
   },
   "subject_patterns": [

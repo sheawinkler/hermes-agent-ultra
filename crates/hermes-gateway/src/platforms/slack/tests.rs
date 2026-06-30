@@ -266,6 +266,78 @@ fn slack_mention_patterns_env_fallback_splits_mixed_csv_and_newlines() {
 }
 
 #[test]
+fn slack_group_dm_scope_warning_detects_stale_install_once() {
+    let adapter = SlackAdapter::new(slack_test_config()).expect("adapter");
+    assert!(adapter.warn_if_missing_group_dm_scopes(
+        "chat:write,im:history,im:read,channels:history",
+        Some("Acme")
+    ));
+    assert!(!adapter.warn_if_missing_group_dm_scopes(
+        "chat:write,im:history,im:read,channels:history",
+        Some("Acme")
+    ));
+}
+
+#[test]
+fn slack_group_dm_scope_warning_requires_im_without_mpim() {
+    let adapter = SlackAdapter::new(slack_test_config()).expect("adapter");
+    assert!(!adapter.warn_if_missing_group_dm_scopes(
+        "chat:write,im:history,mpim:history,mpim:read",
+        Some("Acme")
+    ));
+    assert!(!adapter.warn_if_missing_group_dm_scopes("chat:write,channels:history", Some("Acme")));
+    assert!(!adapter.warn_if_missing_group_dm_scopes("", Some("Acme")));
+}
+
+#[tokio::test]
+async fn slack_auth_test_scope_header_drives_group_dm_warning() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/auth.test"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-oauth-scopes", "chat:write,im:history,im:read")
+                .set_body_json(serde_json::json!({
+                    "ok": true,
+                    "team": "Acme"
+                })),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let adapter = SlackAdapter::new(slack_test_config()).expect("adapter");
+    assert!(adapter
+        .warn_if_missing_group_dm_scopes_from_auth_test(&server.uri())
+        .await
+        .expect("auth scope audit"));
+}
+
+#[tokio::test]
+async fn slack_auth_test_mpim_scope_present_does_not_warn() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/auth.test"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-oauth-scopes", "chat:write,im:history,mpim:history")
+                .set_body_json(serde_json::json!({
+                    "ok": true,
+                    "team": "Acme"
+                })),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let adapter = SlackAdapter::new(slack_test_config()).expect("adapter");
+    assert!(!adapter
+        .warn_if_missing_group_dm_scopes_from_auth_test(&server.uri())
+        .await
+        .expect("auth scope audit"));
+}
+
+#[test]
 fn parse_event_with_config_requires_mention_but_accepts_wake_word() {
     let mut cfg = slack_test_config();
     cfg.require_mention = true;

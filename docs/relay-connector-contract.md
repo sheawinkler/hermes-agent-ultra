@@ -19,6 +19,9 @@ upstream invariants:
 - The connector returns a capability descriptor before events flow.
 - Inbound events use the same session-key discriminators as native platform
   adapters.
+- Relay source metadata uses `scope_id` as the canonical platform-neutral
+  tenant discriminator; `guild_id` is a deprecated alias that Rust readers
+  dual-read and Rust writers dual-write during the migration overlap.
 - Platform signatures, encrypted payloads, and follow-up tokens are verified or
   vaulted by the connector, never leaked into the gateway.
 - Interrupts route by session key and cancel only the active turn for that
