@@ -1054,6 +1054,23 @@ fn test_mattpocock_default_skill_tap_present_in_merged_list() {
 }
 
 #[test]
+fn test_star_derived_default_skill_taps_present_in_merged_list() {
+    let merged = merged_skill_taps(&[]);
+    for expected in [
+        "https://github.com/addyosmani/agent-skills::skills",
+        "https://github.com/google/skills::skills",
+        "https://github.com/kepano/obsidian-skills::skills",
+        "https://github.com/bergside/awesome-design-skills::skills",
+        "https://github.com/Forward-Future/loopy::skills",
+    ] {
+        assert!(
+            merged.iter().any(|tap| tap == expected),
+            "missing default skill tap: {expected}"
+        );
+    }
+}
+
+#[test]
 fn test_merged_skill_taps_deduplicates_default() {
     let merged = merged_skill_taps(&["https://github.com/MiniMax-AI/cli::skill".to_string()]);
     assert_eq!(

@@ -186,6 +186,13 @@ fn register_builtin_tools_with_data_dir(
         "🌳",
         vec![],
     );
+    reg(
+        registry,
+        "project",
+        Arc::new(crate::tools::harness_cockpit::HarnessCockpitHandler::new()),
+        "🧭",
+        vec![],
+    );
 
     // -- Vision --------------------------------------------------------------
     {
@@ -1167,6 +1174,10 @@ mod tests {
         assert!(
             names.contains(&"telemetry_snapshot".to_string()),
             "invalid backend should keep telemetry snapshots"
+        );
+        assert!(
+            names.contains(&"harness_cockpit".to_string()),
+            "invalid backend should keep harness cockpit"
         );
         assert!(
             names.contains(&"ops_snapshot".to_string()),

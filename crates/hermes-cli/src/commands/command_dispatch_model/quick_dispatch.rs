@@ -114,6 +114,64 @@ async fn handle_quick_command(
     }
 }
 
+fn handle_harness_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let mut json_mode = false;
+    let mut action = "status".to_string();
+    let mut repo_arg = None;
+    for arg in args {
+        let value = arg.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if value.eq_ignore_ascii_case("json") || value == "--json" {
+            json_mode = true;
+            continue;
+        }
+        let lower = value.to_ascii_lowercase();
+        if action == "status"
+            && matches!(
+                lower.as_str(),
+                "status"
+                    | "all"
+                    | "skills"
+                    | "proof"
+                    | "roadmap"
+                    | "chaos"
+                    | "onboarding"
+                    | "objective"
+                    | "objectives"
+                    | "help"
+            )
+        {
+            action = lower;
+            continue;
+        }
+        if repo_arg.is_none() {
+            repo_arg = Some(PathBuf::from(value));
+        }
+    }
+    let repo_root = repo_arg.or_else(hermes_tools::repo::detect_repo_root_from_cwd);
+
+    if json_mode || action != "status" {
+        let payload = hermes_tools::tools::harness_cockpit::harness_cockpit_action_snapshot(
+            &action,
+            repo_root.as_deref(),
+        )
+        .map_err(AgentError::Config)?;
+        let pretty = serde_json::to_string_pretty(&payload)
+            .map_err(|err| AgentError::Config(format!("failed to render harness JSON: {err}")))?;
+        emit_command_output(app, pretty);
+    } else {
+        emit_command_output(
+            app,
+            hermes_tools::tools::harness_cockpit::render_harness_cockpit_text(
+                repo_root.as_deref(),
+            ),
+        );
+    }
+    Ok(CommandResult::Handled)
+}
+
 /// Handle a slash command.
 ///
 /// `cmd` is the full command token including the `/` prefix
@@ -206,6 +264,7 @@ async fn dispatch_slash_command(
         "/sethome" => handle_sethome_command(app, args),
         "/evolve" => handle_ops_evolve_command(app, args).await,
         "/objective" => handle_objective_command(app, args),
+        "/harness" => handle_harness_command(app, args),
         "/claims" => handle_claims_command(app, args),
         "/quorum" => handle_quorum_command(app, args).await,
         "/moa" => handle_moa_command(app, args).await,

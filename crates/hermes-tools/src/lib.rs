@@ -69,6 +69,7 @@ pub use tools::file::{
     PatchBackend, PatchHandler, ReadFileHandler, SearchBackend, SearchFilesHandler,
     WriteFileHandler,
 };
+pub use tools::harness_cockpit::HarnessCockpitHandler;
 pub use tools::homeassistant::{
     HaCallServiceHandler, HaGetStateHandler, HaListEntitiesHandler, HaListServicesHandler,
     HomeAssistantBackend,
