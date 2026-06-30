@@ -7,7 +7,10 @@
 //! - Event subscription verification and incoming message parsing
 //! - Mention detection and stripping
 
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -226,6 +229,7 @@ pub struct FeishuAdapter {
     client: Client,
     tenant_token: RwLock<Option<CachedToken>>,
     stop_signal: Arc<Notify>,
+    closing: AtomicBool,
 }
 
 impl FeishuAdapter {
@@ -239,11 +243,29 @@ impl FeishuAdapter {
             client,
             tenant_token: RwLock::new(None),
             stop_signal: Arc::new(Notify::new()),
+            closing: AtomicBool::new(false),
         })
     }
 
     pub fn config(&self) -> &FeishuConfig {
         &self.config
+    }
+
+    fn rearm_runtime(&self) {
+        self.closing.store(false, Ordering::SeqCst);
+    }
+
+    fn begin_shutdown(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+    }
+
+    fn ensure_runtime_available(&self, operation: &str) -> Result<(), GatewayError> {
+        if self.closing.load(Ordering::SeqCst) {
+            return Err(GatewayError::Platform(format!(
+                "Feishu adapter is shutting down; {operation} unavailable"
+            )));
+        }
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -252,6 +274,7 @@ impl FeishuAdapter {
 
     /// Get a valid tenant access token, refreshing automatically when expired.
     pub async fn get_tenant_token(&self) -> Result<String, GatewayError> {
+        self.ensure_runtime_available("tenant token refresh")?;
         {
             let guard = self.tenant_token.read().await;
             if let Some(ref cached) = *guard {
@@ -1282,6 +1305,7 @@ fn format_message(content: &str) -> String {
 impl PlatformAdapter for FeishuAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
         info!("Feishu adapter starting (app_id: {})", self.config.app_id);
+        self.rearm_runtime();
         self.get_tenant_token().await?;
         self.base.mark_running();
         Ok(())
@@ -1289,6 +1313,7 @@ impl PlatformAdapter for FeishuAdapter {
 
     async fn stop(&self) -> Result<(), GatewayError> {
         info!("Feishu adapter stopping");
+        self.begin_shutdown();
         self.base.mark_stopped();
         self.stop_signal.notify_one();
         Ok(())
@@ -1319,6 +1344,7 @@ impl PlatformAdapter for FeishuAdapter {
         file_path: &str,
         caption: Option<&str>,
     ) -> Result<(), GatewayError> {
+        self.ensure_runtime_available("file send")?;
         use crate::platforms::helpers::{media_category, mime_from_extension};
 
         let path = std::path::Path::new(file_path);
@@ -1418,6 +1444,7 @@ impl PlatformAdapter for FeishuAdapter {
         image_url: &str,
         caption: Option<&str>,
     ) -> Result<(), GatewayError> {
+        self.ensure_runtime_available("image-url send")?;
         let downloaded = download_media_url(&self.client, image_url).await;
 
         let (image_bytes, content_type) = match downloaded {

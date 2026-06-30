@@ -223,4 +223,51 @@ mod tests {
         assert_eq!(format_message("\n\nhello world\n"), "hello world");
         assert_eq!(format_message("  hello world  "), "hello world");
     }
+
+    #[tokio::test]
+    async fn stop_refuses_outbound_api_until_rearmed() {
+        let adapter = FeishuAdapter::new(FeishuConfig {
+            app_id: "cli_test_app".to_string(),
+            app_secret: "secret".to_string(),
+            verification_token: None,
+            encrypt_key: None,
+            proxy: AdapterProxyConfig::default(),
+        })
+        .expect("adapter");
+
+        adapter.stop().await.expect("stop");
+
+        let err = adapter
+            .send_text("oc_chat", "hello after shutdown")
+            .await
+            .expect_err("send is refused while shutting down");
+        let rendered = err.to_string();
+        assert!(rendered.contains("Feishu adapter is shutting down"));
+        assert!(rendered.contains("tenant token refresh"));
+
+        adapter.rearm_runtime();
+        assert!(!adapter.closing.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn stopped_feishu_file_paths_do_not_touch_local_inputs() {
+        let adapter = FeishuAdapter::new(FeishuConfig {
+            app_id: "cli_test_app".to_string(),
+            app_secret: "secret".to_string(),
+            verification_token: None,
+            encrypt_key: None,
+            proxy: AdapterProxyConfig::default(),
+        })
+        .expect("adapter");
+
+        adapter.stop().await.expect("stop");
+
+        let err = adapter
+            .send_file("oc_chat", "/definitely/missing/file.txt", None)
+            .await
+            .expect_err("shutdown guard wins before local file reads");
+        let rendered = err.to_string();
+        assert!(rendered.contains("Feishu adapter is shutting down"));
+        assert!(rendered.contains("file send"));
+    }
 }
