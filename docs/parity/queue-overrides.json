@@ -6593,6 +6593,51 @@
       "disposition": "superseded",
       "owner": "rust-runtime",
       "notes": "Upstream already-installed theme picker flags are confined to the absent Electron desktop app under apps/desktop. Hermes Agent Ultra does not ship that theme marketplace/install picker surface; Rust CLI/gateway/TUI UX is the shipped product boundary, so no Rust runtime port applies."
+    },
+    "5636c22828b0be1eadaf8968c7033efb27f705fa": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Photon Spectrum TS sidecar upgrade is confined to the Python/Node Photon plugin bridge. Hermes Agent Ultra does not ship the Photon sidecar in the Rust runtime; shipped Rust gateway adapters cover first-class platform integrations without vendoring this JS bridge."
+    },
+    "4345b3e767c73405e143b2f03a1e4e7773c2b472": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Photon Spectrum TS v8 sidecar upgrade only changes the absent Python/Node Photon bridge. There is no Rust Photon sidecar/package-lock surface to update, so the Rust product boundary supersedes this dependency churn."
+    },
+    "882730026739c51e6ae5c7cbe47e9b64a920a065": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Photon tapback correlation targets the absent Photon adapter and Spectrum TS sidecar. Hermes Agent Ultra does not ship that bridge; Rust gateway reaction/media behavior is owned by the compiled platform adapters instead."
+    },
+    "cd592c105cbbc0bbf927b30ee9d061b1dd7b0b1b": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported/superseded in Rust WhatsApp gateway: PlatformAdapter::send_file uploads local media to WhatsApp Cloud API, maps extension categories to native image/video/audio/document payloads, then sends the uploaded media id. This batch adds api_base_url configurability and a wiremock test proving upload-then-native-image send with caption through the Rust adapter and gateway media path."
+    },
+    "520212cc593dd8bc0472002877e31d7310bd295b": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream live agent terminal streaming changes are Electron desktop right-sidebar UI code. Hermes Agent Ultra does not ship the Electron desktop terminal tab surface; Rust CLI/gateway/TUI terminal execution and streaming surfaces are the product boundary."
+    },
+    "e117cfdff08b7e43b7d0b7f7e661be7b710e7a4f": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream live agent terminals and agent-driven tab close are Electron desktop UI changes. The Rust runtime has no apps/desktop tab lifecycle to port; CLI/gateway session lifecycle is implemented in compiled Rust."
+    },
+    "adacb16d624336f18380a0a40b4b704c699c3f10": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream readable agent terminal tab fixes are limited to the absent Electron desktop terminal UI. Hermes Agent Ultra's shipped runtime uses Rust CLI/gateway/TUI surfaces, so no Rust port applies."
+    },
+    "e5d22ab80d979d38d8062e666af418ed847618a9": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream Daytona fix quotes a Python SDK shell mkdir in the single-upload path. Hermes Agent Ultra's Rust DaytonaBackend does not run mkdir for writes; it sends PUT /workspace/{id}/file with the remote path URL-encoded, so the shell-metacharacter injection class is absent."
+    },
+    "5a3d7fb99d1f23d3156e17575cabc664fc7fe593": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported/superseded by Rust binary image handling: xAI/OpenRouter-compatible image references use std::fs::read/tokio::fs::read byte reads before base64 data-URL encoding, never text decoding. Existing Rust image/video generation tests cover local image paths encoded as data URLs, so the Python windows-footgun suppression is not needed."
     }
   },
   "subject_patterns": [
