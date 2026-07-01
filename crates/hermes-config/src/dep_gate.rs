@@ -36,7 +36,7 @@ pub fn deps_for_tool(tool_name: &str) -> &'static [RuntimeDep] {
         "search_files" => &[RuntimeDep::Ripgrep],
         name if name.starts_with("browser_") => &[RuntimeDep::Browser],
         "computer_use" => &[RuntimeDep::Browser],
-        "tts" | "tts_premium" | "video_analyze" => &[RuntimeDep::Ffmpeg],
+        "tts" | "tts_premium" | "video_analyze" | "media_long_video" => &[RuntimeDep::Ffmpeg],
         _ => &[],
     }
 }
@@ -74,6 +74,11 @@ mod tests {
     #[test]
     fn browser_tools_need_browser_dep() {
         assert_eq!(deps_for_tool("browser_navigate"), &[RuntimeDep::Browser]);
+    }
+
+    #[test]
+    fn media_long_video_needs_ffmpeg() {
+        assert_eq!(deps_for_tool("media_long_video"), &[RuntimeDep::Ffmpeg]);
     }
 
     #[test]

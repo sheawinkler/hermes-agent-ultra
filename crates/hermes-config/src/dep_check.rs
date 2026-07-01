@@ -47,7 +47,7 @@ pub fn description(dep: RuntimeDep) -> &'static str {
         RuntimeDep::Node => "Node.js (required for browser tools and TUI)",
         RuntimeDep::Browser => "Browser engine (Chromium, for web browsing tools)",
         RuntimeDep::Ripgrep => "ripgrep (fast file search)",
-        RuntimeDep::Ffmpeg => "ffmpeg (TTS voice messages)",
+        RuntimeDep::Ffmpeg => "ffmpeg (TTS, long video concat — auto-installed to ~/.hermes/bin)",
     }
 }
 
@@ -100,6 +100,21 @@ pub fn is_available(dep: RuntimeDep) -> bool {
         RuntimeDep::Ripgrep => is_on_path_or_managed("rg", &managed),
         RuntimeDep::Ffmpeg => is_on_path_or_managed("ffmpeg", &managed),
     }
+}
+
+/// Resolve the ffmpeg executable (system PATH or `$HERMES_HOME/bin/ffmpeg[.exe]`).
+pub fn resolve_ffmpeg_executable() -> Option<PathBuf> {
+    if let Ok(path) = which::which("ffmpeg") {
+        return Some(path);
+    }
+    let managed = supplemental_path_entries();
+    for dir in &managed {
+        let candidate = managed_binary(dir, "ffmpeg");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// Return deps that are not currently available (for startup diagnostics).

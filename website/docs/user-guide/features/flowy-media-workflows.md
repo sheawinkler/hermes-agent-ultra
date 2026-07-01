@@ -61,7 +61,7 @@ Seedance limits each generation to about **10 seconds**. For 20s+ targets:
 
 1. Pass `duration: 20` to `media_workflow_plan`, or write the length in the objective (e.g. \"20秒\")
 2. Plan returns `segment_plan` (clip breakdown) and routes to a `long_*` template
-3. Requires **ffmpeg** on the agent host for frame extract + concat
+3. Hermes **auto-installs ffmpeg** to `~/.hermes/bin` when needed (Gateway startup or first long-video run; default `HERMES_AUTO_ENSURE_DEPS=true`)
 4. Credit estimate uses total target duration
 
 ## Progress

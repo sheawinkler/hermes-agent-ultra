@@ -22,7 +22,7 @@ fn description_matches_python() {
     );
     assert_eq!(
         description(RuntimeDep::Ffmpeg),
-        "ffmpeg (TTS voice messages)"
+        "ffmpeg (TTS, long video concat — auto-installed to ~/.hermes/bin)"
     );
 }
 

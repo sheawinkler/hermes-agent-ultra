@@ -212,7 +212,7 @@ pub fn storyboard_shot_video(shot: usize, total: usize, duration_secs: u32) -> S
 
 pub fn long_video_planning(target_secs: u32, segment_count: usize, max_clip_secs: u32) -> String {
     format!(
-        "目标时长约 {target_secs} 秒 — Seedance 单次最多 {max_clip_secs} 秒，将拆分为 {segment_count} 段并首尾帧衔接后拼接"
+        "目标时长约 {target_secs} 秒 — Seedance 单次最多 {max_clip_secs} 秒，将拆分为 {segment_count} 段并首尾帧衔接；Hermes 会自动安装 ffmpeg 并完成拼接"
     )
 }
 

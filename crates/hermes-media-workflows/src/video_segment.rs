@@ -5,11 +5,14 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 
+use hermes_config::RuntimeDep;
 use hermes_core::ToolError;
 use tokio::process::Command;
 
 use crate::assets::persist_bytes;
+use crate::progress::report_media_progress;
 
 /// Per-model maximum seconds for a single Seedance generation request.
 pub fn max_clip_duration_for_model(model: &str) -> u32 {
@@ -136,32 +139,40 @@ pub fn segment_video_prompt(base: &str, segment_index: usize, total: usize) -> S
 }
 
 pub fn require_ffmpeg() -> Result<(), ToolError> {
-    if which_ffmpeg().is_some() {
+    if hermes_config::dep_check::resolve_ffmpeg_executable().is_some() {
         Ok(())
     } else {
-        Err(ToolError::ExecutionFailed(
-            "ffmpeg is required for long video concat — install ffmpeg and ensure it is on PATH"
-                .into(),
-        ))
+        Err(ffmpeg_missing_error())
     }
 }
 
-fn which_ffmpeg() -> Option<PathBuf> {
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths).find_map(|dir| {
-            let candidate = dir.join(if cfg!(windows) {
-                "ffmpeg.exe"
-            } else {
-                "ffmpeg"
-            });
-            candidate.is_file().then_some(candidate)
-        })
-    })
+fn ffmpeg_missing_error() -> ToolError {
+    ToolError::ExecutionFailed(
+        "ffmpeg is required for long video concat — Hermes will auto-install it on first use; \
+         retry in a moment or ensure HERMES_AUTO_ENSURE_DEPS is enabled"
+            .into(),
+    )
+}
+
+/// Ensure ffmpeg is available, triggering Hermes managed auto-install when needed.
+pub async fn ensure_ffmpeg_ready() -> Result<PathBuf, ToolError> {
+    if let Some(path) = hermes_config::dep_check::resolve_ffmpeg_executable() {
+        return Ok(path);
+    }
+
+    report_media_progress("长视频拼接需要 ffmpeg，Hermes 正在后台自动安装…");
+    hermes_config::spawn_background_install(vec![RuntimeDep::Ffmpeg]);
+    let notify = Arc::new(|msg: String| report_media_progress(msg));
+    if !hermes_config::await_tool_deps("media_long_video", notify).await {
+        return Err(ffmpeg_missing_error());
+    }
+
+    hermes_config::dep_check::resolve_ffmpeg_executable().ok_or_else(ffmpeg_missing_error)
 }
 
 /// Extract the last frame of a local video to PNG (for next-segment first_frame).
 pub async fn extract_last_frame_png(video_path: &Path, output_png: &Path) -> Result<(), ToolError> {
-    require_ffmpeg()?;
+    let ffmpeg = ensure_ffmpeg_ready().await?;
     if !video_path.is_file() {
         return Err(ToolError::ExecutionFailed(format!(
             "segment video missing: {}",
@@ -174,7 +185,7 @@ pub async fn extract_last_frame_png(video_path: &Path, output_png: &Path) -> Res
             .map_err(|e| ToolError::ExecutionFailed(format!("create frame dir: {e}")))?;
     }
 
-    let output = Command::new("ffmpeg")
+    let output = Command::new(&ffmpeg)
         .args([
             "-hide_banner",
             "-loglevel",
@@ -216,7 +227,6 @@ pub fn png_bytes_to_data_url(bytes: &[u8]) -> Result<String, ToolError> {
 
 /// Concatenate segment MP4s with ffmpeg (re-encode for codec consistency).
 pub async fn concat_videos(segment_paths: &[PathBuf], output_path: &Path) -> Result<(), ToolError> {
-    require_ffmpeg()?;
     if segment_paths.is_empty() {
         return Err(ToolError::ExecutionFailed(
             "no video segments to concat".into(),
@@ -228,6 +238,8 @@ pub async fn concat_videos(segment_paths: &[PathBuf], output_path: &Path) -> Res
             .map_err(|e| ToolError::ExecutionFailed(format!("copy single segment: {e}")))?;
         return Ok(());
     }
+
+    let ffmpeg = ensure_ffmpeg_ready().await?;
 
     let list_dir = output_path
         .parent()
@@ -247,7 +259,7 @@ pub async fn concat_videos(segment_paths: &[PathBuf], output_path: &Path) -> Res
         .await
         .map_err(|e| ToolError::ExecutionFailed(format!("write concat list: {e}")))?;
 
-    let output = Command::new("ffmpeg")
+    let output = Command::new(&ffmpeg)
         .args([
             "-hide_banner",
             "-loglevel",

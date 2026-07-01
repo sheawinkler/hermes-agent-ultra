@@ -23,7 +23,7 @@ use crate::prompt_refine::RefineInput;
 use crate::qa::{qa_check_image, qa_check_video};
 use crate::video_segment::{
     concat_videos, extract_last_frame_png, persist_concatenated_video, plan_segment_durations,
-    png_file_to_data_url, require_ffmpeg, segment_video_prompt,
+    png_file_to_data_url, segment_video_prompt,
 };
 
 pub struct WorkflowExecutor {
@@ -450,7 +450,7 @@ impl WorkflowExecutor {
         ));
 
         if segment_total > 1 {
-            require_ffmpeg()?;
+            crate::video_segment::ensure_ffmpeg_ready().await?;
         }
 
         let work_dir = hermes_config::hermes_home()
@@ -560,14 +560,8 @@ impl WorkflowExecutor {
         } else {
             remote_url.as_str()
         };
-        let response_str = video_generation_response(
-            &model,
-            video_ref,
-            Some(&artifact),
-            &task,
-            provenance,
-            None,
-        );
+        let response_str =
+            video_generation_response(&model, video_ref, Some(&artifact), &task, provenance, None);
         let parsed: Value = serde_json::from_str(&response_str)
             .map_err(|e| ToolError::ExecutionFailed(format!("long video response JSON: {e}")))?;
 

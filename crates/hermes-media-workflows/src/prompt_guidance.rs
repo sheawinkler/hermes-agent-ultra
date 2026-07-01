@@ -17,7 +17,7 @@ pub fn gateway_media_system_hint(has_workflow_tools: bool) -> String {
         "- `media_workflow_run` is async by default — poll `media_workflow_status` until succeeded/failed; use `media_workflow_cancel` to abort.".to_string(),
         "- User already sent an image URL for video → workflow with `image_url` (img2video_direct); for edits → img2img.".to_string(),
         "- Multi-scene / storyboard / 分镜 / 很多场景 → `media_workflow_plan` with `storyboard_multi` (NOT `video_generate`). Never invent a storyboard table while generating a single 5s clip.".to_string(),
-        "- Long video (>10s, e.g. 20s) → `media_workflow_plan` auto-selects `long_txt2video` / `long_img2video*` — splits into ~10s Seedance clips, chains last-frame, concat locally (requires ffmpeg). Pass `duration` or write \"20秒\" in the objective.".to_string(),
+        "- Long video (>10s, e.g. 20s) → `media_workflow_plan` auto-selects `long_txt2video` / `long_img2video*` — splits into ~10s Seedance clips, chains last-frame, concat locally (Hermes auto-installs ffmpeg to ~/.hermes/bin when needed). Pass `duration` or write \"20秒\" in the objective.".to_string(),
         "Deliver files via MEDIA:/local_path from tool results. Do NOT redirect users to Kling, Sora, Pika, 海螺, etc.".to_string(),
         "Post-actions: image_variation, image_upscale, video_extend workflows for iterate/upscale/extend.".to_string(),
         "Always include `user_prompt_block` from tool results in your reply so the user sees the final prompt sent to the image/video API (WeCom, CLI, Telegram, etc.).".to_string(),

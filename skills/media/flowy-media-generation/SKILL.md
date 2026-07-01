@@ -27,7 +27,7 @@ Use Hermes Flowy-backed tools (`image_generate`, `video_generate`, `media_workfl
 | Edit / style / change background (user image) | `media_workflow_plan` with `image_url` → `img2img` |
 | Animate user image | `media_workflow_plan` with `image_url` → `img2video_direct` |
 | Storyboard / multi-shot narrative / 很多场景 / 分镜 | `media_workflow_plan` → `storyboard_multi` (**not** `video_generate`) |
-| Long video (>10s, e.g. 20s) | `media_workflow_plan` with `duration: 20` or \"20秒\" in objective → `long_txt2video` / `long_img2video*` (auto split + concat; needs **ffmpeg** on PATH) |
+| Long video (>10s, e.g. 20s) | `media_workflow_plan` with `duration: 20` or \"20秒\" in objective → `long_txt2video` / `long_img2video*` (auto split + concat; **ffmpeg auto-installed by Hermes** to `~/.hermes/bin`) |
 | Variations / upscale / extend clip | `image_variation`, `image_upscale`, `video_extend` workflows |
 | Cancel long run | `media_workflow_cancel` with `run_id` |
 | Seedance multimodal (first/last frame, ref video/audio) | `video_generate` or workflow with `last_frame_url`, `reference_*` |
@@ -107,10 +107,10 @@ Seedance accepts **at most ~10s per API call**. For ~20s or longer:
 1. `media_workflow_plan` with `duration` (seconds) or natural language (e.g. \"生成20秒视频\")
 2. Hermes auto-selects `long_txt2video`, `long_img2video_direct`, or `long_img2video`
 3. Each segment is generated at ≤10s; the **last frame** of segment N becomes the **first frame** of segment N+1 (即梦-style continuity)
-4. Segments are concatenated locally with **ffmpeg** (`requires_ffmpeg: true` in `segment_plan`)
+4. Segments are concatenated locally with **ffmpeg** (Hermes **auto-installs** to `~/.hermes/bin` on first use; `ffmpeg_auto_install: true` in `segment_plan`)
 5. Credits scale with **total** target duration (e.g. 20s ≈ 2× single-clip cost)
 
-Do **not** call `video_generate` once with `duration: 20` — it will be clamped to 10s.
+Do **not** call `video_generate` once with `duration: 20` — it will be clamped to 10s. Users do **not** need to install ffmpeg manually.
 
 ## Storyboard (`storyboard_multi`)
 

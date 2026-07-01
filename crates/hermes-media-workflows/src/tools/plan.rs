@@ -189,6 +189,9 @@ impl ToolHandler for MediaWorkflowPlanHandler {
         let rationale = routing_rationale(&template_id, objective, has_image);
         let max_clip = crate::video_segment::max_clip_duration_for_model(&model_for_routing);
         let segment_plan = plan_segment_durations(target_duration, max_clip);
+        if segment_plan.segment_count() > 1 {
+            hermes_config::spawn_background_install(vec![hermes_config::RuntimeDep::Ffmpeg]);
+        }
 
         let next_tool = if preview_requested {
             "media_workflow_run after user confirms the preview"
@@ -206,6 +209,7 @@ impl ToolHandler for MediaWorkflowPlanHandler {
                 "segment_durations": segment_plan.segment_durations,
                 "segment_count": segment_plan.segment_count(),
                 "requires_ffmpeg": segment_plan.segment_count() > 1,
+                "ffmpeg_auto_install": segment_plan.segment_count() > 1,
             },
             "available_templates": list_builtin_templates(),
             "credits": credit_estimate.to_json(balance),
