@@ -310,6 +310,7 @@ async fn dispatch_slash_command(
         "/plan" => handle_plan_command(app, args),
         "/lsp" => handle_lsp_command(app, args),
         "/graph" => handle_graph_command(app, args).await,
+        "/journey" => handle_journey_command(app, args).await,
         "/qos" => handle_qos_command(app, args).await,
         "/image" => handle_image_command(app, args),
         "/config" => handle_config_command(app, args),

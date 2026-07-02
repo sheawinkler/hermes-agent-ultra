@@ -167,6 +167,7 @@ pub fn canonical_command(cmd: &str) -> &str {
         "/scheduler" => "/background",
         "/gateway" => "/platforms",
         "/onboard" => "/walkthrough",
+        "/learning" | "/memory-graph" => "/journey",
         "/reload-skills" | "/reload_skills" => "/reload-skills",
         "/reload_mcp" => "/reload-mcp",
         "/fork" => "/branch",
@@ -348,6 +349,8 @@ mod tests {
         assert_eq!(canonical_command("/compose"), "/prompt");
         assert_eq!(canonical_command("/ts"), "/timestamps");
         assert_eq!(canonical_command("/generate-pet"), "/hatch");
+        assert_eq!(canonical_command("/learning"), "/journey");
+        assert_eq!(canonical_command("/memory-graph"), "/journey");
         assert_eq!(canonical_command("/custom"), "/custom");
     }
 

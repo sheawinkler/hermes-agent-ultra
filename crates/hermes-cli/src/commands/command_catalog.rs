@@ -248,6 +248,12 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "Show graph-memory, ContextLattice status, and embedding diagnostics",
     ),
     (
+        "/journey",
+        "Learning journey timeline across graph-memory, objective learning, walkthrough events, and snapshots",
+    ),
+    ("/learning", "Alias for /journey"),
+    ("/memory-graph", "Alias for /journey"),
+    (
         "/qos",
         "Provider QoS router controls (`status|health|autotune [plan|apply]`)",
     ),

@@ -187,6 +187,8 @@ fn test_upstream_compat_aliases_are_mapped() {
     assert_eq!(canonical_command("/bg"), "/background");
     assert_eq!(canonical_command("/curator"), "/skills");
     assert_eq!(canonical_command("/tt"), "/timetravel");
+    assert_eq!(canonical_command("/learning"), "/journey");
+    assert_eq!(canonical_command("/memory-graph"), "/journey");
     assert_eq!(canonical_command("/rb"), "/runbook");
 }
 
@@ -310,6 +312,40 @@ fn test_memory_command_is_registered_completable_and_cataloged() {
     let catalog = render_command_catalog(Some("memory"));
     assert!(catalog.contains("/memory"));
     assert!(catalog.contains("Show memory backend status"));
+}
+
+#[test]
+fn test_journey_command_is_registered_completable_and_cataloged() {
+    assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/journey"));
+    assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/learning"));
+    assert!(SLASH_COMMANDS
+        .iter()
+        .any(|(name, _)| *name == "/memory-graph"));
+    let results = autocomplete("/jour");
+    assert!(results.contains(&"/journey"));
+    let alias_results = autocomplete("/memory-g");
+    assert!(alias_results.contains(&"/memory-graph"));
+    let catalog = render_command_catalog(Some("journey"));
+    assert!(catalog.contains("/journey"));
+    assert!(catalog.contains("Learning journey timeline"));
+}
+
+#[tokio::test]
+async fn journey_status_surfaces_rust_learning_timeline() {
+    let _guard = env_test_lock();
+    let tmp = tempdir().expect("tempdir");
+    let _home_guard = TempHomeGuard::new(tmp.path());
+    let mut app = build_test_app_with_stream(tmp.path()).await;
+
+    handle_slash_command(&mut app, "/journey", &[])
+        .await
+        .expect("journey status");
+    let out = latest_ui_assistant_text(&app);
+    assert!(out.contains("Learning journey timeline"));
+    assert!(out.contains("/graph status"));
+    assert!(out.contains("/objective ledger tail"));
+    assert!(out.contains("/walkthrough insights"));
+    assert!(out.contains("/timetravel list"));
 }
 
 #[test]

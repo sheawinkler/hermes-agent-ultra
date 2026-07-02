@@ -1,3 +1,91 @@
+async fn handle_journey_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let sub = args
+        .first()
+        .map(|v| v.to_ascii_lowercase())
+        .unwrap_or_else(|| "status".to_string());
+    match sub.as_str() {
+        "status" | "show" | "timeline" => {
+            let ledger = load_objective_learning_ledger().ok();
+            let (entries, updated_at, latest) = ledger
+                .as_ref()
+                .map(|ledger| {
+                    let latest = ledger
+                        .entries
+                        .last()
+                        .map(|entry| {
+                            format!(
+                                "{} state={} decision={}",
+                                entry.recorded_at, entry.objective_state, entry.decision
+                            )
+                        })
+                        .unwrap_or_else(|| "none".to_string());
+                    (ledger.entries.len(), ledger.updated_at.clone(), latest)
+                })
+                .unwrap_or_else(|| (0, "unavailable".to_string(), "none".to_string()));
+            let mut out = String::new();
+            let _ = writeln!(out, "Learning journey timeline");
+            let _ = writeln!(out, "  objective_learning_entries: {}", entries);
+            let _ = writeln!(out, "  objective_learning_updated_at: {}", updated_at);
+            let _ = writeln!(out, "  latest_learning_entry: {}", latest);
+            out.push_str("\nRust journey surfaces:\n");
+            out.push_str("  - /graph status: graph-memory and ContextLattice diagnostics\n");
+            out.push_str("  - /objective ledger tail: objective learning decisions\n");
+            out.push_str("  - /walkthrough insights: guided operator journey events\n");
+            out.push_str("  - /timetravel list: session snapshots and replay checkpoints\n");
+            out.push_str("\nAliases: /learning, /memory-graph");
+            emit_command_output(app, out.trim_end());
+            Ok(CommandResult::Handled)
+        }
+        "graph" | "memory" | "memory-graph" => {
+            let forwarded = if args.len() > 1 {
+                &args[1..]
+            } else {
+                &["status"][..]
+            };
+            handle_graph_command(app, forwarded).await
+        }
+        "ledger" => {
+            let mut forwarded = vec!["ledger"];
+            forwarded.extend_from_slice(args.get(1..).unwrap_or(&[]));
+            handle_objective_command(app, &forwarded)
+        }
+        "tail" => {
+            let mut forwarded = vec!["ledger", "tail"];
+            forwarded.extend_from_slice(args.get(1..).unwrap_or(&[]));
+            handle_objective_command(app, &forwarded)
+        }
+        "walkthrough" => {
+            let forwarded = if args.len() > 1 {
+                &args[1..]
+            } else {
+                &["insights"][..]
+            };
+            handle_walkthrough_command(app, forwarded)
+        }
+        "timetravel" | "snapshots" => {
+            let forwarded = if args.len() > 1 {
+                &args[1..]
+            } else {
+                &["list"][..]
+            };
+            handle_timetravel_command(app, forwarded)
+        }
+        other => {
+            emit_command_output(
+                app,
+                format!(
+                    "Unknown /journey action '{}'. Use `/journey status|graph|ledger|tail|walkthrough|timetravel`.",
+                    other
+                ),
+            );
+            Ok(CommandResult::Handled)
+        }
+    }
+}
+
 async fn handle_graph_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     let sub = args
         .first()
