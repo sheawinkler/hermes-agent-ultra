@@ -298,6 +298,22 @@ pub enum CliCommand {
         insecure: bool,
     },
 
+    /// Start the headless dashboard-compatible HTTP API helper.
+    Serve {
+        /// Host bind address (default: 127.0.0.1).
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Port (default: 9119).
+        #[arg(long, default_value_t = 9119)]
+        port: u16,
+        /// Do not auto-open browser.
+        #[arg(long)]
+        no_open: bool,
+        /// Allow binding to non-localhost.
+        #[arg(long)]
+        insecure: bool,
+    },
+
     /// Debug diagnostics and support report helpers.
     Debug {
         /// Action: share/delete.

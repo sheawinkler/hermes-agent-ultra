@@ -1,27 +1,27 @@
 # Test Coverage Audit
 
-Generated: `2026-06-30T13:55:13.188669+00:00`
+Generated: `2026-07-02T18:24:05.654979+00:00`
 
 ## Gate
 
 - Audit gate: **PASS**
 - Critical gaps: `0`
-- Advisory gaps: `4`
+- Advisory gaps: `3`
 
 ## Summary
 
 | Metric | Value |
 | --- | ---: |
-| `tracked_behavior_rows` | 463 |
-| `covered_behavior_rows` | 463 |
+| `tracked_behavior_rows` | 470 |
+| `covered_behavior_rows` | 470 |
 | `tracked_behavior_coverage_ratio` | 1.0 |
-| `rust_test_files` | 416 |
-| `rust_test_functions` | 7208 |
-| `coverage_manifest_entries` | 453 |
-| `coverage_manifest_entries_with_valid_rust_tests` | 453 |
+| `rust_test_files` | 418 |
+| `rust_test_functions` | 7254 |
+| `coverage_manifest_entries` | 460 |
+| `coverage_manifest_entries_with_valid_rust_tests` | 460 |
 | `missing_rust_test_refs` | 0 |
-| `queue_pending` | 17 |
-| `queue_total` | 7672 |
+| `queue_pending` | 0 |
+| `queue_total` | 8262 |
 | `test_intents_total` | 10 |
 | `test_intents_mapped` | 10 |
 
@@ -29,16 +29,16 @@ Generated: `2026-06-30T13:55:13.188669+00:00`
 
 | Manifest | Entries | Valid Rust-test entries | Referenced Rust tests | Missing refs |
 | --- | ---: | ---: | ---: | ---: |
-| `docs/parity/python-test-suite-coverage.json` | 210 | 210 | 91 | 0 |
+| `docs/parity/python-test-suite-coverage.json` | 214 | 214 | 107 | 0 |
 | `docs/parity/hermes-cli-test-coverage.json` | 124 | 124 | 83 | 0 |
-| `docs/parity/ui-tui-source-coverage.json` | 119 | 119 | 55 | 0 |
+| `docs/parity/ui-tui-source-coverage.json` | 122 | 122 | 68 | 0 |
 
 ## Test Intent Domains
 
 | Intent | Classification | Evidence files | Direct test evidence |
 | --- | --- | ---: | ---: |
 | `gateway-platform-behavior` | `direct_rust_test` | 25 | 22 |
-| `tool-runtime-behavior` | `direct_rust_test` | 119 | 97 |
+| `tool-runtime-behavior` | `direct_rust_test` | 120 | 98 |
 | `cli-command-surface` | `direct_rust_test` | 178 | 45 |
 | `agent-loop-and-runtime` | `direct_rust_test` | 106 | 71 |
 | `acp-protocol-and-transport` | `direct_rust_test` | 21 | 15 |
@@ -54,7 +54,6 @@ Generated: `2026-06-30T13:55:13.188669+00:00`
 
 ## Advisory Gaps
 
-- `upstream_queue_pending`: upstream missing queue has pending rows; queue closure is enforced by global parity thresholds
 - `nonzero_tree_drift`: max_commits_behind remains nonzero in parity matrix
 - `nonzero_tree_drift`: max_upstream_patch_missing remains nonzero in parity matrix
 - `nonzero_tree_drift`: max_files_only_upstream remains nonzero in parity matrix

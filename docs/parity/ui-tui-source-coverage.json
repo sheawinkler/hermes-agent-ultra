@@ -1,6 +1,6 @@
 {
   "summary": {
-    "covered_paths": 119,
+    "covered_paths": 122,
     "required_backlog_classification_paths": [
       "ui-tui",
       "ui-tui/packages",
@@ -11,6 +11,58 @@
     "rust_only_runtime": true
   },
   "entries": [
+    {
+      "path": "ui-tui/README.md",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "package_surface"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_named"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_hex"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_resolved_styles"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_status_bar_color_fields_respect_overrides"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_status_message_style_critical_for_error"
+        }
+      ]
+    },
     {
       "path": "ui-tui/eslint.config.mjs",
       "classification_path": "ui-tui",
@@ -301,6 +353,114 @@
       ]
     },
     {
+      "path": "ui-tui/packages/hermes-ink/src/ink/colorize.test.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "ink_reference_surface",
+        "colorize_test"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_named"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_hex"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_resolved_styles"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_status_bar_color_fields_respect_overrides"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_status_message_style_critical_for_error"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_activity_ring_buffer_caps_size"
+        }
+      ],
+      "classification_path": "ui-tui/packages"
+    },
+    {
+      "path": "ui-tui/packages/hermes-ink/src/ink/colorize.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "ink_reference_surface",
+        "colorize"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_named"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_hex"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_resolved_styles"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_status_bar_color_fields_respect_overrides"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_status_message_style_critical_for_error"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_activity_ring_buffer_caps_size"
+        }
+      ],
+      "classification_path": "ui-tui/packages"
+    },
+    {
       "path": "ui-tui/packages/hermes-ink/src/ink/components/AlternateScreen.tsx",
       "status": "covered_by_rust_primary_tui_contracts",
       "coverage_kind": "rust_primary_tui_or_documented_divergence",
@@ -545,6 +705,90 @@
           "name": "test_transcript_placeholder_shows_when_empty"
         }
       ]
+    },
+    {
+      "path": "ui-tui/packages/hermes-ink/src/ink/components/Text.test.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "ink_reference_surface",
+        "Text_test"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        }
+      ],
+      "classification_path": "ui-tui/packages"
+    },
+    {
+      "path": "ui-tui/packages/hermes-ink/src/ink/constants.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "ink_reference_surface",
+        "constants"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_named"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_hex"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_resolved_styles"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_status_bar_color_fields_respect_overrides"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_status_message_style_critical_for_error"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_activity_ring_buffer_caps_size"
+        }
+      ],
+      "classification_path": "ui-tui/packages"
     },
     {
       "path": "ui-tui/packages/hermes-ink/src/ink/events/input-event.ts",
@@ -1470,12 +1714,13 @@
       ]
     },
     {
-      "path": "ui-tui/README.md",
+      "path": "ui-tui/scripts/build.mjs",
       "status": "covered_by_rust_primary_tui_contracts",
       "coverage_kind": "rust_primary_tui_or_documented_divergence",
       "coverage_tags": [
         "rust_primary_tui",
-        "package_surface"
+        "package_surface",
+        "build_surface"
       ],
       "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
       "rust_tests": [
@@ -1500,24 +1745,12 @@
           "name": "cli_parse_default"
         },
         {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_named"
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_serve_alias_for_headless_dashboard_api"
         },
         {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_hex"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_resolved_styles"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_status_bar_color_fields_respect_overrides"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_status_message_style_critical_for_error"
+          "file": "crates/hermes-cli/src/banner.rs",
+          "name": "startup_banner_names_ultra_runtime"
         }
       ]
     },
@@ -1926,6 +2159,66 @@
       ]
     },
     {
+      "path": "ui-tui/src/__tests__/mathUnicode.test.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "reference_test_surface",
+        "mathUnicode_test"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        }
+      ],
+      "classification_path": "ui-tui/src"
+    },
+    {
+      "path": "ui-tui/src/__tests__/messages.test.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "reference_test_surface",
+        "messages_test"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        }
+      ],
+      "classification_path": "ui-tui/src"
+    },
+    {
       "path": "ui-tui/src/__tests__/paths.test.ts",
       "classification_path": "ui-tui/src",
       "status": "covered_by_rust_primary_tui_contracts",
@@ -1933,6 +2226,36 @@
       "coverage_tags": [
         "rust_primary_tui",
         "test_surface"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        }
+      ]
+    },
+    {
+      "path": "ui-tui/src/__tests__/platform.test.ts",
+      "classification_path": "ui-tui/src",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "reference_test_surface",
+        "platform_test"
       ],
       "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
       "rust_tests": [
@@ -2057,6 +2380,68 @@
           "name": "app_reset_session_invokes_session_lifecycle_hooks"
         }
       ]
+    },
+    {
+      "path": "ui-tui/src/__tests__/subagentTree.test.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "reference_test_surface",
+        "subagentTree_test"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_completions_update"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_completion_popup_hidden_when_slash_deleted"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_completion_popup_hidden_when_modal_or_processing_active"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_status"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_resume_latest_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "app_new_session_invokes_session_lifecycle_hooks"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+        }
+      ],
+      "classification_path": "ui-tui/src"
     },
     {
       "path": "ui-tui/src/__tests__/terminalModes.test.ts",
@@ -2235,6 +2620,60 @@
       ]
     },
     {
+      "path": "ui-tui/src/__tests__/theme.test.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "reference_test_surface",
+        "theme_test"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_named"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_hex"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_resolved_styles"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_status_bar_color_fields_respect_overrides"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_status_message_style_critical_for_error"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_activity_ring_buffer_caps_size"
+        }
+      ],
+      "classification_path": "ui-tui/src"
+    },
+    {
       "path": "ui-tui/src/__tests__/useConfigSync.test.ts",
       "status": "covered_by_rust_primary_tui_contracts",
       "coverage_kind": "rust_primary_tui_or_documented_divergence",
@@ -2405,6 +2844,60 @@
           "name": "test_prompt_slash_command"
         }
       ]
+    },
+    {
+      "path": "ui-tui/src/__tests__/viewportStore.test.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "reference_test_surface",
+        "viewportStore_test"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_scroll_history_offset_not_capped_to_u16"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_jump_to_oldest_sets_unbounded_offset"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_project_transcript_window_virtualizes_large_offsets"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_find_anchor_line_index_prefers_near_expected_window"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_approximate_visual_rows_wraps_long_lines"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_transcript_wrap_width_caps_at_80"
+        }
+      ],
+      "classification_path": "ui-tui/src"
     },
     {
       "path": "ui-tui/src/__tests__/virtualHeights.test.ts",
@@ -4374,6 +4867,44 @@
       ]
     },
     {
+      "path": "ui-tui/src/config/timing.ts",
+      "classification_path": "ui-tui/src",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "timing",
+        "streaming_state"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_processing_cycle_tracks_and_resets_stats"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_processing_cycle_yields_flash_credit_notice"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_processing_stage_labels"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_animated_processing_bar_width_and_motion"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_stream_lane_budget_defaults_balanced"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_stream_lane_budget_throughput_profile_expands"
+        }
+      ]
+    },
+    {
       "path": "ui-tui/src/content/hotkeys.ts",
       "status": "covered_by_rust_primary_tui_contracts",
       "coverage_kind": "rust_primary_tui_or_documented_divergence",
@@ -4461,6 +4992,68 @@
           "name": "test_default_mouse_enabled_respects_env_override"
         }
       ]
+    },
+    {
+      "path": "ui-tui/src/domain/slash.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "state_or_domain_surface",
+        "slash"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_completions_update"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_completion_popup_hidden_when_slash_deleted"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_completion_popup_hidden_when_modal_or_processing_active"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_status"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_resume_latest_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "app_new_session_invokes_session_lifecycle_hooks"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+        }
+      ],
+      "classification_path": "ui-tui/src"
     },
     {
       "path": "ui-tui/src/entry.tsx",
@@ -4619,6 +5212,68 @@
       ]
     },
     {
+      "path": "ui-tui/src/hooks/useCompletion.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "state_or_domain_surface",
+        "useCompletion"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_completions_update"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_completion_popup_hidden_when_slash_deleted"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_completion_popup_hidden_when_modal_or_processing_active"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_status"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_resume_latest_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "app_new_session_invokes_session_lifecycle_hooks"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+        }
+      ],
+      "classification_path": "ui-tui/src"
+    },
+    {
       "path": "ui-tui/src/hooks/useVirtualHistory.ts",
       "status": "covered_by_rust_primary_tui_contracts",
       "coverage_kind": "rust_primary_tui_or_documented_divergence",
@@ -4703,6 +5358,44 @@
         {
           "file": "crates/hermes-cli/src/commands.rs",
           "name": "promoted_paste_command_uses_test_clipboard_override"
+        }
+      ]
+    },
+    {
+      "path": "ui-tui/src/lib/editor.ts",
+      "classification_path": "ui-tui/src",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "library_surface",
+        "editor"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_native_editor_input_inserts_and_deletes_at_cursor"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_native_editor_cursor_navigation_respects_multiline_unicode"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_insert_newline_at_cursor_updates_input_and_cursor"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_insert_newline_at_cursor_clamps_non_char_boundary"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands/command_tests.rs",
+          "name": "prompt_command_reads_editor_and_queues_agent_seed"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands/command_tests.rs",
+          "name": "prompt_command_empty_editor_buffer_cancels_seed"
         }
       ]
     },
@@ -4828,6 +5521,36 @@
       ]
     },
     {
+      "path": "ui-tui/src/lib/gracefulExit.ts",
+      "classification_path": "ui-tui/src",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "library_surface",
+        "gracefulExit"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        }
+      ]
+    },
+    {
       "path": "ui-tui/src/lib/inputMetrics.ts",
       "status": "covered_by_rust_primary_tui_contracts",
       "coverage_kind": "rust_primary_tui_or_documented_divergence",
@@ -4886,6 +5609,36 @@
           "name": "test_jump_to_oldest_sets_unbounded_offset"
         }
       ]
+    },
+    {
+      "path": "ui-tui/src/lib/mathUnicode.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "library_surface",
+        "mathUnicode"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        }
+      ],
+      "classification_path": "ui-tui/src"
     },
     {
       "path": "ui-tui/src/lib/memory.ts",
@@ -4953,6 +5706,36 @@
       "coverage_tags": [
         "rust_primary_tui",
         "library_surface"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        }
+      ]
+    },
+    {
+      "path": "ui-tui/src/lib/platform.ts",
+      "classification_path": "ui-tui/src",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "library_surface",
+        "platform"
       ],
       "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
       "rust_tests": [
@@ -5067,6 +5850,98 @@
         {
           "file": "crates/hermes-acp/src/handler.rs",
           "name": "test_prompt_slash_command"
+        }
+      ]
+    },
+    {
+      "path": "ui-tui/src/lib/subagentTree.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "library_surface",
+        "subagentTree"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_completions_update"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_completion_popup_hidden_when_slash_deleted"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_completion_popup_hidden_when_modal_or_processing_active"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_status"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_resume_latest_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "app_new_session_invokes_session_lifecycle_hooks"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "app_reset_session_invokes_session_lifecycle_hooks"
+        }
+      ],
+      "classification_path": "ui-tui/src"
+    },
+    {
+      "path": "ui-tui/src/lib/terminalModes.ts",
+      "classification_path": "ui-tui/src",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "library_surface",
+        "terminalModes"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
         }
       ]
     },
@@ -5206,6 +6081,60 @@
           "name": "test_transcript_wrap_width_caps_at_80"
         }
       ]
+    },
+    {
+      "path": "ui-tui/src/theme.ts",
+      "status": "covered_by_rust_primary_tui_contracts",
+      "coverage_kind": "rust_primary_tui_or_documented_divergence",
+      "coverage_tags": [
+        "rust_primary_tui",
+        "source_surface",
+        "theme"
+      ],
+      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_input_mode_display"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_fit_status_line_pads_and_respects_display_width"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_default_mouse_enabled_respects_env_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_named"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_parse_color_hex"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_resolved_styles"
+        },
+        {
+          "file": "crates/hermes-cli/src/theme.rs",
+          "name": "test_status_bar_color_fields_respect_overrides"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_status_message_style_critical_for_error"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_activity_ring_buffer_caps_size"
+        }
+      ],
+      "classification_path": "ui-tui/src"
     },
     {
       "path": "ui-tui/src/types.ts",
@@ -5399,819 +6328,7 @@
           "name": "test_status_message_style_critical_for_error"
         }
       ]
-    },
-    {
-      "path": "ui-tui/packages/hermes-ink/src/ink/colorize.test.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "ink_reference_surface",
-        "colorize_test"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_named"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_hex"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_resolved_styles"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_status_bar_color_fields_respect_overrides"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_status_message_style_critical_for_error"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_activity_ring_buffer_caps_size"
-        }
-      ],
-      "classification_path": "ui-tui/packages"
-    },
-    {
-      "path": "ui-tui/packages/hermes-ink/src/ink/colorize.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "ink_reference_surface",
-        "colorize"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_named"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_hex"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_resolved_styles"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_status_bar_color_fields_respect_overrides"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_status_message_style_critical_for_error"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_activity_ring_buffer_caps_size"
-        }
-      ],
-      "classification_path": "ui-tui/packages"
-    },
-    {
-      "path": "ui-tui/packages/hermes-ink/src/ink/components/Text.test.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "ink_reference_surface",
-        "Text_test"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        }
-      ],
-      "classification_path": "ui-tui/packages"
-    },
-    {
-      "path": "ui-tui/packages/hermes-ink/src/ink/constants.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "ink_reference_surface",
-        "constants"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_named"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_hex"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_resolved_styles"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_status_bar_color_fields_respect_overrides"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_status_message_style_critical_for_error"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_activity_ring_buffer_caps_size"
-        }
-      ],
-      "classification_path": "ui-tui/packages"
-    },
-    {
-      "path": "ui-tui/src/__tests__/mathUnicode.test.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "reference_test_surface",
-        "mathUnicode_test"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        }
-      ],
-      "classification_path": "ui-tui/src"
-    },
-    {
-      "path": "ui-tui/src/__tests__/messages.test.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "reference_test_surface",
-        "messages_test"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        }
-      ],
-      "classification_path": "ui-tui/src"
-    },
-    {
-      "path": "ui-tui/src/__tests__/platform.test.ts",
-      "classification_path": "ui-tui/src",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "reference_test_surface",
-        "platform_test"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        }
-      ]
-    },
-    {
-      "path": "ui-tui/src/__tests__/subagentTree.test.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "reference_test_surface",
-        "subagentTree_test"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_completions_update"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_completion_popup_hidden_when_slash_deleted"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_completion_popup_hidden_when_modal_or_processing_active"
-        },
-        {
-          "file": "crates/hermes-cli/src/commands.rs",
-          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
-        },
-        {
-          "file": "crates/hermes-cli/src/cli.rs",
-          "name": "cli_parse_status"
-        },
-        {
-          "file": "crates/hermes-cli/src/cli.rs",
-          "name": "cli_parse_resume_latest_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
-        }
-      ],
-      "classification_path": "ui-tui/src"
-    },
-    {
-      "path": "ui-tui/src/__tests__/theme.test.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "reference_test_surface",
-        "theme_test"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_named"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_hex"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_resolved_styles"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_status_bar_color_fields_respect_overrides"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_status_message_style_critical_for_error"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_activity_ring_buffer_caps_size"
-        }
-      ],
-      "classification_path": "ui-tui/src"
-    },
-    {
-      "path": "ui-tui/src/__tests__/viewportStore.test.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "reference_test_surface",
-        "viewportStore_test"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_scroll_history_offset_not_capped_to_u16"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_jump_to_oldest_sets_unbounded_offset"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_project_transcript_window_virtualizes_large_offsets"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_find_anchor_line_index_prefers_near_expected_window"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_approximate_visual_rows_wraps_long_lines"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_transcript_wrap_width_caps_at_80"
-        }
-      ],
-      "classification_path": "ui-tui/src"
-    },
-    {
-      "path": "ui-tui/src/domain/slash.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "state_or_domain_surface",
-        "slash"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_completions_update"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_completion_popup_hidden_when_slash_deleted"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_completion_popup_hidden_when_modal_or_processing_active"
-        },
-        {
-          "file": "crates/hermes-cli/src/commands.rs",
-          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
-        },
-        {
-          "file": "crates/hermes-cli/src/cli.rs",
-          "name": "cli_parse_status"
-        },
-        {
-          "file": "crates/hermes-cli/src/cli.rs",
-          "name": "cli_parse_resume_latest_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
-        }
-      ],
-      "classification_path": "ui-tui/src"
-    },
-    {
-      "path": "ui-tui/src/hooks/useCompletion.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "state_or_domain_surface",
-        "useCompletion"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_completions_update"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_completion_popup_hidden_when_slash_deleted"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_completion_popup_hidden_when_modal_or_processing_active"
-        },
-        {
-          "file": "crates/hermes-cli/src/commands.rs",
-          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
-        },
-        {
-          "file": "crates/hermes-cli/src/cli.rs",
-          "name": "cli_parse_status"
-        },
-        {
-          "file": "crates/hermes-cli/src/cli.rs",
-          "name": "cli_parse_resume_latest_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
-        }
-      ],
-      "classification_path": "ui-tui/src"
-    },
-    {
-      "path": "ui-tui/src/lib/gracefulExit.ts",
-      "classification_path": "ui-tui/src",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "library_surface",
-        "gracefulExit"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        }
-      ]
-    },
-    {
-      "path": "ui-tui/src/lib/mathUnicode.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "library_surface",
-        "mathUnicode"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        }
-      ],
-      "classification_path": "ui-tui/src"
-    },
-    {
-      "path": "ui-tui/src/lib/platform.ts",
-      "classification_path": "ui-tui/src",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "library_surface",
-        "platform"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        }
-      ]
-    },
-    {
-      "path": "ui-tui/src/lib/subagentTree.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "library_surface",
-        "subagentTree"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_completions_update"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_completion_popup_hidden_when_slash_deleted"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_completion_popup_hidden_when_modal_or_processing_active"
-        },
-        {
-          "file": "crates/hermes-cli/src/commands.rs",
-          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
-        },
-        {
-          "file": "crates/hermes-cli/src/cli.rs",
-          "name": "cli_parse_status"
-        },
-        {
-          "file": "crates/hermes-cli/src/cli.rs",
-          "name": "cli_parse_resume_latest_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_new_session_invokes_session_lifecycle_hooks"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "app_reset_session_invokes_session_lifecycle_hooks"
-        }
-      ],
-      "classification_path": "ui-tui/src"
-    },
-    {
-      "path": "ui-tui/src/lib/terminalModes.ts",
-      "classification_path": "ui-tui/src",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "library_surface",
-        "terminalModes"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        }
-      ]
-    },
-    {
-      "path": "ui-tui/src/theme.ts",
-      "status": "covered_by_rust_primary_tui_contracts",
-      "coverage_kind": "rust_primary_tui_or_documented_divergence",
-      "coverage_tags": [
-        "rust_primary_tui",
-        "source_surface",
-        "theme"
-      ],
-      "rationale": "The upstream TypeScript/Ink TUI row is superseded by the Rust Ratatui CLI/TUI runtime; the cited Rust tests cover the equivalent input, rendering, gateway, slash/session, text, theme, or virtual-history behavior without requiring a JS runtime path.",
-      "rust_tests": [
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_tui_state_default"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_input_mode_display"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_fit_status_line_pads_and_respects_display_width"
-        },
-        {
-          "file": "crates/hermes-cli/src/app.rs",
-          "name": "test_default_mouse_enabled_respects_env_override"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_named"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_parse_color_hex"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_resolved_styles"
-        },
-        {
-          "file": "crates/hermes-cli/src/theme.rs",
-          "name": "test_status_bar_color_fields_respect_overrides"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_status_message_style_critical_for_error"
-        },
-        {
-          "file": "crates/hermes-cli/src/tui.rs",
-          "name": "test_activity_ring_buffer_caps_size"
-        }
-      ],
-      "classification_path": "ui-tui/src"
     }
   ],
-  "generated_at_utc": "2026-06-11T01:35:48.475Z"
+  "generated_at_utc": "2026-07-02T18:23:59Z"
 }

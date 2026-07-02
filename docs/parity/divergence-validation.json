@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Volumes/wd_black/hermes-agent-ultra/repo/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-06-30T13:55:14.388685+00:00",
+  "generated_at_utc": "2026-07-02T18:04:58.270235+00:00",
   "items": [
     {
       "errors": [],
@@ -57,7 +57,7 @@
     {
       "errors": [],
       "id": "rust-skills-catalog-governance",
-      "last_reviewed": "2026-04-21",
+      "last_reviewed": "2026-07-02",
       "matched_files": 1018,
       "matched_sample": [
         "optional-skills/DESCRIPTION.md",
@@ -83,7 +83,7 @@
       ],
       "overdue": false,
       "owner": "sheawinkler",
-      "review_date": "2026-06-30",
+      "review_date": "2026-10-02",
       "status": "approved",
       "ticket": 21,
       "warnings": []
@@ -92,7 +92,7 @@
       "errors": [],
       "id": "rust-gateway-platform-plugin-parity",
       "last_reviewed": "2026-06-30",
-      "matched_files": 40,
+      "matched_files": 41,
       "matched_sample": [
         "plugins/platforms/dingtalk/__init__.py",
         "plugins/platforms/dingtalk/adapter.py",
@@ -200,8 +200,8 @@
     {
       "errors": [],
       "id": "rust-cli-tui-primary-ux-surface",
-      "last_reviewed": "2026-04-21",
-      "matched_files": 1261,
+      "last_reviewed": "2026-07-02",
+      "matched_files": 1272,
       "matched_sample": [
         "ui-tui/.gitignore",
         "ui-tui/.prettierrc",
@@ -226,7 +226,7 @@
       ],
       "overdue": false,
       "owner": "sheawinkler",
-      "review_date": "2026-06-30",
+      "review_date": "2026-10-02",
       "status": "approved",
       "ticket": 22,
       "warnings": []
@@ -281,10 +281,10 @@
   "summary": {
     "errors": 0,
     "items": 12,
-    "local_paths": 4052,
+    "local_paths": 4055,
     "review_overdue": 0,
     "unowned": 0,
-    "upstream_paths": 5843,
+    "upstream_paths": 5966,
     "warnings": 1
   }
 }

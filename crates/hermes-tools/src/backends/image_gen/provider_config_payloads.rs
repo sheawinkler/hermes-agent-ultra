@@ -239,6 +239,12 @@ fn resolve_openrouter_compat_model(provider: OpenRouterCompatImageProviderKind) 
         .as_ref()
         .and_then(|cfg| yaml_get_str(cfg, "model"))
         .map(ToOwned::to_owned)
+        .or_else(|| {
+            load_image_gen_config()
+                .as_ref()
+                .and_then(|cfg| yaml_get_str(cfg, "model"))
+                .map(ToOwned::to_owned)
+        })
         .unwrap_or_else(|| DEFAULT_OPENROUTER_COMPAT_IMAGE_MODEL.to_string())
 }
 
@@ -612,6 +618,15 @@ fn openrouter_compat_reference_image_parts(
         .collect()
 }
 
+fn codex_image_reference_parts(request: &ImageGenerateRequest) -> Result<Vec<String>, ToolError> {
+    request
+        .source_image_urls()
+        .into_iter()
+        .take(CODEX_MAX_SOURCE_IMAGES)
+        .filter_map(|reference| codex_image_reference_part(reference.as_str()).transpose())
+        .collect()
+}
+
 fn krea_style_reference_objects(request: &ImageGenerateRequest) -> Vec<Value> {
     let mut seen = HashSet::new();
     let mut refs = Vec::new();
@@ -698,6 +713,88 @@ fn openrouter_compat_image_url_part(reference: &str) -> Result<Option<String>, T
     };
     let mime = mime_type_for_path(path);
     Ok(Some(format!("data:{mime};base64,{}", STANDARD.encode(raw))))
+}
+
+fn codex_image_reference_part(reference: &str) -> Result<Option<String>, ToolError> {
+    let reference = reference.trim();
+    if reference.is_empty() {
+        return Ok(None);
+    }
+    if reference.starts_with("http://") || reference.starts_with("https://") {
+        return Ok(Some(reference.to_string()));
+    }
+    if reference.starts_with("data:") {
+        ensure_codex_raster_data_uri(reference)?;
+        return Ok(Some(reference.to_string()));
+    }
+
+    let path = Path::new(reference);
+    let raw = match std::fs::read(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Could not read Codex source image {}: {err}",
+                path.display()
+            )));
+        }
+    };
+    let mime = codex_raster_mime_type_for_path(path).ok_or_else(|| {
+        ToolError::InvalidParams(format!(
+            "Codex source image {} must be a raster image (png, jpeg, webp, gif, bmp, or avif).",
+            path.display()
+        ))
+    })?;
+    Ok(Some(format!("data:{mime};base64,{}", STANDARD.encode(raw))))
+}
+
+fn ensure_codex_raster_data_uri(reference: &str) -> Result<(), ToolError> {
+    let mime = reference
+        .strip_prefix("data:")
+        .and_then(|rest| rest.split_once(';').map(|(mime, _)| mime.trim()))
+        .filter(|mime| !mime.is_empty())
+        .ok_or_else(|| {
+            ToolError::InvalidParams(
+                "Codex source image data URI must include a raster image media type.".into(),
+            )
+        })?;
+    if codex_raster_mime_allowed(mime) {
+        Ok(())
+    } else {
+        Err(ToolError::InvalidParams(format!(
+            "Codex source image data URI must be raster image data, got {mime}."
+        )))
+    }
+}
+
+fn codex_raster_mime_type_for_path(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => Some("image/png"),
+        Some("jpg" | "jpeg") => Some("image/jpeg"),
+        Some("gif") => Some("image/gif"),
+        Some("webp") => Some("image/webp"),
+        Some("bmp") => Some("image/bmp"),
+        Some("avif") => Some("image/avif"),
+        _ => None,
+    }
+}
+
+fn codex_raster_mime_allowed(mime: &str) -> bool {
+    matches!(
+        mime.to_ascii_lowercase().as_str(),
+        "image/png"
+            | "image/jpeg"
+            | "image/jpg"
+            | "image/gif"
+            | "image/webp"
+            | "image/bmp"
+            | "image/avif"
+    )
 }
 
 fn mime_type_for_path(path: &Path) -> &'static str {

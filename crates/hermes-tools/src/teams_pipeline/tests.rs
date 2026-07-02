@@ -154,6 +154,20 @@ fn artifact(kind: &str, id: &str) -> MeetingArtifact {
     }
 }
 
+#[test]
+fn safe_file_name_strips_path_components_and_rejects_dot_only_names() {
+    assert_eq!(safe_file_name("../../secret.mp4"), "secret.mp4");
+    assert_eq!(safe_file_name(r"..\secret.mp4"), "secret.mp4");
+    assert_eq!(
+        safe_file_name("Meeting Recording?.mp4"),
+        "Meeting_Recording_.mp4"
+    );
+    assert_eq!(safe_file_name("."), "recording.mp4");
+    assert_eq!(safe_file_name(".."), "recording.mp4");
+    assert_eq!(safe_file_name(""), "recording.mp4");
+    assert_eq!(safe_file_name(r"///\\"), "recording.mp4");
+}
+
 fn pipeline(
     graph: Arc<MockGraph>,
     store: Arc<TeamsPipelineStore>,

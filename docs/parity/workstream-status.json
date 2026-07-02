@@ -1,11 +1,12 @@
 {
-  "generated_at_utc": "2026-06-26T15:22:04-06:00",
-  "head_sha": "79cd74ca3a2d7314e54e4a7d350db9b833142cf1",
+  "generated_at_utc": "2026-06-30T17:01:54-06:00",
+  "head_sha": "74c52efb207a4607bcddf715432951022e1851dd",
   "states": {
-    "complete": 7
+    "complete": 6,
+    "in_progress": 1
   },
   "upstream_ref": "upstream/main",
-  "upstream_sha": "9b2af36d5aea3118ac6cfb15a2802f92fe0b5eda",
+  "upstream_sha": "a9b5598909585b851b1ed65f05034033676d1a86",
   "workstreams": [
     {
       "evidence": [
@@ -13,9 +14,9 @@
         "Runtime tool bridge refreshed from live registry in gateway handlers."
       ],
       "metrics": {
-        "wiring_sites_detected": 3
+        "wiring_sites_detected": 1
       },
-      "state": "complete",
+      "state": "in_progress",
       "title": "Core runtime parity",
       "workstream": "WS2"
     },
@@ -39,7 +40,7 @@
       ],
       "metrics": {
         "divergence_documented": true,
-        "local_skill_files": 917,
+        "local_skill_files": 918,
         "upstream_skill_files": 895
       },
       "state": "complete",
@@ -90,7 +91,7 @@
         "Intentional divergences are codified in docs/parity/intentional-divergence.json."
       ],
       "metrics": {
-        "divergence_items": 10,
+        "divergence_items": 12,
         "policy_exists": true
       },
       "state": "complete",

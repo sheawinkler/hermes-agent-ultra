@@ -1,31 +1,26 @@
 {
   "advisory_gaps": [
     {
-      "kind": "upstream_queue_pending",
-      "message": "upstream missing queue has pending rows; queue closure is enforced by global parity thresholds",
-      "pending": 17
-    },
-    {
       "kind": "nonzero_tree_drift",
       "message": "max_commits_behind remains nonzero in parity matrix",
       "metric": "max_commits_behind",
-      "value": 13736.0
+      "value": 14223.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_upstream_patch_missing remains nonzero in parity matrix",
       "metric": "max_upstream_patch_missing",
-      "value": 12546.0
+      "value": 13006.0
     },
     {
       "kind": "nonzero_tree_drift",
       "message": "max_files_only_upstream remains nonzero in parity matrix",
       "metric": "max_files_only_upstream",
-      "value": 3105.0
+      "value": 3228.0
     }
   ],
   "audit_gate": {
-    "advisory_gaps": 4,
+    "advisory_gaps": 3,
     "critical_gaps": 0,
     "pass": true
   },
@@ -61,15 +56,15 @@
   ],
   "coverage_manifests": [
     {
-      "entries": 210,
+      "entries": 214,
       "missing_rust_test_refs": [],
       "missing_rust_tests_entries": [],
       "path": "docs/parity/python-test-suite-coverage.json",
-      "referenced_rust_tests": 91,
+      "referenced_rust_tests": 107,
       "status_counts": {
-        "covered_by_rust_test_suite_contracts": 210
+        "covered_by_rust_test_suite_contracts": 214
       },
-      "valid_entries_with_rust_tests": 210
+      "valid_entries_with_rust_tests": 214
     },
     {
       "entries": 124,
@@ -83,19 +78,19 @@
       "valid_entries_with_rust_tests": 124
     },
     {
-      "entries": 119,
+      "entries": 122,
       "missing_rust_test_refs": [],
       "missing_rust_tests_entries": [],
       "path": "docs/parity/ui-tui-source-coverage.json",
-      "referenced_rust_tests": 55,
+      "referenced_rust_tests": 68,
       "status_counts": {
-        "covered_by_rust_primary_tui_contracts": 119
+        "covered_by_rust_primary_tui_contracts": 122
       },
-      "valid_entries_with_rust_tests": 119
+      "valid_entries_with_rust_tests": 122
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-06-30T13:55:13.188669+00:00",
+  "generated_at_utc": "2026-07-02T18:24:05.654979+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -161,7 +156,7 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 97,
+      "direct_test_evidence_count": 98,
       "direct_test_evidence_sample": [
         "crates/hermes-tools/src/approval.rs",
         "crates/hermes-tools/src/approval/tests.rs",
@@ -189,7 +184,7 @@
         "crates/hermes-tools/src/backends/vision.rs",
         "crates/hermes-tools/src/backends/web.rs"
       ],
-      "evidence_count": 119,
+      "evidence_count": 120,
       "evidence_sample": [
         "crates/hermes-tools/src/approval.rs",
         "crates/hermes-tools/src/approval/patterns.rs",
@@ -625,21 +620,21 @@
     "upstream_missing_queue": "docs/parity/upstream-missing-queue.json"
   },
   "summary": {
-    "coverage_manifest_entries": 453,
-    "coverage_manifest_entries_with_valid_rust_tests": 453,
-    "covered_behavior_rows": 463,
+    "coverage_manifest_entries": 460,
+    "coverage_manifest_entries_with_valid_rust_tests": 460,
+    "covered_behavior_rows": 470,
     "divergence_errors": 0,
     "divergence_review_overdue": 0,
     "divergence_unowned": 0,
     "missing_rust_test_refs": 0,
-    "queue_pending": 17,
-    "queue_total": 7672,
-    "rust_test_files": 416,
-    "rust_test_functions": 7208,
+    "queue_pending": 0,
+    "queue_total": 8262,
+    "rust_test_files": 418,
+    "rust_test_functions": 7254,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,
     "tracked_behavior_coverage_ratio": 1.0,
-    "tracked_behavior_rows": 463
+    "tracked_behavior_rows": 470
   }
 }

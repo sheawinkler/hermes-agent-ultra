@@ -338,6 +338,12 @@ async fn main() {
             port,
             no_open,
             insecure,
+        }
+        | CliCommand::Serve {
+            host,
+            port,
+            no_open,
+            insecure,
         } => run_dashboard(cli, host, port, no_open, insecure).await,
         CliCommand::Debug {
             action,

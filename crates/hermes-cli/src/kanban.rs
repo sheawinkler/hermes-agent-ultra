@@ -153,30 +153,36 @@ impl Default for KanbanStore {
 }
 
 pub fn kanban_store_path() -> PathBuf {
-    hermes_config::hermes_home()
-        .join(KANBAN_STATE_DIR)
-        .join(KANBAN_STORE_FILE)
+    kanban_store_path_in(&hermes_config::hermes_home())
+}
+
+fn kanban_store_path_in(home: &Path) -> PathBuf {
+    home.join(KANBAN_STATE_DIR).join(KANBAN_STORE_FILE)
 }
 
 pub fn load_store() -> Result<KanbanStore, AgentError> {
     let path = kanban_store_path();
+    load_store_from_path(&path)
+}
+
+fn load_store_from_path(path: &Path) -> Result<KanbanStore, AgentError> {
     if !path.exists() {
         let store = KanbanStore::default();
-        save_store(&store)?;
+        save_store_to_path(&store, path)?;
         return Ok(store);
     }
-    let raw = std::fs::read_to_string(&path).map_err(|e| {
+    let raw = std::fs::read_to_string(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::InvalidData {
-            corrupt_store_error(&path, format!("read failed: {e}"))
+            corrupt_store_error(path, format!("read failed: {e}"))
         } else {
             AgentError::Io(format!("read {} failed: {}", path.display(), e))
         }
     })?;
     let mut store = serde_json::from_str::<KanbanStore>(&raw)
-        .map_err(|e| corrupt_store_error(&path, format!("parse failed: {e}")))?;
+        .map_err(|e| corrupt_store_error(path, format!("parse failed: {e}")))?;
     if store.boards.is_empty() {
         return Err(corrupt_store_error(
-            &path,
+            path,
             "store has no boards; refusing to auto-initialize over existing state",
         ));
     }
@@ -186,15 +192,19 @@ pub fn load_store() -> Result<KanbanStore, AgentError> {
 
 pub fn save_store(store: &KanbanStore) -> Result<PathBuf, AgentError> {
     let path = kanban_store_path();
+    save_store_to_path(store, &path)
+}
+
+fn save_store_to_path(store: &KanbanStore, path: &Path) -> Result<PathBuf, AgentError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| AgentError::Io(format!("failed to create {}: {}", parent.display(), e)))?;
     }
     let serialized = serde_json::to_string_pretty(store)
         .map_err(|e| AgentError::Config(format!("serialize kanban store failed: {}", e)))?;
-    std::fs::write(&path, serialized)
+    std::fs::write(path, serialized)
         .map_err(|e| AgentError::Io(format!("write {} failed: {}", path.display(), e)))?;
-    Ok(path)
+    Ok(path.to_path_buf())
 }
 
 pub fn ensure_board<'a>(
@@ -1002,12 +1012,12 @@ mod tests {
         test_env_lock::lock()
     }
 
-    fn with_temp_home<T>(f: impl FnOnce() -> T) -> T {
+    fn with_temp_home<T>(f: impl FnOnce(&Path) -> T) -> T {
         let _guard = env_test_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let prev = std::env::var_os("HERMES_HOME");
         std::env::set_var("HERMES_HOME", tmp.path());
-        let result = f();
+        let result = f(tmp.path());
         match prev {
             Some(value) => std::env::set_var("HERMES_HOME", value),
             None => std::env::remove_var("HERMES_HOME"),
@@ -1017,8 +1027,9 @@ mod tests {
 
     #[test]
     fn load_store_bootstraps_default_board() {
-        with_temp_home(|| {
-            let store = load_store().expect("load");
+        with_temp_home(|home| {
+            let path = kanban_store_path_in(home);
+            let store = load_store_from_path(&path).expect("load");
             assert_eq!(store.current_board_id, "main");
             assert_eq!(store.boards.len(), 1);
             assert_eq!(store.boards[0].name, "Main");
@@ -1027,13 +1038,13 @@ mod tests {
 
     #[test]
     fn load_store_refuses_malformed_existing_store_and_preserves_backup() {
-        with_temp_home(|| {
-            let path = kanban_store_path();
+        with_temp_home(|home| {
+            let path = kanban_store_path_in(home);
             std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
             let original = b"{ not valid json";
             std::fs::write(&path, original).expect("write corrupt store");
 
-            let err = load_store().expect_err("corrupt store should fail");
+            let err = load_store_from_path(&path).expect_err("corrupt store should fail");
             let msg = err.to_string();
             assert!(msg.contains("Refusing to open corrupt kanban store"));
             assert!(msg.contains("parse failed"));
@@ -1047,13 +1058,14 @@ mod tests {
 
     #[test]
     fn load_store_refuses_semantically_empty_existing_store() {
-        with_temp_home(|| {
-            let path = kanban_store_path();
+        with_temp_home(|home| {
+            let path = kanban_store_path_in(home);
             std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
             let original = br#"{"schema_version":1,"current_board_id":"main","boards":[]}"#;
             std::fs::write(&path, original).expect("write empty store");
 
-            let err = load_store().expect_err("empty existing store should fail closed");
+            let err =
+                load_store_from_path(&path).expect_err("empty existing store should fail closed");
             let msg = err.to_string();
             assert!(msg.contains("Refusing to open corrupt kanban store"));
             assert!(msg.contains("store has no boards"));
@@ -1067,8 +1079,9 @@ mod tests {
 
     #[test]
     fn add_move_and_archive_flow_works() {
-        with_temp_home(|| {
-            let mut store = load_store().expect("load");
+        with_temp_home(|home| {
+            let path = kanban_store_path_in(home);
+            let mut store = load_store_from_path(&path).expect("load");
             let board = ensure_board(&mut store, None);
             let task = add_task(
                 board,
@@ -1094,13 +1107,13 @@ mod tests {
             assert_eq!(moved, 1);
             assert_eq!(board.tasks.len(), 0);
             assert_eq!(board.archived.len(), 1);
-            save_store(&store).expect("save");
+            save_store_to_path(&store, &path).expect("save");
         });
     }
 
     #[test]
     fn contextlattice_checkpoint_disabled_path() {
-        with_temp_home(|| {
+        with_temp_home(|_home| {
             std::env::set_var("HERMES_KANBAN_CONTEXTLATTICE_SYNC", "0");
             let board = KanbanBoard {
                 id: "main".to_string(),
@@ -1128,8 +1141,9 @@ mod tests {
 
     #[test]
     fn attachments_copy_with_safe_unique_names_and_surface_in_worker_context() {
-        with_temp_home(|| {
-            let mut store = load_store().expect("load");
+        with_temp_home(|home| {
+            let path = kanban_store_path_in(home);
+            let mut store = load_store_from_path(&path).expect("load");
             let board = ensure_board(&mut store, None);
             let task = add_task(
                 board,
@@ -1171,8 +1185,9 @@ mod tests {
 
     #[test]
     fn remove_attachment_deletes_row_and_blob() {
-        with_temp_home(|| {
-            let mut store = load_store().expect("load");
+        with_temp_home(|home| {
+            let path = kanban_store_path_in(home);
+            let mut store = load_store_from_path(&path).expect("load");
             let board = ensure_board(&mut store, None);
             let task = add_task(
                 board,
