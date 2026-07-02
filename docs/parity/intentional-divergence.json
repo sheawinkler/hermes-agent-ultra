@@ -148,6 +148,20 @@
       ]
     },
     {
+      "id": "rust-vertex-provider-plugin-parity",
+      "status": "approved",
+      "workstream": "WS3",
+      "summary": "Keep upstream Vertex Python provider plugin files out of the Rust runtime while tracking equivalent Rust provider surfaces.",
+      "owner": "sheawinkler",
+      "ticket": 700,
+      "last_reviewed": "2026-07-02",
+      "review_date": "2026-10-02",
+      "rationale": "Upstream Vertex provider metadata points to a Python vertex_adapter. Hermes Ultra keeps runtime provider behavior in Rust via generic/OpenAI-compatible provider routing, Gemini-compatible request shaping, custom base_url/header support, and OAuth provider surfaces; the Python plugin files are reference-only and should not be vendored into the Rust runtime.",
+      "path_prefixes": [
+        "plugins/model-providers/vertex/"
+      ]
+    },
+    {
       "id": "rust-cli-tui-primary-ux-surface",
       "status": "approved",
       "workstream": "WS5",

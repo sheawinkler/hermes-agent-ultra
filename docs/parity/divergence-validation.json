@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Volumes/wd_black/hermes-agent-ultra/repo/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-07-02T18:04:58.270235+00:00",
+  "generated_at_utc": "2026-07-02T19:11:11.590561+00:00",
   "items": [
     {
       "errors": [],
@@ -199,6 +199,22 @@
     },
     {
       "errors": [],
+      "id": "rust-vertex-provider-plugin-parity",
+      "last_reviewed": "2026-07-02",
+      "matched_files": 2,
+      "matched_sample": [
+        "plugins/model-providers/vertex/__init__.py",
+        "plugins/model-providers/vertex/plugin.yaml"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-10-02",
+      "status": "approved",
+      "ticket": 700,
+      "warnings": []
+    },
+    {
+      "errors": [],
       "id": "rust-cli-tui-primary-ux-surface",
       "last_reviewed": "2026-07-02",
       "matched_files": 1272,
@@ -280,8 +296,8 @@
   ],
   "summary": {
     "errors": 0,
-    "items": 12,
-    "local_paths": 4055,
+    "items": 13,
+    "local_paths": 4056,
     "review_overdue": 0,
     "unowned": 0,
     "upstream_paths": 5966,

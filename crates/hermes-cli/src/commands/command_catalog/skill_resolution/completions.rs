@@ -350,6 +350,7 @@ fn command_subcommand_overrides(cmd: &str) -> &'static [&'static str] {
         ],
         "/simulate" => &["status"],
         "/timetravel" => &["list", "latest", "goto", "undo", "branch"],
+        "/journey" => &["status", "graph", "ledger", "tail", "walkthrough", "timetravel"],
         "/autocompact" => &["status", "now", "governance"],
         "/qos" => &["status", "health", "autotune"],
         "/claims" => &["status", "on", "off"],
