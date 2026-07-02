@@ -567,6 +567,35 @@ fn cli_parse_logs_default() {
 }
 
 #[test]
+fn cli_parse_serve_alias_for_headless_dashboard_api() {
+    let cli = Cli::try_parse_from(vec![
+        "hermes",
+        "serve",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "9123",
+        "--no-open",
+    ])
+    .unwrap();
+
+    match cli.command {
+        Some(CliCommand::Serve {
+            host,
+            port,
+            no_open,
+            insecure,
+        }) => {
+            assert_eq!(host, "127.0.0.1");
+            assert_eq!(port, 9123);
+            assert!(no_open);
+            assert!(!insecure);
+        }
+        _ => panic!("Expected Serve command"),
+    }
+}
+
+#[test]
 fn cli_parse_logs_with_count() {
     let cli = Cli::try_parse_from(vec!["hermes", "logs", "50"]).unwrap();
     match cli.command {

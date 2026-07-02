@@ -1,57 +1,57 @@
 # Parity Matrix
 
-Generated: `2026-06-30T13:55:12.385221+00:00`
+Generated: `2026-07-02T18:02:58.637233+00:00`
 
 ## Scope
 
-- Local ref: `HEAD` (`ceef678d1e8ca61f173de77ae7b2654014f13301`)
-- Upstream ref: `upstream/main` (`1b3768558e02071b629d1014941ed7b2a0024c34`)
+- Local ref: `main` (`74c52efb207a4607bcddf715432951022e1851dd`)
+- Upstream ref: `upstream/main` (`a9b5598909585b851b1ed65f05034033676d1a86`)
 - Merge base: `none (history divergence)`
 
 ## Summary
 
 | Metric | Value |
 | --- | ---: |
-| Commits behind local (`upstream` ancestry only) | 13736 |
-| Commits ahead local (`local` ancestry only) | 1315 |
-| Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 12546 |
+| Commits behind local (`upstream` ancestry only) | 14223 |
+| Commits ahead local (`local` ancestry only) | 1320 |
+| Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 13006 |
 | Upstream commits represented by patch-id (`git cherry local upstream`, `-`) | 6 |
-| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 1052 |
-| Files only in upstream tree | 3105 |
-| Files only in local tree | 1314 |
-| Shared files identical content | 1480 |
-| Shared files different content | 1258 |
-| Total files changed (`local` vs `upstream`) | 5576 |
-| Insertions (`local` vs `upstream`) | 1249742 |
-| Deletions (`local` vs `upstream`) | 758617 |
+| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 1056 |
+| Files only in upstream tree | 3228 |
+| Files only in local tree | 1317 |
+| Shared files identical content | 1471 |
+| Shared files different content | 1267 |
+| Total files changed (`local` vs `upstream`) | 5710 |
+| Insertions (`local` vs `upstream`) | 1294373 |
+| Deletions (`local` vs `upstream`) | 762440 |
 
 ## Top 40 upstream-only buckets
 
 | Bucket | Files |
 | --- | ---: |
-| `apps/desktop` | 785 |
+| `apps/desktop` | 806 |
 | `website/i18n` | 313 |
-| `tests/hermes_cli` | 205 |
-| `tests/gateway` | 174 |
-| `tests/agent` | 126 |
+| `tests/hermes_cli` | 214 |
+| `tests/gateway` | 197 |
+| `tests/agent` | 144 |
 | `web/src` | 108 |
-| `tests/tools` | 81 |
+| `tests/tools` | 88 |
 | `optional-skills/creative` | 70 |
-| `website/docs` | 56 |
-| `tests/plugins` | 54 |
-| `ui-tui/src` | 45 |
-| `tests/run_agent` | 41 |
-| `plugins/platforms` | 40 |
+| `website/docs` | 57 |
+| `tests/plugins` | 55 |
+| `ui-tui/src` | 55 |
+| `tests/run_agent` | 45 |
+| `plugins/platforms` | 41 |
+| `apps/bootstrap-installer` | 40 |
 | `hermes_cli/subcommands` | 39 |
-| `apps/bootstrap-installer` | 35 |
-| `tests/cli` | 29 |
+| `tests/cli` | 32 |
 | `gateway/platforms` | 27 |
 | `tests/docker` | 26 |
+| `tests/tui_gateway` | 16 |
 | `.github/workflows` | 14 |
-| `tests/tui_gateway` | 14 |
+| `tests/cron` | 13 |
 | `website/static` | 13 |
 | `hermes_cli/dashboard_auth` | 12 |
-| `tests/cron` | 12 |
 | `ui-tui/packages` | 12 |
 | `agent/lsp` | 11 |
 | `agent/pet` | 11 |
@@ -76,15 +76,15 @@ Generated: `2026-06-30T13:55:12.385221+00:00`
 | --- | ---: |
 | `tests/gateway` | 205 |
 | `website/docs` | 183 |
-| `tests/tools` | 162 |
+| `tests/tools` | 165 |
 | `tests/hermes_cli` | 142 |
-| `ui-tui/src` | 88 |
+| `ui-tui/src` | 90 |
 | `tests/agent` | 67 |
-| `tests/run_agent` | 63 |
+| `tests/run_agent` | 64 |
 | `tests/cli` | 32 |
 | `ui-tui/packages` | 26 |
+| `plugins/memory` | 21 |
 | `plugins/platforms` | 20 |
-| `plugins/memory` | 19 |
 | `plugins/model-providers` | 16 |
 | `tests/plugins` | 16 |
 | `tests/cron` | 11 |
@@ -121,7 +121,7 @@ Generated: `2026-06-30T13:55:12.385221+00:00`
 | --- | ---: |
 | `third_party/rustsec-patches` | 190 |
 | `crates/hermes-cli` | 182 |
-| `crates/hermes-tools` | 120 |
+| `crates/hermes-tools` | 121 |
 | `crates/hermes-gateway` | 111 |
 | `crates/hermes-agent` | 107 |
 | `skills/creative` | 70 |
@@ -137,15 +137,15 @@ Generated: `2026-06-30T13:55:12.385221+00:00`
 | `crates/hermes-source-parity-tests` | 13 |
 | `skills/mlops` | 13 |
 | `crates/hermes-cron` | 12 |
-| `docs/releases` | 11 |
+| `docs/releases` | 12 |
 | `crates/hermes-mcp` | 10 |
 | `crates/hermes-skills` | 10 |
 | `docs/roadmaps` | 10 |
 | `docs/implementation` | 9 |
 | `skills/red-teaming` | 9 |
+| `crates/hermes-http` | 6 |
 | `optional-skills/creative` | 6 |
 | `tests/plugins` | 6 |
-| `crates/hermes-http` | 5 |
 | `skills/software-development` | 5 |
 | `tests/run_agent` | 5 |
 | `tests/tools` | 5 |
@@ -164,20 +164,20 @@ Generated: `2026-06-30T13:55:12.385221+00:00`
 
 | Workstream | Issue | Name | Upstream-only | Shared-different | Risk | Effort |
 | --- | ---: | --- | ---: | ---: | --- | --- |
-| `WS6` | #10 | Tests and CI parity | 846 | 786 | critical | XL |
-| `WS8` | #12 | Compatibility and divergence policy | 1345 | 12 | critical | XL |
-| `WS5` | #9 | UX parity | 570 | 326 | high | XL |
-| `WS3` | #7 | Tools and adapters parity | 174 | 96 | high | L |
+| `WS6` | #10 | Tests and CI parity | 919 | 790 | critical | XL |
+| `WS8` | #12 | Compatibility and divergence policy | 1379 | 12 | critical | XL |
+| `WS5` | #9 | UX parity | 581 | 329 | high | XL |
+| `WS3` | #7 | Tools and adapters parity | 178 | 98 | high | L |
 | `WS4` | #8 | Skills parity | 101 | 38 | medium | L |
-| `WS2` | #6 | Core runtime parity | 69 | 0 | critical | M |
+| `WS2` | #6 | Core runtime parity | 70 | 0 | critical | M |
 | `WS7` | #11 | Security/secrets/store/webhook parity | 0 | 0 | critical | S |
 
 ## Commit Mapping
 
-- Upstream missing by patch-id: `12546`
+- Upstream missing by patch-id: `13006`
 - Upstream represented by patch-id: `6`
-- Local unique by patch-id: `1052`
-- Intentional divergence tracked items: `12` (covered files: `1264`)
+- Local unique by patch-id: `1056`
+- Intentional divergence tracked items: `12` (covered files: `1279`)
 - Merge base is absent; patch-id mapping is used as primary commit equivalence signal.
 
 ## Intentional Divergence Registry
@@ -188,12 +188,12 @@ Generated: `2026-06-30T13:55:12.385221+00:00`
 | `ultra-webhook-queue-backends` | approved | WS7 | 4 | Preserve webhook-driven sync queue worker architecture with sqlite, SQS, and Kafka support. |
 | `ultra-launchd-webhook-lifecycle` | approved | WS7 | 4 | Preserve launchd-based interactive dev lifecycle management for webhook listener and worker. |
 | `rust-skills-catalog-governance` | approved | WS4 | 262 | Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring). |
-| `rust-gateway-platform-plugin-parity` | approved | WS3 | 39 | Keep platform adapter parity in the Rust gateway instead of vendoring upstream Python platform-plugin trees. |
+| `rust-gateway-platform-plugin-parity` | approved | WS3 | 40 | Keep platform adapter parity in the Rust gateway instead of vendoring upstream Python platform-plugin trees. |
 | `rust-chronos-managed-cron-provider` | approved | WS3 | 5 | Own Chronos managed-cron behavior in the Rust cron scheduler and API server instead of vendoring the upstream Python cron plugin. |
 | `rust-runtime-no-raft-platform-plugin` | temporary | WS3 | 3 | Track the upstream Raft Python platform plugin as non-runtime until a Rust-native Raft adapter is scoped. |
 | `upstream-python-plugin-backend-drift-20260527` | temporary | WS3 | 10 | Track upstream Python backend plugin trees that are not yet closed as Rust-native runtime surfaces. |
 | `upstream-s6-plan-doc-archive` | approved | WS7 | 0 | Do not import upstream implementation-plan archive documents unless they change local runtime or release behavior. |
-| `rust-cli-tui-primary-ux-surface` | approved | WS5 | 918 | Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported. |
+| `rust-cli-tui-primary-ux-surface` | approved | WS5 | 932 | Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported. |
 | `rust-memory-provider-plugin-parity` | approved | WS3 | 13 | Keep Honcho and Mem0 memory provider behavior in Rust-native memory/provider surfaces instead of vendoring Python plugin trees. |
 | `rust-image-provider-plugin-parity` | approved | WS5 | 4 | Keep OpenRouter and Krea image generation provider behavior in the Rust image backend instead of vendoring upstream Python plugin trees. |
 

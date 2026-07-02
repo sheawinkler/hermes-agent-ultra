@@ -48,6 +48,7 @@ const DEFAULT_CODEX_IMAGE_CHAT_MODEL: &str = "gpt-5.5";
 const DEFAULT_CODEX_IMAGE_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const CODEX_IMAGE_INSTRUCTIONS: &str = "You are an assistant that must fulfill image generation requests by using the image_generation tool when provided.";
 const CODEX_CLOUDFLARE_ORIGINATOR: &str = "codex_cli_rs";
+const CODEX_MAX_SOURCE_IMAGES: usize = 16;
 const DEFAULT_OPENAI_IMAGE_BASE_URL: &str = "https://api.openai.com/v1";
 const OPENAI_IMAGE_API_MODEL: &str = "gpt-image-2";
 const DEFAULT_OPENAI_IMAGE_MODEL: &str = "gpt-image-2-medium";

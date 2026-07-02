@@ -404,6 +404,34 @@ fn openrouter_config_resolves_env_and_scoped_config() {
 }
 
 #[test]
+fn openrouter_config_falls_back_to_top_level_image_model() {
+    let _g = EnvScope::new();
+    std::fs::write(
+        hermes_config::paths::config_path(),
+        "image_gen:\n  provider: openrouter\n  model: google/gemini-3.1-flash-image-preview\n  openrouter:\n    api_key: config-openrouter-key\n",
+    )
+    .expect("write config");
+
+    let cfg = OpenRouterCompatImageGenConfig::from_env_or_config(
+        OpenRouterCompatImageProviderKind::OpenRouter,
+    )
+    .unwrap();
+    assert_eq!(cfg.model(), "google/gemini-3.1-flash-image-preview");
+
+    std::fs::write(
+        hermes_config::paths::config_path(),
+        "image_gen:\n  provider: openrouter\n  model: google/gemini-3.1-flash-image-preview\n  openrouter:\n    model: black-forest-labs/flux.2-pro\n    api_key: config-openrouter-key\n",
+    )
+    .expect("write config");
+
+    let cfg = OpenRouterCompatImageGenConfig::from_env_or_config(
+        OpenRouterCompatImageProviderKind::OpenRouter,
+    )
+    .unwrap();
+    assert_eq!(cfg.model(), "black-forest-labs/flux.2-pro");
+}
+
+#[test]
 fn nous_config_reads_auth_store_agent_key_and_inference_base_url() {
     let g = EnvScope::new();
     let auth_path = g.auth_path();
@@ -601,6 +629,74 @@ fn codex_image_sse_parser_keeps_latest_partial_or_result() {
     assert_eq!(image.as_deref(), Some("final"));
 }
 
+#[test]
+fn codex_image_payload_accepts_and_caps_reference_images() {
+    let _g = EnvScope::new();
+    let mut request = image_request("draw with source");
+    request.image_url = Some("data:image/png;base64,c291cmNl".to_string());
+    request.reference_image_urls = (0..20)
+        .map(|index| format!("https://example.test/ref-{index}.png"))
+        .collect();
+
+    let refs = codex_image_reference_parts(&request).unwrap();
+    assert_eq!(refs.len(), CODEX_MAX_SOURCE_IMAGES);
+    assert_eq!(refs[0], "data:image/png;base64,c291cmNl");
+
+    let payload = codex_image_responses_payload(
+        "draw with source",
+        "1024x1024",
+        "medium",
+        "gpt-5.5",
+        refs.as_slice(),
+    );
+    let content = payload["input"][0]["content"].as_array().unwrap();
+    assert_eq!(content.len(), CODEX_MAX_SOURCE_IMAGES + 1);
+    assert_eq!(
+        content[0],
+        json!({"type": "input_text", "text": "draw with source"})
+    );
+    assert_eq!(
+        content[1],
+        json!({"type": "input_image", "image_url": "data:image/png;base64,c291cmNl"})
+    );
+    assert_eq!(
+        content
+            .iter()
+            .filter(|item| item["type"] == "input_image")
+            .count(),
+        CODEX_MAX_SOURCE_IMAGES
+    );
+}
+
+#[test]
+fn codex_reference_images_inline_local_raster_and_reject_svg() {
+    let g = EnvScope::new();
+    let png = g.home.join("source.png");
+    let svg = g.home.join("source.svg");
+    std::fs::write(&png, b"\x89PNG\r\n\x1a\n").expect("write png");
+    std::fs::write(&svg, br#"<svg xmlns="http://www.w3.org/2000/svg"/>"#).expect("write svg");
+
+    let mut request = image_request("use local source");
+    request.image_url = Some(png.to_string_lossy().to_string());
+    let refs = codex_image_reference_parts(&request).unwrap();
+    assert_eq!(refs.len(), 1);
+    assert!(refs[0].starts_with("data:image/png;base64,"));
+    assert_eq!(
+        STANDARD.decode(refs[0].split_once(',').unwrap().1).unwrap(),
+        b"\x89PNG\r\n\x1a\n"
+    );
+
+    let mut bad = image_request("reject vectors");
+    bad.image_url = Some(svg.to_string_lossy().to_string());
+    let err = codex_image_reference_parts(&bad).unwrap_err();
+    assert!(err.to_string().contains("raster image"));
+
+    let mut bad_data_uri = image_request("reject vector data");
+    bad_data_uri.image_url = Some("data:image/svg+xml;base64,PHN2Zy8+".to_string());
+    let err = codex_image_reference_parts(&bad_data_uri).unwrap_err();
+    assert!(err.to_string().contains("raster image data"));
+}
+
 #[tokio::test]
 async fn codex_image_generate_posts_responses_and_saves_png() {
     use wiremock::matchers::{body_partial_json, header, method, path};
@@ -657,8 +753,68 @@ async fn codex_image_generate_posts_responses_and_saves_png() {
     assert_eq!(payload["provider"], "openai-codex");
     assert_eq!(payload["model"], "gpt-image-2-high");
     assert_eq!(payload["quality"], "high");
+    assert_eq!(payload["modality"], "text");
+    assert_eq!(payload["source_images"], 0);
     let image = payload["image"].as_str().expect("image path");
     assert!(image.contains("cache/images/openai_codex_gpt_image_2_high_"));
+    assert_eq!(std::fs::read(image).unwrap(), b"\x89PNG\r\n\x1a\n");
+}
+
+#[tokio::test]
+async fn codex_image_generate_posts_reference_images_and_reports_image_modality() {
+    use wiremock::matchers::{body_partial_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let _g = EnvScope::new();
+    let server = MockServer::start().await;
+    std::env::set_var("HERMES_OPENAI_CODEX_API_KEY", "codex-token");
+    std::env::set_var("HERMES_OPENAI_CODEX_BASE_URL", server.uri());
+
+    let png_b64 = STANDARD.encode(b"\x89PNG\r\n\x1a\n");
+    let sse = format!(
+        "event: response.image_generation_call.completed\n\
+         data: {{\"type\":\"image_generation_call\",\"result\":\"{png_b64}\"}}\n\n\
+         data: [DONE]\n\n"
+    );
+    let source_uri = "data:image/png;base64,c291cmNl";
+    Mock::given(method("POST"))
+        .and(path("/responses"))
+        .and(header("Authorization", "Bearer codex-token"))
+        .and(header("Accept", "text/event-stream"))
+        .and(body_partial_json(json!({
+            "model": DEFAULT_CODEX_IMAGE_CHAT_MODEL,
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "edit a launch poster"},
+                    {"type": "input_image", "image_url": source_uri}
+                ]
+            }],
+            "stream": true
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_string(sse))
+        .mount(&server)
+        .await;
+
+    let backend = OpenAICodexImageGenBackend::from_env_or_auth_store().unwrap();
+    let output = backend
+        .generate(ImageGenerateRequest {
+            prompt: "edit a launch poster".to_string(),
+            size: None,
+            style: None,
+            n: None,
+            image_url: Some(source_uri.to_string()),
+            reference_image_urls: Vec::new(),
+        })
+        .await
+        .unwrap();
+    let payload: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["provider"], "openai-codex");
+    assert_eq!(payload["modality"], "image");
+    assert_eq!(payload["source_images"], 1);
+    let image = payload["image"].as_str().expect("image path");
     assert_eq!(std::fs::read(image).unwrap(), b"\x89PNG\r\n\x1a\n");
 }
 
@@ -1195,13 +1351,11 @@ async fn openrouter_image_generate_errors_when_response_has_no_images() {
     assert!(err.to_string().contains("returned no image"));
 }
 
-#[tokio::test]
-async fn codex_image_generate_rejects_image_inputs() {
-    let mut request = image_request("edit source");
-    request.image_url = Some("https://example.test/source.png".to_string());
-    let err = OpenAICodexImageGenBackend::unconfigured()
-        .generate(request)
-        .await
-        .unwrap_err();
-    assert!(err.to_string().contains("text-to-image only"));
+#[test]
+fn codex_capabilities_advertise_reference_inputs() {
+    let backend = OpenAICodexImageGenBackend::unconfigured();
+    let caps = backend.capabilities();
+    assert_eq!(caps.provider.as_deref(), Some("openai-codex"));
+    assert!(caps.supports_image_input());
+    assert_eq!(caps.max_reference_images, CODEX_MAX_SOURCE_IMAGES);
 }

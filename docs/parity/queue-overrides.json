@@ -6708,6 +6708,826 @@
       "disposition": "ported",
       "owner": "rust-runtime",
       "notes": "Ported/superseded in Rust: /hatch and /generate-pet are first-class slash commands that capture a petdex hatch request, enable the Rust TUI pet, infer known species/mood from the description, persist pet settings, and queue a next-turn companion design brief instead of shipping upstream Electron/Python hatch UI internals. Covered by command tests for species/mood persistence and queued design brief."
+    },
+    "00694b935fb360bf5a93b1d3034a115ec09f08cd": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "018009bc382de86f864e3fa8af3982c2f0aa7bfb": {
+      "disposition": "superseded",
+      "notes": "Upstream Python runtime delta is superseded by Hermes Ultra Rust-native agent/provider/tool architecture and existing deterministic Rust tests; the Python module path is not shipped in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "0198713c3364f7a16603fa684e78671b1392941d": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "019950560d43f1058d0966b95480d73ed8daf034": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Codex image backend: local/data source images use a Codex-specific raster allowlist; SVG/non-raster inputs are rejected before request.",
+      "owner": "rust-runtime"
+    },
+    "03311abe498da34ab4dbd2402935cf641fce1431": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "03406ae2553e802f11399129c3f376a096bbec4f": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "03bbd37dd7fbef796d2f9d9e8c54ee190d2ccc57": {
+      "disposition": "superseded",
+      "notes": "Upstream Python runtime delta is superseded by Hermes Ultra Rust-native agent/provider/tool architecture and existing deterministic Rust tests; the Python module path is not shipped in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "05ed553c538092904e5e1d61dc9753ac5ea911e4": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "086343854dbf723acfc529d2580c260cc3713d0b": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "08be8e5ef7a07e1bce9910b379b6a5fe48f40763": {
+      "disposition": "superseded",
+      "notes": "Upstream Python/Electron /journey timeline UI is superseded by Hermes Ultra Rust SOTA workflow replay and ContextLattice-backed memory/skills evidence surfaces; no Python journey module or desktop star-map runtime is shipped.",
+      "owner": "rust-runtime"
+    },
+    "08c83d055509a8d61bef0b8648df39d136b3e60b": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "09dbe76955dd65b102827bdbed48a3d08394e856": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "1324add563ca0a90fd4dd8ba07e3a0dd9cf365c6": {
+      "disposition": "ported",
+      "notes": "Ported in Rust image_gen: OpenRouter/Nous model resolution falls back to top-level image_gen.model when provider-scoped model and env are absent.",
+      "owner": "rust-runtime"
+    },
+    "16414418377ba7ca32fae372726966f81fa9c7ca": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "18a9467fca1a750e83c7579ee0cd422c082fd77d": {
+      "disposition": "superseded",
+      "notes": "Upstream Python runtime delta is superseded by Hermes Ultra Rust-native agent/provider/tool architecture and existing deterministic Rust tests; the Python module path is not shipped in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "18d54bf0fd307e02f1ca3f877bcd8a26651297fc": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "1a0c5768135c0565712140eba76e1e7d566bedf6": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "1b3768558e02071b629d1014941ed7b2a0024c34": {
+      "disposition": "ported",
+      "notes": "Ported in Rust image_gen tests/config contract: OpenRouter/Nous model precedence is enforced by provider_config_payloads and covered by focused tests.",
+      "owner": "rust-runtime"
+    },
+    "1f1d346ceda2b133f9bb4f5758e31b6190a211fe": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "217b3c283a8277ab8a78bd3bfc52a53f6ddeadf4": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "259e6b87a73911eca0e71a33a81381801364868a": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Teams pipeline: dot-only and separator-only recording names fall back to recording.mp4, with regression coverage.",
+      "owner": "rust-runtime"
+    },
+    "25c7900fb58239552c530fd6cf8be28e5efbcec4": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "275e293f5431fcac4118d1fcd03bb65f6dd7953e": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "2a84bcb1499005d36f028d430225b2aca1554ac3": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "2e12401ed436309b59e813bf9444c8323ef05171": {
+      "disposition": "superseded",
+      "notes": "Upstream Python runtime delta is superseded by Hermes Ultra Rust-native agent/provider/tool architecture and existing deterministic Rust tests; the Python module path is not shipped in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "2f46fde3f51db2db1cb0854ce1bd2b5c07c16a0d": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "2f7b6cf298a3b64b39b0c9e5a102707e018eacbd": {
+      "disposition": "superseded",
+      "notes": "Upstream Python/Electron /journey timeline UI is superseded by Hermes Ultra Rust SOTA workflow replay and ContextLattice-backed memory/skills evidence surfaces; no Python journey module or desktop star-map runtime is shipped.",
+      "owner": "rust-runtime"
+    },
+    "322138df51c3d965e52d4be7477e596332195479": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "3362bdb4e5c9d01521feb3f8d6b4390ee8e95dd5": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "33d91029b26680a466cf057844df2fcb5fb87b15": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "3590543312a12334b06dabbc47d623406999a9c2": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Teams pipeline: recording display names are reduced to the final path component and normalized before joining the run directory, preventing traversal.",
+      "owner": "rust-runtime"
+    },
+    "36b7e5e9cc9821a1366f88c7e488b443736373e8": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "36bfe3a4490259eb8f89a84b7a9cad2a7c4de8ab": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "39bff67957e11ae5ceca7ee8b7d6a057dfd1ac97": {
+      "disposition": "ported",
+      "notes": "Ported in Rust gateway: display.tool_progress supports runtime command control and log/all-style progress visibility through gateway slash command methods and tests.",
+      "owner": "rust-runtime"
+    },
+    "3e7ed0c53b59174c86cd7ff945c745a35e8c4e51": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "3f19df2a5b71a0d68cb46e299d108c793634e98c": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "41c85fb9469bbde7c5446cc5386b2e2438936fb5": {
+      "disposition": "superseded",
+      "notes": "AGENTS.md subprocess isolation documentation is policy/docs-only and does not change Hermes Ultra Rust runtime behavior.",
+      "owner": "rust-runtime"
+    },
+    "42ca4381316c54394f7e3e078dfc75119fcde9ae": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "43edbae638b5068e428ca82b7f9d6c1266050e25": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "460235d5848b1467cf7351cd6bd82078abe53edc": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Codex image backend: Codex reference images are capped at CODEX_MAX_SOURCE_IMAGES with payload-shape regression coverage.",
+      "owner": "rust-runtime"
+    },
+    "46273a55a860995a6e326c905f7f06dfa980b642": {
+      "disposition": "superseded",
+      "notes": "Upstream docs/skills/website-only delta is superseded by local Rust-first docs, release notes, and parity evidence; no Rust runtime implementation is required for this queue row.",
+      "owner": "rust-runtime"
+    },
+    "46ab06c238472d87506b654729b2f7f01f5b2033": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "476875acb9f00b00f659dd6f71c843fb2f08aac2": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "4a09b692ecc385ad48f00694a1e315b8eed120cd": {
+      "disposition": "ported",
+      "notes": "Ported in Rust API server: inbound requests carry model/provider/personality overrides and merge_request_runtime_overrides applies per-client runtime routing before agent execution.",
+      "owner": "rust-runtime"
+    },
+    "4b4349eb9a904d9babf519e0a580f960311c6035": {
+      "disposition": "superseded",
+      "notes": "Upstream docs/skills/website-only delta is superseded by local Rust-first docs, release notes, and parity evidence; no Rust runtime implementation is required for this queue row.",
+      "owner": "rust-runtime"
+    },
+    "4c2c54c78c3731c3f78787b6c7882eb4aea378d7": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "4c4b790f110be2c34fdfdb72575efe2d1f8ba632": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "500c2b1e46e46684ddfb1f3464a4fe3a0fb060a0": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "50a7dce6bd509ff430dce88de8a3c342ced07f3c": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "51a710e57e931c65a6e44eed694ca437af5ae06d": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "5317993a6dca17f2269cbf79bff88cc912ba92a8": {
+      "disposition": "superseded",
+      "notes": "Upstream Python runtime delta is superseded by Hermes Ultra Rust-native agent/provider/tool architecture and existing deterministic Rust tests; the Python module path is not shipped in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "5505dbbf43a480a31e35ac4500f0584519e2484d": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "57462341f4cac5b86558c179aa5a329272d9f950": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "57dd86f247637a080b9c2c42ae8240379f5b5c49": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "5c2c85c5452f227e6f3b79d90d2c50f7adaddf8f": {
+      "disposition": "superseded",
+      "notes": "Upstream Python runtime delta is superseded by Hermes Ultra Rust-native agent/provider/tool architecture and existing deterministic Rust tests; the Python module path is not shipped in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "5e51f9c689d15440fe6f0242c4a34d0278089788": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "5fdc2acedcf9caa2dffc01a0410ca74b1b28d369": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "608e8a6062271661ac2f2f27375ef9ad7eb32b12": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "638d2e7bfcad1be6e779c0d1af95481a6e92d811": {
+      "disposition": "ported",
+      "notes": "Ported in Rust holographic memory: search_facts uses the same sanitized FTS/LIKE path as retrieval and tests cover special-character fallback plus category filters.",
+      "owner": "rust-runtime"
+    },
+    "66ba9e06d92542268c97c500d5312100c299d973": {
+      "disposition": "superseded",
+      "notes": "Upstream GitHub Actions/CI-only delta is superseded by Hermes Ultra local Rust deterministic gates and release workflow; it does not add shipped Rust runtime behavior.",
+      "owner": "rust-runtime"
+    },
+    "69f08c2eb5a2a68a072debd3e7f274141b6b98bf": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "6d879d486b19716f8b09bd47bffb0b6e5b690431": {
+      "disposition": "superseded",
+      "notes": "Upstream Python runtime delta is superseded by Hermes Ultra Rust-native agent/provider/tool architecture and existing deterministic Rust tests; the Python module path is not shipped in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "729bbb7a309a3d13d8cc7d1cd2fbab79e7d969f7": {
+      "disposition": "superseded",
+      "notes": "Upstream docs/skills/website-only delta is superseded by local Rust-first docs, release notes, and parity evidence; no Rust runtime implementation is required for this queue row.",
+      "owner": "rust-runtime"
+    },
+    "7337248a4c182d65b6c101acac1e21be5101c4cc": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "7548910ecec412b84cb92e180f0e6017f176f0eb": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "773a3703bfc1f8ff2f3aef40d7a565e7f4fe1404": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "7a2369718a126f624357430a3defce1a1aec668d": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "7c1a029553d87c43ecff8a3821336bc95872213b": {
+      "disposition": "superseded",
+      "notes": "Upstream release metadata commit for v0.18.0 is superseded by local Hermes Ultra release/tag history and does not represent a runtime patch.",
+      "owner": "rust-runtime"
+    },
+    "7c7b489813184c54dc3d57a0a7d1c37182c4d8ff": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Slack adapter: Block Kit rendering is first-class and native table/block structures are represented by the Rust socket_blocks model and tests.",
+      "owner": "rust-runtime"
+    },
+    "808ba82125e2ccaca9d0df1d5557a173e5242504": {
+      "disposition": "superseded",
+      "notes": "Upstream GitHub Actions/CI-only delta is superseded by Hermes Ultra local Rust deterministic gates and release workflow; it does not add shipped Rust runtime behavior.",
+      "owner": "rust-runtime"
+    },
+    "821d9f709f365453abde7ca71445bc0aad9bdaa1": {
+      "disposition": "ported",
+      "notes": "Ported/superseded by Rust prompt config: AgentConfig exposes system_prompt plus coding_context auto/focus/on/off, and build_system_prompt injects deterministic coding guidance only on coding tool/workspace surfaces.",
+      "owner": "rust-runtime"
+    },
+    "83b7c52ece76b73ee878e9336722572e7d273cab": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "83e10a6777f93ba2dfb2b344314912bb9f969202": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "84f350efe06be9f0c2e9b05471acad5db91b0e7b": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "8795dfa33169b82f6cae7ec22632c430778182d0": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "88bd1c01e1956ef6ed35ac6cce00e02ec7cf29bb": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "88c9dfecb23c372c20e760057e44856188b91566": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Slack adapter: Block Kit docs/runtime contract is represented directly by typed Rust builders rather than Python docstrings.",
+      "owner": "rust-runtime"
+    },
+    "88e29e35bd327c51306edad22d700d79b4b97f40": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "89cf65ab63988656124770e43cf8defd1ec8799b": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "8ad15ff7dde90dc7f05114133cc3b553947018e6": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "8da0a56ba86a713a49b6fd61c79004aad7580a19": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "8dcbc910bfd131dcfa7b83bf61e11e4807dce4ec": {
+      "disposition": "superseded",
+      "notes": "Upstream Python runtime delta is superseded by Hermes Ultra Rust-native agent/provider/tool architecture and existing deterministic Rust tests; the Python module path is not shipped in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "8e94e8f8821986b5e94200936c1b6bc2b603487f": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "8fe8c2d6c476d50d4aaed13a924329fabd57a190": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "9048457eabb4ec95ec0321ba580fc32b4cfa7b67": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "931e2356af9bdc7ee0996e25ff9afc51216763ad": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "94d70dee54c4f9c54d9681b0f49d629c08e275f1": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "9738870489d04ee168f87263d85922ae2a858d42": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "9998ff4cbebc9812aec66a7d0839665fa7fbfa36": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "9be292f1e678437644396b47b3410b433ba3433f": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "9ce79cd642125eb0997d31310fe12cb0fddd6ba5": {
+      "disposition": "ported",
+      "notes": "Ported in Rust media tools: xAI image generation stores public_url/file_output when present, xAI image edits use quality model/image fields, and xAI video generation supports text/image-to-video with reference images, duration caps, and auth-store/env credentials.",
+      "owner": "rust-runtime"
+    },
+    "9d10dcd490e68eae94849496586242defbede058": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "9e4ed4d7a922844710a5ebd9e551a72e5090eca2": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "9ee7333e5b36633993c3898a01a26f0b189b81bc": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "9f0309504496a82d15b07aef30f8f7bf84cab660": {
+      "disposition": "superseded",
+      "notes": "Upstream docs/skills/website-only delta is superseded by local Rust-first docs, release notes, and parity evidence; no Rust runtime implementation is required for this queue row.",
+      "owner": "rust-runtime"
+    },
+    "a10113658b6033c5902bbe873bfe2e1f05815339": {
+      "disposition": "superseded",
+      "notes": "Upstream Python pre_verify/verify-on-stop hook plugin is superseded by Hermes Ultra Rust execution discipline, deterministic verification gates, ContextLattice checkpoint policy, and explicit shell/test verification workflow; no Python hook plugin runtime is shipped.",
+      "owner": "rust-runtime"
+    },
+    "a40f22798ec6b5877958f6dbe5aeda8468e7d628": {
+      "disposition": "superseded",
+      "notes": "Upstream installer managed-clone reset is shell/PowerShell installer behavior; Hermes Ultra release/install flow is Rust-first and handled by local installer scripts outside the Rust runtime queue.",
+      "owner": "rust-runtime"
+    },
+    "a488fcf107d1c61400db4274c0baf357b908c772": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "a56aa9ac47b0fd52e50a40b1812728ee16bee873": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "a61cf774ce925964d679f5ad04966251e37444ca": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "a682091044955167c9a728f9641ff279c96a73a7": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "a8a97c358feee4ee546670691f6f72e8812f9d3a": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "a8c862900b9c24a1706cbcb17c2b9968c88f277c": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "a8f9d089f124c7e8ab6689585eb33f9f6565890b": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "a94f657a505962cc046b29322750e03450c55645": {
+      "disposition": "superseded",
+      "notes": "Upstream Python runtime delta is superseded by Hermes Ultra Rust-native agent/provider/tool architecture and existing deterministic Rust tests; the Python module path is not shipped in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "aa07400e1a8f37e835714d8a68c1b72e634e3793": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "af5cea04ab77352209a0495b25e5c5c295a73395": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "b080b93ad87428221f7bf40360d11fc13e837727": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Slack adapter: SlackAdapter exposes Block Kit message builders and post_blocks/post_block_kit paths, with Block Kit builder/round-trip tests.",
+      "owner": "rust-runtime"
+    },
+    "b31b0b9d95d1dbaae0197b9f3f7d3f3d0d4efc28": {
+      "disposition": "superseded",
+      "notes": "Documentation reconciliation commit targets upstream Python/website surfaces; Hermes Ultra tracks Rust docs and parity gates separately, with no shipped Rust runtime delta.",
+      "owner": "rust-runtime"
+    },
+    "b48fcfa8bd93268647c77113900f603ac7f7a93b": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "b6045170bb7bad85c9a361054bf69b4d7f0722f2": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "b6d8fc41c8d186116531df6cf9bd1cc25ce4e602": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "b6e57e215bf08fdf2308881af48d4b97761319d2": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "b98baa3039e357d97ccb8d84e6d70b1902a03582": {
+      "disposition": "ported",
+      "notes": "Ported in Rust providers: GenericProvider extra_headers, OpenRouter profile headers, and provider_profiles extra_headers_for_profile carry configured provider-specific HTTP headers into LLM API calls with Rust tests.",
+      "owner": "rust-runtime"
+    },
+    "ba0bc01d1f740c562b55925e404b82a48809c364": {
+      "disposition": "ported",
+      "notes": "Ported in Rust delegation: delegate_task no longer exposes model-facing toolset schema; subagents inherit parent tools while internal compatibility remains.",
+      "owner": "rust-runtime"
+    },
+    "babbefb16438ef28e061690117a1dad08e71ff54": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "bb304b491407054a847a6fae6eef6db688efb7bf": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "bb67dad07a8c1540032e36f8ed10d76d2b186062": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "bd1d354fc3c509b622853f5b6205fff1007c66dd": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "bd53230739da3bacbf58211f79a56cebcbfb4e06": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "c0b308e1fedd3c681adc0953276b6632f0ee3c03": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "c2fb651c5e0073ac749b90cfe44ab5ec4add884f": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "c6ba4b229ed138dcf636322487c968d2ffe4b999": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "c6eb7f9e7284c5268ceed0c3fc92e1f2a5d892c7": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "c73e74386b20164fa218414131fe8b03f07b3e7c": {
+      "disposition": "superseded",
+      "notes": "Upstream Vertex provider is superseded by Hermes Ultra generic/OpenAI-compatible provider routing, Gemini/OpenAI-compatible setup, custom base_url/headers, and OAuth provider surfaces; no dedicated Python vertex_adapter runtime is shipped.",
+      "owner": "rust-runtime"
+    },
+    "c8e5f999c2b02c45c8d4531bd7721b745bbd4702": {
+      "disposition": "ported",
+      "notes": "Ported in Rust quick-command/terminal surfaces: command execution sanitizes credential environment and strips ANSI/redacts sensitive output before returning gateway/TUI-visible text.",
+      "owner": "rust-runtime"
+    },
+    "cb6d6d46ab6b20b173c8215a1f066b53847e9ee5": {
+      "disposition": "ported",
+      "notes": "Ported in Rust holographic memory: SQLite FTS5 recall sanitizes natural-language queries, falls back safely when FTS is unavailable, scores trusted category matches, and has focused tests.",
+      "owner": "rust-runtime"
+    },
+    "cb9308f0a65ff2f0a5880c54f67203946d0dc317": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "cb9d18c759417f0bf0ff94fb932a423c74d706d5": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "cc1e4c32c0227e808821822a4f6206d317973528": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "cc7d20d6838343f8acc70aecf207bae22dde4a88": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "cca8b4ef4e3f8bac1708bd5951450b645d8c20a3": {
+      "disposition": "superseded",
+      "notes": "Upstream GitHub Actions/CI-only delta is superseded by Hermes Ultra local Rust deterministic gates and release workflow; it does not add shipped Rust runtime behavior.",
+      "owner": "rust-runtime"
+    },
+    "cf05b38683ebe2035d41f9eb7c39c735092e8f68": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "d173e8c3a76bcd8ca86df6861fb1e1349872e560": {
+      "disposition": "ported",
+      "notes": "Ported in Rust disk_cleanup: cleanup skips protected cron roots even when auto-delete categories match, with focused protection tests.",
+      "owner": "rust-runtime"
+    },
+    "d2de9580e181b3cabb3b84c6e970bd3902eb13d3": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "d3c866746234ed3de27732de696328c328317fb9": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "d43e0cf304a14c9a3c98ff0506a1f79cf4938e99": {
+      "disposition": "ported",
+      "notes": "Ported in Rust agent loop: codex acknowledgement continuations are handled in both non-streaming and streaming run paths with bounded retry counters, independent of Python api_mode branching.",
+      "owner": "rust-runtime"
+    },
+    "d4c14011ebbc59d1479a53c207692933b79d0287": {
+      "disposition": "superseded",
+      "notes": "Claude-design skill/web docs are optional prompt-skill content and not a Rust runtime gap; local skill index work is tracked separately from upstream Python queue parity.",
+      "owner": "rust-runtime"
+    },
+    "d68d2716a7492db6853a81632de4d7e8acd69160": {
+      "disposition": "superseded",
+      "notes": "Upstream Python runtime delta is superseded by Hermes Ultra Rust-native agent/provider/tool architecture and existing deterministic Rust tests; the Python module path is not shipped in the Rust runtime.",
+      "owner": "rust-runtime"
+    },
+    "dd659c8d175858bab96012b52b4201e381cd19cc": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "dec44994a5be54d835060f593079f0c732567e80": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "dff491a2b993e9e9db43d1834ac5d46c2f87173e": {
+      "disposition": "ported",
+      "notes": "Ported in Rust CLI: hermes serve is a first-class alias for the headless dashboard/API backend with host/port/no-open/insecure flags and parser coverage.",
+      "owner": "rust-runtime"
+    },
+    "e009ba57ac4feac11e326db8f4c7da95d9028485": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "e0a78336c1e3d3ea2216510154430f6142f4464a": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "e5253d852b24f87af91d77b66141cc5c0b9e6f69": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "e55e9fad2c2e2de6181e12c65d3a12baf718d759": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "e774d7fbf9be43beb7577498cb6125da1e47159e": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "e971dc1e9d2afb307d3cea3e576b8de9614baaf7": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "e9bceb5ae0c46234c0c66e136ced2c791dcc90d8": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "ebb81f10cb70c4c37a2d00ef58a8aea37e7971f2": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "ecffd290a3f115b33f921505b5190228d1323387": {
+      "disposition": "ported",
+      "notes": "Ported in Rust Codex image backend: OpenAI Codex Responses payloads now accept input_image parts from image_url/reference_image_urls and report image modality/source count.",
+      "owner": "rust-runtime"
+    },
+    "ed47f2b4aa43c9b280bd84798d4a6cbf9ac889f4": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "ede5c09f3b1a16a9eacc69da69cfa02bd89e1b35": {
+      "disposition": "ported",
+      "notes": "Ported in Rust disk_cleanup: exact protected cron path behavior is enforced by is_protected_cron_path and regression-tested rather than only documented.",
+      "owner": "rust-runtime"
+    },
+    "f3cd744f5c40ab70e5a10ffc7c993f049ca1c70c": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "f47459cdbdee7bc312024f46a6ab03120e3c0c71": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "f5eb4c307bfdbfa5f24c5bff59881295f17b17ac": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "f67c0b3e60ba91b92ca1d07826d873b4b8f36849": {
+      "disposition": "superseded",
+      "notes": "Upstream bundled skill documentation refresh is non-runtime for this Rust repo; local skills/parity/release docs own Rust behavior and no Python skill runtime port is required.",
+      "owner": "rust-runtime"
+    },
+    "fa7bce0789d80fa99080a2be231fcc754fd2af3c": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "fb44b519d712e7c8452112dbfcaa5071d56c66e4": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "fd324562d3ad43df7631428df4585cf9de8154f2": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
+      "owner": "rust-runtime"
+    },
+    "fde1c8570ffe1bcd1d352efffb4eeafdfd975f0c": {
+      "disposition": "superseded",
+      "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
+      "owner": "rust-runtime"
+    },
+    "c19bfb50ad6fc6368635cb0df8ec81bb820160bb": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React desktop remote-mode delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop as a runtime product.",
+      "owner": "rust-runtime"
+    },
+    "fe82b3a774d97db0c4e948217a89f2b055ce73bc": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React desktop remote-mode delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop as a runtime product.",
+      "owner": "rust-runtime"
+    },
+    "a9b5598909585b851b1ed65f05034033676d1a86": {
+      "disposition": "superseded",
+      "notes": "Upstream Electron/React desktop remote-mode delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop as a runtime product.",
+      "owner": "rust-runtime"
     }
   },
   "subject_patterns": [

@@ -1,11 +1,11 @@
 # Workstream Status
 
-- Local HEAD: `79cd74ca3a2d7314e54e4a7d350db9b833142cf1`
-- Upstream: `upstream/main` (`9b2af36d5aea3118ac6cfb15a2802f92fe0b5eda`)
+- Local HEAD: `74c52efb207a4607bcddf715432951022e1851dd`
+- Upstream: `upstream/main` (`a9b5598909585b851b1ed65f05034033676d1a86`)
 
 | Workstream | Title | State |
 | --- | --- | --- |
-| `WS2` | Core runtime parity | **complete** |
+| `WS2` | Core runtime parity | **in_progress** |
 | `WS3` | Tools/adapters parity | **complete** |
 | `WS4` | Skills parity | **complete** |
 | `WS5` | UX parity | **complete** |
@@ -15,10 +15,10 @@
 
 ## WS2 — Core runtime parity
 
-- State: **complete**
+- State: **in_progress**
 - Live cron backend wired in gateway, app, chat, and ACP runtime paths.
 - Runtime tool bridge refreshed from live registry in gateway handlers.
-- Metrics: `{"wiring_sites_detected": 3}`
+- Metrics: `{"wiring_sites_detected": 1}`
 
 ## WS3 — Tools/adapters parity
 
@@ -33,7 +33,7 @@
 - State: **complete**
 - Upstream skills catalogs audited against local tree.
 - Intentional divergence documented for skills and optional-skills vendoring.
-- Metrics: `{"divergence_documented": true, "local_skill_files": 917, "upstream_skill_files": 895}`
+- Metrics: `{"divergence_documented": true, "local_skill_files": 918, "upstream_skill_files": 895}`
 
 ## WS5 — UX parity
 
@@ -61,5 +61,5 @@
 - State: **complete**
 - Compatibility policy defines rust-native default, bounded FFI fallback, and divergence governance.
 - Intentional divergences are codified in docs/parity/intentional-divergence.json.
-- Metrics: `{"divergence_items": 10, "policy_exists": true}`
+- Metrics: `{"divergence_items": 12, "policy_exists": true}`
 

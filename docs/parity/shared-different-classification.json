@@ -506,6 +506,20 @@
       "ticket": 25
     },
     {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/holographic/retrieval.py",
+      "rationale": "Upstream holographic retrieval.py behavior is covered by crates/hermes-agent/src/memory_plugins/holographic.rs: the Rust provider now builds a SQLite FTS5 facts index, sanitizes natural-language MATCH queries into stopword-filtered OR terms, applies category and trust filters, reranks with token overlap plus trust scoring, falls back to LIKE for punctuation-heavy queries, and has focused Rust tests for prose recall and C++/hyphen/dot query safety.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/holographic/store.py",
+      "rationale": "Upstream holographic store.py FTS search behavior is covered by crates/hermes-agent/src/memory_plugins/holographic.rs: Rust schema initialization creates facts_fts triggers with rebuild support, fact_store(action='search') uses the same sanitized FTS/LIKE search path, category-scoped lookups are enforced, retrieval counts update after result selection, and focused Rust tests cover tool-handler search parity.",
+      "ticket": 25
+    },
+    {
       "classification": "policy_only",
       "owner": "sheawinkler",
       "path": "plugins/memory/honcho/__init__.py",

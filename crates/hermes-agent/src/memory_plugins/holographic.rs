@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, params_from_iter, Connection, Row};
 use serde_json::{json, Value};
 
 use crate::memory_manager::MemoryProviderPlugin;
@@ -51,12 +51,228 @@ CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(category);
 CREATE INDEX IF NOT EXISTS idx_entities_name  ON entities(name);
 ";
 
+const FTS_SCHEMA: &str = "
+CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts
+    USING fts5(content, tags, content=facts, content_rowid=fact_id);
+
+CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
+    INSERT INTO facts_fts(rowid, content, tags)
+    VALUES (new.fact_id, new.content, new.tags);
+END;
+
+CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
+    DELETE FROM facts_fts WHERE rowid = old.fact_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
+    DELETE FROM facts_fts WHERE rowid = old.fact_id;
+    INSERT INTO facts_fts(rowid, content, tags)
+    VALUES (new.fact_id, new.content, new.tags);
+END;
+";
+
 // Trust adjustment constants
 const HELPFUL_DELTA: f64 = 0.05;
 const UNHELPFUL_DELTA: f64 = -0.10;
 
+const FTS_STOPWORDS: &[&str] = &[
+    "a",
+    "about",
+    "above",
+    "after",
+    "again",
+    "all",
+    "am",
+    "an",
+    "and",
+    "any",
+    "are",
+    "as",
+    "at",
+    "be",
+    "because",
+    "been",
+    "before",
+    "being",
+    "between",
+    "both",
+    "but",
+    "by",
+    "can",
+    "could",
+    "did",
+    "do",
+    "does",
+    "doing",
+    "don",
+    "down",
+    "during",
+    "each",
+    "few",
+    "for",
+    "from",
+    "further",
+    "had",
+    "has",
+    "have",
+    "having",
+    "he",
+    "her",
+    "here",
+    "hers",
+    "herself",
+    "him",
+    "himself",
+    "his",
+    "how",
+    "i",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "itself",
+    "just",
+    "me",
+    "more",
+    "most",
+    "my",
+    "myself",
+    "no",
+    "nor",
+    "not",
+    "now",
+    "of",
+    "off",
+    "on",
+    "once",
+    "only",
+    "or",
+    "other",
+    "our",
+    "ours",
+    "ourselves",
+    "out",
+    "over",
+    "own",
+    "same",
+    "she",
+    "should",
+    "so",
+    "some",
+    "such",
+    "than",
+    "that",
+    "the",
+    "their",
+    "theirs",
+    "them",
+    "themselves",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "through",
+    "to",
+    "too",
+    "under",
+    "until",
+    "up",
+    "very",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "whom",
+    "why",
+    "will",
+    "with",
+    "would",
+    "you",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
+];
+
 fn clamp_trust(v: f64) -> f64 {
     v.max(0.0).min(1.0)
+}
+
+fn is_fts5_unavailable(error: &rusqlite::Error) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("no such module")
+        || message.contains("unknown tokenizer")
+        || message.contains("fts5")
+}
+
+fn escape_like(raw: &str) -> String {
+    raw.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+fn tokenize_query(raw: &str) -> Vec<String> {
+    raw.split_whitespace()
+        .filter_map(|token| {
+            let cleaned = token
+                .trim_matches(|c: char| ".,;:!?\"'()[]{}#@<>".contains(c))
+                .to_ascii_lowercase();
+            (!cleaned.is_empty()).then_some(cleaned)
+        })
+        .collect()
+}
+
+fn sanitize_fts5_query(raw: &str) -> Option<String> {
+    let mut terms = Vec::new();
+    for token in tokenize_query(raw) {
+        let cleaned = token
+            .chars()
+            .filter(|c| !matches!(c, '"' | '(' | ')' | '*' | '^' | ':' | '-' | '+'))
+            .collect::<String>();
+        if cleaned.len() < 2 || FTS_STOPWORDS.contains(&cleaned.as_str()) {
+            continue;
+        }
+        terms.push(format!("\"{}\"", cleaned.replace('"', "\"\"")));
+    }
+    (!terms.is_empty()).then(|| terms.join(" OR "))
+}
+
+fn jaccard_similarity(left: &[String], right: &[String]) -> f64 {
+    let left: std::collections::HashSet<&str> = left.iter().map(String::as_str).collect();
+    let right: std::collections::HashSet<&str> = right.iter().map(String::as_str).collect();
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let intersection = left.intersection(&right).count();
+    let union = left.union(&right).count();
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
+}
+
+fn row_to_fact(row: &Row<'_>) -> rusqlite::Result<Value> {
+    Ok(json!({
+        "fact_id": row.get::<_, i64>(0)?,
+        "content": row.get::<_, String>(1)?,
+        "category": row.get::<_, String>(2)?,
+        "tags": row.get::<_, String>(3)?,
+        "trust_score": row.get::<_, f64>(4)?,
+        "retrieval_count": row.get::<_, i64>(5)?,
+        "helpful_count": row.get::<_, i64>(6)?,
+        "created_at": row.get::<_, String>(7)?,
+        "updated_at": row.get::<_, String>(8)?,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +361,7 @@ fn extract_entities(text: &str) -> Vec<String> {
 /// Holographic memory with structured facts, entity resolution, and trust scoring.
 pub struct HolographicMemoryPlugin {
     conn: Mutex<Option<Connection>>,
+    fts_enabled: Mutex<bool>,
     db_path: Mutex<Option<PathBuf>>,
     default_trust: f64,
     min_trust: f64,
@@ -155,6 +372,7 @@ impl HolographicMemoryPlugin {
     pub fn new() -> Self {
         Self {
             conn: Mutex::new(None),
+            fts_enabled: Mutex::new(false),
             db_path: Mutex::new(None),
             default_trust: 0.5,
             min_trust: 0.3,
@@ -207,10 +425,31 @@ impl HolographicMemoryPlugin {
         }
     }
 
+    fn ensure_fts_schema(conn: &Connection) -> Result<bool, String> {
+        match conn.execute_batch(FTS_SCHEMA) {
+            Ok(()) => {
+                if let Err(err) =
+                    conn.execute("INSERT INTO facts_fts(facts_fts) VALUES('rebuild')", [])
+                {
+                    tracing::debug!("Holographic memory FTS rebuild skipped: {}", err);
+                }
+                Ok(true)
+            }
+            Err(err) if is_fts5_unavailable(&err) => {
+                tracing::warn!(
+                    "SQLite FTS5 unavailable for holographic memory; falling back to LIKE search: {}",
+                    err
+                );
+                Ok(false)
+            }
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
     fn search_facts(
         &self,
         query: &str,
-        _category: Option<&str>,
+        category: Option<&str>,
         min_trust: f64,
         limit: usize,
     ) -> Vec<Value> {
@@ -222,55 +461,48 @@ impl HolographicMemoryPlugin {
             Some(c) => c,
             None => return Vec::new(),
         };
-
-        let query_lower = query.to_lowercase();
-        let keywords: Vec<&str> = query_lower.split_whitespace().collect();
-        if keywords.is_empty() {
+        if query.trim().is_empty() || limit == 0 {
             return Vec::new();
         }
 
-        // Build individual LIKE patterns and merge results.
-        let mut results = Vec::new();
+        let fts_enabled = self.fts_enabled.lock().map(|g| *g).unwrap_or(false);
+        let mut results = if fts_enabled {
+            self.search_facts_fts(conn, query, category, min_trust, limit * 3)
+        } else {
+            Vec::new()
+        };
 
-        // Search for each keyword and merge results.
-        for keyword in &keywords {
-            let pattern = format!("%{}%", keyword);
-            let mut stmt = match conn.prepare(
-                "SELECT fact_id, content, category, tags, trust_score, retrieval_count, helpful_count, created_at, updated_at \
-                 FROM facts WHERE trust_score >= ?1 AND (LOWER(content) LIKE ?2 OR LOWER(tags) LIKE ?2) ORDER BY trust_score DESC LIMIT ?3"
-            ) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-
-            let rows = stmt.query_map(params![min_trust, pattern, limit as i64], |row| {
-                Ok(json!({
-                    "fact_id": row.get::<_, i64>(0)?,
-                    "content": row.get::<_, String>(1)?,
-                    "category": row.get::<_, String>(2)?,
-                    "tags": row.get::<_, String>(3)?,
-                    "trust_score": row.get::<_, f64>(4)?,
-                    "retrieval_count": row.get::<_, i64>(5)?,
-                    "helpful_count": row.get::<_, i64>(6)?,
-                    "created_at": row.get::<_, String>(7)?,
-                    "updated_at": row.get::<_, String>(8)?,
-                }))
-            });
-
-            if let Ok(rows) = rows {
-                for row in rows.flatten() {
-                    let fid = row["fact_id"].as_i64().unwrap_or(0);
-                    if !results
-                        .iter()
-                        .any(|r: &Value| r["fact_id"].as_i64() == Some(fid))
-                    {
-                        results.push(row);
-                    }
-                }
-            }
+        if results.is_empty() {
+            results = self.search_facts_like(conn, query, category, min_trust, limit * 3);
         }
 
-        // Update retrieval counts
+        let query_tokens = tokenize_query(query);
+        for fact in &mut results {
+            let content_tokens = tokenize_query(fact["content"].as_str().unwrap_or_default());
+            let tag_tokens = tokenize_query(fact["tags"].as_str().unwrap_or_default());
+            let mut all_tokens = content_tokens;
+            all_tokens.extend(tag_tokens);
+            let jaccard = jaccard_similarity(&query_tokens, &all_tokens);
+            let fts_rank = fact["fts_rank"].as_f64().unwrap_or(0.5);
+            let trust = fact["trust_score"].as_f64().unwrap_or(0.0);
+            fact["score"] = json!(((0.6 * fts_rank) + (0.4 * jaccard)) * trust);
+        }
+        results.sort_by(|a, b| {
+            b["score"]
+                .as_f64()
+                .unwrap_or(0.0)
+                .partial_cmp(&a["score"].as_f64().unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    b["trust_score"]
+                        .as_f64()
+                        .unwrap_or(0.0)
+                        .partial_cmp(&a["trust_score"].as_f64().unwrap_or(0.0))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        });
+        results.truncate(limit);
+
         let ids: Vec<i64> = results
             .iter()
             .filter_map(|r| r["fact_id"].as_i64())
@@ -281,8 +513,113 @@ impl HolographicMemoryPlugin {
                 params![id],
             );
         }
+        results
+    }
 
-        results.truncate(limit);
+    fn search_facts_fts(
+        &self,
+        conn: &Connection,
+        query: &str,
+        category: Option<&str>,
+        min_trust: f64,
+        limit: usize,
+    ) -> Vec<Value> {
+        let Some(match_query) = sanitize_fts5_query(query) else {
+            return Vec::new();
+        };
+        let mut values = vec![
+            rusqlite::types::Value::Text(match_query),
+            rusqlite::types::Value::Real(min_trust),
+        ];
+        let category_clause = if let Some(category) = category {
+            values.push(rusqlite::types::Value::Text(category.to_string()));
+            " AND f.category = ?3"
+        } else {
+            ""
+        };
+        values.push(rusqlite::types::Value::Integer(limit as i64));
+        let limit_placeholder = values.len();
+        let sql = format!(
+            "SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score, \
+                    f.retrieval_count, f.helpful_count, f.created_at, f.updated_at, \
+                    facts_fts.rank \
+             FROM facts_fts \
+             JOIN facts f ON f.fact_id = facts_fts.rowid \
+             WHERE facts_fts MATCH ?1 AND f.trust_score >= ?2{} \
+             ORDER BY facts_fts.rank, f.trust_score DESC \
+             LIMIT ?{}",
+            category_clause, limit_placeholder
+        );
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(stmt) => stmt,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match stmt.query_map(params_from_iter(values.iter()), |row| {
+            let mut fact = row_to_fact(row)?;
+            let raw_rank = row.get::<_, f64>(9).unwrap_or(0.0).abs();
+            fact["fts_rank"] = json!(1.0 / (1.0 + raw_rank));
+            Ok(fact)
+        }) {
+            Ok(rows) => rows,
+            Err(_) => return Vec::new(),
+        };
+        rows.flatten().collect()
+    }
+
+    fn search_facts_like(
+        &self,
+        conn: &Connection,
+        query: &str,
+        category: Option<&str>,
+        min_trust: f64,
+        limit: usize,
+    ) -> Vec<Value> {
+        let mut seen = std::collections::HashSet::new();
+        let mut results = Vec::new();
+        let mut keywords = tokenize_query(query);
+        if keywords.is_empty() {
+            keywords.push(query.trim().to_ascii_lowercase());
+        }
+        for keyword in keywords {
+            let pattern = format!("%{}%", escape_like(&keyword));
+            let mut values = vec![
+                rusqlite::types::Value::Real(min_trust),
+                rusqlite::types::Value::Text(pattern),
+            ];
+            let category_clause = if let Some(category) = category {
+                values.push(rusqlite::types::Value::Text(category.to_string()));
+                " AND category = ?3"
+            } else {
+                ""
+            };
+            values.push(rusqlite::types::Value::Integer(limit as i64));
+            let limit_placeholder = values.len();
+            let sql = format!(
+                "SELECT fact_id, content, category, tags, trust_score, retrieval_count, \
+                        helpful_count, created_at, updated_at \
+                 FROM facts \
+                 WHERE trust_score >= ?1 \
+                   AND (LOWER(content) LIKE ?2 ESCAPE '\\' OR LOWER(tags) LIKE ?2 ESCAPE '\\'){} \
+                 ORDER BY trust_score DESC \
+                 LIMIT ?{}",
+                category_clause, limit_placeholder
+            );
+            let mut stmt = match conn.prepare(&sql) {
+                Ok(stmt) => stmt,
+                Err(_) => continue,
+            };
+            let rows = match stmt.query_map(params_from_iter(values.iter()), row_to_fact) {
+                Ok(rows) => rows,
+                Err(_) => continue,
+            };
+            for mut row in rows.flatten() {
+                let fact_id = row["fact_id"].as_i64().unwrap_or_default();
+                if seen.insert(fact_id) {
+                    row["fts_rank"] = json!(0.25);
+                    results.push(row);
+                }
+            }
+        }
         results
     }
 
@@ -367,8 +704,16 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
                     tracing::warn!("Holographic memory schema init failed: {}", e);
                     return;
                 }
+                let fts_enabled = match Self::ensure_fts_schema(&conn) {
+                    Ok(enabled) => enabled,
+                    Err(e) => {
+                        tracing::warn!("Holographic memory FTS schema init failed: {}", e);
+                        false
+                    }
+                };
                 *self.db_path.lock().unwrap() = Some(db_path);
                 *self.conn.lock().unwrap() = Some(conn);
+                *self.fts_enabled.lock().unwrap() = fts_enabled;
                 *self.session_id.lock().unwrap() = session_id.to_string();
                 tracing::info!(
                     "Holographic memory plugin initialized for session {}",
@@ -450,6 +795,7 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
 
     fn shutdown(&self) {
         *self.conn.lock().unwrap() = None;
+        *self.fts_enabled.lock().unwrap() = false;
         tracing::debug!("Holographic memory plugin shutdown");
     }
 
@@ -725,6 +1071,101 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("dark mode"));
+    }
+
+    #[test]
+    fn test_search_facts_sanitizes_natural_language_fts_query() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin = HolographicMemoryPlugin::new();
+        plugin.initialize("test-session", tmp.path().to_str().unwrap());
+
+        let _ = plugin.add_fact(
+            "Deployment rollback failed because the gateway token cache was stale",
+            "project",
+            "deploy,rollback",
+        );
+
+        let results = plugin.search_facts(
+            "what happened with the deployment rollback?",
+            Some("project"),
+            0.0,
+            10,
+        );
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Deployment rollback"));
+        assert!(results[0]["score"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn test_search_facts_handles_fts_special_characters_with_like_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin = HolographicMemoryPlugin::new();
+        plugin.initialize("test-session", tmp.path().to_str().unwrap());
+
+        let _ = plugin.add_fact(
+            "C++ build notes mention foo-bar and simulate.p2.test.ts",
+            "project",
+            "c++,foo-bar,simulate.p2.test.ts",
+        );
+
+        let results = plugin.search_facts("C++ foo-bar simulate.p2.test.ts", None, 0.0, 10);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("C++ build"));
+    }
+
+    #[test]
+    fn test_search_facts_honors_category_filter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin = HolographicMemoryPlugin::new();
+        plugin.initialize("test-session", tmp.path().to_str().unwrap());
+
+        let _ = plugin.add_fact("Rust gateway deploy note", "project", "gateway");
+        let _ = plugin.add_fact("Rust personal preference note", "user_pref", "gateway");
+
+        let results = plugin.search_facts("Rust gateway", Some("user_pref"), 0.0, 10);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["category"].as_str(), Some("user_pref"));
+    }
+
+    #[test]
+    fn test_fact_store_search_uses_sanitized_search_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin = HolographicMemoryPlugin::new();
+        plugin.initialize("test-session", tmp.path().to_str().unwrap());
+
+        let _ = plugin.handle_tool_call(
+            "fact_store",
+            &json!({
+                "action": "add",
+                "content": "Natural recall should find the allocator regression",
+                "category": "project",
+                "tags": "allocator,regression"
+            }),
+        );
+        let output = plugin.handle_tool_call(
+            "fact_store",
+            &json!({
+                "action": "search",
+                "query": "can you recall the allocator regression?",
+                "category": "project"
+            }),
+        );
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["count"].as_u64(), Some(1));
+        assert!(parsed["results"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("allocator regression"));
     }
 
     #[test]

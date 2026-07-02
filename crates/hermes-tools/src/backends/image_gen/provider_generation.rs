@@ -92,17 +92,13 @@ impl ImageGenBackend for FalImageGenBackend {
 #[async_trait]
 impl ImageGenBackend for OpenAICodexImageGenBackend {
     async fn generate(&self, request: ImageGenerateRequest) -> Result<String, ToolError> {
-        if request.has_image_inputs() {
-            return Err(ToolError::InvalidParams(
-                "OpenAI Codex image generation is text-to-image only in this Rust backend; omit image_url/reference_image_urls or switch to an edit-capable FAL model.".into(),
-            ));
-        }
         let prompt = request.prompt.trim();
         if prompt.is_empty() {
             return Err(ToolError::InvalidParams(
                 "Prompt is required and must be a non-empty string.".into(),
             ));
         }
+        let source_images = codex_image_reference_parts(&request)?;
         let token = self
             .config
             .access_token
@@ -120,6 +116,7 @@ impl ImageGenBackend for OpenAICodexImageGenBackend {
             image_size,
             self.config.quality.as_str(),
             self.config.chat_model.as_str(),
+            source_images.as_slice(),
         );
         let mut req = self
             .client
@@ -153,6 +150,11 @@ impl ImageGenBackend for OpenAICodexImageGenBackend {
         let image_path =
             save_codex_image_b64(&image_b64, &self.config.output_dir, &self.config.tier_id)?;
         let image = image_path.to_string_lossy().to_string();
+        let modality = if source_images.is_empty() {
+            "text"
+        } else {
+            "image"
+        };
         Ok(json!({
             "success": true,
             "image": image,
@@ -168,7 +170,8 @@ impl ImageGenBackend for OpenAICodexImageGenBackend {
             "prompt": prompt,
             "size": image_size,
             "quality": self.config.quality,
-            "modality": "text",
+            "modality": modality,
+            "source_images": source_images.len(),
         })
         .to_string())
     }
@@ -177,8 +180,8 @@ impl ImageGenBackend for OpenAICodexImageGenBackend {
         ImageGenCapabilities {
             provider: Some("openai-codex".to_string()),
             model: Some(self.config.tier_id.clone()),
-            modalities: vec!["text".to_string()],
-            max_reference_images: 0,
+            modalities: vec!["text".to_string(), "image".to_string()],
+            max_reference_images: CODEX_MAX_SOURCE_IMAGES,
         }
     }
 }

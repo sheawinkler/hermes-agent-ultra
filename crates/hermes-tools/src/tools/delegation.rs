@@ -99,13 +99,6 @@ impl ToolHandler for DelegateTaskHandler {
             }),
         );
         props.insert(
-            "toolset".into(),
-            json!({
-                "type": "string",
-                "description": "Optional toolset name for the sub-agent. Omit to inherit the currently enabled parent tools."
-            }),
-        );
-        props.insert(
             "model".into(),
             json!({
                 "type": "string",
@@ -143,7 +136,7 @@ impl ToolHandler for DelegateTaskHandler {
 
         tool_schema(
             "delegate_task",
-            "Delegate a task to a sub-agent with an isolated context. Omitted toolset inherits the current session's enabled tools.",
+            "Delegate a task to a sub-agent with an isolated context. Sub-agents inherit the current session's enabled parent tools.",
             JsonSchema::object(props, vec!["task".into()]),
         )
     }
@@ -177,7 +170,9 @@ mod tests {
         assert_eq!(handler.schema().name, "delegate_task");
         let rendered = serde_json::to_string(&handler.schema()).expect("schema json");
         assert!(rendered.contains("inherit"));
-        assert!(rendered.contains("currently enabled parent tools"));
+        assert!(rendered.contains("current session"));
+        assert!(rendered.contains("enabled parent tools"));
+        assert!(!rendered.contains("\"toolset\""));
         assert!(rendered.contains("background"));
     }
 

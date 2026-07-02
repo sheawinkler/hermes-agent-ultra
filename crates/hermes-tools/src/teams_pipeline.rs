@@ -862,7 +862,14 @@ impl TeamsTranscriber for TranscriptionToolTeamsTranscriber {
 }
 
 fn safe_file_name(value: &str) -> String {
-    let cleaned = value
+    let Some(leaf) = value
+        .rsplit(['/', '\\'])
+        .find(|part| !part.is_empty())
+        .map(str::trim)
+    else {
+        return "recording.mp4".into();
+    };
+    let cleaned = leaf
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
@@ -872,7 +879,7 @@ fn safe_file_name(value: &str) -> String {
             }
         })
         .collect::<String>();
-    if cleaned.is_empty() {
+    if cleaned.is_empty() || cleaned.chars().all(|ch| ch == '.') {
         "recording.mp4".into()
     } else {
         cleaned

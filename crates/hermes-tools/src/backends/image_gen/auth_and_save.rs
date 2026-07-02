@@ -300,7 +300,17 @@ fn codex_image_responses_payload(
     size: &str,
     quality: &str,
     chat_model: &str,
+    source_images: &[String],
 ) -> Value {
+    let mut content = Vec::with_capacity(source_images.len() + 1);
+    content.push(json!({"type": "input_text", "text": prompt}));
+    content.extend(source_images.iter().map(|url| {
+        json!({
+            "type": "input_image",
+            "image_url": url,
+        })
+    }));
+
     json!({
         "model": chat_model,
         "store": false,
@@ -308,7 +318,7 @@ fn codex_image_responses_payload(
         "input": [{
             "type": "message",
             "role": "user",
-            "content": [{"type": "input_text", "text": prompt}],
+            "content": content,
         }],
         "tools": [{
             "type": "image_generation",
