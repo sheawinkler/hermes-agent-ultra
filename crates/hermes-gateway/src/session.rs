@@ -489,6 +489,34 @@ impl SessionManager {
             .collect()
     }
 
+    /// Search a user's visible sessions by title, UUID id, or canonical gateway key.
+    pub async fn search_user_sessions(
+        &self,
+        user_id: &str,
+        query: &str,
+        limit: usize,
+    ) -> Vec<Session> {
+        let query = query.trim();
+        if query.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+
+        let needle = query.to_ascii_lowercase();
+        let normalized_needle = normalize_session_search_text(query);
+        let user_sessions = self.get_user_sessions(user_id).await;
+        let mut matches = user_sessions
+            .into_iter()
+            .filter(|session| {
+                let key =
+                    self.compose_session_key(&session.platform, &session.chat_id, &session.user_id);
+                session_matches_query(session, &key, &needle, &normalized_needle)
+            })
+            .collect::<Vec<_>>();
+        matches.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
+        matches.truncate(limit);
+        matches
+    }
+
     /// Get the global messages from all sessions for a user across platforms
     /// (cross-platform session continuity).
     pub async fn get_cross_platform_messages(&self, user_id: &str) -> Vec<Message> {
@@ -641,6 +669,37 @@ fn normalize_session_title(raw: Option<&str>) -> Option<String> {
     raw.map(str::trim)
         .filter(|title| !title.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn normalize_session_search_text(text: &str) -> String {
+    text.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
+}
+
+fn session_matches_query(
+    session: &Session,
+    key: &str,
+    needle: &str,
+    normalized_needle: &str,
+) -> bool {
+    let mut haystacks = vec![
+        session.id.as_str(),
+        session.platform.as_str(),
+        session.chat_id.as_str(),
+        key,
+    ];
+    if let Some(title) = &session.title {
+        haystacks.push(title.as_str());
+    }
+
+    haystacks.iter().any(|haystack| {
+        let lower = haystack.to_ascii_lowercase();
+        lower.contains(needle)
+            || (!normalized_needle.is_empty()
+                && normalize_session_search_text(haystack).contains(normalized_needle))
+    })
 }
 
 #[cfg(test)]
@@ -866,6 +925,43 @@ mod tests {
 
         assert!(manager.set_title(&sid, "   ").await.is_none());
         assert!(manager.get_title(&sid).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn session_manager_searches_titles_ids_and_keys_without_cross_user_leakage() {
+        let manager = SessionManager::new(SessionConfig::default());
+        let target = manager
+            .get_or_create_session("telegram", "chat-target", "user1")
+            .await;
+        let target_key =
+            manager.compose_session_key(&target.platform, &target.chat_id, &target.user_id);
+        manager
+            .set_title(&target_key, "AN-94 Prestige Barrel Build #2")
+            .await;
+        manager
+            .get_or_create_session("telegram", "chat-other", "user2")
+            .await;
+        let other_key = manager.compose_session_key("telegram", "chat-other", "user2");
+        manager.set_title(&other_key, "AN-94 other user").await;
+
+        let by_punctuation_folded_title = manager.search_user_sessions("user1", "an94", 10).await;
+        assert_eq!(by_punctuation_folded_title.len(), 1);
+        assert_eq!(by_punctuation_folded_title[0].chat_id, "chat-target");
+
+        let by_id = manager.search_user_sessions("user1", &target.id, 10).await;
+        assert_eq!(by_id.len(), 1);
+        assert_eq!(by_id[0].id, target.id);
+
+        let by_key = manager
+            .search_user_sessions("user1", "telegram:chat-target", 10)
+            .await;
+        assert_eq!(by_key.len(), 1);
+        assert_eq!(by_key[0].chat_id, "chat-target");
+
+        assert!(manager
+            .search_user_sessions("user1", "other user", 10)
+            .await
+            .is_empty());
     }
 
     #[tokio::test]

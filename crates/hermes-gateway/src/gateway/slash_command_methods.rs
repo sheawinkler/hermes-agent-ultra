@@ -31,6 +31,30 @@ impl Gateway {
         }
     }
 
+    fn format_session_list(&self, heading: &str, sessions: &[Session]) -> String {
+        if sessions.is_empty() {
+            return format!("📚 No {} found for your user.", heading.to_ascii_lowercase());
+        }
+
+        let mut out = format!("📚 **{}:**\n\n", heading);
+        for s in sessions {
+            let key = self
+                .session_manager
+                .compose_session_key(&s.platform, &s.chat_id, &s.user_id);
+            let title = s.title.as_deref().unwrap_or("(untitled)");
+            out.push_str(&format!(
+                "• `{}` — {} messages, title `{}`, platform `{}` (id `{}`)\n",
+                key,
+                s.messages.len(),
+                title,
+                s.platform,
+                s.id
+            ));
+        }
+        out.push_str("\nUse `/sessions <key or id>` to switch.");
+        out
+    }
+
     async fn apply_verbose_command(
         &self,
         incoming: &IncomingMessage,
@@ -866,29 +890,18 @@ impl Gateway {
                     .session_manager
                     .get_user_sessions(&incoming.user_id)
                     .await;
-                let text = if sessions.is_empty() {
-                    "📚 No sessions found for your user.".to_string()
-                } else {
-                    let mut out = String::from("📚 **Your sessions:**\n\n");
-                    for s in sessions {
-                        let key = self.session_manager.compose_session_key(
-                            &s.platform,
-                            &s.chat_id,
-                            &s.user_id,
-                        );
-                        let title = s.title.as_deref().unwrap_or("(untitled)");
-                        out.push_str(&format!(
-                            "• `{}` — {} messages, title `{}`, platform `{}` (id `{}`)\n",
-                            key,
-                            s.messages.len(),
-                            title,
-                            s.platform,
-                            s.id
-                        ));
-                    }
-                    out.push_str("\nUse `/sessions <key or id>` to switch.");
-                    out
-                };
+                let text = self.format_session_list("Your sessions", &sessions);
+                self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SearchSessions { query } => {
+                let sessions = self
+                    .session_manager
+                    .search_user_sessions(&incoming.user_id, &query, 10)
+                    .await;
+                let text =
+                    self.format_session_list(&format!("Sessions matching `{}`", query), &sessions);
                 self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
                     .await?;
                 Ok(true)

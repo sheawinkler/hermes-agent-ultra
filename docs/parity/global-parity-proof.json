@@ -46,19 +46,19 @@
   "ci_gate": {
     "checks": [
       {
-        "actual": 14223.0,
+        "actual": 1.0,
         "limit": 5500,
         "metric": "max_commits_behind",
-        "status": "fail"
+        "status": "pass"
       },
       {
-        "actual": 13006.0,
+        "actual": 1.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
-        "status": "fail"
+        "status": "pass"
       },
       {
-        "actual": 3228.0,
+        "actual": 3319.0,
         "limit": 2600,
         "metric": "max_files_only_upstream",
         "status": "fail"
@@ -248,7 +248,7 @@
       "unverified_cases": 0
     }
   },
-  "generated_at_utc": "2026-07-03T20:16:19.256095+00:00",
+  "generated_at_utc": "2026-07-03T21:02:23.196063+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -267,20 +267,20 @@
     "max_behavioral_missing_rust_refs": 0.0,
     "max_behavioral_regressions": 0.0,
     "max_behavioral_unverified_cases": 0.0,
-    "max_commits_behind": 14223.0,
+    "max_commits_behind": 1.0,
     "max_deep_problem_solving_gaps": 0.0,
     "max_deep_problem_solving_missing_rust_refs": 0.0,
     "max_deep_problem_solving_regressions": 0.0,
     "max_deep_problem_solving_unverified_cases": 0.0,
     "max_divergence_review_overdue": 0.0,
-    "max_files_only_upstream": 3228.0,
+    "max_files_only_upstream": 3319.0,
     "max_queue_pending_commits": 0.0,
     "max_sota_harness_critical_gaps": 0.0,
     "max_sota_harness_missing_rust_refs": 0.0,
     "max_test_coverage_audit_critical_gaps": 0.0,
     "max_test_coverage_missing_rust_refs": 0.0,
     "max_unowned_divergences": 0.0,
-    "max_upstream_patch_missing": 13006.0,
+    "max_upstream_patch_missing": 1.0,
     "min_behavioral_similarity_ratio": 1.0,
     "min_behavioral_superiority_cases": 8.0,
     "min_deep_problem_solving_ratio": 1.0,
@@ -298,22 +298,14 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "mirrored": 99,
-      "ported": 569,
-      "superseded": 7594
+      "ported": 1
     },
     "by_target_ticket": {
-      "20": 3866,
-      "21": 132,
-      "22": 1027,
-      "23": 524,
-      "24": 26,
-      "25": 166,
-      "26": 2521
+      "20": 1
     },
     "overrides_path": "docs/parity/queue-overrides.json",
-    "patch_equivalent_count": 6,
-    "total_commits": 8262
+    "patch_equivalent_count": 0,
+    "total_commits": 1
   },
   "release_gate": {
     "checks": [
@@ -526,7 +518,7 @@
       "queue_pending": 0,
       "queue_total": 8262,
       "rust_test_files": 418,
-      "rust_test_functions": 7254,
+      "rust_test_functions": 7263,
       "test_intent_mapping_ratio": 1.0,
       "test_intents_mapped": 10,
       "test_intents_total": 10,

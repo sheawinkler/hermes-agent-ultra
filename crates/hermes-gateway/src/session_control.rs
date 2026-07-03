@@ -485,6 +485,15 @@ mod tests {
         MessageEvent::text(text, source(thread_id))
     }
 
+    fn image_event(path: &str, thread_id: &str) -> MessageEvent {
+        let mut event = MessageEvent::text("see image", source(thread_id));
+        event.message_type = MessageType::Image;
+        event
+            .metadata
+            .insert("media_path".to_string(), Value::String(path.to_string()));
+        event
+    }
+
     #[test]
     fn session_keys_preserve_distinct_topics() {
         assert_eq!(build_session_key(&source("10")), "telegram:-1001:10");
@@ -635,6 +644,40 @@ mod tests {
         assert!(decision.queued);
         assert!(!decision.interrupted);
         assert_eq!(coord.pending(&key).unwrap().text, "do not drop me");
+    }
+
+    #[test]
+    fn image_events_are_queued_by_resolved_session_key_not_source_fallback() {
+        let mut coord = BusySessionCoordinator::default();
+        let resolved_key = "canonical-session-key";
+        let source_key = build_session_key(&source("10"));
+        let sibling_key = build_session_key(&source("11"));
+        coord.mark_active(resolved_key, None);
+        coord.mark_active(&sibling_key, None);
+
+        let queued_image = coord.handle_busy_message(
+            resolved_key,
+            image_event("/tmp/a.png", "10"),
+            BusyInputMode::Queue,
+        );
+        let queued_sibling = coord.handle_busy_message(
+            &sibling_key,
+            event("plain text", "11"),
+            BusyInputMode::Queue,
+        );
+
+        assert!(queued_image.queued);
+        assert!(queued_sibling.queued);
+        assert!(coord.pending(&source_key).is_none());
+        assert_eq!(
+            coord
+                .pending(resolved_key)
+                .unwrap()
+                .metadata
+                .get("media_path"),
+            Some(&Value::String("/tmp/a.png".to_string()))
+        );
+        assert_eq!(coord.pending(&sibling_key).unwrap().text, "plain text");
     }
 
     #[test]

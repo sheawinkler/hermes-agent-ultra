@@ -1077,6 +1077,60 @@ async fn gateway_title_command_persists_and_surfaces_session_title() {
 }
 
 #[tokio::test]
+async fn gateway_sessions_search_matches_title_without_cross_user_leakage() {
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(TestAdapter {
+        messages: sent.clone(),
+    });
+
+    let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+    let mut dm_manager = DmManager::with_pair_behavior();
+    dm_manager.authorize_user("user1");
+    let gw = Gateway::new(session_mgr.clone(), dm_manager, GatewayConfig::default());
+    gw.register_adapter("test", adapter).await;
+
+    let target = session_mgr
+        .get_or_create_session("test", "chat-target", "user1")
+        .await;
+    let target_key = session_mgr.compose_session_key(&target.platform, &target.chat_id, &target.user_id);
+    session_mgr
+        .set_title(&target_key, "AN-94 Prestige Barrel Build #2")
+        .await;
+    let filler = session_mgr
+        .get_or_create_session("test", "chat-filler", "user1")
+        .await;
+    let filler_key = session_mgr.compose_session_key(&filler.platform, &filler.chat_id, &filler.user_id);
+    session_mgr.set_title(&filler_key, "Filler Build").await;
+    let other = session_mgr
+        .get_or_create_session("test", "chat-secret", "user2")
+        .await;
+    let other_key = session_mgr.compose_session_key(&other.platform, &other.chat_id, &other.user_id);
+    session_mgr
+        .set_title(&other_key, "AN-94 someone else's secret")
+        .await;
+
+    let search = IncomingMessage {
+        platform: "test".into(),
+        chat_id: "chat-search".into(),
+        user_id: "user1".into(),
+        text: "/sessions search an94".into(),
+        message_id: None,
+        thread_id: None,
+        is_dm: true,
+    };
+    assert!(gw.route_message(&search).await.is_ok());
+
+    let msgs = sent.lock().unwrap();
+    let reply = msgs.last().map(|(_, text)| text.as_str()).unwrap_or("");
+    assert!(reply.contains("Sessions matching `an94`"));
+    assert!(reply.contains("AN-94 Prestige Barrel Build #2"));
+    assert!(reply.contains(&target_key));
+    assert!(!reply.contains("Filler Build"));
+    assert!(!reply.contains("secret"));
+    assert!(!reply.contains(&other_key));
+}
+
+#[tokio::test]
 async fn gateway_profile_command_applies_profile_yaml_overlay() {
     let tmp = tempfile::tempdir().unwrap();
     let _env = HermesHomeEnvGuard::set(tmp.path());

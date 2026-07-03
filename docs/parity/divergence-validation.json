@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Volumes/wd_black/hermes-agent-ultra/repo/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-07-02T19:11:11.590561+00:00",
+  "generated_at_utc": "2026-07-03T20:54:03.926069+00:00",
   "items": [
     {
       "errors": [],
@@ -58,7 +58,7 @@
       "errors": [],
       "id": "rust-skills-catalog-governance",
       "last_reviewed": "2026-07-02",
-      "matched_files": 1018,
+      "matched_files": 1074,
       "matched_sample": [
         "optional-skills/DESCRIPTION.md",
         "optional-skills/autonomous-ai-agents/DESCRIPTION.md",
@@ -217,7 +217,7 @@
       "errors": [],
       "id": "rust-cli-tui-primary-ux-surface",
       "last_reviewed": "2026-07-02",
-      "matched_files": 1272,
+      "matched_files": 1273,
       "matched_sample": [
         "ui-tui/.gitignore",
         "ui-tui/.prettierrc",
@@ -297,10 +297,10 @@
   "summary": {
     "errors": 0,
     "items": 13,
-    "local_paths": 4056,
+    "local_paths": 4063,
     "review_overdue": 0,
     "unowned": 0,
-    "upstream_paths": 5966,
+    "upstream_paths": 6057,
     "warnings": 1
   }
 }
