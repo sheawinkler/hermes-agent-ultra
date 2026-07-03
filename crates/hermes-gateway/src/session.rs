@@ -512,7 +512,7 @@ impl SessionManager {
                 session_matches_query(session, &key, &needle, &normalized_needle)
             })
             .collect::<Vec<_>>();
-        matches.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
+        matches.sort_by_key(|session| std::cmp::Reverse(session.last_active_at));
         matches.truncate(limit);
         matches
     }
