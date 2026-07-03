@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="${REPO:-sheawinkler/hermes-agent-ultra}"
-VERSION="${VERSION:-v0.21.2}"
+VERSION="${VERSION:-v0.21.3}"
 KEEP_TMP="${KEEP_TMP:-false}"
 RUN_SETUP_HELP="${RUN_SETUP_HELP:-true}"
 HERMES_SMOKE_COMMAND_TIMEOUT_SECONDS="${HERMES_SMOKE_COMMAND_TIMEOUT_SECONDS:-30}"
