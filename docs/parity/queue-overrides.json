@@ -616,6 +616,11 @@
       "owner": "rust-runtime",
       "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence."
     },
+    "19d4174454624a1ca91bc47b8f2a7ae8c3b4b5d3": {
+      "disposition": "ported",
+      "owner": "rust-runtime",
+      "notes": "Ported in Rust gateway: /sessions search and /sessions find now route to user-scoped SessionManager search over session title, UUID id, and canonical gateway key with punctuation-normalized matching; missing-query usage and cross-user non-leakage are covered by gateway parser/runtime tests."
+    },
     "19db9cd0760e05dafcd1ae637db946cdd65322ce": {
       "disposition": "ported",
       "notes": "Rust ACP SessionManager now exposes a public lock-protected update_session_meta API with COALESCE-style optional model preservation, merges cwd/provider/api_mode/base_url/config options, routes existing update_cwd/update_model through it, and tests missing-session no-op plus single persist callback behavior."

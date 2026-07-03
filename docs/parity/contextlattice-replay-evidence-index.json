@@ -4,9 +4,9 @@
     "project": "hermes-agent-ultra",
     "topic": "parity/sota"
   },
-  "generated_at_utc": "2026-06-24T00:21:39.244232+00:00",
+  "generated_at_utc": "2026-07-03T20:16:19.312670+00:00",
   "latest_gate_state": {
-    "ci_gate_pass": true,
+    "ci_gate_pass": false,
     "queue_pending": 0,
     "release_gate_pass": true,
     "sota_harness_gate_pass": true,
@@ -23,7 +23,11 @@
       "required_capabilities": [
         "cli workflow replay",
         "normalized stdout snapshots",
-        "non-TTY/PTY diagnostic snapshot"
+        "non-TTY/PTY diagnostic snapshot",
+        "one-true-harness cockpit registry",
+        "release systems proof snapshot",
+        "provider QoS route-health snapshot",
+        "memory backend status snapshot"
       ],
       "retrieval_query": "Hermes Agent Ultra SOTA harness evidence for workflow-replay-and-terminal-snapshots including fixtures, Rust tests, failures, and queue status",
       "rust_tests": [
@@ -38,7 +42,7 @@
       ],
       "status": "covered_by_rust_contracts",
       "title": "User workflow replay and terminal snapshots",
-      "why": "Protects operator journeys by replaying real CLI commands and normalized terminal-facing diagnostics."
+      "why": "Protects operator journeys by replaying real CLI commands, release-facing proof surfaces, provider QoS snapshots, memory status, and normalized terminal diagnostics."
     },
     {
       "contextlattice_topic": "hermes-agent-ultra/parity/sota/protocol-differential-contracts",

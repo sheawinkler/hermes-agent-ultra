@@ -61,6 +61,7 @@ jobs:
           python3 -m py_compile scripts/run-upstream-surface-coverage-gate.py
           python3 -m py_compile scripts/generate-shared-diff-backlog.py
           python3 -m py_compile scripts/generate-test-coverage-audit.py
+          python3 -m py_compile scripts/generate-release-readiness-summary.py
           python3 -m py_compile scripts/release_secret_scan.py
 
   cross-build:

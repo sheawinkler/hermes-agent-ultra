@@ -1,12 +1,12 @@
 {
-  "generated_at_utc": "2026-07-02T12:28:16-06:00",
-  "head_sha": "13085efc6e7264168d174136cf3aad00f9df6452",
+  "generated_at_utc": "2026-07-03T14:36:48-06:00",
+  "head_sha": "074c0dd09f61171ecd5795a289f6bde205a08945",
   "states": {
     "complete": 6,
     "in_progress": 1
   },
   "upstream_ref": "upstream/main",
-  "upstream_sha": "a9b5598909585b851b1ed65f05034033676d1a86",
+  "upstream_sha": "19d4174454624a1ca91bc47b8f2a7ae8c3b4b5d3",
   "workstreams": [
     {
       "evidence": [
@@ -41,7 +41,7 @@
       "metrics": {
         "divergence_documented": true,
         "local_skill_files": 918,
-        "upstream_skill_files": 895
+        "upstream_skill_files": 951
       },
       "state": "complete",
       "title": "Skills parity",
@@ -91,7 +91,7 @@
         "Intentional divergences are codified in docs/parity/intentional-divergence.json."
       ],
       "metrics": {
-        "divergence_items": 12,
+        "divergence_items": 13,
         "policy_exists": true
       },
       "state": "complete",

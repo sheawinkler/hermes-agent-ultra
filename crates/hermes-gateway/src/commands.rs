@@ -34,8 +34,10 @@ pub enum GatewayCommandResult {
     EnableTool { name: String },
     /// Disable a specific tool.
     DisableTool { name: String },
-    /// List or switch sessions.
+    /// List sessions.
     ListSessions,
+    /// Search sessions by visible title or handle.
+    SearchSessions { query: String },
     /// Switch to a specific session.
     SwitchSession { session_id: String },
     /// Show or set usage budget.
@@ -356,8 +358,8 @@ pub fn all_commands() -> Vec<CommandInfo> {
         CommandInfo {
             name: "/sessions",
             aliases: &[],
-            description: "List or switch sessions",
-            usage: "/sessions [id]",
+            description: "List, search, or switch sessions",
+            usage: "/sessions [id|search <query>|find <query>]",
         },
         CommandInfo {
             name: "/budget",
@@ -888,8 +890,19 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
             if args.is_empty() {
                 GatewayCommandResult::ListSessions
             } else {
-                GatewayCommandResult::SwitchSession {
-                    session_id: args.to_string(),
+                let parts = args.split_whitespace().collect::<Vec<_>>();
+                match parts.as_slice() {
+                    ["search"] | ["find"] => {
+                        GatewayCommandResult::Reply("Usage: /sessions search <query>".to_string())
+                    }
+                    ["search", rest @ ..] | ["find", rest @ ..] => {
+                        GatewayCommandResult::SearchSessions {
+                            query: rest.join(" "),
+                        }
+                    }
+                    _ => GatewayCommandResult::SwitchSession {
+                        session_id: args.to_string(),
+                    },
                 }
             }
         }
@@ -1348,6 +1361,18 @@ mod tests {
         match handle_command("/sessions") {
             GatewayCommandResult::ListSessions => {}
             other => panic!("Expected ListSessions, got {:?}", other),
+        }
+        match handle_command("/sessions search an94") {
+            GatewayCommandResult::SearchSessions { query } => assert_eq!(query, "an94"),
+            other => panic!("Expected SearchSessions, got {:?}", other),
+        }
+        match handle_command("/sessions find AN-94 build") {
+            GatewayCommandResult::SearchSessions { query } => assert_eq!(query, "AN-94 build"),
+            other => panic!("Expected SearchSessions, got {:?}", other),
+        }
+        match handle_command("/sessions search") {
+            GatewayCommandResult::Reply(msg) => assert!(msg.contains("/sessions search <query>")),
+            other => panic!("Expected usage Reply, got {:?}", other),
         }
         match handle_command("/sessions abc-123") {
             GatewayCommandResult::SwitchSession { session_id } => assert_eq!(session_id, "abc-123"),

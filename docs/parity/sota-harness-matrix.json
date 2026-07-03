@@ -11,7 +11,7 @@
     "domains_passing": 3,
     "domain_coverage_ratio": 1.0,
     "direct_rust_tests": 12,
-    "workflow_replay_steps": 5,
+    "workflow_replay_steps": 9,
     "protocol_cases": 7,
     "fault_scenarios": 6,
     "required_fault_classes": 7,
@@ -21,7 +21,7 @@
     {
       "id": "workflow-replay-and-terminal-snapshots",
       "title": "User workflow replay and terminal snapshots",
-      "why": "Protects operator journeys by replaying real CLI commands and normalized terminal-facing diagnostics.",
+      "why": "Protects operator journeys by replaying real CLI commands, release-facing proof surfaces, provider QoS snapshots, memory status, and normalized terminal diagnostics.",
       "status": "covered_by_rust_contracts",
       "fixtures": [
         "crates/hermes-parity-tests/tests/fixtures/sota_workflow_replay.json"
@@ -29,7 +29,11 @@
       "required_capabilities": [
         "cli workflow replay",
         "normalized stdout snapshots",
-        "non-TTY/PTY diagnostic snapshot"
+        "non-TTY/PTY diagnostic snapshot",
+        "one-true-harness cockpit registry",
+        "release systems proof snapshot",
+        "provider QoS route-health snapshot",
+        "memory backend status snapshot"
       ],
       "rust_tests": [
         {

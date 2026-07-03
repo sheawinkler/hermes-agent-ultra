@@ -1,6 +1,6 @@
 # Test Coverage Audit
 
-Generated: `2026-07-02T18:30:54.008059+00:00`
+Generated: `2026-07-03T20:54:02.745718+00:00`
 
 ## Gate
 
@@ -16,7 +16,7 @@ Generated: `2026-07-02T18:30:54.008059+00:00`
 | `covered_behavior_rows` | 470 |
 | `tracked_behavior_coverage_ratio` | 1.0 |
 | `rust_test_files` | 418 |
-| `rust_test_functions` | 7254 |
+| `rust_test_functions` | 7263 |
 | `coverage_manifest_entries` | 460 |
 | `coverage_manifest_entries_with_valid_rust_tests` | 460 |
 | `missing_rust_test_refs` | 0 |

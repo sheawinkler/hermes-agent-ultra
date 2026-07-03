@@ -14,6 +14,24 @@
 
 Rust-first autonomous agent runtime with functional parity goals against `NousResearch/hermes-agent`, plus an Ultra reliability, security, and operator-control layer.
 
+## Current Release And Parity Baseline
+
+Current release baseline: [`v0.21.2`](./docs/releases/v0.21.2.md).
+
+As of `v0.21.2`, the tracked upstream parity backlog is closed in the local
+governance artifacts: upstream queue pending is `0`, shared-diff pending
+classification/review is `0 / 0`, coverage critical gaps are `0`, and SOTA
+harness critical gaps are `0`. Future upstream changes can create new drift;
+the scheduled parity audit and release-readiness summary are the public guard.
+
+Fast confidence check against published artifacts:
+
+```bash
+bash scripts/smoke-release-artifact.sh --version v0.21.2
+```
+
+See [docs/demo.md](./docs/demo.md) for the one-command demo/readiness path.
+
 ## What You Get
 
 - Fully Rust-native core runtime (agent loop, tools, gateway, skills, CLI/TUI)
