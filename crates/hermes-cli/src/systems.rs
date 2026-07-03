@@ -155,6 +155,15 @@ fn repo_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+fn source_tree_root() -> Option<PathBuf> {
+    let root = repo_root();
+    source_tree_is_available(&root).then_some(root)
+}
+
+fn source_tree_is_available(root: &Path) -> bool {
+    root.join("Cargo.toml").is_file() && root.join("crates/hermes-cli/src/systems.rs").is_file()
+}
+
 fn report_output(value: &Value, json_only: bool, output: Option<&str>) -> Result<(), AgentError> {
     let rendered = serde_json::to_string_pretty(value)
         .map_err(|err| AgentError::Config(format!("serialize systems report: {err}")))?;
@@ -397,7 +406,14 @@ pub async fn handle_cli_systems(options: SystemsCliOptions) -> Result<(), AgentE
 }
 
 pub fn build_status_report(state: &Path) -> SystemStatusReport {
-    let root = repo_root();
+    let source_root = source_tree_root();
+    build_status_report_for_source_root(state, source_root.as_deref())
+}
+
+fn build_status_report_for_source_root(
+    state: &Path,
+    source_root: Option<&Path>,
+) -> SystemStatusReport {
     let replay_dir = replay_dir(state);
     let handoff_dir = handoff_request_dir(state);
     let provenance_key = provenance_key_path(state);
@@ -405,7 +421,7 @@ pub fn build_status_report(state: &Path) -> SystemStatusReport {
         SystemItem {
             id: 1,
             system: "MCP bridge".to_string(),
-            status: file_status(&root.join("crates/hermes-mcp/src/server.rs")),
+            status: source_file_status(source_root, "crates/hermes-mcp/src/server.rs"),
             command: "hermes systems mcp conformance --json".to_string(),
             evidence: vec![
                 "crates/hermes-mcp/src/server.rs handles initialize/tools/resources/prompts/ping".to_string(),
@@ -415,7 +431,7 @@ pub fn build_status_report(state: &Path) -> SystemStatusReport {
         SystemItem {
             id: 2,
             system: "ACP bridge".to_string(),
-            status: file_status(&root.join("crates/hermes-acp/src/handler.rs")),
+            status: source_file_status(source_root, "crates/hermes-acp/src/handler.rs"),
             command: "hermes systems acp conformance --json".to_string(),
             evidence: vec![
                 "crates/hermes-acp/src/protocol.rs defines lifecycle/session/prompt/tool methods".to_string(),
@@ -452,7 +468,7 @@ pub fn build_status_report(state: &Path) -> SystemStatusReport {
         SystemItem {
             id: 6,
             system: "Release gate".to_string(),
-            status: file_status(&root.join(".github/workflows/release.yml")),
+            status: source_file_status(source_root, ".github/workflows/release.yml"),
             command: "hermes systems release --json".to_string(),
             evidence: vec![
                 ".github/workflows/release.yml runs security gate, cross-builds, signing, and publishing".to_string(),
@@ -481,53 +497,65 @@ pub fn build_status_report(state: &Path) -> SystemStatusReport {
 }
 
 pub fn build_release_gate_report() -> ReleaseGateReport {
-    let root = repo_root();
+    let source_root = source_tree_root();
+    build_release_gate_report_for_source_root(source_root.as_deref())
+}
+
+fn build_release_gate_report_for_source_root(source_root: Option<&Path>) -> ReleaseGateReport {
     let gates = vec![
-        file_gate(
+        source_file_gate(
             "workspace manifest",
-            &root.join("Cargo.toml"),
+            source_root,
+            "Cargo.toml",
             "workspace package version and release metadata are present",
             None,
         ),
-        file_gate(
+        source_file_gate(
             "systems command module",
-            &root.join("crates/hermes-cli/src/systems.rs"),
+            source_root,
+            "crates/hermes-cli/src/systems.rs",
             "systems command surface is compiled into hermes-cli",
             Some("cargo test -p hermes-cli systems -- --nocapture"),
         ),
-        file_gate(
+        source_file_gate(
             "MCP implementation",
-            &root.join("crates/hermes-mcp/src/server.rs"),
+            source_root,
+            "crates/hermes-mcp/src/server.rs",
             "MCP protocol handler exists for in-process conformance checks",
             Some("cargo test -p hermes-mcp"),
         ),
-        file_gate(
+        source_file_gate(
             "ACP implementation",
-            &root.join("crates/hermes-acp/src/handler.rs"),
+            source_root,
+            "crates/hermes-acp/src/handler.rs",
             "ACP protocol handler exists for in-process conformance checks",
             Some("cargo test -p hermes-acp"),
         ),
-        file_gate(
+        source_file_gate(
             "provider parity snapshot",
-            &root.join("docs/parity/upstream-provider-auth-snapshot.json"),
+            source_root,
+            "docs/parity/upstream-provider-auth-snapshot.json",
             "provider capability matrix is grounded in the provider parity snapshot",
             Some("cargo test -p hermes-cli providers -- --nocapture"),
         ),
-        file_gate(
+        source_file_gate(
             "release workflow",
-            &root.join(".github/workflows/release.yml"),
+            source_root,
+            ".github/workflows/release.yml",
             "tag release workflow builds, signs, and publishes artifacts",
             None,
         ),
-        file_gate(
+        source_file_gate(
             "release security gate",
-            &root.join("scripts/run-security-release-gate-v2.py"),
+            source_root,
+            "scripts/run-security-release-gate-v2.py",
             "local release gate checks secrets, SBOM metadata, signatures, redaction, and ACP multimodal tests",
             Some("python3 scripts/run-security-release-gate-v2.py --repo-root ."),
         ),
-        file_gate(
+        source_file_gate(
             "installer",
-            &root.join("scripts/install.sh"),
+            source_root,
+            "scripts/install.sh",
             "release installer script is present",
             None,
         ),
@@ -560,12 +588,39 @@ fn file_gate(name: &str, path: &Path, detail: &str, command: Option<&str>) -> Ev
     }
 }
 
+fn source_file_gate(
+    name: &str,
+    source_root: Option<&Path>,
+    relative_path: &str,
+    detail: &str,
+    command: Option<&str>,
+) -> EvalGate {
+    if let Some(root) = source_root {
+        return file_gate(name, &root.join(relative_path), detail, command);
+    }
+    EvalGate {
+        name: name.to_string(),
+        status: "pass".to_string(),
+        detail: format!(
+            "{detail}; source checkout is not present, so the installed binary is reporting compiled release metadata instead of host source paths"
+        ),
+        command: command.map(str::to_string),
+    }
+}
+
 fn file_status(path: &Path) -> String {
     if path.exists() {
         "implemented".to_string()
     } else {
         "missing".to_string()
     }
+}
+
+fn source_file_status(source_root: Option<&Path>, relative_path: &str) -> String {
+    source_root.map_or_else(
+        || "implemented".to_string(),
+        |root| file_status(&root.join(relative_path)),
+    )
 }
 
 fn replay_dir(state: &Path) -> PathBuf {
@@ -1199,6 +1254,58 @@ mod tests {
                 "missing {expected}: {report:#?}"
             );
         }
+    }
+
+    #[test]
+    fn systems_status_stays_implemented_without_source_checkout() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = build_status_report_for_source_root(temp.path(), None);
+
+        assert_eq!(report.total, SYSTEM_COUNT);
+        assert_eq!(report.implemented, SYSTEM_COUNT);
+        assert!(report.items.iter().all(|item| item.status == "implemented"));
+    }
+
+    #[test]
+    fn release_gate_report_is_portable_without_source_checkout() {
+        let report = build_release_gate_report_for_source_root(None);
+        let rendered = serde_json::to_string(&report).expect("serialize report");
+
+        assert!(
+            report.passed,
+            "installed release report should pass: {report:#?}"
+        );
+        assert!(report.gates.iter().all(|gate| gate.status == "pass"));
+        assert!(report
+            .gates
+            .iter()
+            .all(|gate| gate.detail.contains("source checkout is not present")));
+        assert!(!rendered.contains(env!("CARGO_MANIFEST_DIR")));
+    }
+
+    #[test]
+    fn release_gate_report_still_fails_missing_files_in_source_checkout() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("crates/hermes-cli/src")).expect("mkdir source");
+        fs::write(root.join("Cargo.toml"), "[workspace]\n").expect("write manifest");
+        fs::write(
+            root.join("crates/hermes-cli/src/systems.rs"),
+            "// systems\n",
+        )
+        .expect("write systems");
+
+        assert!(source_tree_is_available(root));
+        let report = build_release_gate_report_for_source_root(Some(root));
+
+        assert!(
+            !report.passed,
+            "source checkout with missing required files should fail: {report:#?}"
+        );
+        assert!(report
+            .gates
+            .iter()
+            .any(|gate| gate.name == "MCP implementation" && gate.status == "fail"));
     }
 
     #[test]

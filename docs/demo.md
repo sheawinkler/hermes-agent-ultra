@@ -7,12 +7,12 @@ the same smoke should pass without using the local development tree.
 ## One Command
 
 ```bash
-bash scripts/smoke-release-artifact.sh --version v0.21.2
+bash scripts/smoke-release-artifact.sh --version v0.21.3
 ```
 
 What it proves:
 
-- downloads the published `install.sh` from the `v0.21.2` GitHub release
+- downloads the published `install.sh` from the `v0.21.3` GitHub release
 - installs the published platform artifact into a temporary `bin` directory
 - fails if the installer falls back to building from source
 - verifies `hermes-agent-ultra` and `hermes-ultra`
@@ -37,8 +37,8 @@ CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo test -p hermes-http dashboard
 | Claim | Public surface | Deterministic proof |
 | --- | --- | --- |
 | Current parity baseline is closed | release-readiness summary | `scripts/generate-release-readiness-summary.py --check` |
-| Published artifacts install cleanly | release artifact smoke | `scripts/smoke-release-artifact.sh --version v0.21.2` |
-| Upstream `hermes` can coexist | installer smoke sentinel | `scripts/smoke-release-artifact.sh --version v0.21.2` |
+| Published artifacts install cleanly | release artifact smoke | `scripts/smoke-release-artifact.sh --version v0.21.3` |
+| Upstream `hermes` can coexist | installer smoke sentinel | `scripts/smoke-release-artifact.sh --version v0.21.3` |
 | One-true-harness cockpit exists | `/harness`, `harness_cockpit` | `cargo test -p hermes-cli harness_command_reports_issue_backed_cockpit_and_teach_skill` |
 | Tool simulator exists | `/simulate`, `tool_policy_simulate` | `cargo test -p hermes-cli test_simulate_command_is_registered_and_completable` |
 | Time-travel/session replay exists | `/timetravel`, replay fixture | `cargo test -p hermes-cli --test e2e_sota_workflow_replay` |

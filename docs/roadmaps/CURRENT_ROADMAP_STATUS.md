@@ -9,7 +9,7 @@ remains the generated parity artifacts under `docs/parity/`.
 
 | Signal | Current state | Evidence |
 | --- | ---: | --- |
-| Latest release baseline | `v0.21.2` | `docs/releases/v0.21.2.md` |
+| Latest release baseline | `v0.21.3` | `docs/releases/v0.21.3.md` |
 | Upstream missing queue pending | `0` | `docs/parity/upstream-missing-queue.json` |
 | Shared diff pending classification/review | `0 / 0` | `docs/parity/shared-diff-backlog.json` |
 | Coverage critical gaps | `0` | `docs/parity/test-coverage-audit.json` |
@@ -37,7 +37,7 @@ future upstream commits cannot create new drift.
 | Area | Required state | Local gate |
 | --- | --- | --- |
 | Release readiness summary | PASS | `python3 scripts/generate-release-readiness-summary.py --repo-root . --check` |
-| Released binary smoke | PASS for current tag | `bash scripts/smoke-release-artifact.sh --version v0.21.2` |
+| Released binary smoke | PASS for current tag | `bash scripts/smoke-release-artifact.sh --version v0.21.3` |
 | Upstream missing queue | `pending = 0` before release | `python3 scripts/generate-upstream-patch-queue.py --max-commits 0` |
 | Global parity proof | Pass release gate locally | `python3 scripts/generate-global-parity-proof.py --check-release` |
 | SOTA harness coverage | All domains covered | `python3 scripts/generate-sota-harness-hardening.py --check` |
@@ -58,7 +58,7 @@ future upstream commits cannot create new drift.
 - Use released-artifact smoke evidence, not local-source assumptions, before
   claiming installer or distribution behavior.
 - Keep public issue/status truth synchronized with release artifacts. Issue
-  #585 is resolved by the `v0.21.2` zero-backlog baseline and should be closed
+  #585 is resolved by the `v0.21.3` zero-backlog baseline and should be closed
   after this post-release confidence PR lands.
 - Treat stale roadmap prose as non-authoritative when it conflicts with
   generated parity artifacts, release workflow evidence, or closed GitHub issue
