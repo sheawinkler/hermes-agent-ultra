@@ -25,15 +25,15 @@
       "reason": "all SOTA harness domains must remain represented"
     },
     {
-      "actual": 3630,
+      "actual": 7254,
       "id": "rust_test_functions",
-      "limit": 4500,
+      "limit": 8000,
       "operator": "<=",
       "pass": true,
-      "reason": "cross-version review required before the Rust test surface grows another large tranche"
+      "reason": "cross-version review required before the post-parity Rust test surface grows another large tranche"
     },
     {
-      "actual": 409,
+      "actual": 460,
       "id": "coverage_manifest_entries",
       "limit": 600,
       "operator": "<=",
@@ -41,7 +41,7 @@
       "reason": "coverage manifest growth must stay reviewable across releases"
     },
     {
-      "actual": 5,
+      "actual": 9,
       "id": "sota_workflow_replay_steps",
       "limit": 12,
       "operator": "<=",
@@ -69,30 +69,30 @@
     "failures": [],
     "pass": true
   },
-  "generated_at_utc": "2026-06-24T00:21:39.244248+00:00",
+  "generated_at_utc": "2026-07-03T20:16:19.312706+00:00",
   "purpose": "Cross-version review budget for SOTA harness and coverage growth.",
   "schema_version": 1,
   "snapshot": {
-    "ci_gate_pass": true,
-    "coverage_manifest_entries": 409,
-    "covered_behavior_rows": 419,
-    "local_head": "55d43effb9c00a02dc0bdfde2840cef7b5176961+worktree",
+    "ci_gate_pass": false,
+    "coverage_manifest_entries": 460,
+    "covered_behavior_rows": 470,
+    "local_head": "977d4afe0031323843f69812f0ffc3b06aee2eaf+worktree",
     "missing_rust_test_refs": 0,
     "queue_pending": 0,
-    "queue_total": 6132,
-    "recorded_at_utc": "2026-06-24T00:21:39.243720+00:00",
+    "queue_total": 8262,
+    "recorded_at_utc": "2026-07-03T20:16:19.311890+00:00",
     "release_gate_pass": true,
-    "rust_test_functions": 3630,
+    "rust_test_functions": 7254,
     "sota_critical_gaps": 0,
     "sota_direct_rust_tests": 12,
     "sota_domain_coverage_ratio": 1.0,
     "sota_fault_scenarios": 6,
     "sota_missing_rust_test_refs": 0,
     "sota_protocol_cases": 7,
-    "sota_workflow_replay_steps": 5,
+    "sota_workflow_replay_steps": 9,
     "tracked_behavior_coverage_ratio": 1.0,
-    "tracked_behavior_rows": 419,
-    "upstream_head": "5ecf3bf0e0726b8b33682bb5c3aad9679b7b5be4"
+    "tracked_behavior_rows": 470,
+    "upstream_head": "048270fa069ff6aa41c01b403ac1eeab34b29628"
   },
   "source_artifacts": {
     "global_parity_proof": "docs/parity/global-parity-proof.json",

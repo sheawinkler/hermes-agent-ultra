@@ -20,6 +20,7 @@ jobs:
       - name: Checkout upstream hermes-agent snapshot
         run: git clone --depth 1 https://github.com/NousResearch/hermes-agent.git ../hermes-agent
       - name: Generate global parity artifacts
+        id: parity-proof
         run: |
           python3 scripts/generate-parity-matrix.py --local-ref origin/main
           python3 scripts/generate-workstream-status.py
@@ -29,7 +30,18 @@ jobs:
           python3 scripts/validate-intentional-divergence.py --check --allow-warnings
           python3 scripts/generate-shared-diff-backlog.py --local-ref origin/main --no-fetch
           python3 scripts/generate-upstream-patch-queue.py --local-ref origin/main --max-commits 0
-          python3 scripts/generate-global-parity-proof.py --check-ci
+          status=0
+          python3 scripts/generate-global-parity-proof.py --check-ci || status=$?
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+      - name: Generate public release readiness summary
+        run: |
+          status=0
+          python3 scripts/generate-release-readiness-summary.py --repo-root . --check || status=$?
+          cat .sync-reports/release-readiness-summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Enforce global parity CI gate
+        if: steps.parity-proof.outputs.status != '0'
+        run: exit "${{ steps.parity-proof.outputs.status }}"
       - name: Upstream surface coverage gate
         run: python3 scripts/run-upstream-surface-coverage-gate.py --repo-root . --upstream-ref upstream/main --local-ref origin/main
       - name: Golden parity harness
@@ -68,6 +80,8 @@ jobs:
             docs/parity/global-parity-proof.md
             docs/parity/upstream-missing-queue.md
             docs/parity/upstream-missing-queue.json
+            .sync-reports/release-readiness-summary.json
+            .sync-reports/release-readiness-summary.md
             .sync-reports/golden-parity-harness-*.json
             .sync-reports/behavioral-parity-*.json
       - name: Comment parity epic on failure
@@ -78,11 +92,16 @@ jobs:
           BODY=$(python3 - <<'PY'
           import json
           from pathlib import Path
+          summary = Path(".sync-reports/release-readiness-summary.md")
+          if summary.exists():
+              print(summary.read_text(encoding="utf-8"))
+              print("")
           p = Path("docs/parity/global-parity-proof.json")
           if not p.exists():
               print("Automated parity audit failed before proof artifact generation.")
           else:
               raw = json.loads(p.read_text(encoding="utf-8"))
+              ci_gate = raw.get("ci_gate", {})
               metrics = raw.get("metrics", {})
               backlog_path = Path("docs/parity/shared-diff-backlog.json")
               backlog_summary = {}
@@ -90,6 +109,12 @@ jobs:
                   backlog_summary = json.loads(backlog_path.read_text(encoding="utf-8")).get("summary", {})
               print("Automated parity audit failed CI gate.")
               print("")
+              for check in ci_gate.get("checks", []):
+                  if check.get("status") != "pass":
+                      print(
+                          f"- {check.get('metric')}: actual `{check.get('actual')}`, "
+                          f"limit `{check.get('limit')}`"
+                      )
               print(f"- commits_behind: `{metrics.get('max_commits_behind')}`")
               print(f"- upstream_patch_missing: `{metrics.get('max_upstream_patch_missing')}`")
               print(f"- files_only_upstream: `{metrics.get('max_files_only_upstream')}`")

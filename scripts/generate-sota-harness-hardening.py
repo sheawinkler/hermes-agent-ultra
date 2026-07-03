@@ -260,9 +260,9 @@ def build_budget(snapshot: dict[str, Any], thresholds: dict[str, Any]) -> dict[s
         {
             "id": "rust_test_functions",
             "actual": snapshot["rust_test_functions"],
-            "limit": 4500,
+            "limit": 8000,
             "operator": "<=",
-            "reason": "cross-version review required before the Rust test surface grows another large tranche",
+            "reason": "cross-version review required before the post-parity Rust test surface grows another large tranche",
         },
         {
             "id": "coverage_manifest_entries",

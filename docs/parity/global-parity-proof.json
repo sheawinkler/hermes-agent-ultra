@@ -248,7 +248,7 @@
       "unverified_cases": 0
     }
   },
-  "generated_at_utc": "2026-07-02T18:30:54.092535+00:00",
+  "generated_at_utc": "2026-07-03T20:16:19.256095+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -492,7 +492,7 @@
       "fault_scenarios": 6,
       "protocol_cases": 7,
       "required_fault_classes": 7,
-      "workflow_replay_steps": 5
+      "workflow_replay_steps": 9
     }
   },
   "sources": {

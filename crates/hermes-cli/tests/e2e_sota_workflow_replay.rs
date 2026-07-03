@@ -107,6 +107,10 @@ fn sota_workflow_replay_fixture_is_well_formed() {
         "tool_registry",
         "auth_status",
         "gateway_status",
+        "release_systems_status",
+        "release_gate",
+        "provider_qos",
+        "memory_fusion",
         "pty_diagnostic",
     ] {
         assert!(roles.contains(required), "missing snapshot role {required}");

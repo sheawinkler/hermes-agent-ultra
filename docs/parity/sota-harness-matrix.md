@@ -1,6 +1,6 @@
 # SOTA Harness Matrix
 
-Generated: `2026-06-10T23:45:00Z`
+Generated: `2026-07-03T00:00:00Z`
 
 ## Gate
 
@@ -19,7 +19,7 @@ Generated: `2026-06-10T23:45:00Z`
 
 ## What This Adds
 
-- Workflow replay turns operator CLI journeys into deterministic fixtures, including terminal-facing non-TTY diagnostics.
+- Workflow replay turns operator CLI journeys into deterministic fixtures, including release systems proof, one-true-harness tool registry, provider QoS, memory status, and terminal-facing non-TTY diagnostics.
 - Protocol differential contracts compare normalized ACP, MCP, and gateway behavior against fixture expectations.
 - Fault injection expands the existing Rust chaos harness with connection reset, auth expiry, and malformed tool payload scenarios, while retaining stream recovery tests.
 

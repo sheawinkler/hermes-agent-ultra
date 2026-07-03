@@ -56,16 +56,20 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             artifact: hermes-linux-x86_64.tar.gz
-            binary: hermes
+            binary: hermes-agent-ultra
+            packaged: hermes
           - target: aarch64-unknown-linux-gnu
             artifact: hermes-linux-aarch64.tar.gz
-            binary: hermes
+            binary: hermes-agent-ultra
+            packaged: hermes
           - target: x86_64-unknown-linux-musl
             artifact: hermes-linux-x86_64-musl.tar.gz
-            binary: hermes
+            binary: hermes-agent-ultra
+            packaged: hermes
           - target: x86_64-pc-windows-gnu
             artifact: hermes-windows-x86_64.zip
-            binary: hermes.exe
+            binary: hermes-agent-ultra.exe
+            packaged: hermes.exe
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,19 +80,19 @@ jobs:
       - name: Install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
       - name: Build release binary
-        run: cross build --release --target ${{ matrix.target }} -p hermes-cli
+        run: cross build --release --target ${{ matrix.target }} -p hermes-cli --bin hermes-agent-ultra
       - name: Package artifact (tar.gz)
         if: "!contains(matrix.artifact, '.zip')"
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
-          tar -C dist -czf ${{ matrix.artifact }} ${{ matrix.binary }}
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/${{ matrix.packaged }}
+          tar -C dist -czf ${{ matrix.artifact }} ${{ matrix.packaged }}
       - name: Package artifact (zip)
         if: contains(matrix.artifact, '.zip')
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
-          cd dist && zip ../${{ matrix.artifact }} ${{ matrix.binary }}
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/${{ matrix.packaged }}
+          cd dist && zip ../${{ matrix.artifact }} ${{ matrix.packaged }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -117,11 +121,11 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} -p hermes-cli
+        run: cargo build --release --target ${{ matrix.target }} -p hermes-cli --bin hermes-agent-ultra
       - name: Package artifact
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/hermes dist/
+          cp target/${{ matrix.target }}/release/hermes-agent-ultra dist/hermes
           tar -C dist -czf ${{ matrix.artifact }} hermes
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -176,3 +180,14 @@ jobs:
             dist/security/release-sbom.cdx.json
             scripts/install.sh
             Formula/hermes-agent-ultra.rb
+
+  release-smoke:
+    needs: sign-and-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Smoke published release artifact
+        run: bash scripts/smoke-release-artifact.sh --version "${GITHUB_REF_NAME}"

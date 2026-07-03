@@ -9,27 +9,114 @@
       "steps": [
         {
           "id": "model_status",
-          "args": ["model"],
+          "args": [
+            "model"
+          ],
           "snapshot_role": "cli_status",
-          "expected_stdout_contains": ["Current model"]
+          "expected_stdout_contains": [
+            "Current model"
+          ]
         },
         {
           "id": "tools_list",
-          "args": ["tools", "list"],
+          "args": [
+            "tools",
+            "list"
+          ],
           "snapshot_role": "tool_registry",
-          "expected_stdout_contains": ["send_message", "clarify"]
+          "expected_stdout_contains": [
+            "send_message",
+            "clarify",
+            "harness_cockpit",
+            "tool_policy_simulate",
+            "objective_snapshot",
+            "ops_snapshot",
+            "integrations_snapshot",
+            "auth_snapshot",
+            "skills_list",
+            "skill_view"
+          ]
         },
         {
           "id": "auth_status_nous",
-          "args": ["auth", "status", "nous"],
+          "args": [
+            "auth",
+            "status",
+            "nous"
+          ],
           "snapshot_role": "auth_status",
-          "expected_stdout_contains": ["Auth status", "provider='nous'"]
+          "expected_stdout_contains": [
+            "Auth status",
+            "provider='nous'"
+          ]
         },
         {
           "id": "gateway_status",
-          "args": ["gateway", "status"],
+          "args": [
+            "gateway",
+            "status"
+          ],
           "snapshot_role": "gateway_status",
-          "expected_stdout_contains": ["Gateway status"]
+          "expected_stdout_contains": [
+            "Gateway status"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release_binary_confidence",
+      "purpose": "Exercise release-facing one-true-harness, memory, provider/QoS, and systems proof surfaces through non-interactive CLI commands.",
+      "steps": [
+        {
+          "id": "systems_status_json",
+          "args": [
+            "systems",
+            "status",
+            "--json"
+          ],
+          "snapshot_role": "release_systems_status",
+          "expected_stdout_contains": [
+            "\"kind\": \"hermes.systems.status\"",
+            "Provider capability registry",
+            "Release gate"
+          ]
+        },
+        {
+          "id": "systems_release_json",
+          "args": [
+            "systems",
+            "release",
+            "--json"
+          ],
+          "snapshot_role": "release_gate",
+          "expected_stdout_contains": [
+            "\"kind\": \"hermes.systems.release_gate\"",
+            "\"passed\": true"
+          ]
+        },
+        {
+          "id": "route_health_json",
+          "args": [
+            "route-health",
+            "show",
+            "--json"
+          ],
+          "snapshot_role": "provider_qos",
+          "expected_stdout_contains": [
+            "\"summary\"",
+            "\"overall\""
+          ]
+        },
+        {
+          "id": "memory_status",
+          "args": [
+            "memory",
+            "status"
+          ],
+          "snapshot_role": "memory_fusion",
+          "expected_stdout_contains": [
+            "Memory provider"
+          ]
         }
       ]
     },
