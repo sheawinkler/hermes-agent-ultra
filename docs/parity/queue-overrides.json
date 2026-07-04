@@ -2064,6 +2064,11 @@
       "disposition": "ported",
       "notes": "rust gateway already supports vision/image URL handling and platform media send paths; this slice adds MEDIA marker extraction/routing with unsafe path blocking to close generated screenshot/image delivery parity"
     },
+    "5445e42b87b9918d5b1bfa9f4eadd8e4bb10ff37": {
+      "disposition": "superseded",
+      "owner": "rust-runtime",
+      "notes": "Upstream PR #57969 / head 4bf749fd changed only Electron desktop copy-button tooltip and scrollbar-offset UI in apps/desktop/src/components/assistant-ui/tool/fallback.tsx and apps/desktop/src/components/ui/copy-button.tsx. Hermes Agent Ultra does not ship the Electron desktop app; Rust CLI/TUI/gateway/tool surfaces own copy/display behavior, so there is no Rust runtime port target."
+    },
     "546193aa6d0ab3aff44a9691723c3c0a63ffda99": {
       "disposition": "superseded",
       "owner": "rust-runtime",

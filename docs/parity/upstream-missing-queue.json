@@ -2,7 +2,7 @@
   "commits": [
     {
       "classification_rule": "sha_override",
-      "disposition": "ported",
+      "disposition": "superseded",
       "files_sample": [
         ".dockerignore",
         ".env.example",
@@ -26,7 +26,7 @@
         ".github/pr-screenshots/telegram-overflow/topic-final-response-clipped.jpg"
       ],
       "files_touched": 6057,
-      "notes": "Ported in Rust gateway: /sessions search and /sessions find now route to user-scoped SessionManager search over session title, UUID id, and canonical gateway key with punctuation-normalized matching; missing-query usage and cross-user non-leakage are covered by gateway parser/runtime tests.",
+      "notes": "Upstream PR #57969 / head 4bf749fd changed only Electron desktop copy-button tooltip and scrollbar-offset UI in apps/desktop/src/components/assistant-ui/tool/fallback.tsx and apps/desktop/src/components/ui/copy-button.tsx. Hermes Agent Ultra does not ship the Electron desktop app; Rust CLI/TUI/gateway/tool surfaces own copy/display behavior, so there is no Rust runtime port target.",
       "owner": "rust-runtime",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -34,15 +34,15 @@
         "rust_primary_surface_only_commit": false,
         "superseded_by_guard": false
       },
-      "sha": "19d4174454624a1ca91bc47b8f2a7ae8c3b4b5d3",
-      "subject": "feat(gateway): add /sessions search <query> (#57685)",
+      "sha": "5445e42b87b9918d5b1bfa9f4eadd8e4bb10ff37",
+      "subject": "Merge pull request #57969 from alelpoan/fix/copy-button-tooltip",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-07-03T21:02:23.131785+00:00",
+  "generated_at_utc": "2026-07-04T06:47:45.845372+00:00",
   "refs": {
-    "baseline_start_sha": "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
+    "baseline_start_sha": "19d4174454624a1ca91bc47b8f2a7ae8c3b4b5d3",
     "local_ref": "HEAD",
     "prior_ref": "HEAD",
     "prior_source": "HEAD",
@@ -52,7 +52,7 @@
   },
   "summary": {
     "by_disposition": {
-      "ported": 1
+      "superseded": 1
     },
     "by_target_ticket": {
       "20": 1

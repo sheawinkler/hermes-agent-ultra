@@ -30,6 +30,14 @@ Fast confidence check against published artifacts:
 bash scripts/smoke-release-artifact.sh --version v0.21.3
 ```
 
+Repo-local CI is the authoritative gate for development and release confidence.
+GitHub Actions are a hosted mirror of the repo contract when they run; they are
+not required as the source of truth.
+
+```bash
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} bash scripts/run-repo-ci.sh
+```
+
 See [docs/demo.md](./docs/demo.md) for the one-command demo/readiness path.
 
 ## What You Get
