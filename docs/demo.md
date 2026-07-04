@@ -22,7 +22,11 @@ What it proves:
 
 ## Source Tree Confidence Path
 
+Repo-local CI is the gold standard. Hosted GitHub Actions can mirror this, but
+the repo-owned command is the artifact to trust when hosted CI is unavailable.
+
 ```bash
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} bash scripts/run-repo-ci.sh
 python3 scripts/generate-release-readiness-summary.py --repo-root . --check
 CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo test -p hermes-cli --test e2e_sota_workflow_replay -- --nocapture
 CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-target} cargo test -p hermes-cli harness_command_reports_issue_backed_cockpit_and_teach_skill -- --nocapture

@@ -90,7 +90,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-07-03T20:54:02.745718+00:00",
+  "generated_at_utc": "2026-07-04T06:47:43.205545+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -628,9 +628,9 @@
     "divergence_unowned": 0,
     "missing_rust_test_refs": 0,
     "queue_pending": 0,
-    "queue_total": 8262,
+    "queue_total": 1,
     "rust_test_files": 418,
-    "rust_test_functions": 7263,
+    "rust_test_functions": 7270,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,
