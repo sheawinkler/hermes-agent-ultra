@@ -84,6 +84,27 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
     Ok(())
 }
 
+async fn run_model_completion_values(cli: Cli, providers_only: bool) -> Result<(), AgentError> {
+    let config =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in provider_catalog_entries_for_config(&config).await {
+        if providers_only {
+            if seen.insert(entry.provider.clone()) {
+                println!("{}", entry.provider);
+            }
+            continue;
+        }
+        for model in entry.models {
+            let candidate = format!("{}:{}", entry.provider, model);
+            if seen.insert(candidate.clone()) {
+                println!("{candidate}");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Handle `hermes tools [action]`.
 async fn run_tools(
     cli: Cli,
@@ -718,4 +739,3 @@ async fn run_config(
     }
     Ok(())
 }
-

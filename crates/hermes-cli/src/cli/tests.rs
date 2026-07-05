@@ -19,7 +19,13 @@ fn cli_parse_default() {
 fn cli_parse_model() {
     let cli = Cli::try_parse_from(vec!["hermes", "model", "openai:gpt-4o"]).unwrap();
     match cli.command {
-        Some(CliCommand::Model { provider_model }) => {
+        Some(CliCommand::Model {
+            completion_values,
+            completion_providers,
+            provider_model,
+        }) => {
+            assert!(!completion_values);
+            assert!(!completion_providers);
             assert_eq!(provider_model.as_deref(), Some("openai:gpt-4o"));
         }
         _ => panic!("Expected Model command"),

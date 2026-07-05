@@ -1,4 +1,4 @@
-async fn print_auth_status_matrix(cli: &Cli, manager: &AuthManager) -> Result<(), AgentError> {
+async fn print_auth_status_matrix(cli: &Cli, token_store: &FileTokenStore) -> Result<(), AgentError> {
     let cfg_path = hermes_state_root(cli).join("config.yaml");
     let disk = load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
 
@@ -15,7 +15,7 @@ async fn print_auth_status_matrix(cli: &Cli, manager: &AuthManager) -> Result<()
                     .ok()
                     .map(|v| !v.trim().is_empty())
                     .unwrap_or(false));
-        let store_present = manager.get_access_token(provider).await?.is_some();
+        let store_present = token_store.get(provider).await.is_some();
         let auth_state_present = if provider_supports_oauth(provider) {
             read_provider_auth_state(provider)?.is_some()
         } else {

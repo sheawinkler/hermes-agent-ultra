@@ -960,7 +960,7 @@ async fn run_auth(
         }
         _ => {
             if provider == "all" || provider == "*" {
-                print_auth_status_matrix(&cli, &manager).await?;
+                print_auth_status_matrix(&cli, &token_store).await?;
                 return Ok(());
             }
             if provider == "telegram" {
@@ -1049,7 +1049,7 @@ async fn run_auth(
             }
             if provider == "nous" {
                 let env_present = provider_api_key_from_env(&provider).is_some();
-                let store_present = manager.get_access_token(&provider).await?.is_some();
+                let store_present = token_store.get(&provider).await.is_some();
                 let auth_state_present = read_valid_nous_auth_state()?.is_some();
                 let (has_token, source) = if env_present {
                     (true, "env")
@@ -1069,7 +1069,7 @@ async fn run_auth(
             if provider == "qwen-oauth" {
                 let qwen_status = get_qwen_auth_status().await;
                 let auth_state_present = read_provider_auth_state(&provider)?.is_some();
-                let store_present = manager.get_access_token(&provider).await?.is_some();
+                let store_present = token_store.get(&provider).await.is_some();
                 let env_present = provider_api_key_from_env(&provider).is_some();
                 let (has_token, source) = if env_present {
                     (true, "env")
@@ -1105,7 +1105,7 @@ async fn run_auth(
             if provider == "google-gemini-cli" {
                 let google_status = get_gemini_oauth_auth_status().await;
                 let auth_state_present = read_provider_auth_state(&provider)?.is_some();
-                let store_present = manager.get_access_token(&provider).await?.is_some();
+                let store_present = token_store.get(&provider).await.is_some();
                 let env_present = provider_api_key_from_env(&provider).is_some();
                 let (has_token, source) = if env_present {
                     (true, "env")
@@ -1147,7 +1147,7 @@ async fn run_auth(
             if provider == "anthropic" {
                 let anthropic_status = get_anthropic_oauth_status().await;
                 let auth_state_present = read_provider_auth_state(&provider)?.is_some();
-                let store_present = manager.get_access_token(&provider).await?.is_some();
+                let store_present = token_store.get(&provider).await.is_some();
                 let env_present = provider_api_key_from_env(&provider).is_some();
                 let (has_token, source) = if env_present {
                     (true, "env")
@@ -1180,7 +1180,7 @@ async fn run_auth(
                 return Ok(());
             }
             let env_present = provider_api_key_from_env(&provider).is_some();
-            let store_present = manager.get_access_token(&provider).await?.is_some();
+            let store_present = token_store.get(&provider).await.is_some();
             let auth_state_present = if provider_supports_oauth(&provider) {
                 read_provider_auth_state(&provider)?.is_some()
             } else {

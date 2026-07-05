@@ -21,6 +21,12 @@ pub enum CliCommand {
     ///   hermes model                    — show current model
     ///   hermes model openai:gpt-4o      — switch to gpt-4o via openai provider
     Model {
+        /// Print provider:model completion candidates, one per line.
+        #[arg(long, hide = true, conflicts_with = "completion_providers")]
+        completion_values: bool,
+        /// Print provider completion candidates, one per line.
+        #[arg(long, hide = true)]
+        completion_providers: bool,
         /// Provider:model identifier (e.g. "openai:gpt-4o", "anthropic:claude-3-opus").
         provider_model: Option<String>,
     },
