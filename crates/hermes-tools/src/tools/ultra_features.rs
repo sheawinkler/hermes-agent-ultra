@@ -1,4 +1,4 @@
-//! Rust-native "magic harness" tools: hash-stable edits, URI resources,
+//! Rust-native ultra feature tools: hash-stable edits, URI resources,
 //! conflict transactions, lightweight LSP/DAP, advisor guards, subagent
 //! workspaces, eval kernels, output minimization, inheritance, and benchmarks.
 
@@ -24,14 +24,14 @@ use crate::tools::file::content_looks_like_internal_read_status;
 const MAX_RESOURCE_CHARS: usize = 200_000;
 const MAX_SEARCH_RESULTS: usize = 200;
 const MAX_SCAN_FILES: usize = 600;
-const MAGIC_VERSION: &str = "2026-07-05";
+const ULTRA_FEATURE_VERSION: &str = "2026-07-05";
 
 #[derive(Debug, Clone)]
-pub struct MagicState {
+pub struct UltraFeatureState {
     root: PathBuf,
 }
 
-impl MagicState {
+impl UltraFeatureState {
     pub fn new(root: PathBuf) -> Self {
         let state = Self { root };
         state.ensure_dirs();
@@ -71,7 +71,7 @@ impl MagicState {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum MagicToolKind {
+pub enum UltraFeatureKind {
     BenchmarkLedger,
     HashEdit,
     ReadResource,
@@ -87,25 +87,25 @@ pub enum MagicToolKind {
     EvalKernel,
     MinimizeOutput,
     FirstRunInherit,
-    MagicBenchmark,
+    Benchmark,
 }
 
-pub struct MagicToolHandler {
-    state: Arc<MagicState>,
-    kind: MagicToolKind,
+pub struct UltraFeatureHandler {
+    state: Arc<UltraFeatureState>,
+    kind: UltraFeatureKind,
 }
 
-impl MagicToolHandler {
-    pub fn new(state: Arc<MagicState>, kind: MagicToolKind) -> Self {
+impl UltraFeatureHandler {
+    pub fn new(state: Arc<UltraFeatureState>, kind: UltraFeatureKind) -> Self {
         Self { state, kind }
     }
 }
 
-pub fn builtin_magic_handlers(
+pub fn builtin_ultra_feature_handlers(
     data_dir: PathBuf,
 ) -> Vec<(Arc<dyn ToolHandler>, &'static str, &'static str)> {
-    let state = Arc::new(MagicState::new(data_dir.join("magic_harness")));
-    use MagicToolKind::*;
+    let state = Arc::new(UltraFeatureState::new(data_dir.join("ultra_features")));
+    use UltraFeatureKind::*;
     [
         (BenchmarkLedger, "ledger"),
         (HashEdit, "edit"),
@@ -122,13 +122,13 @@ pub fn builtin_magic_handlers(
         (EvalKernel, "eval"),
         (MinimizeOutput, "min"),
         (FirstRunInherit, "inherit"),
-        (MagicBenchmark, "bench"),
+        (Benchmark, "bench"),
     ]
     .into_iter()
     .map(|(kind, icon)| {
         (
-            Arc::new(MagicToolHandler::new(state.clone(), kind)) as Arc<dyn ToolHandler>,
-            "magic",
+            Arc::new(UltraFeatureHandler::new(state.clone(), kind)) as Arc<dyn ToolHandler>,
+            "ultra_features",
             icon,
         )
     })
@@ -136,39 +136,39 @@ pub fn builtin_magic_handlers(
 }
 
 #[async_trait]
-impl ToolHandler for MagicToolHandler {
+impl ToolHandler for UltraFeatureHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
         self.state.ensure_dirs();
         match self.kind {
-            MagicToolKind::BenchmarkLedger => Ok(benchmark_ledger()),
-            MagicToolKind::HashEdit => hash_edit(params).await,
-            MagicToolKind::ReadResource => read_resource(params, &self.state).await,
-            MagicToolKind::SearchResource => search_resource(params, &self.state).await,
-            MagicToolKind::ResolveConflict => resolve_conflict(params).await,
-            MagicToolKind::LspInspect => lsp_inspect(params).await,
-            MagicToolKind::DebugProbe => debug_probe(params).await,
-            MagicToolKind::TransactionPreview => transaction_preview(params, &self.state).await,
-            MagicToolKind::AstSearch => ast_search(params).await,
-            MagicToolKind::StreamRuleGuard => stream_rule_guard(params, &self.state).await,
-            MagicToolKind::AdvisorWatch => advisor_watch(params, &self.state).await,
-            MagicToolKind::SubagentWorkspace => subagent_workspace(params, &self.state).await,
-            MagicToolKind::EvalKernel => eval_kernel(params, &self.state).await,
-            MagicToolKind::MinimizeOutput => Ok(minimize_output_tool(params)),
-            MagicToolKind::FirstRunInherit => first_run_inherit(params, &self.state).await,
-            MagicToolKind::MagicBenchmark => magic_benchmark(&self.state).await,
+            UltraFeatureKind::BenchmarkLedger => Ok(benchmark_ledger()),
+            UltraFeatureKind::HashEdit => hash_edit(params).await,
+            UltraFeatureKind::ReadResource => read_resource(params, &self.state).await,
+            UltraFeatureKind::SearchResource => search_resource(params, &self.state).await,
+            UltraFeatureKind::ResolveConflict => resolve_conflict(params).await,
+            UltraFeatureKind::LspInspect => lsp_inspect(params).await,
+            UltraFeatureKind::DebugProbe => debug_probe(params).await,
+            UltraFeatureKind::TransactionPreview => transaction_preview(params, &self.state).await,
+            UltraFeatureKind::AstSearch => ast_search(params).await,
+            UltraFeatureKind::StreamRuleGuard => stream_rule_guard(params, &self.state).await,
+            UltraFeatureKind::AdvisorWatch => advisor_watch(params, &self.state).await,
+            UltraFeatureKind::SubagentWorkspace => subagent_workspace(params, &self.state).await,
+            UltraFeatureKind::EvalKernel => eval_kernel(params, &self.state).await,
+            UltraFeatureKind::MinimizeOutput => Ok(minimize_output_tool(params)),
+            UltraFeatureKind::FirstRunInherit => first_run_inherit(params, &self.state).await,
+            UltraFeatureKind::Benchmark => ultra_feature_benchmark(&self.state).await,
         }
     }
 
     fn schema(&self) -> ToolSchema {
         match self.kind {
-            MagicToolKind::BenchmarkLedger => simple_schema(
-                "magic_benchmark_ledger",
-                "Return the implemented magic-harness gap ledger for all 15 competitive surfaces.",
+            UltraFeatureKind::BenchmarkLedger => simple_schema(
+                "ultra-feature-1",
+                "Return the implemented ultra-feature gap ledger for all competitive surfaces.",
                 vec![],
                 vec![],
             ),
-            MagicToolKind::HashEdit => simple_schema(
-                "hash_edit",
+            UltraFeatureKind::HashEdit => simple_schema(
+                "ultra-feature-2",
                 "Apply a SHA-256 content-hash anchored file edit with stale-anchor detection.",
                 vec![
                     str_prop("path", "File to edit."),
@@ -182,8 +182,8 @@ impl ToolHandler for MagicToolHandler {
                 ],
                 vec!["path", "new_string"],
             ),
-            MagicToolKind::ReadResource => simple_schema(
-                "read_resource",
+            UltraFeatureKind::ReadResource => simple_schema(
+                "ultra-feature-3",
                 "Read file://, http(s)://, pr://, issue://, skill://, session://, memory://, agent://, or conflict:// resources.",
                 vec![
                     str_prop("uri", "Resource URI or path."),
@@ -193,90 +193,90 @@ impl ToolHandler for MagicToolHandler {
                 ],
                 vec!["uri"],
             ),
-            MagicToolKind::SearchResource => simple_schema(
-                "search_resource",
+            UltraFeatureKind::SearchResource => simple_schema(
+                "ultra-feature-4",
                 "Search a resource URI namespace with regex.",
                 vec![str_prop("uri", "Resource URI or path."), str_prop("pattern", "Regex pattern."), int_prop("limit", "Result limit.")],
                 vec!["uri", "pattern"],
             ),
-            MagicToolKind::ResolveConflict => enum_schema(
-                "resolve_conflict",
+            UltraFeatureKind::ResolveConflict => enum_schema(
+                "ultra-feature-5",
                 "List, read, and resolve git conflict hunks.",
                 "action",
                 &["list", "read", "resolve"],
                 vec![str_prop("path", "File or directory."), int_prop("index", "Conflict index."), str_prop("choice", "ours, theirs, base, or manual."), str_prop("content", "Manual content."), bool_prop("dry_run", "Preview only.")],
             ),
-            MagicToolKind::LspInspect => enum_schema(
-                "lsp_inspect",
+            UltraFeatureKind::LspInspect => enum_schema(
+                "ultra-feature-6",
                 "Lightweight Rust-native LSP surface: diagnostics, symbols, references, workspace symbols, rename, and code actions.",
                 "action",
                 &["diagnostics", "symbols", "references", "workspace_symbols", "rename_preview", "rename_apply", "code_action_preview"],
                 vec![str_prop("path", "File/workspace path."), str_prop("symbol", "Symbol."), str_prop("replacement", "Replacement symbol."), int_prop("limit", "Limit.")],
             ),
-            MagicToolKind::DebugProbe => enum_schema(
-                "debug_probe",
+            UltraFeatureKind::DebugProbe => enum_schema(
+                "ultra-feature-7",
                 "DAP/debug surface: adapter probes, initialize packet, optional connect_initialize, launch and breakpoint plans.",
                 "action",
                 &["probe_adapters", "initialize_packet", "connect_initialize", "launch_plan", "breakpoint_plan"],
                 vec![str_prop("adapter", "Adapter family."), str_prop("program", "Program path."), str_prop("host", "DAP host."), int_prop("port", "DAP port.")],
             ),
-            MagicToolKind::TransactionPreview => enum_schema(
-                "transaction_preview",
+            UltraFeatureKind::TransactionPreview => enum_schema(
+                "ultra-feature-8",
                 "Create, list, read, accept, or reject durable preview cards for risky edits.",
                 "action",
                 &["create", "list", "read", "accept", "reject"],
                 vec![str_prop("id", "Transaction id."), str_prop("kind", "file_write or content_replace, with other kinds preview-only."), obj_prop("payload", "Kind-specific payload.")],
             ),
-            MagicToolKind::AstSearch => enum_schema(
-                "ast_search",
+            UltraFeatureKind::AstSearch => enum_schema(
+                "ultra-feature-9",
                 "Structural source symbol search and guarded replacement over Rust, Python, JS/TS, and Go.",
                 "action",
                 &["search", "replace"],
                 vec![str_prop("path", "Root/file path."), str_prop("pattern", "Regex over symbol names."), str_prop("symbol_kind", "Optional kind filter."), str_prop("replacement", "Replacement for action=replace."), bool_prop("dry_run", "Preview only."), int_prop("limit", "Limit.")],
             ),
-            MagicToolKind::StreamRuleGuard => enum_schema(
-                "stream_rule_guard",
+            UltraFeatureKind::StreamRuleGuard => enum_schema(
+                "ultra-feature-10",
                 "Persist and evaluate stream guard rules that warn, inject, retry, or abort.",
                 "action",
                 &["add", "list", "remove", "evaluate"],
                 vec![str_prop("id", "Rule id."), str_prop("pattern", "Regex pattern."), str_prop("effect", "warn, inject, retry, or abort."), str_prop("message", "Rule message."), str_prop("text", "Text to evaluate.")],
             ),
-            MagicToolKind::AdvisorWatch => simple_schema(
-                "advisor_watch",
+            UltraFeatureKind::AdvisorWatch => simple_schema(
+                "ultra-feature-11",
                 "Deterministic advisor pass for blocker/risk/verification findings before finalization.",
                 vec![str_prop("transcript", "Draft transcript."), str_prop("objective", "Objective text."), str_prop("evidence", "Evidence text.")],
                 vec!["transcript"],
             ),
-            MagicToolKind::SubagentWorkspace => enum_schema(
-                "subagent_workspace",
+            UltraFeatureKind::SubagentWorkspace => enum_schema(
+                "ultra-feature-12",
                 "Create and manage isolated subagent workspaces and agent:// artifacts.",
                 "action",
                 &["create", "list", "read", "write", "remove"],
                 vec![str_prop("id", "Subagent id."), str_prop("goal", "Subagent goal."), str_prop("path", "Artifact path."), str_prop("content", "Artifact content."), bool_prop("git_worktree", "Create a real git worktree."), str_prop("branch", "Worktree branch.")],
             ),
-            MagicToolKind::EvalKernel => enum_schema(
-                "eval_kernel",
+            UltraFeatureKind::EvalKernel => enum_schema(
+                "ultra-feature-13",
                 "Persistent Rust-managed JavaScript/TypeScript/shell eval kernel with Hermes file read/search helpers. Python is unsupported.",
                 "action",
                 &["run", "read", "reset"],
                 vec![str_prop("session", "Kernel session."), str_prop("language", "javascript, typescript, bash, or sh."), str_prop("code", "Code."), int_prop("timeout", "Timeout seconds.")],
             ),
-            MagicToolKind::MinimizeOutput => simple_schema(
-                "minimize_output",
+            UltraFeatureKind::MinimizeOutput => simple_schema(
+                "ultra-feature-14",
                 "Compress command output into errors, warnings, failures, changed files, and tail context.",
                 vec![str_prop("tool", "Command family."), str_prop("output", "Raw output."), int_prop("max_lines", "Tail lines."), int_prop("max_chars", "Character cap.")],
                 vec!["output"],
             ),
-            MagicToolKind::FirstRunInherit => enum_schema(
-                "first_run_inherit",
+            UltraFeatureKind::FirstRunInherit => enum_schema(
+                "ultra-feature-15",
                 "Scan/import rules from Codex, Claude, Cursor, Windsurf, Gemini, Cline, Copilot, and VS Code surfaces.",
                 "action",
                 &["scan", "import"],
                 vec![str_prop("path", "Workspace path."), int_prop("max_chars_per_file", "Excerpt cap.")],
             ),
-            MagicToolKind::MagicBenchmark => simple_schema(
-                "magic_benchmark",
-                "Run deterministic local magic-harness smoke benchmarks.",
+            UltraFeatureKind::Benchmark => simple_schema(
+                "ultra-feature-16",
+                "Run deterministic local ultra-feature smoke benchmarks.",
                 vec![],
                 vec![],
             ),
@@ -350,11 +350,16 @@ fn benchmark_ledger() -> String {
     let rows = [
         (
             1,
-            "Magic benchmark ledger",
-            "magic_benchmark_ledger + docs ledger",
+            "Ultra feature benchmark ledger",
+            "ultra-feature-1 + docs ledger",
             "implemented",
         ),
-        (2, "Hash-anchored edit engine", "hash_edit", "implemented"),
+        (
+            2,
+            "Hash-anchored edit engine",
+            "ultra-feature-2",
+            "implemented",
+        ),
         (
             3,
             "Unified resource URI layer",
@@ -370,67 +375,67 @@ fn benchmark_ledger() -> String {
         (
             5,
             "First-class LSP surface",
-            "lsp_inspect",
+            "ultra-feature-6",
             "implemented_lightweight",
         ),
         (
             6,
             "DAP/debug surface",
-            "debug_probe",
+            "ultra-feature-7",
             "implemented_probe_packet_connect",
         ),
         (
             7,
             "Preview/accept transaction queue",
-            "transaction_preview",
+            "ultra-feature-8",
             "implemented",
         ),
         (
             8,
             "Structural AST search/edit",
-            "ast_search",
+            "ultra-feature-9",
             "implemented_lightweight",
         ),
         (
             9,
             "Mid-stream rule injection",
-            "stream_rule_guard",
+            "ultra-feature-10",
             "implemented",
         ),
-        (10, "Advisor watcher", "advisor_watch", "implemented"),
+        (10, "Advisor watcher", "ultra-feature-11", "implemented"),
         (
             11,
             "Subagent worktree fanout",
-            "subagent_workspace",
+            "ultra-feature-12",
             "implemented",
         ),
         (
             12,
             "Persistent eval kernel",
-            "eval_kernel",
+            "ultra-feature-13",
             "implemented_js_shell_no_python",
         ),
         (
             13,
             "Tool output minimizer",
-            "minimize_output",
+            "ultra-feature-14",
             "implemented",
         ),
         (
             14,
             "First-run inheritance",
-            "first_run_inherit",
+            "ultra-feature-15",
             "implemented",
         ),
         (
             15,
-            "Public magic proof",
-            "magic_benchmark + docs/magic-benchmarks.md",
+            "Public ultra-feature proof",
+            "ultra-feature-16 + docs/ultra-feature-benchmarks.md",
             "implemented",
         ),
     ];
     json!({
-        "version": MAGIC_VERSION,
+        "version": ULTRA_FEATURE_VERSION,
         "rust_only_core": true,
         "items": rows.into_iter().map(|(id,item,surface,status)| json!({"id":id,"item":item,"surface":surface,"status":status})).collect::<Vec<_>>()
     })
@@ -598,7 +603,7 @@ fn replace_line_range(
     })
 }
 
-async fn read_resource(params: Value, state: &MagicState) -> Result<String, ToolError> {
+async fn read_resource(params: Value, state: &UltraFeatureState) -> Result<String, ToolError> {
     let uri = required_str(&params, "uri")?;
     let max_chars = params
         .get("max_chars")
@@ -621,7 +626,7 @@ async fn read_resource(params: Value, state: &MagicState) -> Result<String, Tool
     Ok(truncate_chars(&content, max_chars))
 }
 
-async fn search_resource(params: Value, state: &MagicState) -> Result<String, ToolError> {
+async fn search_resource(params: Value, state: &UltraFeatureState) -> Result<String, ToolError> {
     let uri = required_str(&params, "uri")?;
     let pattern = required_str(&params, "pattern")?;
     let limit = params
@@ -663,7 +668,7 @@ async fn search_resource(params: Value, state: &MagicState) -> Result<String, To
     Ok(json!({"matches":matches,"truncated":false}).to_string())
 }
 
-async fn resolve_resource(uri: &str, state: &MagicState) -> Result<String, ToolError> {
+async fn resolve_resource(uri: &str, state: &UltraFeatureState) -> Result<String, ToolError> {
     if uri.starts_with("http://") || uri.starts_with("https://") {
         return reqwest::get(uri)
             .await
@@ -700,7 +705,7 @@ async fn resolve_resource(uri: &str, state: &MagicState) -> Result<String, ToolE
     fs::read_to_string(clean_path(PathBuf::from(uri))).map_err(io_err("read path resource"))
 }
 
-fn uri_to_local_path(uri: &str, state: &MagicState) -> Option<PathBuf> {
+fn uri_to_local_path(uri: &str, state: &UltraFeatureState) -> Option<PathBuf> {
     if let Some(path) = uri.strip_prefix("file://") {
         return Some(clean_path(PathBuf::from(path)));
     }
@@ -862,7 +867,7 @@ fn read_memory_resource(query: &str) -> Result<String, ToolError> {
     })
 }
 
-fn read_agent_resource(spec: &str, state: &MagicState) -> Result<String, ToolError> {
+fn read_agent_resource(spec: &str, state: &UltraFeatureState) -> Result<String, ToolError> {
     let (id, rel) = split_once_or_all(spec, '/');
     fs::read_to_string(clean_join(&state.agents_dir().join(safe_id(id)), rel))
         .map_err(io_err("read agent resource"))
@@ -1028,7 +1033,7 @@ fn resolve_conflict_hunk(path: &Path, params: &Value) -> Result<String, ToolErro
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct MagicSymbol {
+struct UltraFeatureSymbol {
     name: String,
     kind: String,
     line: usize,
@@ -1124,7 +1129,7 @@ fn matches_pair(open: Option<char>, close: char) -> bool {
     )
 }
 
-fn extract_symbols(path: &Path, content: &str) -> Vec<MagicSymbol> {
+fn extract_symbols(path: &Path, content: &str) -> Vec<UltraFeatureSymbol> {
     let patterns: &[(&str, &str)] = match language_for_path(path) {
         "rust" => &[
             (
@@ -1191,7 +1196,7 @@ fn extract_symbols(path: &Path, content: &str) -> Vec<MagicSymbol> {
     for (idx, line) in content.lines().enumerate() {
         for (kind, re) in &compiled {
             if let Some(name) = re.captures(line).and_then(|caps| caps.get(1)) {
-                out.push(MagicSymbol {
+                out.push(UltraFeatureSymbol {
                     name: name.as_str().into(),
                     kind: (*kind).into(),
                     line: idx + 1,
@@ -1393,7 +1398,10 @@ struct PreviewTransaction {
     payload: Value,
 }
 
-async fn transaction_preview(params: Value, state: &MagicState) -> Result<String, ToolError> {
+async fn transaction_preview(
+    params: Value,
+    state: &UltraFeatureState,
+) -> Result<String, ToolError> {
     let action = required_str(&params, "action")?;
     match action {
         "create" => {
@@ -1445,13 +1453,13 @@ async fn transaction_preview(params: Value, state: &MagicState) -> Result<String
     }
 }
 
-fn transaction_path(state: &MagicState, id: &str) -> PathBuf {
+fn transaction_path(state: &UltraFeatureState, id: &str) -> PathBuf {
     state
         .transactions_dir()
         .join(format!("{}.json", safe_id(id)))
 }
 
-fn write_transaction(state: &MagicState, txn: &PreviewTransaction) -> Result<(), ToolError> {
+fn write_transaction(state: &UltraFeatureState, txn: &PreviewTransaction) -> Result<(), ToolError> {
     fs::write(
         transaction_path(state, &txn.id),
         serde_json::to_vec_pretty(txn).map_err(to_tool_err)?,
@@ -1459,7 +1467,7 @@ fn write_transaction(state: &MagicState, txn: &PreviewTransaction) -> Result<(),
     .map_err(io_err("write transaction"))
 }
 
-fn read_transaction(state: &MagicState, id: &str) -> Result<PreviewTransaction, ToolError> {
+fn read_transaction(state: &UltraFeatureState, id: &str) -> Result<PreviewTransaction, ToolError> {
     read_transaction_path(&transaction_path(state, id))
 }
 
@@ -1615,7 +1623,7 @@ struct StreamRule {
     message: String,
 }
 
-async fn stream_rule_guard(params: Value, state: &MagicState) -> Result<String, ToolError> {
+async fn stream_rule_guard(params: Value, state: &UltraFeatureState) -> Result<String, ToolError> {
     let action = params
         .get("action")
         .and_then(Value::as_str)
@@ -1676,7 +1684,7 @@ fn default_stream_rules() -> Vec<StreamRule> {
     ]
 }
 
-fn load_stream_rules(state: &MagicState) -> Result<Vec<StreamRule>, ToolError> {
+fn load_stream_rules(state: &UltraFeatureState) -> Result<Vec<StreamRule>, ToolError> {
     if !state.rules_path().is_file() {
         return Ok(default_stream_rules());
     }
@@ -1684,7 +1692,7 @@ fn load_stream_rules(state: &MagicState) -> Result<Vec<StreamRule>, ToolError> {
         .map_err(to_tool_err)
 }
 
-fn save_stream_rules(state: &MagicState, rules: &[StreamRule]) -> Result<(), ToolError> {
+fn save_stream_rules(state: &UltraFeatureState, rules: &[StreamRule]) -> Result<(), ToolError> {
     fs::write(
         state.rules_path(),
         serde_json::to_vec_pretty(rules).map_err(to_tool_err)?,
@@ -1715,7 +1723,7 @@ fn evaluate_stream_rules(text: &str, rules: &[StreamRule]) -> Value {
     json!({"verdict":verdict,"matches":matches})
 }
 
-async fn advisor_watch(params: Value, state: &MagicState) -> Result<String, ToolError> {
+async fn advisor_watch(params: Value, state: &UltraFeatureState) -> Result<String, ToolError> {
     let transcript = required_str(&params, "transcript")?;
     let objective = params
         .get("objective")
@@ -1782,7 +1790,7 @@ struct SubagentManifest {
     status: String,
 }
 
-async fn subagent_workspace(params: Value, state: &MagicState) -> Result<String, ToolError> {
+async fn subagent_workspace(params: Value, state: &UltraFeatureState) -> Result<String, ToolError> {
     let action = params
         .get("action")
         .and_then(Value::as_str)
@@ -1930,7 +1938,7 @@ struct KernelSession {
     updated_at: String,
 }
 
-async fn eval_kernel(params: Value, state: &MagicState) -> Result<String, ToolError> {
+async fn eval_kernel(params: Value, state: &UltraFeatureState) -> Result<String, ToolError> {
     let action = params
         .get("action")
         .and_then(Value::as_str)
@@ -2005,7 +2013,7 @@ fn write_kernel(path: &Path, kernel: &KernelSession) -> Result<(), ToolError> {
 }
 
 async fn run_kernel_code(
-    state: &MagicState,
+    state: &UltraFeatureState,
     kernel: &KernelSession,
     code: &str,
     language: &str,
@@ -2021,7 +2029,7 @@ async fn run_kernel_code(
 }
 
 async fn run_js_kernel(
-    state: &MagicState,
+    state: &UltraFeatureState,
     kernel: &KernelSession,
     code: &str,
     timeout: u64,
@@ -2228,7 +2236,7 @@ struct InheritFinding {
     excerpt: String,
 }
 
-async fn first_run_inherit(params: Value, state: &MagicState) -> Result<String, ToolError> {
+async fn first_run_inherit(params: Value, state: &UltraFeatureState) -> Result<String, ToolError> {
     let action = params
         .get("action")
         .and_then(Value::as_str)
@@ -2308,7 +2316,7 @@ fn scan_agent_configs(root: &Path, max_chars: usize) -> Vec<InheritFinding> {
     out
 }
 
-async fn magic_benchmark(state: &MagicState) -> Result<String, ToolError> {
+async fn ultra_feature_benchmark(state: &UltraFeatureState) -> Result<String, ToolError> {
     let bench_dir = state.root.join("benchmark-smoke");
     let _ = fs::remove_dir_all(&bench_dir);
     fs::create_dir_all(&bench_dir).map_err(io_err("create benchmark dir"))?;
@@ -2335,12 +2343,12 @@ async fn magic_benchmark(state: &MagicState) -> Result<String, ToolError> {
         2_000,
     );
     Ok(json!({
-        "version":MAGIC_VERSION,
-        "hash_edit":serde_json::from_str::<Value>(&hash_result).unwrap_or_else(|_| json!(hash_result)),
+        "version":ULTRA_FEATURE_VERSION,
+        "ultra-feature-2":serde_json::from_str::<Value>(&hash_result).unwrap_or_else(|_| json!(hash_result)),
         "conflicts":serde_json::from_str::<Value>(&conflict_result).unwrap_or_else(|_| json!(conflict_result)),
         "lsp":serde_json::from_str::<Value>(&lsp_result).unwrap_or_else(|_| json!(lsp_result)),
-        "stream_rule_guard":guard_result,
-        "minimize_output":minimized,
+        "ultra-feature-10":guard_result,
+        "ultra-feature-14":minimized,
         "all_smokes_completed":true
     }).to_string())
 }
@@ -2627,7 +2635,7 @@ mod tests {
     #[tokio::test]
     async fn resource_reader_reads_file_and_searches_path() {
         let tmp = tempfile::tempdir().unwrap();
-        let state = MagicState::new(tmp.path().join("state"));
+        let state = UltraFeatureState::new(tmp.path().join("state"));
         let file = tmp.path().join("note.txt");
         fs::write(&file, "alpha\nbeta\nalpha again\n").unwrap();
         let read = read_resource(
@@ -2690,7 +2698,7 @@ mod tests {
     #[tokio::test]
     async fn transactions_accept_content_replace() {
         let tmp = tempfile::tempdir().unwrap();
-        let state = MagicState::new(tmp.path().join("state"));
+        let state = UltraFeatureState::new(tmp.path().join("state"));
         let file = tmp.path().join("a.txt");
         fs::write(&file, "hello old\n").unwrap();
         let created = transaction_preview(json!({"action":"create","kind":"content_replace","payload":{"path":file,"old_string":"old","new_string":"new"}}), &state).await.unwrap();
@@ -2707,7 +2715,7 @@ mod tests {
     #[tokio::test]
     async fn stream_rules_and_advisor_flag_unverified_claims() {
         let tmp = tempfile::tempdir().unwrap();
-        let state = MagicState::new(tmp.path().join("state"));
+        let state = UltraFeatureState::new(tmp.path().join("state"));
         let eval = stream_rule_guard(
             json!({"action":"evaluate","text":"I will implement this later"}),
             &state,
@@ -2727,7 +2735,7 @@ mod tests {
     #[tokio::test]
     async fn subagent_workspace_artifacts_are_addressable() {
         let tmp = tempfile::tempdir().unwrap();
-        let state = MagicState::new(tmp.path().join("state"));
+        let state = UltraFeatureState::new(tmp.path().join("state"));
         let created = subagent_workspace(
             json!({"action":"create","id":"worker/one","goal":"check docs"}),
             &state,
@@ -2771,11 +2779,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn magic_benchmark_runs_smoke_suite() {
+    async fn ultra_feature_benchmark_runs_smoke_suite() {
         let tmp = tempfile::tempdir().unwrap();
-        let state = MagicState::new(tmp.path().join("state"));
-        let result = magic_benchmark(&state).await.unwrap();
+        let state = UltraFeatureState::new(tmp.path().join("state"));
+        let result = ultra_feature_benchmark(&state).await.unwrap();
         assert!(result.contains("all_smokes_completed"));
-        assert!(result.contains("hash_edit"));
+        assert!(result.contains("ultra-feature-2"));
     }
 }

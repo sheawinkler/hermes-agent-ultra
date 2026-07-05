@@ -334,7 +334,7 @@ If a subagent encounters bugs during implementation:
   Spec reviewer: ✅ PASS
 
 [Dispatch quality reviewer]
-  Quality reviewer: Important: Magic number 8, extract to constant
+  Quality reviewer: Important: Hard-coded number 8, extract to constant
   Implementer: Extracted MIN_PASSWORD_LENGTH constant
   Quality reviewer: ✅ APPROVED
 

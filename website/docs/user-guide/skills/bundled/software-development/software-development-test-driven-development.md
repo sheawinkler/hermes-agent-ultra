@@ -97,7 +97,7 @@ Clear name, tests real behavior, one thing.
 **Bad test:**
 ```python
 def test_retry_works():
-    mock = MagicMock()
+    mock = Mock()
     mock.side_effect = [Exception(), Exception(), 'success']
     result = retry_operation(mock)
     assert result == 'success'  # What about retry count? Timing?

@@ -78,7 +78,6 @@ pub use tools::image_gen::{
     ImageGenBackend, ImageGenCapabilities, ImageGenerateHandler, ImageGenerateRequest,
 };
 pub use tools::integrations_snapshot::IntegrationsSnapshotHandler;
-pub use tools::magic::{builtin_magic_handlers, MagicState, MagicToolHandler, MagicToolKind};
 pub use tools::managed_tool_gateway::ManagedToolGatewayHandler;
 pub use tools::memory::{MemoryBackend, MemoryHandler};
 pub use tools::messaging::{MessagingBackend, SendMessageHandler};
@@ -110,6 +109,9 @@ pub use tools::tool_result_storage::ToolResultStorageHandler;
 pub use tools::transcription::TranscriptionHandler;
 pub use tools::tts::{TextToSpeechHandler, TtsBackend};
 pub use tools::tts_premium::TtsPremiumHandler;
+pub use tools::ultra_features::{
+    builtin_ultra_feature_handlers, UltraFeatureHandler, UltraFeatureKind, UltraFeatureState,
+};
 pub use tools::url_safety::UrlSafetyHandler;
 pub use tools::video::{
     VideoAnalyzeHandler, VideoBackend, VideoGenerateBackend, VideoGenerateHandler,
