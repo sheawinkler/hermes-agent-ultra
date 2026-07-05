@@ -14,6 +14,28 @@ mod tests {
             .expect("env lock poisoned")
     }
 
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set_path(key: &'static str, value: &std::path::Path) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.previous.as_deref() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     #[test]
     fn gateway_memory_notifications_follow_display_config() {
         let mut cfg = GatewayConfig::default();
@@ -142,6 +164,58 @@ mod tests {
 
         let cfg = load_user_config_file(&tmp.path().join("config.yaml")).expect("load config");
         assert_eq!(cfg.model.as_deref(), Some("nous:nousresearch/hermes-4-70b"));
+    }
+
+    #[tokio::test]
+    async fn auth_status_does_not_refresh_expired_stored_credential() {
+        let _guard = env_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvVarGuard::set_path("HERMES_HOME", tmp.path());
+        let cli = cli_for_temp_state_root(tmp.path());
+        let token_store = FileTokenStore::new(secret_vault_path_for_cli(&cli))
+            .await
+            .expect("token store");
+        AuthManager::new(token_store)
+            .save_credential(OAuthCredential {
+                provider: "nous".to_string(),
+                access_token: "expired-access-token".to_string(),
+                refresh_token: Some("refresh-token-without-handler".to_string()),
+                token_type: "bearer".to_string(),
+                scope: None,
+                expires_at: Some(chrono::Utc::now() - chrono::Duration::minutes(5)),
+            })
+            .await
+            .expect("save expired credential");
+
+        run_auth(
+            cli,
+            Some("status".to_string()),
+            Some("nous".to_string()),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .expect("auth status must be passive");
+    }
+
+    #[test]
+    fn zsh_completion_uses_catalog_backed_provider_and_model_candidates() {
+        let script = concat!(
+            "'--model=[Override]:MODEL:_default' \\\n",
+            "'--provider=[Override]:PROVIDER:_default' \\\n",
+            "'::provider_model -- Provider\\:model identifier (e.g. \"openai\\:gpt-4o\", \"anthropic\\:claude-3-opus\"):_default' \\\n",
+        );
+        let enhanced = enhance_zsh_provider_completion(script.to_string());
+
+        assert!(enhanced.contains(":MODEL:_hermes_agent_ultra_model_values"));
+        assert!(enhanced.contains(":PROVIDER:_hermes_agent_ultra_provider_values"));
+        assert!(enhanced.contains("provider_model -- Provider\\:model identifier"));
+        assert!(enhanced.contains("_hermes_agent_ultra_model_values()"));
+        assert!(enhanced.contains("model --completion-values"));
+        assert!(enhanced.contains("model --completion-providers"));
     }
 
     #[test]

@@ -231,7 +231,17 @@ async fn main() {
                 .await
             }
         }
-        CliCommand::Model { provider_model } => run_model(cli, provider_model).await,
+        CliCommand::Model {
+            completion_values,
+            completion_providers,
+            provider_model,
+        } => {
+            if completion_values || completion_providers {
+                run_model_completion_values(cli, completion_providers).await
+            } else {
+                run_model(cli, provider_model).await
+            }
+        }
         CliCommand::Tools {
             action,
             name,

@@ -963,8 +963,76 @@ fn run_completion(shell: Option<String>) -> Result<(), AgentError> {
         "elvish" => CompletionShell::Elvish,
         _ => CompletionShell::Zsh,
     };
-    generate(sh, &mut cmd, "hermes-agent-ultra", &mut std::io::stdout());
+    let mut out = Vec::new();
+    generate(sh, &mut cmd, "hermes-agent-ultra", &mut out);
+    if sh == CompletionShell::Zsh {
+        let script = String::from_utf8(out).map_err(|e| AgentError::Config(e.to_string()))?;
+        std::io::stdout()
+            .write_all(enhance_zsh_provider_completion(script).as_bytes())
+            .map_err(|e| AgentError::Io(e.to_string()))?;
+    } else {
+        std::io::stdout()
+            .write_all(&out)
+            .map_err(|e| AgentError::Io(e.to_string()))?;
+    }
     Ok(())
+}
+
+fn enhance_zsh_provider_completion(mut script: String) -> String {
+    script = script.replace(":MODEL:_default", ":MODEL:_hermes_agent_ultra_model_values");
+    script = script.replace(
+        ":PROVIDER:_default",
+        ":PROVIDER:_hermes_agent_ultra_provider_values",
+    );
+    script = script.replace(
+        "Provider\\:model identifier (e.g. \"openai\\:gpt-4o\", \"anthropic\\:claude-3-opus\"):_default",
+        "Provider\\:model identifier (e.g. \"openai\\:gpt-4o\", \"anthropic\\:claude-3-opus\"):_hermes_agent_ultra_model_values",
+    );
+    script.push_str(
+        r#"
+
+_hermes_agent_ultra_completion_binary() {
+    local cmd="${words[1]:-hermes-agent-ultra}"
+    if command -v "$cmd" >/dev/null 2>&1; then
+        echo "$cmd"
+        return
+    fi
+    for cmd in hermes-agent-ultra hermes-ultra hermes; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            echo "$cmd"
+            return
+        fi
+    done
+}
+
+_hermes_agent_ultra_model_values() {
+    local cmd="$(_hermes_agent_ultra_completion_binary)"
+    local -a values
+    if [[ -n "$cmd" ]]; then
+        values=("${(@f)$("$cmd" model --completion-values 2>/dev/null)}")
+    fi
+    if (( ${#values[@]} )); then
+        compadd -a values
+    else
+        _default
+    fi
+}
+
+_hermes_agent_ultra_provider_values() {
+    local cmd="$(_hermes_agent_ultra_completion_binary)"
+    local -a values
+    if [[ -n "$cmd" ]]; then
+        values=("${(@f)$("$cmd" model --completion-providers 2>/dev/null)}")
+    fi
+    if (( ${#values[@]} )); then
+        compadd -a values
+    else
+        _default
+    fi
+}
+"#,
+    );
+    script
 }
 
 async fn run_uninstall(yes: bool) -> Result<(), AgentError> {
@@ -1018,4 +1086,3 @@ async fn run_lumio(action: Option<String>, model: Option<String>) -> Result<(), 
     }
     Ok(())
 }
-
