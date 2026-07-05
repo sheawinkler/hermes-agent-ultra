@@ -116,6 +116,25 @@ pub const TOOLSET_RL_TRAINING: &[&str] = &[
     "rl_list_runs",
     "rl_test_inference",
 ];
+/// Magic harness coding-agent surfaces.
+pub const TOOLSET_MAGIC: &[&str] = &[
+    "magic_benchmark_ledger",
+    "hash_edit",
+    "read_resource",
+    "search_resource",
+    "resolve_conflict",
+    "lsp_inspect",
+    "debug_probe",
+    "transaction_preview",
+    "ast_search",
+    "stream_rule_guard",
+    "advisor_watch",
+    "subagent_workspace",
+    "eval_kernel",
+    "minimize_output",
+    "first_run_inherit",
+    "magic_benchmark",
+];
 /// Lean coding posture tools.
 pub const TOOLSET_CODING: &[&str] = &[
     "web_search",
@@ -148,6 +167,22 @@ pub const TOOLSET_CODING: &[&str] = &[
     "clarify",
     "execute_code",
     "delegate_task",
+    "magic_benchmark_ledger",
+    "hash_edit",
+    "read_resource",
+    "search_resource",
+    "resolve_conflict",
+    "lsp_inspect",
+    "debug_probe",
+    "transaction_preview",
+    "ast_search",
+    "stream_rule_guard",
+    "advisor_watch",
+    "subagent_workspace",
+    "eval_kernel",
+    "minimize_output",
+    "first_run_inherit",
+    "magic_benchmark",
 ];
 
 // ---------------------------------------------------------------------------
@@ -330,6 +365,10 @@ impl ToolsetManager {
         self.register(Toolset::new(
             "rl_training",
             TOOLSET_RL_TRAINING.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "magic",
+            TOOLSET_MAGIC.iter().map(|s| s.to_string()).collect(),
         ));
         self.register(Toolset::new(
             "coding",

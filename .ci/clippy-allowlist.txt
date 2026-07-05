@@ -173,7 +173,6 @@ hermes_tools|clippy::manual_checked_ops|crates/hermes-tools/src/backends/memory.
 hermes_tools|clippy::manual_contains|crates/hermes-tools/src/tool_policy.rs
 hermes_tools|clippy::manual_is_multiple_of|crates/hermes-tools/src/tts_streaming/minimax.rs
 hermes_tools|clippy::manual_pattern_char_comparison|crates/hermes-tools/src/tts_streaming/sentence_buffer.rs
-hermes_tools|clippy::manual_range_contains|crates/hermes-tools/src/toolset_distributions.rs
 hermes_tools|clippy::manual_strip|crates/hermes-tools/src/v4a_patch.rs
 hermes_tools|clippy::op_ref|crates/hermes-tools/src/credential_guard.rs
 hermes_tools|clippy::too_many_arguments|crates/hermes-tools/src/backends/file.rs

@@ -88,6 +88,7 @@ fn base_weights() -> HashMap<String, f64> {
     w.insert("tts".into(), 0.1);
     w.insert("voice".into(), 0.1);
     w.insert("mixture_of_agents".into(), 0.3);
+    w.insert("magic".into(), 0.4);
     w
 }
 
@@ -152,6 +153,7 @@ fn make_development() -> ToolsetDistribution {
     w.insert("todo".into(), 1.0);
     w.insert("rl_training".into(), 0.4);
     w.insert("browser".into(), 0.2);
+    w.insert("magic".into(), 0.9);
     ToolsetDistribution {
         name: "development".into(),
         description: "Software development with terminal, file, and code tools".into(),
@@ -197,6 +199,7 @@ fn make_balanced() -> ToolsetDistribution {
         "code_execution",
         "mixture_of_agents",
         "rl_training",
+        "magic",
     ] {
         w.insert(key.into(), 0.5);
     }
@@ -266,6 +269,7 @@ fn make_reasoning() -> ToolsetDistribution {
     w.insert("web".into(), 0.6);
     w.insert("file".into(), 0.5);
     w.insert("mixture_of_agents".into(), 0.8);
+    w.insert("magic".into(), 0.8);
     ToolsetDistribution {
         name: "reasoning".into(),
         description: "Focused on reasoning with memory, clarification, and planning".into(),
@@ -318,6 +322,7 @@ fn make_terminal_tasks() -> ToolsetDistribution {
     w.insert("code_execution".into(), 0.9);
     w.insert("todo".into(), 0.9);
     w.insert("skills".into(), 0.7);
+    w.insert("magic".into(), 0.8);
     ToolsetDistribution {
         name: "terminal_tasks".into(),
         description: "Terminal-driven task automation".into(),
@@ -337,6 +342,7 @@ fn make_mixed_tasks() -> ToolsetDistribution {
     w.insert("skills".into(), 0.7);
     w.insert("memory".into(), 0.6);
     w.insert("mixture_of_agents".into(), 0.5);
+    w.insert("magic".into(), 0.8);
     ToolsetDistribution {
         name: "mixed_tasks".into(),
         description: "Mixed terminal + browser task automation".into(),
@@ -397,7 +403,7 @@ pub fn validate_distribution(dist: &ToolsetDistribution) -> Result<(), String> {
     }
 
     for (toolset, &weight) in &dist.toolset_weights {
-        if weight < 0.0 || weight > 1.0 {
+        if !(0.0..=1.0).contains(&weight) {
             return Err(format!(
                 "Weight for toolset '{}' is {} — must be between 0.0 and 1.0",
                 toolset, weight
