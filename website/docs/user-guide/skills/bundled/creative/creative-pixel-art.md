@@ -138,7 +138,7 @@ pixel_art("in.png", "out.png", preset="snes", palette="PICO_8", block=6)
 | `indoor` | Dust motes |
 | `urban` | Rain + neon pulse |
 | `nature` | Leaves + fireflies |
-| `magic` | Sparkles + fireflies |
+| `sparkle` | Sparkles + fireflies |
 | `storm` | Rain + lightning |
 | `underwater` | Bubbles + light sparkles |
 | `fire` | Embers + sparkles |

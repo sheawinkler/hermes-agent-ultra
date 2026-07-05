@@ -38,7 +38,7 @@ internally and auto-dismisses native dialogs within ~10ms, so
 `Page.handleJavaScriptDialog` can't keep up. To work around this, the
 supervisor injects a bridge script via
 `Page.addScriptToEvaluateOnNewDocument` that overrides
-`window.alert`/`confirm`/`prompt` with a synchronous XHR to a magic host
+`window.alert`/`confirm`/`prompt` with a synchronous XHR to a reserved bridge host
 (`hermes-dialog-bridge.invalid`). `Fetch.enable` intercepts those XHRs
 before they touch the network — the dialog becomes a `Fetch.requestPaused`
 event the supervisor captures, and `respond_to_dialog` fulfills via

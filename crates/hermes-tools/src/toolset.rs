@@ -116,24 +116,24 @@ pub const TOOLSET_RL_TRAINING: &[&str] = &[
     "rl_list_runs",
     "rl_test_inference",
 ];
-/// Magic harness coding-agent surfaces.
-pub const TOOLSET_MAGIC: &[&str] = &[
-    "magic_benchmark_ledger",
-    "hash_edit",
-    "read_resource",
-    "search_resource",
-    "resolve_conflict",
-    "lsp_inspect",
-    "debug_probe",
-    "transaction_preview",
-    "ast_search",
-    "stream_rule_guard",
-    "advisor_watch",
-    "subagent_workspace",
-    "eval_kernel",
-    "minimize_output",
-    "first_run_inherit",
-    "magic_benchmark",
+/// Ultra feature harness coding-agent surfaces.
+pub const TOOLSET_ULTRA_FEATURES: &[&str] = &[
+    "ultra-feature-1",
+    "ultra-feature-2",
+    "ultra-feature-3",
+    "ultra-feature-4",
+    "ultra-feature-5",
+    "ultra-feature-6",
+    "ultra-feature-7",
+    "ultra-feature-8",
+    "ultra-feature-9",
+    "ultra-feature-10",
+    "ultra-feature-11",
+    "ultra-feature-12",
+    "ultra-feature-13",
+    "ultra-feature-14",
+    "ultra-feature-15",
+    "ultra-feature-16",
 ];
 /// Lean coding posture tools.
 pub const TOOLSET_CODING: &[&str] = &[
@@ -167,22 +167,22 @@ pub const TOOLSET_CODING: &[&str] = &[
     "clarify",
     "execute_code",
     "delegate_task",
-    "magic_benchmark_ledger",
-    "hash_edit",
-    "read_resource",
-    "search_resource",
-    "resolve_conflict",
-    "lsp_inspect",
-    "debug_probe",
-    "transaction_preview",
-    "ast_search",
-    "stream_rule_guard",
-    "advisor_watch",
-    "subagent_workspace",
-    "eval_kernel",
-    "minimize_output",
-    "first_run_inherit",
-    "magic_benchmark",
+    "ultra-feature-1",
+    "ultra-feature-2",
+    "ultra-feature-3",
+    "ultra-feature-4",
+    "ultra-feature-5",
+    "ultra-feature-6",
+    "ultra-feature-7",
+    "ultra-feature-8",
+    "ultra-feature-9",
+    "ultra-feature-10",
+    "ultra-feature-11",
+    "ultra-feature-12",
+    "ultra-feature-13",
+    "ultra-feature-14",
+    "ultra-feature-15",
+    "ultra-feature-16",
 ];
 
 // ---------------------------------------------------------------------------
@@ -367,8 +367,11 @@ impl ToolsetManager {
             TOOLSET_RL_TRAINING.iter().map(|s| s.to_string()).collect(),
         ));
         self.register(Toolset::new(
-            "magic",
-            TOOLSET_MAGIC.iter().map(|s| s.to_string()).collect(),
+            "ultra_features",
+            TOOLSET_ULTRA_FEATURES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
         ));
         self.register(Toolset::new(
             "coding",
