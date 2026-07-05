@@ -194,6 +194,11 @@ fn register_builtin_tools_with_data_dir(
         vec![],
     );
 
+    // -- Magic harness coding-agent surfaces ----------------------------------
+    for (handler, toolset, emoji) in crate::tools::magic::builtin_magic_handlers(data_dir.clone()) {
+        reg(registry, toolset, handler, emoji, vec![]);
+    }
+
     // -- Vision --------------------------------------------------------------
     {
         let backend =
@@ -1140,6 +1145,10 @@ mod tests {
             );
         }
         assert!(
+            names.contains(&"magic_benchmark_ledger".to_string()),
+            "invalid backend should keep Rust-native magic harness tools"
+        );
+        assert!(
             names.contains(&"tool_policy_simulate".to_string()),
             "invalid backend should keep policy simulator"
         );
@@ -1278,6 +1287,22 @@ mod tests {
             "rl_get_results",
             "rl_list_runs",
             "rl_test_inference",
+            "magic_benchmark_ledger",
+            "hash_edit",
+            "read_resource",
+            "search_resource",
+            "resolve_conflict",
+            "lsp_inspect",
+            "debug_probe",
+            "transaction_preview",
+            "ast_search",
+            "stream_rule_guard",
+            "advisor_watch",
+            "subagent_workspace",
+            "eval_kernel",
+            "minimize_output",
+            "first_run_inherit",
+            "magic_benchmark",
         ] {
             assert!(
                 names.contains(&expected.to_string()),

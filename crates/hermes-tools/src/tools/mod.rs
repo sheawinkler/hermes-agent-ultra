@@ -20,6 +20,7 @@ pub mod harness_cockpit;
 pub mod homeassistant;
 pub mod image_gen;
 pub mod integrations_snapshot;
+pub mod magic;
 pub mod managed_tool_gateway;
 pub mod memory;
 pub mod messaging;

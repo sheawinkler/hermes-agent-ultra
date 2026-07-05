@@ -78,6 +78,7 @@ pub use tools::image_gen::{
     ImageGenBackend, ImageGenCapabilities, ImageGenerateHandler, ImageGenerateRequest,
 };
 pub use tools::integrations_snapshot::IntegrationsSnapshotHandler;
+pub use tools::magic::{builtin_magic_handlers, MagicState, MagicToolHandler, MagicToolKind};
 pub use tools::managed_tool_gateway::ManagedToolGatewayHandler;
 pub use tools::memory::{MemoryBackend, MemoryHandler};
 pub use tools::messaging::{MessagingBackend, SendMessageHandler};
