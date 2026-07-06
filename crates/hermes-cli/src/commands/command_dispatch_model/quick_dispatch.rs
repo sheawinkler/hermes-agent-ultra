@@ -140,6 +140,7 @@ fn handle_harness_command(app: &mut App, args: &[&str]) -> Result<CommandResult,
                     | "onboarding"
                     | "objective"
                     | "objectives"
+                    | "autonomy"
                     | "help"
             )
         {

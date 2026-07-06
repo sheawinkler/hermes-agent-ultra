@@ -73,6 +73,8 @@ Ultra keeps parity work separate from intentional extensions.
 - `RTK raw-mode controls`: inspect unwrapped tool payloads when debugging integrations
 - `Memory fusion`: ContextLattice + external memory providers with scoring/fusion logic
 - `One-true-harness cockpit`: `/harness` and `harness_cockpit` unify skills, proof, OIDC, replay, objectives, onboarding, and chaos probes
+- `Ultra autonomy cockpit`: `ultra_autonomy`, `/harness autonomy`, and `harness.autonomy` expose task boards, loop detection, resource-governed subagents, ContextLattice-first memory lifecycle, channel surfaces, and objective-to-board planning
+- `One-command always-on UX`: `hermes-ultra up` composes gateway service install/start/status into a single operator command
 - `Advanced sync gates`: differential parity checks, red-team/adversarial gating, elite sync gate
 - `Operational tooling`: deep doctor snapshots, replay traces, queue-based upstream webhook sync
 - `Rust-only implementation strategy`: parity in Rust first; no direct Python runtime vendoring
@@ -302,6 +304,10 @@ Skills commands support multi-registry search/install and local tap flows.
 Use `/harness` in the TUI or the `harness_cockpit` tool for the curated
 one-true-harness index, including Matt Pocock `teach`, `domain-modeling`,
 `grill-with-docs`, `codebase-design`, and architecture-deepening workflows.
+Use `/harness autonomy` or the `ultra_autonomy` tool for board execution,
+loop detection, resource admission, ContextLattice-first memory lifecycle, and
+objective-to-board planning. Dashboard clients can call `harness.autonomy` via
+`/v1/rpc`; see [Ultra Autonomy Surfaces](./docs/ultra-autonomy-surfaces.md).
 
 ## Dashboard OIDC
 

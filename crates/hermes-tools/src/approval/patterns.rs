@@ -77,7 +77,7 @@ static CONFIRM_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 
 static HARDLINE_RM_PROTECTED_PATH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)\brm\s+(?:-[A-Za-z]*r[A-Za-z]*f[A-Za-z]*|-[A-Za-z]*f[A-Za-z]*r[A-Za-z]*|--recursive\s+--force|--force\s+--recursive)\s+(?:/|/\*|/(?:home|etc|usr|var|boot|bin)(?:/\*)?|~(?:/|/\*|\*)?|\$HOME)(?:\s|$)",
+        r#"(?i)\brm\s+(?:-[A-Za-z]*r[A-Za-z]*f[A-Za-z]*|-[A-Za-z]*f[A-Za-z]*r[A-Za-z]*|--recursive\s+--force|--force\s+--recursive)\s+(?:/|/\*|/(?:home|etc|usr|var|boot|bin)(?:/\*)?|~(?:/|/\*|\*)?|\$HOME)(?:$|[\s)`'"])"#,
     )
     .unwrap()
 });

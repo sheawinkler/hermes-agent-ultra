@@ -282,6 +282,7 @@ async fn main() {
             )
             .await
         }
+        CliCommand::Up { force, dry_run } => run_up(force, dry_run).await,
         CliCommand::Setup { portal } => {
             if portal {
                 run_portal(cli, Some("setup".to_string())).await

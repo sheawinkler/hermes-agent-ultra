@@ -57,7 +57,12 @@ pub const TOOLSET_MEMORY: &[&str] = &["memory"];
 /// Session search tools.
 pub const TOOLSET_SESSION_SEARCH: &[&str] = &["session_search"];
 /// Project/workspace inspection tools.
-pub const TOOLSET_PROJECT: &[&str] = &["project_facts", "project_tree", "harness_cockpit"];
+pub const TOOLSET_PROJECT: &[&str] = &[
+    "project_facts",
+    "project_tree",
+    "harness_cockpit",
+    "ultra_autonomy",
+];
 /// Todo/task management tools.
 pub const TOOLSET_TODO: &[&str] = &["todo"];
 /// Clarification/question tools.
@@ -97,6 +102,7 @@ pub const TOOLSET_SYSTEM: &[&str] = &[
     "runbook_control",
     "telemetry_snapshot",
     "harness_cockpit",
+    "ultra_autonomy",
     "ops_snapshot",
     "tool_result_storage",
     "disk_cleanup",
@@ -162,6 +168,7 @@ pub const TOOLSET_CODING: &[&str] = &[
     "todo",
     "project_facts",
     "project_tree",
+    "ultra_autonomy",
     "memory",
     "session_search",
     "clarify",

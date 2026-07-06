@@ -109,6 +109,7 @@ pub use tools::tool_result_storage::ToolResultStorageHandler;
 pub use tools::transcription::TranscriptionHandler;
 pub use tools::tts::{TextToSpeechHandler, TtsBackend};
 pub use tools::tts_premium::TtsPremiumHandler;
+pub use tools::ultra_autonomy::{UltraAutonomyHandler, UltraAutonomyState};
 pub use tools::ultra_features::{
     builtin_ultra_feature_handlers, UltraFeatureHandler, UltraFeatureKind, UltraFeatureState,
 };

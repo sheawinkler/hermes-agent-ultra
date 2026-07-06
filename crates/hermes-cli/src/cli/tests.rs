@@ -242,6 +242,18 @@ fn cli_parse_gateway_platform_compat_flag() {
 }
 
 #[test]
+fn cli_parse_up_command() {
+    let cli = Cli::try_parse_from(vec!["hermes", "up", "--force", "--dry-run"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(CliCommand::Up {
+            force: true,
+            dry_run: true,
+        })
+    ));
+}
+
+#[test]
 fn cli_parse_doctor() {
     let cli = Cli::try_parse_from(vec!["hermes", "doctor"]).unwrap();
     assert!(matches!(
