@@ -680,6 +680,14 @@ fn rpc_param_variables(params: &Value) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
+fn rpc_harness_autonomy_payload(params: &Value) -> Result<Value, String> {
+    let cwd = rpc_param_str(params, "cwd").map(PathBuf::from);
+    hermes_tools::tools::harness_cockpit::harness_cockpit_action_snapshot(
+        "autonomy",
+        cwd.as_deref(),
+    )
+}
+
 fn main_runtime_from_model(model: Option<String>) -> Option<AuxiliaryMainRuntime> {
     let model = model?;
     let (provider, model_part) = model.split_once(':')?;
@@ -731,6 +739,10 @@ async fn exec_rpc(
             );
             rpc_ok(id, serde_json::json!({ "verification": verification }))
         }
+        "harness.autonomy" => match rpc_harness_autonomy_payload(&params) {
+            Ok(payload) => rpc_ok(id, serde_json::json!({ "autonomy": payload })),
+            Err(err) => rpc_err(id, 4220, err),
+        },
         "llm.oneshot" => {
             let template = rpc_param_str(&params, "template");
             let instructions = rpc_param_str(&params, "instructions").unwrap_or_default();
@@ -1132,6 +1144,15 @@ mod tests {
                 .and_then(|cfg| cfg.request_timeout_seconds),
             Some(45.5)
         );
+    }
+
+    #[test]
+    fn rpc_harness_autonomy_exposes_dashboard_surface() {
+        let payload = rpc_harness_autonomy_payload(&serde_json::json!({})).expect("autonomy");
+        let rendered = serde_json::to_string(&payload).expect("render");
+        assert!(rendered.contains("ultra_autonomy"));
+        assert!(rendered.contains("contextlattice"));
+        assert!(rendered.contains("resource_plan"));
     }
 
     #[test]

@@ -989,6 +989,40 @@ fn run_sessions_db_auto_maintenance(config: &GatewayConfig) {
     }
 }
 
+/// One-command always-on runtime UX.
+///
+/// This intentionally composes the existing gateway service manager instead of
+/// creating a parallel daemon path. On platforms without service-install
+/// support, it still prints the gateway service/status contract so operators
+/// know the fallback command.
+async fn run_up(force: bool, dry_run: bool) -> Result<(), AgentError> {
+    println!("Hermes Agent Ultra up");
+    if dry_run {
+        install_gateway_service(force, true)?;
+        if let Some(service_state) = gateway_service_status()? {
+            println!("{service_state}");
+        } else {
+            println!("Gateway service: service install/start is not implemented for this platform.");
+        }
+        println!("Dry-run: would ensure the gateway service is installed, start it, then print status.");
+        return Ok(());
+    }
+
+    install_gateway_service(force, false)?;
+    if try_start_gateway_service()? {
+        println!("Gateway service started.");
+    } else {
+        println!(
+            "Gateway service start is not available on this platform; use `hermes-ultra gateway start` for foreground runtime."
+        );
+    }
+    if let Some(service_state) = gateway_service_status()? {
+        println!("{service_state}");
+    }
+    println!("Use `hermes-ultra logs --follow` for runtime logs.");
+    Ok(())
+}
+
 fn gateway_memory_notifications_enabled(config: &GatewayConfig) -> bool {
     config.display.memory_notifications_enabled()
 }

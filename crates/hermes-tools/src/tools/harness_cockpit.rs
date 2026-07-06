@@ -16,6 +16,10 @@ use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 use crate::repo::detect_repo_root_from_cwd;
 use crate::tools::telemetry_snapshot::telemetry_gate_snapshot;
+use crate::tools::ultra_autonomy::memory_lifecycle_snapshot;
+use crate::tools::ultra_autonomy::resource_admission_plan;
+use crate::tools::ultra_autonomy::MemoryProviderSignal;
+use crate::tools::ultra_autonomy::ResourceGovernorInput;
 use crate::verification_evidence::verification_status;
 
 const TOOL_NAME: &str = "harness_cockpit";
@@ -79,7 +83,7 @@ impl ToolHandler for HarnessCockpitHandler {
             "action".into(),
             json!({
                 "type": "string",
-                "enum": ["status", "skills", "proof", "roadmap", "chaos", "onboarding", "objective", "help"],
+                "enum": ["status", "skills", "proof", "roadmap", "chaos", "onboarding", "objective", "autonomy", "help"],
                 "description": "Harness cockpit section. Defaults to status."
             }),
         );
@@ -112,6 +116,7 @@ pub fn harness_cockpit_snapshot(repo_root: Option<&Path>) -> Value {
         },
         "proof": proof_snapshot(repo_root),
         "objectives": objective_surfaces(),
+        "autonomy": autonomy_surfaces(),
         "onboarding": onboarding_commands(),
         "chaos": chaos_scenarios(),
     })
@@ -146,13 +151,17 @@ pub fn harness_cockpit_action_snapshot(
             "status": "ok",
             "surfaces": objective_surfaces(),
         })),
+        "autonomy" => Ok(json!({
+            "status": "ok",
+            "surfaces": autonomy_surfaces(),
+        })),
         "help" => Ok(json!({
             "status": "ok",
             "tool": TOOL_NAME,
-            "actions": ["status", "skills", "proof", "roadmap", "chaos", "onboarding", "objective", "help"],
+            "actions": ["status", "skills", "proof", "roadmap", "chaos", "onboarding", "objective", "autonomy", "help"],
         })),
         other => Err(format!(
-            "unknown action '{other}'; expected status|skills|proof|roadmap|chaos|onboarding|objective|help"
+            "unknown action '{other}'; expected status|skills|proof|roadmap|chaos|onboarding|objective|autonomy|help"
         )),
     }
 }
@@ -184,6 +193,18 @@ pub fn render_harness_cockpit_text(repo_root: Option<&Path>) -> String {
     out.push_str("\nStar-derived candidates\n");
     for skill in candidates.iter().take(8) {
         out.push_str(&format!("- {} ({})\n", skill.id, skill.why));
+    }
+    out.push_str("\nAutonomy surfaces\n");
+    for surface in autonomy_surfaces() {
+        let name = surface
+            .get("surface")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let purpose = surface
+            .get("purpose")
+            .and_then(Value::as_str)
+            .unwrap_or("runtime surface");
+        out.push_str(&format!("- {name} ({purpose})\n"));
     }
     out.push_str("\nUse `harness_cockpit` tool action=status for structured JSON.");
     out
@@ -483,6 +504,50 @@ fn objective_surfaces() -> Vec<Value> {
     ]
 }
 
+fn autonomy_surfaces() -> Vec<Value> {
+    let resource_plan = resource_admission_plan(ResourceGovernorInput {
+        cpu_cores: std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1),
+        free_ram_mb: None,
+        total_ram_mb: None,
+        ram_per_agent_mb: 2048,
+        min_free_ram_mb: 1024,
+        token_budget_remaining: Some(128_000),
+        per_agent_token_reserve: 32_000,
+        user_override: None,
+    });
+    let memory = memory_lifecycle_snapshot(&[
+        MemoryProviderSignal {
+            provider: "builtin".to_string(),
+            available: true,
+            score: 1.20,
+            confidence: 0.80,
+            last_seen_days: 0,
+            evidence_count: 1,
+        },
+        MemoryProviderSignal {
+            provider: "contextlattice".to_string(),
+            available: true,
+            score: 1.25,
+            confidence: 0.90,
+            last_seen_days: 0,
+            evidence_count: 3,
+        },
+    ]);
+    vec![
+        json!({"surface": "ultra_autonomy loop_evaluate", "purpose": "detect repeated tool calls, repeated failures, no-action loops, and repeated model text"}),
+        json!({"surface": "ultra_autonomy board_*", "purpose": "JSON-backed task boards with dependencies, question state, comments, and token budgets"}),
+        json!({"surface": "ultra_autonomy objective_bridge", "purpose": "materialize durable objectives into dependency-tracked board cards"}),
+        json!({"surface": "ultra_autonomy resource_plan", "purpose": "resource-aware subagent concurrency admission", "sample": resource_plan}),
+        json!({"surface": "ultra_autonomy memory_lifecycle", "purpose": "ContextLattice-first hot/warm/archive memory projection", "sample": memory}),
+        json!({"surface": "ultra_autonomy memory_resolve", "purpose": "memory reinforcement/conflict resolution with provenance notes"}),
+        json!({"surface": "ultra_autonomy service_plan", "purpose": "one-command service UX contract for hermes-ultra up"}),
+        json!({"surface": "ultra_autonomy channel_surface", "purpose": "CLI/dashboard/gateway/Telegram status, skill, and permission surface map"}),
+        json!({"surface": "ultra_autonomy events", "purpose": "dashboard/gateway SSE-style event envelopes for board and memory changes"}),
+    ]
+}
+
 fn onboarding_commands() -> Vec<Value> {
     vec![
         json!({"command": "/boot", "purpose": "check readiness and auth/runtime state"}),
@@ -550,5 +615,15 @@ mod tests {
         assert!(text.contains("Hermes one-true-harness cockpit"));
         assert!(text.contains("harness_cockpit"));
         assert!(text.contains("teach"));
+        assert!(text.contains("ultra_autonomy"));
+    }
+
+    #[test]
+    fn autonomy_action_exposes_contextlattice_memory_and_resource_plan() {
+        let payload = harness_cockpit_action_snapshot("autonomy", None).expect("autonomy");
+        let rendered = serde_json::to_string(&payload).expect("render");
+        assert!(rendered.contains("contextlattice"));
+        assert!(rendered.contains("resource_plan"));
+        assert!(rendered.contains("objective_bridge"));
     }
 }

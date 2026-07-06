@@ -104,6 +104,36 @@ fn test_multiline_denied_patterns() {
 }
 
 #[test]
+fn test_shell_substitution_and_chain_laundering_are_guarded() {
+    let hardline = [
+        "echo $(rm -rf /)",
+        "printf ok `reboot`",
+        "ls /tmp; shutdown -h now",
+        "cat README.md && mkfs.ext4 /dev/sda1",
+    ];
+    for command in hardline {
+        assert_eq!(
+            check_approval(command),
+            ApprovalDecision::Denied,
+            "expected hardline denial for laundered command {command:?}"
+        );
+    }
+
+    let recoverable = [
+        "echo $(rm -rf /tmp/hermes-demo)",
+        "ls /tmp && git reset --hard HEAD~1",
+        "printf ok `chmod -R 777 .`",
+    ];
+    for command in recoverable {
+        assert_eq!(
+            check_approval(command),
+            ApprovalDecision::RequiresConfirmation,
+            "expected approval for recoverable laundered command {command:?}"
+        );
+    }
+}
+
+#[test]
 fn test_hardline_protected_path_floor() {
     let blocked = [
         "rm -rf /",
@@ -280,4 +310,3 @@ fn test_yolo_only_bypasses_recoverable_confirmations() {
         );
     }
 }
-

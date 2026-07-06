@@ -193,6 +193,15 @@ fn register_builtin_tools_with_data_dir(
         "🧭",
         vec![],
     );
+    reg(
+        registry,
+        "ultra_autonomy",
+        Arc::new(crate::tools::ultra_autonomy::UltraAutonomyHandler::new(
+            data_dir.clone(),
+        )),
+        "🧠",
+        vec![],
+    );
 
     // -- Ultra feature coding-agent surfaces -----------------------------------------
     for (handler, toolset, emoji) in
@@ -1191,6 +1200,10 @@ mod tests {
             "invalid backend should keep harness cockpit"
         );
         assert!(
+            names.contains(&"ultra_autonomy".to_string()),
+            "invalid backend should keep autonomy cockpit"
+        );
+        assert!(
             names.contains(&"ops_snapshot".to_string()),
             "invalid backend should keep read-only ops snapshots"
         );
@@ -1266,6 +1279,7 @@ mod tests {
             "process_registry",
             "project_facts",
             "project_tree",
+            "ultra_autonomy",
             "todo",
             "text_to_speech",
             "tts_premium",

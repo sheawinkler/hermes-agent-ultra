@@ -14,28 +14,6 @@ mod tests {
             .expect("env lock poisoned")
     }
 
-    struct EnvVarGuard {
-        key: &'static str,
-        previous: Option<String>,
-    }
-
-    impl EnvVarGuard {
-        fn set_path(key: &'static str, value: &std::path::Path) -> Self {
-            let previous = std::env::var(key).ok();
-            std::env::set_var(key, value);
-            Self { key, previous }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            match self.previous.as_deref() {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
-
     #[test]
     fn gateway_memory_notifications_follow_display_config() {
         let mut cfg = GatewayConfig::default();
@@ -168,9 +146,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_status_does_not_refresh_expired_stored_credential() {
-        let _guard = env_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
-        let _home = EnvVarGuard::set_path("HERMES_HOME", tmp.path());
         let cli = cli_for_temp_state_root(tmp.path());
         let token_store = FileTokenStore::new(secret_vault_path_for_cli(&cli))
             .await

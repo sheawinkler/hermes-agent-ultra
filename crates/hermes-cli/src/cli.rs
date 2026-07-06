@@ -118,6 +118,16 @@ pub enum CliCommand {
         deep: bool,
     },
 
+    /// Ensure the always-on Hermes service surface is installed/running when supported.
+    Up {
+        /// Reinstall/overwrite the user service definition when supported.
+        #[arg(long)]
+        force: bool,
+        /// Show the service plan without writing service files or starting anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Run the interactive setup wizard.
     Setup {
         /// One-shot Nous Portal OAuth setup.
