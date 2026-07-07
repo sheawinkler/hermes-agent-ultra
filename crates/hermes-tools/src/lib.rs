@@ -156,7 +156,7 @@ pub use backends::video_gen::{
 pub use backends::vision::OpenAiVisionBackend;
 pub use backends::web::{
     crawl_backend_from_env_or_fallback, extract_backend_from_env_or_fallback,
-    search_backend_from_env_or_fallback, ExaSearchBackend, FallbackCrawlBackend,
+    search_backend_from_env_or_fallback, ExaExtractBackend, ExaSearchBackend, FallbackCrawlBackend,
     FallbackSearchBackend, FirecrawlExtractBackend, FirecrawlSearchBackend, SimpleExtractBackend,
     TavilyCrawlBackend, TavilyExtractBackend, TavilySearchBackend, XaiWebSearchBackend,
 };

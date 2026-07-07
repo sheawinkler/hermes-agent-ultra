@@ -851,6 +851,14 @@ pub struct LlmProviderConfig {
     )]
     pub models: Vec<String>,
 
+    /// Per-model provider-aware context windows for custom/named providers.
+    #[serde(
+        default,
+        alias = "model_context_lengths",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub model_context_windows: HashMap<String, u64>,
+
     /// Whether model pickers should live-probe `/models` for this provider.
     #[serde(
         default = "default_true",
@@ -909,6 +917,7 @@ impl Default for LlmProviderConfig {
             args: Vec::new(),
             model: None,
             models: Vec::new(),
+            model_context_windows: HashMap::new(),
             discover_models: true,
             api_mode: None,
             max_tokens: None,

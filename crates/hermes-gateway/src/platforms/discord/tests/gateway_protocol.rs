@@ -1,5 +1,5 @@
 use tokio::time::{sleep, Duration, Instant};
-use wiremock::matchers::{header, method, path};
+use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[test]
@@ -94,6 +94,84 @@ async fn discord_liveness_probe_disabled_by_zero_knob() {
         .expect("liveness lock")
         .is_none());
     adapter.stop().await.expect("stop");
+}
+
+#[tokio::test]
+async fn discord_error_response_text_is_bounded() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/too-large-error"))
+        .respond_with(
+            ResponseTemplate::new(500)
+                .set_body_string("x".repeat(DISCORD_REST_ERROR_BODY_LIMIT_BYTES + 64)),
+        )
+        .mount(&server)
+        .await;
+
+    let resp = reqwest::Client::new()
+        .get(format!("{}/too-large-error", server.uri()))
+        .send()
+        .await
+        .expect("response");
+
+    let text = discord_response_text_limited(resp).await;
+
+    assert!(text.ends_with("... [truncated]"));
+    assert!(text.len() <= DISCORD_REST_ERROR_BODY_LIMIT_BYTES + "... [truncated]".len());
+}
+
+#[tokio::test]
+async fn discord_json_response_rejects_oversized_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/too-large-json"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+            "{{\"id\":\"{}\"}}",
+            "x".repeat(DISCORD_REST_JSON_BODY_LIMIT_BYTES + 64)
+        )))
+        .mount(&server)
+        .await;
+
+    let resp = reqwest::Client::new()
+        .get(format!("{}/too-large-json", server.uri()))
+        .send()
+        .await
+        .expect("response");
+
+    let err = discord_response_json_limited::<DiscordMessage>(resp)
+        .await
+        .expect_err("oversized JSON should fail closed");
+
+    assert!(err.to_string().contains("Discord API JSON response exceeds"));
+}
+
+#[tokio::test]
+async fn discord_rename_thread_uses_bounded_utf16_title() {
+    let server = MockServer::start().await;
+    let title = "😀".repeat(90);
+    let expected = truncate_discord_utf16_with_suffix(&title, 100, "...");
+    assert!(discord_utf16_len(&expected) <= 100);
+
+    Mock::given(method("PATCH"))
+        .and(path("/channels/thread-1"))
+        .and(header("Authorization", "Bot test-token"))
+        .and(body_json(serde_json::json!({ "name": expected })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "thread-1",
+            "name": "renamed"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cfg = test_config();
+    cfg.api_base_url = Some(server.uri());
+    let adapter = DiscordAdapter::new(cfg).expect("adapter");
+
+    adapter
+        .rename_thread_channel("thread-1", &title)
+        .await
+        .expect("thread rename should succeed");
 }
 
 #[test]

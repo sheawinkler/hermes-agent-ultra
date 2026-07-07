@@ -24,6 +24,7 @@ use crate::memory_plugins::config_io;
 
 const BREAKER_THRESHOLD: u32 = 5;
 const BREAKER_COOLDOWN_SECS: u64 = 120;
+const MEM0_CLOUD_BASE_URL: &str = "https://api.mem0.ai/v1";
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -150,10 +151,10 @@ impl Mem0Config {
             } else if !env_host.trim().is_empty() {
                 env_host
             } else {
-                "https://api.mem0.ai/v1".into()
+                MEM0_CLOUD_BASE_URL.into()
             },
             api_timeout_secs: 10.0,
-            rerank: true,
+            rerank: false,
         };
 
         let config_path = Self::config_path(hermes_home);
@@ -205,8 +206,24 @@ impl Mem0Config {
 
 fn normalize_mem0_mode(raw: &str) -> String {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "oss" | "self-hosted" | "self_hosted" | "local" => "oss".to_string(),
+        "oss" | "selfhosted" | "self-hosted" | "self_hosted" | "local" => "oss".to_string(),
         _ => "platform".to_string(),
+    }
+}
+
+fn mem0_base_url_is_cloud(base_url: &str) -> bool {
+    let normalized = base_url.trim().trim_end_matches('/');
+    normalized.eq_ignore_ascii_case(MEM0_CLOUD_BASE_URL)
+        || normalized.eq_ignore_ascii_case("https://api.mem0.ai")
+}
+
+fn mem0_mode_label(config: &Mem0Config) -> String {
+    if config.mode == "oss" {
+        "OSS/self-hosted".to_string()
+    } else if !mem0_base_url_is_cloud(&config.base_url) {
+        format!("self-hosted HTTP at {}", config.base_url)
+    } else {
+        "platform".to_string()
     }
 }
 
@@ -517,14 +534,7 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
         let config = self.config.lock().unwrap();
         let (user_id, mode_label) = config
             .as_ref()
-            .map(|c| {
-                let mode_label = if c.mode == "oss" {
-                    format!("OSS/self-hosted at {}", c.base_url)
-                } else {
-                    "platform".to_string()
-                };
-                (c.user_id.as_str(), mode_label)
-            })
+            .map(|c| (c.user_id.as_str(), mem0_mode_label(c)))
             .unwrap_or(("hermes-user", "platform".to_string()));
         format!(
             "# Mem0 Memory\n\
@@ -808,14 +818,14 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
             .unwrap_or_else(|| "platform".to_string());
         let api_key_required = mode != "oss";
         Some(json!([
-            {"key": "mode", "description": "Mem0 mode", "default": "platform", "choices": ["platform", "oss"], "env_var": "MEM0_MODE"},
+            {"key": "mode", "description": "Mem0 mode", "default": "platform", "choices": ["platform", "selfhosted", "oss"], "env_var": "MEM0_MODE"},
             {"key": "api_key", "description": "Mem0 API key", "secret": true, "required": api_key_required, "env_var": "MEM0_API_KEY", "url": "https://app.mem0.ai"},
             {"key": "host", "description": "Self-hosted Mem0 URL (alias for base_url)", "default": "", "env_var": "MEM0_HOST"},
             {"key": "user_id", "description": "User identifier", "default": "hermes-user"},
             {"key": "agent_id", "description": "Agent identifier", "default": "hermes"},
-            {"key": "base_url", "description": "Mem0 API base URL", "default": "https://api.mem0.ai/v1", "env_var": "MEM0_BASE_URL"},
+            {"key": "base_url", "description": "Mem0 API base URL", "default": MEM0_CLOUD_BASE_URL, "env_var": "MEM0_BASE_URL"},
             {"key": "api_timeout_secs", "description": "HTTP timeout seconds", "default": "10"},
-            {"key": "rerank", "description": "Enable reranking for recall", "default": "true"}
+            {"key": "rerank", "description": "Enable reranking for recall", "default": "false"}
         ]))
     }
 
@@ -948,11 +958,56 @@ mod tests {
     }
 
     #[test]
+    fn test_mem0_prompt_label_matches_effective_self_hosted_route() {
+        let plugin = Mem0MemoryPlugin::new();
+        let cfg = Mem0Config {
+            mode: "platform".to_string(),
+            api_key: String::new(),
+            user_id: "operator".to_string(),
+            agent_id: "hermes".to_string(),
+            base_url: "http://127.0.0.1:24220".to_string(),
+            api_timeout_secs: 5.0,
+            rerank: false,
+        };
+        *plugin.config.lock().expect("config lock") = Some(cfg);
+
+        let block = plugin.system_prompt_block();
+
+        assert!(block.contains("self-hosted HTTP at http://127.0.0.1:24220"));
+        assert!(!block.contains("Mode: platform"));
+    }
+
+    #[test]
+    fn test_mem0_load_defaults_rerank_to_false() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _api = EnvGuard::remove("MEM0_API_KEY");
+        let _host = EnvGuard::remove("MEM0_HOST");
+        let _base = EnvGuard::remove("MEM0_BASE_URL");
+
+        let cfg = Mem0Config::load(tmp.path().to_str().expect("utf8"));
+
+        assert!(!cfg.rerank);
+    }
+
+    #[test]
     fn test_mem0_config_schema_marks_api_key_optional_in_oss_mode() {
         let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
-        let _mode = EnvGuard::set("MEM0_MODE", "oss");
+        let _mode = EnvGuard::set("MEM0_MODE", "selfhosted");
 
         let schema = Mem0MemoryPlugin::new().get_config_schema().expect("schema");
+        let mode = schema
+            .as_array()
+            .expect("array")
+            .iter()
+            .find(|item| item.get("key").and_then(Value::as_str) == Some("mode"))
+            .expect("mode field");
+        assert!(mode
+            .get("choices")
+            .and_then(Value::as_array)
+            .expect("mode choices")
+            .iter()
+            .any(|choice| choice.as_str() == Some("selfhosted")));
         let api_key = schema
             .as_array()
             .expect("array")
@@ -960,6 +1015,13 @@ mod tests {
             .find(|item| item.get("key").and_then(Value::as_str) == Some("api_key"))
             .expect("api key field");
         assert_eq!(api_key.get("required"), Some(&Value::Bool(false)));
+        let rerank = schema
+            .as_array()
+            .expect("array")
+            .iter()
+            .find(|item| item.get("key").and_then(Value::as_str) == Some("rerank"))
+            .expect("rerank field");
+        assert_eq!(rerank.get("default").and_then(Value::as_str), Some("false"));
     }
 
     #[test]

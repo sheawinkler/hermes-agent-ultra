@@ -27,7 +27,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "595569a82fa0adea9efb72530b1135d947c2a391",
+      "upstream_blob": "ab60120165362316152e412fbec9d3f30efa2334",
       "workstream": "WS6"
     },
     {
@@ -57,7 +57,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "c820e0a55106ef586c58c94079a0c5593dc9d55d",
+      "upstream_blob": "e4240ea36e754fe6e6035b787f9713b57d3457d1",
       "workstream": "WS8"
     },
     {
@@ -72,7 +72,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "e89c819844e6a61dc1dc7c8c3d01ed201bc70f2d",
+      "upstream_blob": "e1dbaaa5c43c129f3de8a0e40098e602fd4e40e1",
       "workstream": "WS8"
     },
     {
@@ -87,7 +87,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "bad33481c745e2092d849c26201d0cee1d3bd923",
+      "upstream_blob": "46581d820037d2abd46ddd2b0d74c0b39190596d",
       "workstream": "WS8"
     },
     {
@@ -125,7 +125,7 @@
       "classification": "intentional_divergence",
       "classification_path": "README.md",
       "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "6f19299d645b8c96cfa8eccc9cfc75eacc957a51",
+      "local_blob": "9f519632dd2d7b684b1d6f412ab9319a900f6e83",
       "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "README.md",
@@ -282,7 +282,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 305,
-      "upstream_blob": "1c1d0b78922b62fddbb92e7820bb694b575d414a",
+      "upstream_blob": "8715490be1d4de3aa59a4f405403b272429c0c8b",
       "workstream": "WS8"
     },
     {
@@ -417,7 +417,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "aa4e067ae82a3ff62eff46fddc1803e794d940c8",
+      "upstream_blob": "7ea146adc137d115bef207c54c4b97c383a0bdd0",
       "workstream": "WS4"
     },
     {
@@ -462,7 +462,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "2ce65fd336e775696e5853d60084c26acbc87f62",
+      "upstream_blob": "d353855b669fdeb9aabe551a4356c31985dfd23c",
       "workstream": "WS4"
     },
     {
@@ -492,7 +492,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "d9d53a97a2405475841f0481afc38a96bd953896",
+      "upstream_blob": "c108a99ea5a6d1abe8bf5e7e2a811d82d19e7d6d",
       "workstream": "WS4"
     },
     {
@@ -717,7 +717,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "9f13aebb4c6cafca2bc2226511a4609265b691a3",
+      "upstream_blob": "7650c54f570d9bb51bf31939ed81cc3c39152edf",
       "workstream": "WS3"
     },
     {
@@ -732,7 +732,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 304,
-      "upstream_blob": "e721c037c814c7f91c928f5ae0d893d54e226fb9",
+      "upstream_blob": "1ab0c0fd73dbb5d0ced87896cf032326c3b0e3ec",
       "workstream": "WS3"
     },
     {
@@ -762,7 +762,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 304,
-      "upstream_blob": "255b851ba6a7d9232ee3bdbba3cba6a1dc0ae39b",
+      "upstream_blob": "ac2b08ac5860c445b1f783387d38644601025d39",
       "workstream": "WS3"
     },
     {
@@ -942,7 +942,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 304,
-      "upstream_blob": "d932bb1d24f62537e528cb841ca9e591bccc3b31",
+      "upstream_blob": "a801a87327c0b8c619218b8e27a2e43949b77a70",
       "workstream": "WS3"
     },
     {
@@ -957,7 +957,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 304,
-      "upstream_blob": "6b396b2612ef41f36b3613059d270f559294a18a",
+      "upstream_blob": "8f2a43c295ffd06cdf27d14d3a3bc370102c2867",
       "workstream": "WS3"
     },
     {
@@ -1137,7 +1137,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 304,
-      "upstream_blob": "8fc37448fd4622234fd3ad3926cd4176bb2b4650",
+      "upstream_blob": "3db0cc3fd684fd012e81b802b612904aa2ea15b5",
       "workstream": "WS3"
     },
     {
@@ -1182,7 +1182,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "53046b08e3a3798dd0a917b13176a85a9115b673",
+      "upstream_blob": "c5c39f2bc49f6bf0b1b01d5e9ccb57c08bb79f3b",
       "workstream": "WS3"
     },
     {
@@ -1197,7 +1197,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 304,
-      "upstream_blob": "3647496375d9e8618398fcb07b364ba19212c258",
+      "upstream_blob": "35f413ed37a72985f9c819e23c283f5a9847d4f3",
       "workstream": "WS3"
     },
     {
@@ -1212,7 +1212,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ef06b0f37f71c549abe295521a7a4545e0568b45",
+      "upstream_blob": "c6ae10acca8dda674d1ffe732c523e5a31572d72",
       "workstream": "WS3"
     },
     {
@@ -1242,7 +1242,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "c6ea6bc1d7c3c814accf14c0fec758f04ddd75f1",
+      "upstream_blob": "5aef3b908503bd94aee6236f3c44922910890c18",
       "workstream": "WS3"
     },
     {
@@ -1258,6 +1258,21 @@
       "status": "cleared_intentional_divergence",
       "ticket": 25,
       "upstream_blob": "18b8ea78741548dac1d4e52df7ad130ef84bc848",
+      "workstream": "WS3"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "plugins/memory/retaindb/__init__.py",
+      "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "62121410d41c7b4dcee5605de4728037e7ca1684",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/retaindb/__init__.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "a777ccbd55ee9110e6484240d29e5fe8be90a361",
       "workstream": "WS3"
     },
     {
@@ -1392,7 +1407,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "e893be95b279ff7eb30b78247d48092bfcd86769",
+      "upstream_blob": "2847d161adf0d936d474670bebce3a5e3750810c",
       "workstream": "WS3"
     },
     {
@@ -1482,7 +1497,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ebf3b9274d6ff7be772740826493da8af9805537",
+      "upstream_blob": "f8cbcc1baf3284a3bd93cf498e77d5c8c4d94275",
       "workstream": "WS3"
     },
     {
@@ -1527,7 +1542,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "7a53ec166c109de5d87bec20d24e1145130afe1c",
+      "upstream_blob": "a4c022ff85539339e89b265407d65dfda1f96b70",
       "workstream": "WS3"
     },
     {
@@ -1557,7 +1572,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 304,
-      "upstream_blob": "bfe4724504109dca63aa208b0e222aab29326df2",
+      "upstream_blob": "8a83f8805ed9afafa4fed5a39404e0be7e1396ab",
       "workstream": "WS3"
     },
     {
@@ -1572,7 +1587,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 304,
-      "upstream_blob": "5deb0e5af4c3a6bddde3e6d7bc9c90b11857a9b8",
+      "upstream_blob": "f63efeabebdee645708cf3494c70af764d8d8a9a",
       "workstream": "WS3"
     },
     {
@@ -1587,7 +1602,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 304,
-      "upstream_blob": "3d481b3ead7ba133594a16ba6202aedd22514b67",
+      "upstream_blob": "277b2396f0c517de5d1f2a263926e34f02d25569",
       "workstream": "WS3"
     },
     {
@@ -1692,7 +1707,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "d6e627f667bc6f1aa99939bd6df6c82b5a843e04",
+      "upstream_blob": "27df34ecf2c4dcbfd907ef6eaf020800175fdb2d",
       "workstream": "WS3"
     },
     {
@@ -1842,7 +1857,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 304,
-      "upstream_blob": "bc204b98b38ec51712cd53009b0de12fb430d09f",
+      "upstream_blob": "432300983795619ac1d3099f2c544e525fc0661a",
       "workstream": "WS3"
     },
     {
@@ -1983,6 +1998,21 @@
     {
       "action": "No vendoring; verify approved divergence remains current.",
       "classification": "intentional_divergence",
+      "classification_path": "plugins/web/brave_free/provider.py",
+      "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "df4584f7732c1a8e2cf89259b082f67dff4de014",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/web/brave_free/provider.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "0da8d11c991243ca9265344c101645e7eeb877ba",
+      "workstream": "WS3"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
       "classification_path": "plugins/web/ddgs/provider.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "e8846236a24db13e0736fc0aeaf79a17de7ce8fb",
@@ -1998,6 +2028,21 @@
     {
       "action": "No vendoring; verify approved divergence remains current.",
       "classification": "intentional_divergence",
+      "classification_path": "plugins/web/exa/provider.py",
+      "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "0fea6fb5a8b79d0177b00f1db240c2916cf0e94f",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/web/exa/provider.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "17ce665dc18a566545977e5f6ceacdecd17cdfa8",
+      "workstream": "WS3"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
       "classification_path": "plugins/web/firecrawl/provider.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "bcc574ffca39807de3f33e45843d03dd2749fc3e",
@@ -2007,7 +2052,22 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "97718a6cae2924b495b0d115078ef47b46f75f4a",
+      "upstream_blob": "ae02b43a6eb7ce360e40825ae08f22ccf1479ed7",
+      "workstream": "WS3"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "plugins/web/parallel/provider.py",
+      "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "38578e6b52c34a7b18f95656188e9971ccda3352",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/web/parallel/provider.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "028f5df3fc37b350edfaa9e612fb474514b598d3",
       "workstream": "WS3"
     },
     {
@@ -2052,7 +2112,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "fe161a4a0964a1c3139284b715e48aa2dafa12a5",
+      "upstream_blob": "e2a9d7b40f185162c9d26a25ef4c34d510690270",
       "workstream": "WS3"
     },
     {
@@ -2128,6 +2188,21 @@
       "status": "cleared_intentional_divergence",
       "ticket": 25,
       "upstream_blob": "d67fa6ce1bad06f97330dcfe480f57dc81e247a8",
+      "workstream": "WS4"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "skills/media/youtube-content/scripts/fetch_transcript.py",
+      "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "6160339038dd3ba8b54882703ed779d0c8f3eced",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "skills/media/youtube-content/scripts/fetch_transcript.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "73c305cee5474a5881d1ea150e06979a1c3f7914",
       "workstream": "WS4"
     },
     {
@@ -2502,7 +2577,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "9610f7fb57cb57bbe8649f6b35736e5de00430b6",
+      "upstream_blob": "1393d71ab8594b06e1e2173b47fb1ea852b446e5",
       "workstream": "WS6"
     },
     {
@@ -2532,7 +2607,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "91a5fa743bb580545ed7f062bb63a790a674e6a3",
+      "upstream_blob": "96a8fe9ff04cb8e953f8b3004054127d6d760f57",
       "workstream": "WS6"
     },
     {
@@ -2547,7 +2622,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "b5901391ee95fcfec94e330793a654d65ff1014f",
+      "upstream_blob": "5e18fa73a1f831005a96206327ed840df6d9b176",
       "workstream": "WS6"
     },
     {
@@ -2577,7 +2652,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "0b8b0a04462a137d2f51cdba5b18a7725a318ccd",
+      "upstream_blob": "935bb04371d8b36d43fd3eb0715ee5715316e10d",
       "workstream": "WS6"
     },
     {
@@ -2592,7 +2667,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "afceeec02d94bd96451161beeb8bbca9f3e17ed5",
+      "upstream_blob": "fe4a8c34d3706ae23f429361e6e30f4da84a0619",
       "workstream": "WS6"
     },
     {
@@ -2652,7 +2727,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "65df149e528d939d011df1ac2af165bd5787d693",
+      "upstream_blob": "d8840bc979e4f0aa0d8adbaf81580191d05e2615",
       "workstream": "WS6"
     },
     {
@@ -2712,7 +2787,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "231f8b4077fb17d07c9591f1f8b06944134fdaf3",
+      "upstream_blob": "75b22bb8a80d756ca8b9ed662bfa094379388146",
       "workstream": "WS6"
     },
     {
@@ -2795,6 +2870,21 @@
       "classification": "intentional_divergence",
       "classification_path": "tests/agent",
       "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "8477fdb646a89dce472d4ec84bc327b92b8861cc",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/agent/test_credential_pool_routing.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "9c7c047305151fe3d1be82aaafdbb2cbd9b35eca",
+      "workstream": "WS6"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/agent",
+      "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "be8d51cea8c9b198f1b2e21a3c18be8682330bce",
       "necessity": "approved_divergence",
       "owner": "sheawinkler",
@@ -2847,7 +2937,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "804e5a65ecc68581072b77a31afcc3e4148e7f58",
+      "upstream_blob": "5c3414d0edb611fd74459a217fefce1bd5948663",
       "workstream": "WS6"
     },
     {
@@ -2907,7 +2997,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "6c533089986ceb739db76986f25dde019f59f39a",
+      "upstream_blob": "baadfa7e196af7248195a83621d99549f9cbe61c",
       "workstream": "WS6"
     },
     {
@@ -2952,7 +3042,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "4439eec1e074468d3ba3d2d54c9c46ee06430b2d",
+      "upstream_blob": "66c809008a69c04c5c5aef3a10b729553a79043f",
       "workstream": "WS6"
     },
     {
@@ -3012,7 +3102,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "675823112cff467363789e4c9b75a271c9537a29",
+      "upstream_blob": "671e6aaa18dd450d2faa414e7a669cccf22a46ea",
       "workstream": "WS6"
     },
     {
@@ -3207,7 +3297,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "499ffc765a41485367bac53f325c113e9a318ecd",
+      "upstream_blob": "7a1c0495e1b335f05dd60502e4ac0e9d86285ce1",
       "workstream": "WS6"
     },
     {
@@ -3237,7 +3327,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ed7e42558874af6d8006bb24f269755b0bd5dcc4",
+      "upstream_blob": "57956a383b0e87a61a41ad8e74ee4c5d658ec946",
       "workstream": "WS6"
     },
     {
@@ -3282,7 +3372,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "192ad0d0b353f0f58359e9a462cf07973eb8a3be",
+      "upstream_blob": "08fe9f41b4fe8450466a3a125c42cf10671647cb",
       "workstream": "WS6"
     },
     {
@@ -3312,7 +3402,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ab3cfe280aeee5cdf9fe3d7711427f5d82b601f5",
+      "upstream_blob": "347d1b667c7a053cff7517feea20f5e2960267f4",
       "workstream": "WS6"
     },
     {
@@ -3867,7 +3957,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "5091256a399038c1783f2c00dfa479849054edfe",
+      "upstream_blob": "08185689e73c42596c5f53ee3f932d455986ab07",
       "workstream": "WS6"
     },
     {
@@ -4077,7 +4167,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ee02d043017fbfb78647c1979ab8cda3141a14e7",
+      "upstream_blob": "1033fb1ee4ffb14d813a1a5dbe4de7109ebb6d76",
       "workstream": "WS6"
     },
     {
@@ -4092,7 +4182,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "d8efdfb4855aff7e8e0794b4562b4f1c2673a380",
+      "upstream_blob": "253bde4769bb3455fead67c8b956c446500d8124",
       "workstream": "WS6"
     },
     {
@@ -4122,7 +4212,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "50eb7ab7770bff74b11b527e97bd0dd40bd64a06",
+      "upstream_blob": "d0adf7ed1bd1fcc5c936eb6d78d5499af5e29cca",
       "workstream": "WS6"
     },
     {
@@ -4137,7 +4227,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "54445e7054c77294c4bb947124dc2860612698c2",
+      "upstream_blob": "8cb81cb6177a835caa1febed9de95c4d3bb7f5dd",
       "workstream": "WS6"
     },
     {
@@ -4167,7 +4257,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "193f7f125d8a41fe1235950daf0dadf42bcd3b14",
+      "upstream_blob": "46c98b5d08438d7716e063bafe5b6ed6c031400e",
       "workstream": "WS6"
     },
     {
@@ -4212,7 +4302,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "d1f47c700b226f026197749899c0a13b8269e9db",
+      "upstream_blob": "3546b09cc7544f37cfd414998a265a561a533db5",
       "workstream": "WS6"
     },
     {
@@ -4272,7 +4362,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 302,
-      "upstream_blob": "73a4941db3f448a1fb4d61b323a5db98024fb495",
+      "upstream_blob": "81264fa37c9d9197ce4c66f996a1e95cfdf67480",
       "workstream": "WS6"
     },
     {
@@ -4407,7 +4497,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "6d50a31be2eb4dde591dc60a64658590a8f4917a",
+      "upstream_blob": "f5ac3b8c40ba2b7a374fde25b1eed9af87f48154",
       "workstream": "WS6"
     },
     {
@@ -4512,7 +4602,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 302,
-      "upstream_blob": "a77c527d2e9b2048e6c256ff14f1c030df6c901e",
+      "upstream_blob": "66c4672f21c34d56b1748df1f0419c159fd6527c",
       "workstream": "WS6"
     },
     {
@@ -4602,7 +4692,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "88e53e212effdcb9daec616f46122fc73621eba9",
+      "upstream_blob": "e8e8d582887609a3f953011473b1b1cc4aa6b46e",
       "workstream": "WS6"
     },
     {
@@ -4647,7 +4737,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "3f787403bd860d4e92afc64556e9fb753792ed4e",
+      "upstream_blob": "b9d4993b5f0604905b08daf6e8de9b13af2baecf",
       "workstream": "WS6"
     },
     {
@@ -4662,7 +4752,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "299b7e6b3bef19b533629225bfd9a78d01949028",
+      "upstream_blob": "ca449b94b62b9c9b42cbb3b7abcf3cd9806d69c9",
       "workstream": "WS6"
     },
     {
@@ -4827,7 +4917,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "5c77c8e13b861b7e86b3edd5fd559a4f1c661142",
+      "upstream_blob": "7acad309ad33edb38e8c450a99bcc2b2a7a74d35",
       "workstream": "WS6"
     },
     {
@@ -4917,7 +5007,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "86025f4e4291f50a782170253d3e118eb40aefe1",
+      "upstream_blob": "369dcb9a977b68fede5f71c3bc14c0ba2ba6dc75",
       "workstream": "WS6"
     },
     {
@@ -5037,7 +5127,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "5ef6812f5375104baa6bc1ab446b8b36f9abe071",
+      "upstream_blob": "f35ca2fa94549d8c47f694270f3c9fa983af5e88",
       "workstream": "WS6"
     },
     {
@@ -5082,7 +5172,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "81bbc912fab877e3cdee0cb3f58772e111e806e0",
+      "upstream_blob": "d05807e41a79cc322fc7063d644602253f7921bc",
       "workstream": "WS6"
     },
     {
@@ -5202,7 +5292,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 302,
-      "upstream_blob": "c1000094007007f565f03b3852ed43cee4af64ec",
+      "upstream_blob": "a5b07c89880d1e7b84c3e86ccc4a1a64b543d673",
       "workstream": "WS6"
     },
     {
@@ -5217,7 +5307,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "bb97c7e72be17f85d7917c7fc386f94385fc329f",
+      "upstream_blob": "58d7bb888722b9eb9c3ab77bca84aca96bf4b027",
       "workstream": "WS6"
     },
     {
@@ -5562,7 +5652,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "1fedb30a019ffbf9a04941ab92a89c49d78817f0",
+      "upstream_blob": "808180ba144c6950adf2f7732b4f89b7978862ed",
       "workstream": "WS6"
     },
     {
@@ -5667,7 +5757,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "caa141c6a444296e7eabec9ac6eeea95f6dd52a1",
+      "upstream_blob": "ca9d603c697e8eb42aec03754477da933549cf59",
       "workstream": "WS6"
     },
     {
@@ -5712,7 +5802,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "74e718f181a5aafaa1fe501fcb5c1b1d185386aa",
+      "upstream_blob": "ef1037692e6b04ea99c160376f97057f901ff52d",
       "workstream": "WS6"
     },
     {
@@ -5847,7 +5937,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "0c7fa80a0ba0bb24f826991da0f008053e248d35",
+      "upstream_blob": "be98f7eb9acbdc13fcdcb038a4f3482cdc9bda9e",
       "workstream": "WS6"
     },
     {
@@ -5877,7 +5967,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ec1b0dedc83d7072dcdf87fbc0e133328b4d0755",
+      "upstream_blob": "857da98da71c1976a2278bf91b39d0b9449e4aee",
       "workstream": "WS6"
     },
     {
@@ -5952,7 +6042,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "35135cfc4481978ce232fcf96900b1090e5fc5e3",
+      "upstream_blob": "0dc217d39d9479f525e0b7fdd9215af55bcbdf1a",
       "workstream": "WS6"
     },
     {
@@ -6012,7 +6102,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "dfa065bc3a8b876d881b28951ed511b24bf70dc7",
+      "upstream_blob": "b7f08713b1df04cc73b57041e2a21007770ca5a9",
       "workstream": "WS6"
     },
     {
@@ -6177,7 +6267,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "9ec0860a5d01037c1d5b611de0e7d5f37f8aa927",
+      "upstream_blob": "4f47d0ff638bbe33fe2cfd59cbf00dea42613b81",
       "workstream": "WS6"
     },
     {
@@ -6192,7 +6282,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "9831e636c2025a525e608c1c03e4c6be248e6e2c",
+      "upstream_blob": "58eb449adf9f34930d78f40c50200599ebf6e21d",
       "workstream": "WS6"
     },
     {
@@ -6267,7 +6357,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ec05b31b7359b83b30dafe51a298885e620efbd6",
+      "upstream_blob": "5f93a3820aae51723e8ad85c125ed7ea3496621f",
       "workstream": "WS6"
     },
     {
@@ -6447,7 +6537,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "b101151d9f2fb34f31fbc9cd7d8576208652cb43",
+      "upstream_blob": "de3edf2db272eb8ff61febb5094660c9f9896118",
       "workstream": "WS6"
     },
     {
@@ -6507,7 +6597,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "85a9501f06ab7da9e89e3261d161b58bed02d759",
+      "upstream_blob": "bfb70289b75d1b6b53f66b678f9c37958796e391",
       "workstream": "WS6"
     },
     {
@@ -6552,7 +6642,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ab4c941574372db2002946ac0382c03ed16b28ba",
+      "upstream_blob": "780bf8efc5168d6530c0ea7f30e5cdbfe991abeb",
       "workstream": "WS6"
     },
     {
@@ -6717,7 +6807,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "697356f66a05c54edef2b11998442571f3740fc4",
+      "upstream_blob": "5868a0c56ff53b4e3d42a9e10a5d86983274d224",
       "workstream": "WS6"
     },
     {
@@ -6747,7 +6837,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "a39c28c3d669ae5eefb99faf263d76f10ebbda8c",
+      "upstream_blob": "18dec441ecedeef6ef23e1d4f933831466032627",
       "workstream": "WS6"
     },
     {
@@ -6792,7 +6882,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "57950d0fb61f66b7e7f325d370926a39e8c0cedb",
+      "upstream_blob": "cede492fe5bded015ab31280d9d9f773b1827f0e",
       "workstream": "WS6"
     },
     {
@@ -6807,7 +6897,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "4a06340446342d16a2b6d43a034962d82b1f41e3",
+      "upstream_blob": "0016b0e32e75062f9c81f941de1de16da6364037",
       "workstream": "WS6"
     },
     {
@@ -6897,7 +6987,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "3f5b7da420ca08d64693e2083cde1d7bc471f296",
+      "upstream_blob": "41dbcc001d3c06959ebcc0e2c090e15a88b50271",
       "workstream": "WS6"
     },
     {
@@ -6912,7 +7002,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "97ef78d4fdb11a870fe60ed9cf66a8b503991aeb",
+      "upstream_blob": "c309a328d5184f923a0fabfa9f11265e757226cb",
       "workstream": "WS6"
     },
     {
@@ -7062,7 +7152,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 302,
-      "upstream_blob": "a5da0e1143815666236a7e9710a6113d6558b3d2",
+      "upstream_blob": "b420a16047d65acc5673cc1e407ef170437d974e",
       "workstream": "WS6"
     },
     {
@@ -7122,7 +7212,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "9e5340042ee3a3d3f9b77a8d7ccc2964b27be5e1",
+      "upstream_blob": "a1e235f46e6302784a5fbafc319c179be849c3b5",
       "workstream": "WS6"
     },
     {
@@ -7242,7 +7332,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "5f2fae26c5e52cc20887e184abf88c14b954ebe9",
+      "upstream_blob": "3692fe5a12d480b861ce76509fdcc03c7126f62a",
       "workstream": "WS6"
     },
     {
@@ -7707,7 +7797,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "d357a7c89a6a187b6742b56ff7cfb1c4324eb2b7",
+      "upstream_blob": "969ff559366e3f647a33b01dc957217baca5ae22",
       "workstream": "WS6"
     },
     {
@@ -7737,7 +7827,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "37740c2ea759d08b6229f136a63f33904dae6828",
+      "upstream_blob": "06bc395214f7ee7c5645c8307555837ba3ad3dc4",
       "workstream": "WS6"
     },
     {
@@ -7752,7 +7842,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 302,
-      "upstream_blob": "435a47668780d10bb2007c22c0a4f736dd0260a5",
+      "upstream_blob": "acc41da7c46a7aa8ea89e0b0b75b697f3d6d4a82",
       "workstream": "WS6"
     },
     {
@@ -7782,7 +7872,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "3d0b0bdeb722f781b6dd3ddeb5898fa64d785bbe",
+      "upstream_blob": "b658584f30295c5d9a978a2cbde4d3e3745ad0f3",
       "workstream": "WS6"
     },
     {
@@ -7827,7 +7917,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "14e97e5c325de81ecd3be0ac8302f166f9092e8e",
+      "upstream_blob": "1ce36a1740d264bc2ab2c2aec4a6f69147cbdd8c",
       "workstream": "WS6"
     },
     {
@@ -7857,7 +7947,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "4dfd019ed68b32603eb0aebb4d90f5c3ce929150",
+      "upstream_blob": "e778a30b2ca85f33e08b4b80d4d017486a93edb9",
       "workstream": "WS6"
     },
     {
@@ -8067,7 +8157,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "7470165928f29acd2ab40a852779b13841e5809c",
+      "upstream_blob": "c2d03625dc36f77f88a3185430ff031db5888224",
       "workstream": "WS6"
     },
     {
@@ -8307,7 +8397,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "2e7a3f2de0ccb174dd1d0b68c23153d9f09fb9ed",
+      "upstream_blob": "6fbd95510ccbf90e662c4f39dae808213dc43b4a",
       "workstream": "WS6"
     },
     {
@@ -8322,7 +8412,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "3986fe712003d5b1e51c0e17d64d33a5d4c6b387",
+      "upstream_blob": "e88f04960406a06f18b6ea957faab5f84ac2fc8b",
       "workstream": "WS6"
     },
     {
@@ -8420,6 +8510,21 @@
       "classification": "intentional_divergence",
       "classification_path": "tests/hermes_cli",
       "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "cb6275af09302c89437f8c6d5c6752d5781b8a17",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/hermes_cli/test_model_switch_context_display.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "b30ed9024fdc75d27f4e96c51998c7acf9fd2ecb",
+      "workstream": "WS6"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/hermes_cli",
+      "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "84734e622d5f44ceaf577b8d16fdfeac40d524ef",
       "necessity": "approved_divergence",
       "owner": "sheawinkler",
@@ -8427,7 +8532,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "bfffa0474debfa17db4985a6d0484ecc87e9a1c1",
+      "upstream_blob": "4d80469b975b773256ecf12e1c7b1dd4288976f8",
       "workstream": "WS6"
     },
     {
@@ -8682,7 +8787,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "91a13dd761a466ea60fc0f1e6b2ee0ec98e59c13",
+      "upstream_blob": "c61bc36dd4be5cc6502178de98fa7007e246f91c",
       "workstream": "WS6"
     },
     {
@@ -8712,7 +8817,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "43b9cb38121d5dfe2ec1ef696bbcc27c752ab886",
+      "upstream_blob": "e8892ae7846a0e728c08e15bd70dfdc9a5468980",
       "workstream": "WS6"
     },
     {
@@ -8788,6 +8893,21 @@
       "status": "cleared_intentional_divergence",
       "ticket": 25,
       "upstream_blob": "833729973ae55410fe8a807cface404ae67ca76d",
+      "workstream": "WS6"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/hermes_cli",
+      "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "7b3b8a9add25bb619ccfb4bcb6d20737b34afe55",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/hermes_cli/test_sessions_delete.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "0c54da1cf15b47211c4b006983f9a8fe3ddc5823",
       "workstream": "WS6"
     },
     {
@@ -9252,7 +9372,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "2b6305ac8a30cfabb94f01a92bea20bd027f1a81",
+      "upstream_blob": "34de95b826d2fd46989299194254a376586901b8",
       "workstream": "WS6"
     },
     {
@@ -9357,7 +9477,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "7797be6317777350b67056099edea7146f7ece44",
+      "upstream_blob": "18f5facbb6b64c808d3f43c839dbc7185cd9616b",
       "workstream": "WS6"
     },
     {
@@ -9515,6 +9635,21 @@
       "classification": "intentional_divergence",
       "classification_path": "tests/integration",
       "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "85565ae6e49cf8893f23c82b730a5bbf74b398d4",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/integration/test_batch_runner.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "793006062397da60fc153b93c64fd3f2bef0555e",
+      "workstream": "WS6"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/integration",
+      "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "a5b1a2aa99ff4549cf124963739ef395da094f37",
       "necessity": "approved_divergence",
       "owner": "sheawinkler",
@@ -9522,7 +9657,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "739f0452fe3f273296efc4f7014ead6a55797c4a",
+      "upstream_blob": "5a4820a88a4e22f3050122da472902a7c0de676a",
       "workstream": "WS6"
     },
     {
@@ -9538,6 +9673,21 @@
       "status": "cleared_intentional_divergence",
       "ticket": 25,
       "upstream_blob": "4b619816972734f0c2855644b4cca4bdf1c0bd8b",
+      "workstream": "WS6"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/integration",
+      "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "a4fc26996d5b9dd0aacfed9af57e0863d266dd7e",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/integration/test_modal_terminal.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "40c7164ffdce9f684164bffb807f1e8891212116",
       "workstream": "WS6"
     },
     {
@@ -9567,7 +9717,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "6be64b6b2a62a427efcd9edc315167d57f9aabfa",
+      "upstream_blob": "11fade5ee16f0e977dca63c3999b92d3945a5238",
       "workstream": "WS6"
     },
     {
@@ -9657,7 +9807,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "f8991e3e76680bfc2d4237cf7764c8fb0acf1b29",
+      "upstream_blob": "98a99755bfcb8433bd0242807e7679d2426d480c",
       "workstream": "WS6"
     },
     {
@@ -9747,7 +9897,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "92815553922da619a5c46acf42182e687d9b6fd8",
+      "upstream_blob": "028bf59efbe40da77ca055a1d2207d2d4a6e63b5",
       "workstream": "WS6"
     },
     {
@@ -10182,7 +10332,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "494a4919e88d2b70e6b9d10d97bcec98755f6e4e",
+      "upstream_blob": "408db5e5f34ac4239bf0e2336914de5086321b3f",
       "workstream": "WS6"
     },
     {
@@ -10302,7 +10452,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "27d3bff91c0594cd8c8c3fed2176e5e3a9e45df4",
+      "upstream_blob": "78975a7395af6227a01aa4f955fc917699335003",
       "workstream": "WS6"
     },
     {
@@ -10437,7 +10587,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "93e65193756db5b9b936720dde638b0bf506761b",
+      "upstream_blob": "816af59fd891f9a4a4caf7a6ea0f3df52c5e98c6",
       "workstream": "WS6"
     },
     {
@@ -10482,7 +10632,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "7285cb1f625c902cc3c7f434a70f3444dbafab88",
+      "upstream_blob": "2c7e53e13497706fa0b35121e2adebfdd5f187a3",
       "workstream": "WS6"
     },
     {
@@ -10602,7 +10752,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "575a9700ac30e7a0f9151202be706622f2ee62d9",
+      "upstream_blob": "da8a446bf8d8aee905b7383c1cdcf506ebfe2eb0",
       "workstream": "WS6"
     },
     {
@@ -10617,7 +10767,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "1d355c65543667811de5b005b74c3fdfbc10f4d0",
+      "upstream_blob": "0c24adc4ed6c8c5167de648aeaa67e18614a68db",
       "workstream": "WS6"
     },
     {
@@ -10782,7 +10932,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "e5bbdd93d808b1400f86a8032ffd899bdf949af7",
+      "upstream_blob": "5b80fea40654713bbf988ab9eeef3ffd435e5c08",
       "workstream": "WS6"
     },
     {
@@ -10962,7 +11112,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "d667a97a7cbdd64f05334ede8e13f91f7564ac6b",
+      "upstream_blob": "936dbaf5baf61f37051891081a68771559c8bb19",
       "workstream": "WS6"
     },
     {
@@ -10977,7 +11127,22 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "f5695e4bde13b3ac1e673eadeef14bdc787c54c2",
+      "upstream_blob": "80d9183003a527eef6a22501cb7ebfae982ea895",
+      "workstream": "WS6"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/stress",
+      "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "b468cd957ef648d5c2789e963f93311e68e686df",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/stress/test_concurrency_reclaim_race.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "6a636de72efa66f2f7b503fa9fa5aee8a12a7871",
       "workstream": "WS6"
     },
     {
@@ -11157,7 +11322,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "f23bed43ab8a0115c3def52bbaa90c15f0b24e97",
+      "upstream_blob": "e4b064ed947ed5587c21ca0b5fd978f304e63c95",
       "workstream": "WS6"
     },
     {
@@ -11172,7 +11337,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ca0b13ff5dab33f938e28c19f1c989dac9b1fa33",
+      "upstream_blob": "6d05def051f431069c7d6ace03282106b627ea00",
       "workstream": "WS6"
     },
     {
@@ -11187,7 +11352,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "eb884129bc56f4904fbf2711824c9db3d7becdc2",
+      "upstream_blob": "4ad888442afcfe327565776ebb06ee9391c9da29",
       "workstream": "WS6"
     },
     {
@@ -11307,7 +11472,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "0ae403370d69b0b32f2d90616ba5887b6f05fe0c",
+      "upstream_blob": "9c002925b20ce9fa1d1b6f494895daeaa4c20783",
       "workstream": "WS6"
     },
     {
@@ -11352,7 +11517,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "9eff5c5b2d334251f55a0a2e7db5e6da81176e4b",
+      "upstream_blob": "469b8a6921e9594fb3ee1ea2c69e6eb77f7fabf9",
       "workstream": "WS6"
     },
     {
@@ -11457,7 +11622,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ff08d3a40625101817adf358d9012c85f09fd9c7",
+      "upstream_blob": "49bdb09ec0ba68ffc721819134c99976b2abc848",
       "workstream": "WS6"
     },
     {
@@ -11532,7 +11697,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "f9e4969b7beaaa649c0beaa0b87916f820eec326",
+      "upstream_blob": "3f99554561ea84dbdc0045e7500abc9e8701cad7",
       "workstream": "WS6"
     },
     {
@@ -11592,7 +11757,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "6d39a252cfe9bc1d8bf27364b75aa0283f141922",
+      "upstream_blob": "3286363dfd23f76f7776909afd2f8cb936113c14",
       "workstream": "WS6"
     },
     {
@@ -11622,7 +11787,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "53613abd1ec908548e04911b874175403d04c050",
+      "upstream_blob": "d55dad7e007f94b92771024549b44384817c15cc",
       "workstream": "WS6"
     },
     {
@@ -11667,7 +11832,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ec0406c9eba8d462da4cf204e4dbbc8f0fc5e5a1",
+      "upstream_blob": "e364dcd3be0b00f6282a4f6064bc144bc8532f53",
       "workstream": "WS6"
     },
     {
@@ -11712,7 +11877,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "8d6e6ab7328847a6096b3167703b58797c159de4",
+      "upstream_blob": "d629d95ea29997f8010cdf4629ce480941bc88e5",
       "workstream": "WS6"
     },
     {
@@ -12087,7 +12252,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "85f62e4e3c788a2a3bb06a9643cd669bddaa23c0",
+      "upstream_blob": "9f4a6a5ca051396c16ae6f7b4b40dd414e79bad7",
       "workstream": "WS6"
     },
     {
@@ -12267,7 +12432,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "ac94ce5e75168226c19531bbd7d5a76afb722468",
+      "upstream_blob": "2a7d2793aaaf0ba58c933f02abe6048ac9d51691",
       "workstream": "WS6"
     },
     {
@@ -12387,7 +12552,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "861ebc4936f22a3d4883ea3f2a9b1b95e77a7e15",
+      "upstream_blob": "23aa53d2b1408ba0f02775d5fb4416ccb60afd27",
       "workstream": "WS6"
     },
     {
@@ -12507,7 +12672,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "e084e61fe8f4e19daf9f1b83eac750236a4fa94b",
+      "upstream_blob": "38f9d4d7a842996cd2286b274e76f52f616ebc93",
       "workstream": "WS6"
     },
     {
@@ -12597,7 +12762,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "5d614f62bc54053aad957f0ceabf8f9b5d4dd00a",
+      "upstream_blob": "8c71f10ffd97d4842f79ad9fd9ecb57f589eb17a",
       "workstream": "WS6"
     },
     {
@@ -12777,7 +12942,22 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "4f5a89477d05ec1dadfa7400c3d5cc10bfc60ee0",
+      "upstream_blob": "116af9397cdfa80a8867215477eb6e343e9f89b5",
+      "workstream": "WS6"
+    },
+    {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/tools",
+      "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "c9adf545ed5ca92b25d670314800f115ddbff6ea",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": "tests/tools/test_mcp_dynamic_discovery.py",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 25,
+      "upstream_blob": "f7eac572b8db32f8b45629a172122dd59fe9e956",
       "workstream": "WS6"
     },
     {
@@ -12822,7 +13002,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "b5265b6adb9f2cad4dfe8e3664c48a1999e0ad72",
+      "upstream_blob": "8f3f58ca9fbacce22c1292a60373e2e18cf09d1c",
       "workstream": "WS6"
     },
     {
@@ -12882,7 +13062,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "494ebbbe024ffbafea656b7a084b8b99f7a4f368",
+      "upstream_blob": "796dbed913d20aba49b229962653664b132841f4",
       "workstream": "WS6"
     },
     {
@@ -12912,7 +13092,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "9b130268181b7535cc31f0f3499cf06c9b35a26c",
+      "upstream_blob": "eeeeef7e48cbd087e0f2b9cef7e228d5a1d228bc",
       "workstream": "WS6"
     },
     {
@@ -12942,7 +13122,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "b17e6484aabd876871607737f003bd2d2d866420",
+      "upstream_blob": "6a693d5aaf89f1ec6017f201f351062285dd198b",
       "workstream": "WS6"
     },
     {
@@ -12972,7 +13152,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "a7c822cb18db0f3aad38ca15e36abda123c5ed13",
+      "upstream_blob": "c2903f375c6d36613c225789462451059473fd0e",
       "workstream": "WS6"
     },
     {
@@ -13137,7 +13317,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "360457de2b2aa7c873532fefbe683dc9ff42e299",
+      "upstream_blob": "90a6ffa3c048b7d9e799b94ff8dc33ce6957f269",
       "workstream": "WS6"
     },
     {
@@ -13182,7 +13362,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "5d28b8b2065ae55cbbc12106f02ccc8b2dc0c071",
+      "upstream_blob": "ed04233226326218f1b725abef333cbfc7adc755",
       "workstream": "WS6"
     },
     {
@@ -13362,7 +13542,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "2c807e5846607ccf9a8f35da27b7c57e0f0150d0",
+      "upstream_blob": "a4c244de033f1955e7a930b88f587e7b08ffbda6",
       "workstream": "WS6"
     },
     {
@@ -13377,7 +13557,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "987995066ff8ebd0694b81f3c9e8be8027e2b344",
+      "upstream_blob": "b1310e8535984ecc248d0305f95892a8591867cb",
       "workstream": "WS6"
     },
     {
@@ -13587,7 +13767,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "aac71feccc4074c9af916f4a4a58b6c5280fb152",
+      "upstream_blob": "8182a46b729f487858e1f798de72ada911329407",
       "workstream": "WS6"
     },
     {
@@ -13842,7 +14022,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "1745d98d026df42ae1dbfea7169dddad5fab89c8",
+      "upstream_blob": "b3386f092a6faefdce39726ef81b92712aac805f",
       "workstream": "WS6"
     },
     {
@@ -13857,7 +14037,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "1294ab8f55813b1b4a1491f05e47480fed4b38e6",
+      "upstream_blob": "35da27d260562c27e6855bc1049229f5f7c31d67",
       "workstream": "WS6"
     },
     {
@@ -13872,7 +14052,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "bb396c05dc36dd17b31b92e87398001eff6530b8",
+      "upstream_blob": "d66b52aec365fc9239cc26da588a0f3d622199e4",
       "workstream": "WS6"
     },
     {
@@ -13887,7 +14067,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "73cc672a6ed31adac9076c7b8f2cf4976c58fe6d",
+      "upstream_blob": "571560339781870b9298de61d583581c42687b10",
       "workstream": "WS6"
     },
     {
@@ -13902,7 +14082,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "f43eb97c96de99ae7f2a8330097c126fb4f09dc5",
+      "upstream_blob": "dc6f2061f2c7842982c90348277132a00289d946",
       "workstream": "WS6"
     },
     {
@@ -13947,7 +14127,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 306,
-      "upstream_blob": "f71b1f3b7d8ac26460b0f3262486aad3d95e015b",
+      "upstream_blob": "8a62093b0a7d97eddeecb54899a3511537dc5217",
       "workstream": "WS6"
     },
     {
@@ -14007,7 +14187,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 306,
-      "upstream_blob": "6466e615f04b4dbf379dea1a83ac72276248a020",
+      "upstream_blob": "535f930e0808d19e5393188f34aa52ed26d50141",
       "workstream": "WS6"
     },
     {
@@ -14697,7 +14877,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "c0487fad0536de17d1c67b528ff73c9c32b6d30e",
+      "upstream_blob": "ca1af4cd9abedcfd60bb646f028e6ca610e9c7f7",
       "workstream": "WS5"
     },
     {
@@ -15072,7 +15252,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "65285467d9afc89bfd9e984afa94e7a9219f3578",
+      "upstream_blob": "85586f66aaa7f7dcf1b982aef43b4dc720060903",
       "workstream": "WS5"
     },
     {
@@ -15132,7 +15312,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "94e1b38c5de48316a7d690631d69e333236be96d",
+      "upstream_blob": "6b1fe55481bc2d8234239e356b4934ac19d708c9",
       "workstream": "WS5"
     },
     {
@@ -15357,7 +15537,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "9ab568f32ea6dd58cfed53063a75a4b597b0e46f",
+      "upstream_blob": "24b45d33e2480699ef0e3fe919b03983f5c38d80",
       "workstream": "WS5"
     },
     {
@@ -15432,7 +15612,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "c36a1505908df35bbe3474935f5105b0913f23ed",
+      "upstream_blob": "8752dd371a23a5335746c361012d7e4654c5309f",
       "workstream": "WS5"
     },
     {
@@ -16092,7 +16272,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "0fe6d795ae479a39d9bdeb3baba26cae082b881a",
+      "upstream_blob": "975bdaca0603d6f961da0cbaff63f8a40f95ff00",
       "workstream": "WS5"
     },
     {
@@ -16122,7 +16302,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "f3698f8e52a302d382a2a9e44982ca5a7bcdd3e4",
+      "upstream_blob": "6d6ec8695ae4739184d9433c24552509734483f3",
       "workstream": "WS5"
     },
     {
@@ -16130,7 +16310,7 @@
       "classification": "policy_only",
       "classification_path": "website/docs",
       "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "ba26d579bbbbefcf34cfb8cd3e886437badb3515",
+      "local_blob": "06257602a8d77f5d4944ea9519373d04d8ef0940",
       "necessity": "not_runtime_required",
       "owner": "sheawinkler",
       "path": "website/docs/developer-guide/browser-supervisor.md",
@@ -16152,7 +16332,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "93240a486c007ccc49f248ae0ab169e37c4b8d1c",
+      "upstream_blob": "aa817190c1746365b35a64af02357bd35936ff9e",
       "workstream": "WS5"
     },
     {
@@ -16182,7 +16362,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "e61100a609d3dc3eb242b5d0ca81a7db9152d4d2",
+      "upstream_blob": "52ec92d28ad46ba56ec94d73a34c1593dd663cb0",
       "workstream": "WS5"
     },
     {
@@ -16242,7 +16422,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "b746ce82229cfe73b0e204b11259608453b23d62",
+      "upstream_blob": "66179cfa5c0b69ef30952582642ddd22254c917e",
       "workstream": "WS5"
     },
     {
@@ -16272,7 +16452,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "f12ed3abf3365e77a5f1cb559e21a580538c1773",
+      "upstream_blob": "6c20a66be425554da70c142cf08e78f9a21bff00",
       "workstream": "WS5"
     },
     {
@@ -16362,7 +16542,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "619e2010394ad9c1564a5f44f2be3ec22503ce6e",
+      "upstream_blob": "a643267637a00f9796cb46bd54b0f27c96cf1809",
       "workstream": "WS5"
     },
     {
@@ -16490,21 +16670,6 @@
       "classification": "policy_only",
       "classification_path": "website/docs",
       "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "cda37809a691e9af5831da33557ea7b691058ab8",
-      "necessity": "not_runtime_required",
-      "owner": "sheawinkler",
-      "path": "website/docs/guides/build-a-hermes-plugin.md",
-      "rust_requirement": "not_required_for_runtime",
-      "status": "cleared_non_runtime",
-      "ticket": 25,
-      "upstream_blob": "90361a76348dbbb3afdc948ea55d2a241d3bbb5c",
-      "workstream": "WS5"
-    },
-    {
-      "action": "No runtime implementation; keep rationale current.",
-      "classification": "policy_only",
-      "classification_path": "website/docs",
-      "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "5863412f565780ba9554facdcb858d65b8b076c1",
       "necessity": "not_runtime_required",
       "owner": "sheawinkler",
@@ -16572,7 +16737,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "b5fe0a525b28b99fd66cb2995840eed7bf7cb424",
+      "upstream_blob": "f45684973bd45028efc2c8e2291998a024705b71",
       "workstream": "WS5"
     },
     {
@@ -16707,7 +16872,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "ea7670ace5056b51d9403bdbc1e1ba2e6bb68cce",
+      "upstream_blob": "fd4501080a0d5e045a32818faa3209ac9b5e8606",
       "workstream": "WS5"
     },
     {
@@ -16767,7 +16932,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "f3f3666e2c41718e56e2ce4a9d00aa4a369f505e",
+      "upstream_blob": "8c0551a5af1773eb85abb522fd8b3ace19d3aeb5",
       "workstream": "WS5"
     },
     {
@@ -16782,7 +16947,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "331558924e0278e8d0473cb693bd3a68d365c874",
+      "upstream_blob": "f191ff146d11b28a680fbac38a6d4c1db08a25b7",
       "workstream": "WS5"
     },
     {
@@ -16797,7 +16962,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "e3389b33abda0a22fb6092777ea2330ec78ea69a",
+      "upstream_blob": "90bd0a4042a61cba4c83858f91a9307e11424d29",
       "workstream": "WS5"
     },
     {
@@ -16827,7 +16992,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "2f35858ef04d1538cbe5e3a1768c2efa56666997",
+      "upstream_blob": "b8ace5b1912a3173b3b9bcfba1817a318568160d",
       "workstream": "WS5"
     },
     {
@@ -16842,7 +17007,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "9f4aa214453995ecfecacf51eeca938332ad2e5a",
+      "upstream_blob": "b7df6823837c03a6b8de91715c8f95460e7e3d7f",
       "workstream": "WS5"
     },
     {
@@ -16857,7 +17022,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "bddaf8b2ad48723c58dc8a0c6f7b8741b593b761",
+      "upstream_blob": "ad9a7140fd64ef51458d7b2d64704409739ae695",
       "workstream": "WS5"
     },
     {
@@ -16872,7 +17037,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "e7a35a5878bb4bda113ba75e6f2f85a507b19735",
+      "upstream_blob": "2809f709f2eabb4f4b68482fd3de9f9d25431ef7",
       "workstream": "WS5"
     },
     {
@@ -16947,7 +17112,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "1f4254667ca3ad73d1ed0c3f60512159d70fdd16",
+      "upstream_blob": "8b5786de5a553f449c52bf49b4bed211ab394ec3",
       "workstream": "WS5"
     },
     {
@@ -17007,7 +17172,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "0bcda2138a4590f56390c0cd11f56253686c702a",
+      "upstream_blob": "46afc11bcfd259fb5d207190e13567c700fe3344",
       "workstream": "WS5"
     },
     {
@@ -17022,7 +17187,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "f73d2b287696bbe295757a91198788a50f48e6f9",
+      "upstream_blob": "ec789c9c96e0a66eee406523983539be434303d4",
       "workstream": "WS5"
     },
     {
@@ -17112,7 +17277,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "b4c1d5ef080474e7f3f350b579b1905727e8032b",
+      "upstream_blob": "722105fcf67a00890ccb351c9d8e4400725c570e",
       "workstream": "WS5"
     },
     {
@@ -17172,7 +17337,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "80700057008af140fdfba05d9e10f43ddf41e7ea",
+      "upstream_blob": "5d8503b3a79106ca8ce4bc643683073a54c598c8",
       "workstream": "WS5"
     },
     {
@@ -17247,7 +17412,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "05629af590fce198cff9ed583afd7fb90fb76ce4",
+      "upstream_blob": "ff6cbf6f9ef04c68c6e941e0e208fc2a9dd84e0b",
       "workstream": "WS5"
     },
     {
@@ -17292,7 +17457,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "4a2fc06860619c0e1a7a3cc6ec74e8103317909c",
+      "upstream_blob": "224d20198b3039d358c2c42c57a1b25889f597d0",
       "workstream": "WS5"
     },
     {
@@ -17382,7 +17547,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "a2f5352e621cafbaf1170581ae9e185c24aa06a2",
+      "upstream_blob": "1c6ebf7c43f36b36a2e8989383b9b0bb70d81282",
       "workstream": "WS5"
     },
     {
@@ -17442,7 +17607,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "f543b5610a2ca8496ca746f71908c109dc60098c",
+      "upstream_blob": "ed8012325b6e52eb230288de55ec6511f5f4044c",
       "workstream": "WS5"
     },
     {
@@ -17472,7 +17637,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "18dd93c1262407d5551c274b64c1d04ea7bd3f1c",
+      "upstream_blob": "19fffb1f1b23727f8d13cd42ac7986716ad1cf93",
       "workstream": "WS5"
     },
     {
@@ -17555,7 +17720,7 @@
       "classification": "policy_only",
       "classification_path": "website/docs",
       "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "51cfe57bd1004aa10087c65c8d63ac11f2867a4b",
+      "local_blob": "e1a60d9fd5db54fec456c6e74e6159c682c21499",
       "necessity": "not_runtime_required",
       "owner": "sheawinkler",
       "path": "website/docs/user-guide/features/vision.md",
@@ -17577,7 +17742,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "f32d96d151c45dc3d8ca61ee1ef438e2f2caa7d2",
+      "upstream_blob": "14a4235e3e7cdeda4a580faab2ef6fa1b3776342",
       "workstream": "WS5"
     },
     {
@@ -17667,7 +17832,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "2ee4d9aaa2ec05030e4ab428a9224a4de3ceb94c",
+      "upstream_blob": "030e69681e5e64a22e431e9049aea7ae98f76e2f",
       "workstream": "WS5"
     },
     {
@@ -17742,7 +17907,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "0e9327f27028cd1b3a85b9ea17ad5e21fe5f15f6",
+      "upstream_blob": "8011191c89ff96b0f0d835d4e8175194ab3aee35",
       "workstream": "WS5"
     },
     {
@@ -17840,7 +18005,7 @@
       "classification": "policy_only",
       "classification_path": "website/docs",
       "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "acb607cfebe075b99b9512d23b51a9849ae9809e",
+      "local_blob": "c77f5b71e83f6d75b0d09f9f55811a1826c3d380",
       "necessity": "not_runtime_required",
       "owner": "sheawinkler",
       "path": "website/docs/user-guide/messaging/signal.md",
@@ -17937,7 +18102,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "98e8d06605641735fc9ba2a462eb3cf031248865",
+      "upstream_blob": "0a8296f0dc563cde0b25c2402de126ee5fba546f",
       "workstream": "WS5"
     },
     {
@@ -18057,7 +18222,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "c48c6db6b9d233c04bbd85041250af6c1c703cac",
+      "upstream_blob": "60eec972e281462bf039baad679537f45264ba3a",
       "workstream": "WS5"
     },
     {
@@ -18072,7 +18237,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "b1d6c903c4af65fb934f0634470ebda4250c0e87",
+      "upstream_blob": "e2ae75ea7d4adc977c6f7bde80b5d630a29a21ac",
       "workstream": "WS5"
     },
     {
@@ -18515,7 +18680,7 @@
       "classification": "policy_only",
       "classification_path": "website/docs",
       "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "5b424f3adc776f76b0fd619c0c94e5006189c661",
+      "local_blob": "87c924f7d899e2e9d2301d6077fd1f91de6b0e03",
       "necessity": "not_runtime_required",
       "owner": "sheawinkler",
       "path": "website/docs/user-guide/skills/bundled/software-development/software-development-test-driven-development.md",
@@ -18792,7 +18957,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "6b2e35aa86454779c75f1a5f7c4b248ebc51d85e",
+      "upstream_blob": "6243170a6b9169a66bf560959a2885db149e5b5b",
       "workstream": "WS5"
     },
     {
@@ -18912,7 +19077,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_non_runtime",
       "ticket": 25,
-      "upstream_blob": "b012354a532e97cc3223a82a7d884e72724a6963",
+      "upstream_blob": "1843a924eb76583bf5453b4076656a8ba1594fed",
       "workstream": "WS5"
     },
     {
@@ -18950,7 +19115,7 @@
       "classification": "policy_only",
       "classification_path": "website/src",
       "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "651589426ed1388a3d707c21bb1e86e36b33a98e",
+      "local_blob": "f8935aac02b545acebd70c028257f20fa0794395",
       "necessity": "not_runtime_required",
       "owner": "sheawinkler",
       "path": "website/src/data/userStories.json",
@@ -19021,37 +19186,37 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-07-04T06:47:44.628337+00:00",
+  "generated_at_utc": "2026-07-07T21:51:25.017721+00:00",
   "refs": {
     "local_ref": "HEAD",
-    "local_sha": "c905df14be39b3f43623d2ec17f98c587ea97a83",
+    "local_sha": "8c58db72e5e53c349a77cd59efe3e5b86b001adf",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "5445e42b87b9918d5b1bfa9f4eadd8e4bb10ff37"
+    "upstream_sha": "5e51b123f32b7f6a51fbd5759e89ba5146ce4003"
   },
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "intentional_divergence": 1043,
-      "policy_only": 224
+      "intentional_divergence": 1055,
+      "policy_only": 223
     },
     "by_rust_requirement": {
-      "not_required_for_runtime": 1268
+      "not_required_for_runtime": 1279
     },
     "by_status": {
-      "cleared_intentional_divergence": 1043,
-      "cleared_non_runtime": 225
+      "cleared_intentional_divergence": 1055,
+      "cleared_non_runtime": 224
     },
     "by_workstream": {
-      "WS3": 98,
-      "WS4": 38,
-      "WS5": 322,
-      "WS6": 791,
+      "WS3": 102,
+      "WS4": 39,
+      "WS5": 321,
+      "WS6": 798,
       "WS8": 19
     },
-    "cleared_intentional_divergence": 1043,
-    "cleared_non_runtime": 225,
+    "cleared_intentional_divergence": 1055,
+    "cleared_non_runtime": 224,
     "pending_classification": 0,
     "pending_review": 0,
-    "total_shared_different": 1268
+    "total_shared_different": 1279
   }
 }

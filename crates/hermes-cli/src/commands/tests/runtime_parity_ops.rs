@@ -1133,3 +1133,196 @@ fn parse_skill_tap_spec_parses_tree_url() {
     assert_eq!(parsed.repo, "anthropics/skills");
     assert_eq!(parsed.path, "skills");
 }
+
+#[test]
+fn cli_sessions_delete_resolves_unique_prefix_and_removes_snapshot() {
+    let tmp = tempdir().expect("tempdir");
+    let sessions_dir = tmp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_dir).expect("sessions dir");
+    let full_id = "20260315_092437_c9a6ff";
+    let path = sessions_dir.join(format!("{full_id}.json"));
+    std::fs::write(&path, r#"{"messages":[]}"#).expect("session snapshot");
+
+    let deleted =
+        delete_session_snapshot_by_query(&sessions_dir, "20260315_092437_c9a6").expect("delete");
+
+    assert_eq!(deleted.as_deref(), Some(full_id));
+    assert!(!path.exists());
+}
+
+#[test]
+fn cli_sessions_prune_uses_90_day_default_and_source_all_ages() {
+    assert_eq!(prune_cutoff_for_sessions(None, None, None), Some(90));
+    assert_eq!(prune_cutoff_for_sessions(Some("cron"), None, None), None);
+    assert_eq!(
+        prune_cutoff_for_sessions(Some("cron"), Some(30), None),
+        Some(30)
+    );
+}
+
+#[test]
+fn cli_sessions_prune_filters_source_and_renders_preview_bounds() {
+    let tmp = tempdir().expect("tempdir");
+    let sessions_dir = tmp.path().join("sessions");
+    std::fs::create_dir_all(&sessions_dir).expect("sessions dir");
+    std::fs::write(
+        sessions_dir.join("cron-session.json"),
+        r#"{"source":"cron","messages":[]}"#,
+    )
+    .expect("cron session");
+    std::fs::write(
+        sessions_dir.join("cli-session.json"),
+        r#"{"source":"cli","messages":[]}"#,
+    )
+    .expect("cli session");
+
+    let candidates =
+        prune_session_snapshot_candidates(&sessions_dir, Some("cron"), None).expect("candidates");
+    let ids: Vec<_> = candidates.iter().map(|entry| entry.id.as_str()).collect();
+    assert_eq!(ids, vec!["cron-session"]);
+    let preview = render_prune_preview(&candidates);
+    assert!(preview.contains("1 session(s) match"));
+    assert!(preview.contains("oldest"));
+    assert!(preview.contains("newest"));
+}
+
+#[test]
+fn cli_sessions_confirmation_treats_eof_or_empty_input_as_cancelled() {
+    assert!(!session_confirm_response_is_yes(None));
+    assert!(!session_confirm_response_is_yes(Some("")));
+    assert!(!session_confirm_response_is_yes(Some("n")));
+    assert!(session_confirm_response_is_yes(Some("yes")));
+    assert!(session_confirm_response_is_yes(Some("Y")));
+}
+
+#[test]
+fn cli_sessions_export_renders_prompt_only_jsonl_and_markdown() {
+    let session = SessionExportSnapshot {
+        id: "session-a".to_string(),
+        data: serde_json::json!({
+            "id": "session-a",
+            "title": "Export <title>",
+            "source": "cli",
+            "messages": [
+                {"role": "system", "content": "internal"},
+                {"role": "user", "id": "u1", "timestamp": 1700000000, "content": "first prompt"},
+                {"role": "assistant", "content": "answer"},
+                {"role": "user", "content": [{"type": "text", "text": "second"}, {"text": "prompt"}]}
+            ]
+        }),
+    };
+
+    let jsonl = render_session_exports(
+        std::slice::from_ref(&session),
+        SessionExportFormat::Jsonl,
+        Some(SessionExportOnly::UserPrompts),
+    )
+    .expect("jsonl");
+    let rows: Vec<serde_json::Value> = jsonl
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("json row"))
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["session_id"], "session-a");
+    assert_eq!(rows[0]["text"], "first prompt");
+    assert_eq!(rows[1]["index"], 2);
+    assert_eq!(rows[1]["text"], "second\nprompt");
+
+    let markdown = render_session_exports(
+        &[session],
+        SessionExportFormat::Markdown,
+        Some(SessionExportOnly::UserPrompts),
+    )
+    .expect("markdown");
+    assert!(markdown.contains("# User prompts for session session-a"));
+    assert!(markdown.contains("## 1. 2023-11-14T22:13:20Z"));
+    assert!(markdown.contains("first prompt"));
+    assert!(!markdown.contains("internal"));
+}
+
+#[test]
+fn cli_sessions_export_html_is_self_contained_and_escaped() {
+    let sessions = vec![
+        SessionExportSnapshot {
+            id: "session-a".to_string(),
+            data: serde_json::json!({
+                "title": "One",
+                "messages": [
+                    {"role": "user", "content": "<script>alert(1)</script>"},
+                    {"role": "assistant", "reasoning": "private <reason>", "content": "done"}
+                ]
+            }),
+        },
+        SessionExportSnapshot {
+            id: "session-b".to_string(),
+            data: serde_json::json!({"title": "Two", "messages": []}),
+        },
+    ];
+
+    let html = render_session_exports(&sessions, SessionExportFormat::Html, None).expect("html");
+
+    assert!(html.starts_with("<!doctype html>"));
+    assert!(html.contains("<nav class=\"sidebar\">"));
+    assert!(html.contains("session-session-a"));
+    assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    assert!(html.contains("private &lt;reason&gt;"));
+    assert!(!html.contains("<script>alert(1)</script>"));
+}
+
+#[test]
+fn cli_sessions_export_redacts_secret_fields_and_text_tokens() {
+    let mut value = serde_json::json!({
+        "api_key": "sk-live-secret-token",
+        "messages": [
+            {"role": "user", "content": "Bearer abcdefghijklmnopqrstuvwxyz token=abc123"}
+        ]
+    });
+
+    redact_session_export_value(&mut value, None);
+
+    assert_eq!(value["api_key"], "[REDACTED]");
+    let content = value["messages"][0]["content"].as_str().expect("content");
+    assert!(content.contains("Bearer [REDACTED]"));
+    assert!(content.contains("token=[REDACTED]"));
+}
+
+#[tokio::test]
+async fn cli_sessions_export_command_writes_html_file_with_session_id_alias() {
+    let _guard = env_test_lock();
+    let tmp = tempdir().expect("tempdir");
+    let _home_guard = TempHomeGuard::new(tmp.path());
+    let sessions_dir = hermes_config::hermes_home().join("sessions");
+    std::fs::create_dir_all(&sessions_dir).expect("sessions dir");
+    std::fs::write(
+        sessions_dir.join("20260707_export_html.json"),
+        serde_json::json!({
+            "id": "20260707_export_html",
+            "title": "HTML export",
+            "messages": [{"role": "user", "content": "render this"}]
+        })
+        .to_string(),
+    )
+    .expect("session fixture");
+    let output = tmp.path().join("session-export.html");
+
+    handle_cli_sessions(CliSessionsOptions {
+        action: Some("export".to_string()),
+        session: None,
+        id: None,
+        session_id: Some("20260707_export".to_string()),
+        name: None,
+        format: Some("html".to_string()),
+        only: None,
+        output: Some(output.display().to_string()),
+        redact: false,
+        yes: false,
+        source: None,
+        older_than: None,
+    })
+    .await
+    .expect("export");
+
+    let html = std::fs::read_to_string(output).expect("html output");
+    assert!(html.contains("HTML export"));
+    assert!(html.contains("render this"));
+}

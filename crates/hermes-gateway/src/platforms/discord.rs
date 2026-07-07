@@ -156,6 +156,11 @@ impl PlatformAdapter for DiscordAdapter {
         Ok(())
     }
 
+    async fn rename_thread(&self, thread_id: &str, title: &str) -> Result<bool, GatewayError> {
+        self.rename_thread_channel(thread_id, title).await?;
+        Ok(true)
+    }
+
     async fn send_image_url(
         &self,
         chat_id: &str,

@@ -438,7 +438,24 @@ async fn main() {
             action,
             target,
             yes,
-        } => hermes_cli::commands::handle_cli_memory(action, target, yes).await,
+            mode,
+            host,
+            api_key,
+            dry_run,
+        } => {
+            hermes_cli::commands::handle_cli_memory(
+                action,
+                target,
+                hermes_cli::commands::MemorySetupCliOptions {
+                    yes,
+                    mode,
+                    host,
+                    api_key,
+                    dry_run,
+                },
+            )
+            .await
+        }
         CliCommand::Mcp {
             action,
             name,
@@ -450,8 +467,35 @@ async fn main() {
             hermes_cli::commands::handle_cli_mcp(action, name, server, url, command, parallel_tools)
                 .await
         }
-        CliCommand::Sessions { action, id, name } => {
-            hermes_cli::commands::handle_cli_sessions(action, id, name).await
+        CliCommand::Sessions {
+            action,
+            session,
+            id,
+            session_id,
+            name,
+            format,
+            only,
+            output,
+            redact,
+            yes,
+            source,
+            older_than,
+        } => {
+            hermes_cli::commands::handle_cli_sessions(hermes_cli::commands::CliSessionsOptions {
+                action,
+                session,
+                id,
+                session_id,
+                name,
+                format,
+                only,
+                output,
+                redact,
+                yes,
+                source,
+                older_than,
+            })
+            .await
         }
         CliCommand::Resume { session_id } => run_resume(cli, session_id).await,
         CliCommand::Insights { days, source } => {

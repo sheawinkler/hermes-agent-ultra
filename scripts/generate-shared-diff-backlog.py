@@ -77,7 +77,7 @@ def ensure_remote(repo_root: Path, remote: str, url: str) -> None:
 
 
 def fetch_remote_branch(repo_root: Path, remote: str, branch: str) -> None:
-    refspec = f"refs/heads/{branch}:refs/remotes/{remote}/{branch}"
+    refspec = f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"
     run_git(repo_root, ["fetch", "--no-tags", remote, refspec])
 
 

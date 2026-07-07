@@ -63,6 +63,69 @@ struct ResolvedModelCapabilities {
     context_window: u64,
 }
 
+const OPENAI_CODEX_OAUTH_CONTEXT_WINDOW: u64 = 272_000;
+
+fn model_context_override_for_config(
+    provider: &str,
+    model_id: &str,
+    config: &GatewayConfig,
+) -> Option<u64> {
+    let (_, provider_cfg) = crate::model_switch::configured_llm_provider(config, provider)?;
+    let model_id = model_id.trim();
+    let provider_model = format!("{}:{}", provider.trim(), model_id);
+    provider_cfg
+        .model_context_windows
+        .iter()
+        .find_map(|(key, value)| {
+            let key = key.trim();
+            if key.eq_ignore_ascii_case(model_id) || key.eq_ignore_ascii_case(&provider_model) {
+                Some((*value).max(1))
+            } else {
+                None
+            }
+        })
+}
+
+fn provider_is_openai_codex_oauth(provider: &str, config: Option<&GatewayConfig>) -> bool {
+    let canonical = canonical_provider_id(provider);
+    if canonical == "openai-codex" {
+        return true;
+    }
+    let Some(config) = config else {
+        return false;
+    };
+    crate::model_switch::configured_llm_provider(config, provider)
+        .and_then(|(_, provider_cfg)| provider_cfg.base_url.as_deref())
+        .map(|base_url| {
+            base_url
+                .trim()
+                .trim_end_matches('/')
+                .eq_ignore_ascii_case("https://chatgpt.com/backend-api/codex")
+        })
+        .unwrap_or(false)
+}
+
+fn resolve_display_context_window(
+    provider: &str,
+    model_id: &str,
+    config: Option<&GatewayConfig>,
+    models_dev_context_window: Option<u64>,
+) -> u64 {
+    if provider_is_openai_codex_oauth(provider, config) {
+        return OPENAI_CODEX_OAUTH_CONTEXT_WINDOW;
+    }
+    if let Some(config) = config {
+        if let Some(value) = model_context_override_for_config(provider, model_id, config) {
+            return value;
+        }
+    }
+    if let Some(value) = models_dev_context_window.filter(|value| *value > 0) {
+        return value;
+    }
+    let provider_model = format!("{}:{}", provider.trim(), model_id.trim());
+    get_model_context_length(&provider_model)
+}
+
 fn normalize_model_capability_name(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
         "tools" | "tool" | "function-calling" | "function_calling" => Some("tools"),
@@ -181,32 +244,33 @@ fn resolve_model_capabilities(
     provider: &str,
     model_id: &str,
     client: &hermes_intelligence::models_dev::ModelsDevClient,
+    config: Option<&GatewayConfig>,
 ) -> ResolvedModelCapabilities {
-    if let Some(caps) = client.capabilities(provider, model_id) {
-        return ResolvedModelCapabilities {
-            supports_tools: caps.supports_tools,
-            supports_vision: caps.supports_vision,
-            supports_reasoning: caps.supports_reasoning,
-            context_window: caps.context_window.max(1),
-        };
-    }
-
     let provider_model = format!("{}:{}", provider.trim(), model_id.trim());
+    let models_dev_caps = client.capabilities(provider, model_id);
     let info = get_model_info(&provider_model).or_else(|| get_model_info(model_id));
     ResolvedModelCapabilities {
-        supports_tools: info
+        supports_tools: models_dev_caps
             .as_ref()
             .map(|entry| entry.supports_tools)
+            .or_else(|| info.as_ref().map(|entry| entry.supports_tools))
             .unwrap_or(true),
-        supports_vision: info
+        supports_vision: models_dev_caps
             .as_ref()
             .map(|entry| entry.supports_vision)
+            .or_else(|| info.as_ref().map(|entry| entry.supports_vision))
             .unwrap_or(false),
-        supports_reasoning: info
+        supports_reasoning: models_dev_caps
             .as_ref()
             .map(|entry| entry.supports_reasoning)
+            .or_else(|| info.as_ref().map(|entry| entry.supports_reasoning))
             .unwrap_or(false),
-        context_window: get_model_context_length(&provider_model),
+        context_window: resolve_display_context_window(
+            provider,
+            model_id,
+            config,
+            models_dev_caps.map(|entry| entry.context_window),
+        ),
     }
 }
 
@@ -283,7 +347,7 @@ async fn handle_model_explain_command(
     let (provider, model_id) = split_provider_model(&guarded);
     let client = default_client();
     client.fetch(false).await;
-    let capabilities = resolve_model_capabilities(provider, model_id, client);
+    let capabilities = resolve_model_capabilities(provider, model_id, client, Some(&app.config));
 
     let mut out = String::new();
     let _ = writeln!(out, "Model capability report");
@@ -319,7 +383,7 @@ async fn handle_model_explain_command(
                 .into_iter()
                 .filter(|candidate| {
                     model_meets_requirements(
-                        resolve_model_capabilities(provider, candidate, client),
+                    resolve_model_capabilities(provider, candidate, client, Some(&app.config)),
                         requirements,
                     )
                 })
@@ -583,7 +647,12 @@ async fn pick_model_for_provider(
             .iter()
             .filter(|model_id| {
                 model_meets_requirements(
-                    resolve_model_capabilities(&normalized_provider, model_id, client),
+                    resolve_model_capabilities(
+                        &normalized_provider,
+                        model_id,
+                        client,
+                        Some(&app.config),
+                    ),
                     requirements,
                 )
             })
@@ -740,4 +809,3 @@ fn handle_model_failover_command(
     }
     Ok(CommandResult::Handled)
 }
-

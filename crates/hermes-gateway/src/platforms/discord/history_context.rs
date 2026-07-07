@@ -74,15 +74,16 @@ pub fn discord_normalize_clarify_choices(
 
 pub fn discord_clarify_button_label(index: usize, choice: &str) -> String {
     let prefix = format!("{}. ", index + 1);
-    let budget = 80usize.saturating_sub(prefix.chars().count()).max(1);
-    let choice_len = choice.chars().count();
+    let budget = 80usize.saturating_sub(discord_utf16_len(&prefix)).max(1);
+    let choice_len = discord_utf16_len(choice);
+    let ellipsis = "…";
     let label_body = if choice_len <= budget {
         choice.to_string()
     } else {
-        let mut chars = choice
-            .chars()
-            .take(budget.saturating_sub(1))
-            .collect::<String>();
+        let mut chars = truncate_discord_utf16_units(
+            choice,
+            budget.saturating_sub(discord_utf16_len(ellipsis)),
+        );
         while chars.chars().last().is_some_and(char::is_whitespace) {
             chars.pop();
         }
@@ -109,7 +110,7 @@ pub fn discord_clarify_button_label(index: usize, choice: &str) -> String {
         while chars.chars().last().is_some_and(char::is_whitespace) {
             chars.pop();
         }
-        format!("{chars}…")
+        format!("{chars}{ellipsis}")
     };
     format!("{prefix}{label_body}")
 }
@@ -330,4 +331,3 @@ pub fn discord_reactions_enabled_from_raw(raw: Option<&str>) -> bool {
         None => true,
     }
 }
-

@@ -748,7 +748,7 @@ fn plan_capability_preflight(app: &App, task: &str) -> (Option<String>, bool) {
 
     let (provider, model_id) = split_provider_model(&app.current_model);
     let client = default_client();
-    let caps = resolve_model_capabilities(provider, model_id, client);
+    let caps = resolve_model_capabilities(provider, model_id, client, Some(&app.config));
     let unmet = unmet_model_requirements(caps, req);
     if unmet.is_empty() {
         return (

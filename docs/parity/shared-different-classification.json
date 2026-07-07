@@ -478,6 +478,13 @@
       "ticket": 25
     },
     {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/memory/retaindb/__init__.py",
+      "rationale": "RetainDB runtime behavior is owned by the Rust RetainDbMemoryPlugin: core profile/search/context/remember/forget tools, shared file-store upload/list/read/ingest/delete tools, SOUL.md agent seeding, context plus user-synthesis/self-model prefetch, and durable SQLite queued turn ingest are implemented and covered by focused hermes-agent tests; the Python plugin remains reference-only in the Rust runtime.",
+      "ticket": 25
+    },
+    {
       "classification": "policy_only",
       "owner": "sheawinkler",
       "path": "plugins/memory/byterover/__init__.py",
@@ -937,6 +944,27 @@
       "owner": "sheawinkler",
       "path": "plugins/web",
       "rationale": "Web-search plugin differences affect provider routing, credential handling, and tool result behavior.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/web/brave_free/provider.py",
+      "rationale": "Brave free web search is implemented by Rust BraveFreeSearchBackend with BRAVE_SEARCH_API_KEY gating, free endpoint routing, X-Subscription-Token auth, count clamping, result normalization, explicit/generic backend aliases, auto-detect, and search-only extract/crawl error routing covered by web backend tests.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/web/exa/provider.py",
+      "rationale": "Exa search and extraction are implemented by Rust ExaSearchBackend and ExaExtractBackend with EXA_API_KEY/EXA_BASE_URL config, /search and /contents request contracts, source-quality result normalization, explicit/generic extract routing, auto-detect, and focused mocked web backend tests; the Python SDK plugin remains reference-only.",
+      "ticket": 25
+    },
+    {
+      "classification": "intentional_divergence",
+      "owner": "sheawinkler",
+      "path": "plugins/web/parallel/provider.py",
+      "rationale": "Parallel search and extraction are implemented by Rust ParallelWebBackend with PARALLEL_API_KEY/PARALLEL_BASE_URL/PARALLEL_SEARCH_MODE config, /v1/search and /v1/extract REST payloads, full-content extraction, result/error normalization, explicit/generic backend routing, auto-detect, and focused mocked web backend tests; the Python SDK plugin remains reference-only.",
       "ticket": 25
     },
     {

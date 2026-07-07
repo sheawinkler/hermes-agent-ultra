@@ -247,6 +247,14 @@ pub trait PlatformAdapter: Send + Sync {
         Ok(false)
     }
 
+    /// Rename a platform-native thread/channel when supported.
+    ///
+    /// The default is a no-op so gateway session titles remain portable across
+    /// platforms without requiring every adapter to expose thread metadata.
+    async fn rename_thread(&self, _thread_id: &str, _title: &str) -> Result<bool, GatewayError> {
+        Ok(false)
+    }
+
     /// Add a reaction emoji to a message if the platform supports it.
     async fn add_reaction(
         &self,

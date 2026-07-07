@@ -607,6 +607,47 @@ llm_providers:
     }
 
     #[test]
+    fn resolve_model_capabilities_uses_codex_oauth_display_context_cap() {
+        let client = hermes_intelligence::models_dev::ModelsDevClient::new(
+            "http://127.0.0.1:9",
+            std::env::temp_dir().join("hermes-models-dev-codex-cap.json"),
+        );
+        let caps = resolve_model_capabilities("openai-codex", "gpt-5.5", &client, None);
+
+        assert_eq!(caps.context_window, OPENAI_CODEX_OAUTH_CONTEXT_WINDOW);
+    }
+
+    #[test]
+    fn resolve_model_capabilities_uses_custom_provider_context_override() {
+        let client = hermes_intelligence::models_dev::ModelsDevClient::new(
+            "http://127.0.0.1:9",
+            std::env::temp_dir().join("hermes-models-dev-custom-context.json"),
+        );
+        let mut config = GatewayConfig::default();
+        config.llm_providers.insert(
+            "my-custom-endpoint".to_string(),
+            hermes_config::LlmProviderConfig {
+                base_url: Some("https://example.invalid/v1".to_string()),
+                models: vec!["gpt-5.5".to_string()],
+                model_context_windows: std::collections::HashMap::from([(
+                    "gpt-5.5".to_string(),
+                    1_050_000,
+                )]),
+                ..hermes_config::LlmProviderConfig::default()
+            },
+        );
+
+        let caps = resolve_model_capabilities(
+            "my-custom-endpoint",
+            "gpt-5.5",
+            &client,
+            Some(&config),
+        );
+
+        assert_eq!(caps.context_window, 1_050_000);
+    }
+
+    #[test]
     fn parse_model_command_args_rejects_unknown_capability() {
         let err = parse_model_command_args(&["--cap", "telepathy"]).expect_err("expected error");
         let message = err.to_string().to_ascii_lowercase();

@@ -25,6 +25,32 @@ def test_longest_prefix_match_prefers_specific_prefix():
     assert match["path"] == "tests/gateway"
 
 
+def test_fetch_remote_branch_force_updates_tracking_ref(monkeypatch, tmp_path):
+    mod = load_module()
+    calls = []
+
+    def fake_run_git(repo_root, args, check=True):
+        calls.append((repo_root, args, check))
+        return ""
+
+    monkeypatch.setattr(mod, "run_git", fake_run_git)
+
+    mod.fetch_remote_branch(tmp_path, "upstream", "main")
+
+    assert calls == [
+        (
+            tmp_path,
+            [
+                "fetch",
+                "--no-tags",
+                "upstream",
+                "+refs/heads/main:refs/remotes/upstream/main",
+            ],
+            True,
+        )
+    ]
+
+
 def test_build_ledger_classifies_shared_different_entries(monkeypatch, tmp_path):
     mod = load_module()
     local_tree = {

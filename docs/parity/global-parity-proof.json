@@ -58,7 +58,7 @@
         "status": "pass"
       },
       {
-        "actual": 3319.0,
+        "actual": 3422.0,
         "limit": 2600,
         "metric": "max_files_only_upstream",
         "status": "fail"
@@ -248,7 +248,7 @@
       "unverified_cases": 0
     }
   },
-  "generated_at_utc": "2026-07-04T06:47:45.918725+00:00",
+  "generated_at_utc": "2026-07-07T21:51:26.217875+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -273,7 +273,7 @@
     "max_deep_problem_solving_regressions": 0.0,
     "max_deep_problem_solving_unverified_cases": 0.0,
     "max_divergence_review_overdue": 0.0,
-    "max_files_only_upstream": 3319.0,
+    "max_files_only_upstream": 3422.0,
     "max_queue_pending_commits": 0.0,
     "max_sota_harness_critical_gaps": 0.0,
     "max_sota_harness_missing_rust_refs": 0.0,
@@ -298,7 +298,7 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "superseded": 1
+      "ported": 1
     },
     "by_target_ticket": {
       "20": 1
@@ -508,22 +508,22 @@
       "pass": true
     },
     "summary": {
-      "coverage_manifest_entries": 460,
-      "coverage_manifest_entries_with_valid_rust_tests": 460,
-      "covered_behavior_rows": 470,
+      "coverage_manifest_entries": 467,
+      "coverage_manifest_entries_with_valid_rust_tests": 467,
+      "covered_behavior_rows": 477,
       "divergence_errors": 0,
       "divergence_review_overdue": 0,
       "divergence_unowned": 0,
       "missing_rust_test_refs": 0,
       "queue_pending": 0,
       "queue_total": 1,
-      "rust_test_files": 418,
-      "rust_test_functions": 7270,
+      "rust_test_files": 422,
+      "rust_test_functions": 7391,
       "test_intent_mapping_ratio": 1.0,
       "test_intents_mapped": 10,
       "test_intents_total": 10,
       "tracked_behavior_coverage_ratio": 1.0,
-      "tracked_behavior_rows": 470
+      "tracked_behavior_rows": 477
     }
   },
   "ws_legacy_states": {

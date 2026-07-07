@@ -129,6 +129,35 @@ llm_providers:
     }
 
     #[test]
+    fn repo_cli_config_example_parses_as_rust_gateway_config() {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let example_path = manifest_dir.join("../..").join("cli-config.yaml.example");
+
+        let cfg = crate::loader::load_from_yaml(&example_path).expect("example config parses");
+
+        assert_eq!(cfg.model.as_deref(), Some("openai-codex:dynamic"));
+        assert!(cfg.model_switch.persist_switch_by_default);
+        assert_eq!(
+            cfg.llm_providers
+                .get("openai-codex")
+                .and_then(|provider| provider.api_mode.as_deref()),
+            Some("codex_responses")
+        );
+        assert_eq!(
+            cfg.llm_providers
+                .get("openai-codex")
+                .and_then(|provider| provider.model_context_windows.get("dynamic")),
+            Some(&272_000)
+        );
+        assert_eq!(cfg.terminal.backend, TerminalBackendType::Local);
+        assert_eq!(cfg.terminal.workdir.as_deref(), Some("."));
+        assert_eq!(cfg.web.search_backend, "auto");
+        assert_eq!(cfg.web.extract_backend, "auto");
+        assert!(cfg.sessions.auto_prune);
+        assert!(cfg.smart_model_routing.enabled);
+    }
+
+    #[test]
     fn default_auxiliary_task_configs_match_upstream_shape() {
         let tasks = default_auxiliary_task_configs();
         for key in ["vision", "web_extract", "approval"] {

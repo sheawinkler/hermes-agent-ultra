@@ -264,6 +264,9 @@ fn discord_auto_thread_names_and_feedback_match_slash_contract() {
     let long_name = discord_auto_thread_name(&"a".repeat(200));
     assert_eq!(long_name.len(), 80);
     assert!(long_name.ends_with("..."));
+    let emoji_name = discord_auto_thread_name(&"😀".repeat(80));
+    assert!(discord_utf16_len(&emoji_name) <= 80);
+    assert!(emoji_name.ends_with("..."));
     assert!(discord_thread_create_success_message("555").contains("<#555>"));
     assert!(discord_thread_create_failure_message("nope").contains("Failed to create thread"));
 }

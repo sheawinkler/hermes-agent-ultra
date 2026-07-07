@@ -406,7 +406,12 @@ mod tests {
         )
         .expect("write config");
 
-        let saved_path = setup_memory_provider_target("honcho", true).expect("setup honcho");
+        let saved_path = setup_memory_provider_target(
+            "honcho",
+            &MemorySetupCliOptions::yes_only(true),
+        )
+        .expect("setup honcho")
+        .config_path;
 
         assert_eq!(saved_path, path);
         let parsed: serde_json::Value =
@@ -490,7 +495,12 @@ mod tests {
         let _user = EnvVarGuard::remove("OPENVIKING_USER");
         let _agent = EnvVarGuard::remove("OPENVIKING_AGENT");
 
-        let path = setup_memory_provider_target("openviking", true).expect("setup openviking");
+        let path = setup_memory_provider_target(
+            "openviking",
+            &MemorySetupCliOptions::yes_only(true),
+        )
+        .expect("setup openviking")
+        .config_path;
 
         assert_eq!(path, tmp.path().join("openviking.json"));
         let parsed: serde_json::Value =
@@ -524,7 +534,12 @@ mod tests {
         let _base_url = EnvVarGuard::set("SUPERMEMORY_BASE_URL", "https://api.supermemory.ai");
         let _container = EnvVarGuard::set("SUPERMEMORY_CONTAINER_TAG", "hermes-tests");
 
-        let path = setup_memory_provider_target("supermemory", true).expect("setup supermemory");
+        let path = setup_memory_provider_target(
+            "supermemory",
+            &MemorySetupCliOptions::yes_only(true),
+        )
+        .expect("setup supermemory")
+        .config_path;
 
         assert_eq!(path, tmp.path().join("supermemory.json"));
         let parsed: serde_json::Value =
@@ -556,7 +571,12 @@ mod tests {
         let _home = TempHomeGuard::new(tmp.path());
         let _api_key = EnvVarGuard::set("BRV_API_KEY", "brv-test-key");
 
-        let path = setup_memory_provider_target("byterover", true).expect("setup byterover");
+        let path = setup_memory_provider_target(
+            "byterover",
+            &MemorySetupCliOptions::yes_only(true),
+        )
+        .expect("setup byterover")
+        .config_path;
 
         assert_eq!(path, tmp.path().join("byterover.json"));
         let parsed: serde_json::Value =

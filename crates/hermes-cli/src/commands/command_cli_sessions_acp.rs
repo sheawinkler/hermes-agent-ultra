@@ -1,19 +1,906 @@
 const CLI_SESSIONS_ACTIONS: &str =
     "list, export, delete, prune, optimize, repair, stats, rename, browse";
 
+pub struct CliSessionsOptions {
+    pub action: Option<String>,
+    pub session: Option<String>,
+    pub id: Option<String>,
+    pub session_id: Option<String>,
+    pub name: Option<String>,
+    pub format: Option<String>,
+    pub only: Option<String>,
+    pub output: Option<String>,
+    pub redact: bool,
+    pub yes: bool,
+    pub source: Option<String>,
+    pub older_than: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct SessionSnapshotEntry {
+    id: String,
+    path: PathBuf,
+    modified: SystemTime,
+    source: Option<String>,
+}
+
 fn file_size_mb(path: &Path) -> f64 {
     std::fs::metadata(path)
         .map(|meta| meta.len() as f64 / (1024.0 * 1024.0))
         .unwrap_or(0.0)
 }
 
+fn session_subject(session: Option<String>, id: Option<String>) -> Option<String> {
+    id.or(session)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn read_session_snapshot_source(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    value
+        .get("source")
+        .or_else(|| value.pointer("/session_info/source"))
+        .or_else(|| value.pointer("/metadata/source"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|source| !source.is_empty())
+        .map(ToString::to_string)
+}
+
+fn list_session_snapshot_entries(
+    sessions_dir: &Path,
+) -> Result<Vec<SessionSnapshotEntry>, hermes_core::AgentError> {
+    if !sessions_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut entries = Vec::new();
+    let rd = std::fs::read_dir(sessions_dir).map_err(|e| {
+        hermes_core::AgentError::Io(format!(
+            "Failed to read sessions directory {}: {}",
+            sessions_dir.display(),
+            e
+        ))
+    })?;
+    for entry in rd.filter_map(Result::ok) {
+        let path = entry.path();
+        if !path.extension().map(|e| e == "json").unwrap_or(false) {
+            continue;
+        }
+        let Some(id) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        let modified = std::fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        entries.push(SessionSnapshotEntry {
+            id,
+            source: read_session_snapshot_source(&path),
+            path,
+            modified,
+        });
+    }
+    Ok(entries)
+}
+
+fn resolve_unique_session_snapshot(
+    sessions_dir: &Path,
+    query: &str,
+) -> Result<Option<SessionSnapshotEntry>, hermes_core::AgentError> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(None);
+    }
+    let entries = list_session_snapshot_entries(sessions_dir)?;
+    if let Some(exact) = entries
+        .iter()
+        .find(|entry| entry.id.eq_ignore_ascii_case(query))
+        .cloned()
+    {
+        return Ok(Some(exact));
+    }
+
+    let matches: Vec<_> = entries
+        .into_iter()
+        .filter(|entry| entry.id.starts_with(query))
+        .collect();
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.into_iter().next()),
+        _ => Err(hermes_core::AgentError::Config(format!(
+            "Session prefix '{}' is ambiguous ({} matches).",
+            query,
+            matches.len()
+        ))),
+    }
+}
+
+fn delete_session_snapshot_by_query(
+    sessions_dir: &Path,
+    query: &str,
+) -> Result<Option<String>, hermes_core::AgentError> {
+    let Some(entry) = resolve_unique_session_snapshot(sessions_dir, query)? else {
+        return Ok(None);
+    };
+    std::fs::remove_file(&entry.path).map_err(|e| {
+        hermes_core::AgentError::Io(format!(
+            "Failed to delete session snapshot {}: {}",
+            entry.path.display(),
+            e
+        ))
+    })?;
+    Ok(Some(entry.id))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionExportFormat {
+    Json,
+    Jsonl,
+    Markdown,
+    Html,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionExportOnly {
+    UserPrompts,
+}
+
+#[derive(Debug, Clone)]
+struct SessionExportSnapshot {
+    id: String,
+    data: serde_json::Value,
+}
+
+fn normalize_session_export_format(
+    format: Option<&str>,
+) -> Result<SessionExportFormat, hermes_core::AgentError> {
+    match format
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("json")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "json" => Ok(SessionExportFormat::Json),
+        "jsonl" => Ok(SessionExportFormat::Jsonl),
+        "md" | "markdown" => Ok(SessionExportFormat::Markdown),
+        "html" => Ok(SessionExportFormat::Html),
+        other => Err(hermes_core::AgentError::Config(format!(
+            "Unsupported sessions export format '{}'. Expected json, jsonl, md, markdown, or html.",
+            other
+        ))),
+    }
+}
+
+fn normalize_session_export_only(
+    only: Option<&str>,
+) -> Result<Option<SessionExportOnly>, hermes_core::AgentError> {
+    let Some(value) = only.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    match value.to_ascii_lowercase().as_str() {
+        "user" | "prompts" | "user-prompts" | "user_prompts" => {
+            Ok(Some(SessionExportOnly::UserPrompts))
+        }
+        other => Err(hermes_core::AgentError::Config(format!(
+            "Unsupported sessions export filter '{}'. Expected user-prompts.",
+            other
+        ))),
+    }
+}
+
+fn session_export_positional_looks_like_output(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed == "-"
+        || trimmed.contains('/')
+        || trimmed.ends_with(".json")
+        || trimmed.ends_with(".jsonl")
+        || trimmed.ends_with(".md")
+        || trimmed.ends_with(".markdown")
+        || trimmed.ends_with(".html")
+        || trimmed.ends_with(".htm")
+}
+
+fn session_export_id_from_data(entry_id: &str, data: &serde_json::Value) -> String {
+    data.get("id")
+        .or_else(|| data.get("session_id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(entry_id)
+        .to_string()
+}
+
+fn read_session_export_snapshot(
+    entry: &SessionSnapshotEntry,
+    redact: bool,
+) -> Result<SessionExportSnapshot, hermes_core::AgentError> {
+    let content = std::fs::read_to_string(&entry.path).map_err(|e| {
+        hermes_core::AgentError::Io(format!(
+            "Failed to read session snapshot {}: {}",
+            entry.path.display(),
+            e
+        ))
+    })?;
+    let mut data = serde_json::from_str::<serde_json::Value>(&content).map_err(|e| {
+        hermes_core::AgentError::Io(format!(
+            "Failed to parse session snapshot {}: {}",
+            entry.path.display(),
+            e
+        ))
+    })?;
+    if redact {
+        redact_session_export_value(&mut data, None);
+    }
+    let id = session_export_id_from_data(&entry.id, &data);
+    Ok(SessionExportSnapshot { id, data })
+}
+
+fn collect_session_export_snapshots(
+    sessions_dir: &Path,
+    subject: Option<&str>,
+    source: Option<&str>,
+    older_than_days: Option<u64>,
+    redact: bool,
+) -> Result<Vec<SessionExportSnapshot>, hermes_core::AgentError> {
+    let entries = if let Some(subject) = subject.map(str::trim).filter(|value| !value.is_empty()) {
+        match resolve_unique_session_snapshot(sessions_dir, subject)? {
+            Some(entry) => vec![entry],
+            None => return Ok(Vec::new()),
+        }
+    } else {
+        let mut entries = prune_session_snapshot_candidates(sessions_dir, source, older_than_days)?;
+        entries.sort_by(|a, b| b.modified.cmp(&a.modified).then_with(|| a.id.cmp(&b.id)));
+        entries
+    };
+    entries
+        .iter()
+        .map(|entry| read_session_export_snapshot(entry, redact))
+        .collect()
+}
+
+fn redact_session_export_value(value: &mut serde_json::Value, key: Option<&str>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (child_key, child_value) in map.iter_mut() {
+                redact_session_export_value(child_value, Some(child_key));
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                redact_session_export_value(item, key);
+            }
+        }
+        serde_json::Value::String(text) => {
+            if key.is_some_and(session_export_key_is_secret) {
+                *text = "[REDACTED]".to_string();
+            } else {
+                *text = redact_session_export_text(text);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn session_export_key_is_secret(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key.contains("api_key")
+        || key.contains("apikey")
+        || key.contains("authorization")
+        || key.contains("password")
+        || key.contains("secret")
+        || key.contains("token")
+        || key.ends_with("_key")
+}
+
+fn redact_session_export_text(text: &str) -> String {
+    let mut redacted = text.to_string();
+    for (pattern, replacement) in [
+        (r"sk-[A-Za-z0-9_-]{16,}", "sk-[REDACTED]"),
+        (r"Bearer\s+[A-Za-z0-9._~+/=-]{16,}", "Bearer [REDACTED]"),
+        (
+            r"(?i)(api[_-]?key|token|secret)\s*[:=]\s*[^\s,;]+",
+            "$1=[REDACTED]",
+        ),
+    ] {
+        if let Ok(regex) = Regex::new(pattern) {
+            redacted = regex.replace_all(&redacted, replacement).into_owned();
+        }
+    }
+    redacted
+}
+
+fn render_session_exports(
+    sessions: &[SessionExportSnapshot],
+    format: SessionExportFormat,
+    only: Option<SessionExportOnly>,
+) -> Result<String, hermes_core::AgentError> {
+    match (format, only) {
+        (SessionExportFormat::Json, None) => {
+            let result = if sessions.len() == 1 {
+                serde_json::to_string_pretty(&sessions[0].data)
+            } else {
+                serde_json::to_string_pretty(
+                    &sessions
+                        .iter()
+                        .map(|session| session.data.clone())
+                        .collect::<Vec<_>>(),
+                )
+            };
+            result
+                .map(|mut value| {
+                    value.push('\n');
+                    value
+                })
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))
+        }
+        (SessionExportFormat::Jsonl, None) => render_sessions_jsonl(sessions, false),
+        (SessionExportFormat::Jsonl, Some(SessionExportOnly::UserPrompts)) => {
+            render_sessions_jsonl(sessions, true)
+        }
+        (SessionExportFormat::Markdown, None) => Ok(render_sessions_markdown(sessions, false)),
+        (SessionExportFormat::Markdown, Some(SessionExportOnly::UserPrompts)) => {
+            Ok(render_sessions_markdown(sessions, true))
+        }
+        (SessionExportFormat::Html, None) => Ok(render_sessions_html(sessions)),
+        (SessionExportFormat::Html, Some(SessionExportOnly::UserPrompts))
+        | (SessionExportFormat::Json, Some(SessionExportOnly::UserPrompts)) => {
+            Err(hermes_core::AgentError::Config(
+                "--only user-prompts supports --format jsonl or md.".into(),
+            ))
+        }
+    }
+}
+
+fn render_sessions_jsonl(
+    sessions: &[SessionExportSnapshot],
+    prompts_only: bool,
+) -> Result<String, hermes_core::AgentError> {
+    let mut lines = Vec::new();
+    if prompts_only {
+        for record in iter_user_prompt_records(sessions) {
+            lines.push(serde_json::to_string(&record).map_err(|e| {
+                hermes_core::AgentError::Io(format!("Failed to render prompt JSONL: {}", e))
+            })?);
+        }
+    } else {
+        for session in sessions {
+            lines.push(serde_json::to_string(&session.data).map_err(|e| {
+                hermes_core::AgentError::Io(format!("Failed to render session JSONL: {}", e))
+            })?);
+        }
+    }
+    Ok(if lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", lines.join("\n"))
+    })
+}
+
+fn iter_user_prompt_records(
+    sessions: &[SessionExportSnapshot],
+) -> Vec<serde_json::Map<String, serde_json::Value>> {
+    let mut records = Vec::new();
+    for session in sessions {
+        let mut index = 0usize;
+        for message in session_messages(&session.data) {
+            if message_role(message) != "user" {
+                continue;
+            }
+            index += 1;
+            let mut record = serde_json::Map::new();
+            record.insert("session_id".into(), serde_json::Value::String(session.id.clone()));
+            record.insert(
+                "index".into(),
+                serde_json::Value::Number(serde_json::Number::from(index as u64)),
+            );
+            record.insert("role".into(), serde_json::Value::String("user".into()));
+            record.insert(
+                "text".into(),
+                serde_json::Value::String(message_text(message.get("content"))),
+            );
+            if let Some(created_at) = message_timestamp(message) {
+                record.insert("created_at".into(), serde_json::Value::String(created_at));
+            }
+            if let Some(message_id) = message.get("id").cloned() {
+                record.insert("message_id".into(), message_id);
+            }
+            if let Some(event_id) = message
+                .get("platform_message_id")
+                .or_else(|| message.get("event_id"))
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+            {
+                record.insert("event_id".into(), serde_json::Value::String(event_id.into()));
+            }
+            records.push(record);
+        }
+    }
+    records
+}
+
+fn render_sessions_markdown(sessions: &[SessionExportSnapshot], prompts_only: bool) -> String {
+    let mut lines = Vec::new();
+    if prompts_only {
+        if sessions.len() == 1 {
+            lines.push(format!("# User prompts for session {}", sessions[0].id));
+            append_session_metadata(&mut lines, &sessions[0]);
+            append_prompt_markdown(&mut lines, &sessions[0], 2);
+        } else {
+            lines.push("# User prompts export".into());
+            for session in sessions {
+                lines.push(String::new());
+                lines.push(format!("## Session {}", session.id));
+                append_session_metadata(&mut lines, session);
+                append_prompt_markdown(&mut lines, session, 3);
+            }
+        }
+    } else if sessions.len() == 1 {
+        lines.push(format!(
+            "# Session: {}",
+            markdown_heading_text(&session_title_or_id(&sessions[0]))
+        ));
+        append_session_metadata(&mut lines, &sessions[0]);
+        append_session_messages_markdown(&mut lines, &sessions[0], 2);
+    } else {
+        lines.push("# Hermes sessions export".into());
+        for session in sessions {
+            lines.push(String::new());
+            lines.push(format!(
+                "## Session: {}",
+                markdown_heading_text(&session_title_or_id(session))
+            ));
+            append_session_metadata(&mut lines, session);
+            append_session_messages_markdown(&mut lines, session, 3);
+        }
+    }
+    finish_session_markdown(lines)
+}
+
+fn append_session_metadata(lines: &mut Vec<String>, session: &SessionExportSnapshot) {
+    lines.push(format!("- Session ID: `{}`", session.id));
+    for key in ["source", "model", "title"] {
+        if let Some(value) = session
+            .data
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            lines.push(format!(
+                "- {}: {}",
+                title_case_ascii(key),
+                value.replace('\n', " ")
+            ));
+        }
+    }
+    if let Some(started) = session
+        .data
+        .get("started_at")
+        .or_else(|| session.data.get("created_at"))
+        .and_then(format_session_timestamp)
+    {
+        lines.push(format!("- Started: {}", started));
+    }
+    lines.push(String::new());
+}
+
+fn append_prompt_markdown(
+    lines: &mut Vec<String>,
+    session: &SessionExportSnapshot,
+    heading_level: usize,
+) {
+    let prompts = iter_user_prompt_records(std::slice::from_ref(session));
+    if prompts.is_empty() {
+        lines.push("_No user prompts found._".into());
+        return;
+    }
+    let marker = "#".repeat(heading_level);
+    for prompt in prompts {
+        let index = prompt
+            .get("index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let created_at = prompt
+            .get("created_at")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("timestamp unavailable");
+        lines.push(format!("{} {}. {}", marker, index, created_at));
+        if let Some(message_id) = prompt.get("message_id") {
+            lines.push(format!("Message ID: `{}`", json_scalar_text(message_id)));
+            lines.push(String::new());
+        }
+        lines.push(
+            prompt
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        );
+        lines.push(String::new());
+    }
+}
+
+fn append_session_messages_markdown(
+    lines: &mut Vec<String>,
+    session: &SessionExportSnapshot,
+    heading_level: usize,
+) {
+    let visible: Vec<_> = session_messages(&session.data)
+        .into_iter()
+        .filter(|message| message_role(message) != "system")
+        .collect();
+    if visible.is_empty() {
+        lines.push("_No messages found._".into());
+        return;
+    }
+    let marker = "#".repeat(heading_level);
+    for message in visible {
+        let role = message_role(message);
+        let label = match role.as_str() {
+            "user" => "User".to_string(),
+            "assistant" => "Assistant".to_string(),
+            "tool" => format!(
+                "Tool: {}",
+                message
+                    .get("tool_name")
+                    .or_else(|| message.get("name"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("tool")
+            ),
+            other => title_case_ascii(other),
+        };
+        let suffix = message_timestamp(message)
+            .map(|value| format!(" - {}", value))
+            .unwrap_or_default();
+        lines.push(format!("{} {}{}", marker, markdown_heading_text(&label), suffix));
+        lines.push(String::new());
+        if role == "tool" {
+            lines.push(fenced_session_text(&message_text(message.get("content"))));
+        } else {
+            lines.push(message_text(message.get("content")));
+        }
+        lines.push(String::new());
+    }
+}
+
+fn render_sessions_html(sessions: &[SessionExportSnapshot]) -> String {
+    let page_title = if sessions.len() == 1 {
+        format!("Hermes session {}", sessions[0].id)
+    } else {
+        format!("Hermes sessions export ({} sessions)", sessions.len())
+    };
+    let mut sidebar = String::new();
+    if sessions.len() > 1 {
+        sidebar.push_str("<nav class=\"sidebar\"><h2>Sessions</h2><ul>");
+        for session in sessions {
+            sidebar.push_str(&format!(
+                "<li><a href=\"#session-{id}\"><strong>{title}</strong><span>{id}</span></a></li>",
+                id = html_escape(&session.id),
+                title = html_escape(&session_title_or_id(session))
+            ));
+        }
+        sidebar.push_str("</ul></nav>");
+    }
+
+    let mut body = String::new();
+    for session in sessions {
+        body.push_str(&format!(
+            "<section class=\"session\" id=\"session-{id}\"><header><p class=\"eyebrow\">Hermes Ultra session export</p><h1>{title}</h1><p class=\"session-id\">{id}</p></header>",
+            id = html_escape(&session.id),
+            title = html_escape(&session_title_or_id(session))
+        ));
+        body.push_str("<div class=\"messages\">");
+        for message in session_messages(&session.data) {
+            let role = message_role(message);
+            if role == "session_meta" {
+                continue;
+            }
+            body.push_str(&format!(
+                "<article class=\"message message-{role}\"><div class=\"message-meta\"><span>{role}</span><time>{time}</time></div><pre>{content}</pre>",
+                role = html_escape(&role),
+                time = html_escape(
+                    &message_timestamp(message).unwrap_or_else(|| "timestamp unavailable".into())
+                ),
+                content = html_escape(&message_text(message.get("content"))),
+            ));
+            if let Some(tool_calls) = message
+                .get("tool_calls")
+                .and_then(serde_json::Value::as_array)
+            {
+                for tool_call in tool_calls {
+                    body.push_str("<details><summary>Tool call</summary><pre>");
+                    body.push_str(&html_escape(&json_scalar_text(tool_call)));
+                    body.push_str("</pre></details>");
+                }
+            }
+            if let Some(reasoning) = message
+                .get("reasoning")
+                .or_else(|| message.get("reasoning_content"))
+                .and_then(serde_json::Value::as_str)
+            {
+                body.push_str("<details><summary>Reasoning</summary><pre>");
+                body.push_str(&html_escape(reasoning));
+                body.push_str("</pre></details>");
+            }
+            body.push_str("</article>");
+        }
+        body.push_str("</div></section>");
+    }
+
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{}</title>
+<style>
+:root {{ color-scheme: light dark; --bg:#f8f4ec; --fg:#1d1912; --panel:#fffaf0; --muted:#756957; --border:#d9c6a3; --accent:#9a5a18; --tool:#ebf5ff; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg:#11100d; --fg:#f7ecd7; --panel:#1e1a14; --muted:#c7bca7; --border:#5b4a31; --accent:#ffb84d; --tool:#132232; }} }}
+body {{ margin:0; background:radial-gradient(circle at top left, rgba(154,90,24,.18), transparent 36rem), var(--bg); color:var(--fg); font:16px/1.5 ui-serif, Georgia, serif; }}
+.layout {{ display:flex; min-height:100vh; }}
+.sidebar {{ width:18rem; padding:1.25rem; border-right:1px solid var(--border); background:color-mix(in srgb, var(--panel) 86%, transparent); position:sticky; top:0; height:100vh; overflow:auto; }}
+.sidebar ul {{ list-style:none; margin:0; padding:0; }}
+.sidebar a {{ color:var(--fg); display:block; padding:.7rem 0; text-decoration:none; border-bottom:1px solid var(--border); }}
+.sidebar span {{ color:var(--muted); display:block; font:12px ui-monospace, SFMono-Regular, Menlo, monospace; }}
+main {{ width:min(72rem, 100%); margin:0 auto; padding:3rem 1.25rem; }}
+.session {{ margin-bottom:4rem; }}
+.eyebrow {{ color:var(--accent); font:700 12px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:.1em; text-transform:uppercase; }}
+h1 {{ font-size:clamp(2rem, 5vw, 4rem); line-height:1; margin:.25rem 0; }}
+.session-id {{ color:var(--muted); font:13px ui-monospace, SFMono-Regular, Menlo, monospace; }}
+.message {{ background:var(--panel); border:1px solid var(--border); border-radius:18px; box-shadow:0 18px 50px rgba(0,0,0,.08); margin:1rem 0; padding:1rem; }}
+.message-user {{ border-left:5px solid var(--accent); }}
+.message-tool {{ background:var(--tool); }}
+.message-meta {{ display:flex; justify-content:space-between; gap:1rem; color:var(--muted); font:12px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform:uppercase; }}
+pre {{ white-space:pre-wrap; word-break:break-word; font:13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }}
+details {{ margin-top:.75rem; }}
+@media (max-width: 860px) {{ .layout {{ display:block; }} .sidebar {{ position:relative; width:auto; height:auto; border-right:0; border-bottom:1px solid var(--border); }} main {{ padding-top:1.5rem; }} }}
+</style>
+</head>
+<body><div class="layout">{}<main>{}</main></div></body>
+</html>
+"#,
+        html_escape(&page_title),
+        sidebar,
+        body
+    )
+}
+
+fn session_messages(data: &serde_json::Value) -> Vec<&serde_json::Map<String, serde_json::Value>> {
+    data.get("messages")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_object)
+        .collect()
+}
+
+fn message_role(message: &serde_json::Map<String, serde_json::Value>) -> String {
+    message
+        .get("role")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_ascii_lowercase()
+}
+
+fn message_text(content: Option<&serde_json::Value>) -> String {
+    match content {
+        None | Some(serde_json::Value::Null) => String::new(),
+        Some(serde_json::Value::String(text)) => text.clone(),
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .map(|item| message_text(Some(item)))
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Some(serde_json::Value::Object(map)) => map
+            .get("text")
+            .or_else(|| map.get("content"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| content.map(json_scalar_text).unwrap_or_default()),
+        Some(other) => json_scalar_text(other),
+    }
+}
+
+fn message_timestamp(message: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    message
+        .get("timestamp")
+        .or_else(|| message.get("created_at"))
+        .and_then(format_session_timestamp)
+}
+
+fn format_session_timestamp(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Number(number) => number.as_f64().and_then(|secs| {
+            chrono::DateTime::<chrono::Utc>::from_timestamp(secs as i64, 0)
+                .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        }),
+        serde_json::Value::String(text) => {
+            let text = text.trim();
+            (!text.is_empty()).then(|| text.to_string())
+        }
+        _ => None,
+    }
+}
+
+fn session_title_or_id(session: &SessionExportSnapshot) -> String {
+    session
+        .data
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&session.id)
+        .to_string()
+}
+
+fn title_case_ascii(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+fn markdown_heading_text(value: &str) -> String {
+    value
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn fenced_session_text(text: &str) -> String {
+    let mut fence = "```".to_string();
+    while text.contains(&fence) {
+        fence.push('`');
+    }
+    format!("{}text\n{}\n{}", fence, text, fence)
+}
+
+fn finish_session_markdown(mut lines: Vec<String>) -> String {
+    while matches!(lines.last(), Some(line) if line.is_empty()) {
+        lines.pop();
+    }
+    format!("{}\n", lines.join("\n"))
+}
+
+fn json_scalar_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| String::new()),
+    }
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn write_session_export_output(
+    output: Option<&str>,
+    rendered: &str,
+) -> Result<(), hermes_core::AgentError> {
+    match output.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("-") => {
+            print!("{}", rendered);
+            Ok(())
+        }
+        Some(path) => std::fs::write(path, rendered)
+            .map_err(|e| hermes_core::AgentError::Io(format!("Failed to write {}: {}", path, e))),
+    }
+}
+
+fn session_confirm_response_is_yes(input: Option<&str>) -> bool {
+    matches!(
+        input.map(|value| value.trim().to_ascii_lowercase()),
+        Some(value) if matches!(value.as_str(), "y" | "yes")
+    )
+}
+
+fn prompt_session_confirmation(prompt: &str, yes: bool) -> bool {
+    if yes {
+        return true;
+    }
+    print!("{} [y/N]: ", prompt);
+    let _ = std::io::stdout().flush();
+    let mut input = String::new();
+    match std::io::stdin().read_line(&mut input) {
+        Ok(0) | Err(_) => false,
+        Ok(_) => session_confirm_response_is_yes(Some(input.as_str())),
+    }
+}
+
+fn prune_cutoff_for_sessions(
+    source: Option<&str>,
+    older_than: Option<u64>,
+    legacy_days: Option<&str>,
+) -> Option<u64> {
+    let explicit = older_than.or_else(|| legacy_days.and_then(|value| value.parse::<u64>().ok()));
+    explicit.or_else(|| source.is_none().then_some(90))
+}
+
+fn prune_session_snapshot_candidates(
+    sessions_dir: &Path,
+    source: Option<&str>,
+    older_than_days: Option<u64>,
+) -> Result<Vec<SessionSnapshotEntry>, hermes_core::AgentError> {
+    let source = source.map(str::trim).filter(|value| !value.is_empty());
+    let cutoff = older_than_days.and_then(|days| {
+        SystemTime::now().checked_sub(Duration::from_secs(days.saturating_mul(86_400)))
+    });
+    let candidates = list_session_snapshot_entries(sessions_dir)?
+        .into_iter()
+        .filter(|entry| {
+            source.is_none_or(|expected| {
+                entry
+                    .source
+                    .as_deref()
+                    .is_some_and(|actual| actual.eq_ignore_ascii_case(expected))
+            })
+        })
+        .filter(|entry| cutoff.is_none_or(|cutoff| entry.modified < cutoff))
+        .collect();
+    Ok(candidates)
+}
+
+fn session_time_epoch_seconds(time: SystemTime) -> u64 {
+    time.duration_since(SystemTime::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn render_prune_preview(candidates: &[SessionSnapshotEntry]) -> String {
+    if candidates.is_empty() {
+        return "0 session(s) match.".to_string();
+    }
+    let oldest = candidates
+        .iter()
+        .map(|entry| entry.modified)
+        .min()
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let newest = candidates
+        .iter()
+        .map(|entry| entry.modified)
+        .max()
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    format!(
+        "{} session(s) match (oldest {}, newest {}).",
+        candidates.len(),
+        session_time_epoch_seconds(oldest),
+        session_time_epoch_seconds(newest)
+    )
+}
+
 /// Handle `hermes sessions [action] [--id ...] [--name ...]`.
 pub async fn handle_cli_sessions(
-    action: Option<String>,
-    id: Option<String>,
-    name: Option<String>,
+    options: CliSessionsOptions,
 ) -> Result<(), hermes_core::AgentError> {
     let sessions_dir = hermes_config::hermes_home().join("sessions");
+    let CliSessionsOptions {
+        action,
+        session,
+        id,
+        session_id,
+        name,
+        format,
+        only,
+        output,
+        redact,
+        yes,
+        source,
+        older_than,
+    } = options;
 
     match action.as_deref().unwrap_or("list") {
         "list" => {
@@ -80,34 +967,99 @@ pub async fn handle_cli_sessions(
             }
         }
         "export" => {
-            let session_id = id.ok_or_else(|| {
-                hermes_core::AgentError::Config(
-                    "Missing session ID. Usage: hermes sessions export --id <id>".into(),
-                )
-            })?;
-            let path = sessions_dir.join(format!("{}.json", session_id));
-            if !path.exists() {
-                println!("Session '{}' not found.", session_id);
+            let export_format = normalize_session_export_format(format.as_deref())?;
+            let export_only = normalize_session_export_only(only.as_deref())?;
+            let explicit_subject = session_id.or(id);
+            let mut export_subject = explicit_subject;
+            let mut export_output = output;
+
+            if export_subject.is_none() {
+                if let Some(candidate) = session.clone().map(|value| value.trim().to_string()) {
+                    if candidate.is_empty() {
+                        export_subject = None;
+                    } else if resolve_unique_session_snapshot(&sessions_dir, &candidate)?.is_some() {
+                        export_subject = Some(candidate);
+                    } else if export_output.is_none()
+                        && session_export_positional_looks_like_output(&candidate)
+                    {
+                        export_output = Some(candidate);
+                    } else {
+                        export_subject = Some(candidate);
+                    }
+                }
+            }
+
+            if export_format == SessionExportFormat::Html
+                && export_output
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty() && *value != "-")
+                    .is_none()
+            {
+                return Err(hermes_core::AgentError::Config(
+                    "HTML export requires an output file path.".into(),
+                ));
+            }
+
+            let snapshots = collect_session_export_snapshots(
+                &sessions_dir,
+                export_subject.as_deref(),
+                source.as_deref(),
+                older_than,
+                redact,
+            )?;
+            if snapshots.is_empty() {
+                if let Some(subject) = export_subject {
+                    println!("Session '{}' not found.", subject);
+                } else {
+                    println!("No sessions found.");
+                }
                 return Ok(());
             }
-            let content = std::fs::read_to_string(&path)
-                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-            println!("{}", content);
+
+            let rendered = render_session_exports(&snapshots, export_format, export_only)?;
+            write_session_export_output(export_output.as_deref(), &rendered)?;
+            if let Some(output) = export_output.as_deref().filter(|value| *value != "-") {
+                let count = if export_only == Some(SessionExportOnly::UserPrompts) {
+                    iter_user_prompt_records(&snapshots).len()
+                } else {
+                    snapshots.len()
+                };
+                let noun = if export_only == Some(SessionExportOnly::UserPrompts) {
+                    "prompt"
+                } else {
+                    "session"
+                };
+                println!(
+                    "Exported {} {}{} to {}",
+                    count,
+                    noun,
+                    if count == 1 { "" } else { "s" },
+                    output
+                );
+            }
         }
         "delete" => {
-            let session_id = id.ok_or_else(|| {
+            let session_id = session_subject(session.clone(), id.clone()).ok_or_else(|| {
                 hermes_core::AgentError::Config(
                     "Missing session ID. Usage: hermes sessions delete --id <id>".into(),
                 )
             })?;
-            let path = sessions_dir.join(format!("{}.json", session_id));
-            if path.exists() {
-                std::fs::remove_file(&path)
-                    .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-                println!("Session '{}' deleted.", session_id);
-            } else {
+            let Some(resolved) = resolve_unique_session_snapshot(&sessions_dir, &session_id)?
+            else {
                 println!("Session '{}' not found.", session_id);
+                return Ok(());
+            };
+            if !prompt_session_confirmation(
+                &format!("Delete session '{}'? This cannot be undone.", resolved.id),
+                yes,
+            ) {
+                println!("Cancelled.");
+                return Ok(());
             }
+            let deleted = delete_session_snapshot_by_query(&sessions_dir, &resolved.id)?
+                .unwrap_or_else(|| resolved.id.clone());
+            println!("Deleted session '{}'.", deleted);
         }
         "stats" => {
             if !sessions_dir.exists() {
@@ -137,33 +1089,30 @@ pub async fn handle_cli_sessions(
             println!("  Directory:      {}", sessions_dir.display());
         }
         "prune" => {
-            let max_age_days: u64 = name
-                .as_deref()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(30);
-            println!("Pruning sessions older than {} days...", max_age_days);
             if !sessions_dir.exists() {
                 println!("No sessions directory.");
                 return Ok(());
             }
-            let cutoff = std::time::SystemTime::now()
-                .checked_sub(std::time::Duration::from_secs(max_age_days * 86400))
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let max_age_days =
+                prune_cutoff_for_sessions(source.as_deref(), older_than, name.as_deref());
+            let candidates = prune_session_snapshot_candidates(
+                &sessions_dir,
+                source.as_deref(),
+                max_age_days,
+            )?;
+            println!("{}", render_prune_preview(&candidates));
+            if candidates.is_empty() {
+                return Ok(());
+            }
+            if !prompt_session_confirmation("Prune matching sessions?", yes) {
+                println!("Cancelled.");
+                return Ok(());
+            }
             let mut pruned = 0u32;
-            if let Ok(rd) = std::fs::read_dir(&sessions_dir) {
-                for entry in rd.filter_map(|e| e.ok()) {
-                    let path = entry.path();
-                    if !path.extension().map(|e| e == "json").unwrap_or(false) {
-                        continue;
-                    }
-                    if let Ok(meta) = std::fs::metadata(&path) {
-                        let modified = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                        if modified < cutoff && std::fs::remove_file(&path).is_ok() {
-                            let name = path.file_stem().unwrap_or_default().to_string_lossy();
-                            println!("  Pruned: {}", name);
-                            pruned += 1;
-                        }
-                    }
+            for entry in candidates {
+                if std::fs::remove_file(&entry.path).is_ok() {
+                    println!("  Pruned: {}", entry.id);
+                    pruned += 1;
                 }
             }
             println!("Pruned {} session(s).", pruned);

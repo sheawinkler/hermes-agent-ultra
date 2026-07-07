@@ -120,6 +120,14 @@ Setup:
 hermes-ultra setup
 ```
 
+Mem0 memory setup supports cloud, self-hosted, and OSS-style endpoints:
+
+```bash
+hermes-ultra memory setup mem0 --mode selfhosted --host http://127.0.0.1:24220 -y
+```
+
+Add `--api-key ...` only when the self-hosted server requires auth; Hermes writes the host to `mem0.json` and the secret to `$HERMES_HOME/.env`.
+
 Interactive session:
 
 ```bash

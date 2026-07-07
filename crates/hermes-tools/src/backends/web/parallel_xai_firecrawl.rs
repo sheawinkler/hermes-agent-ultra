@@ -387,13 +387,17 @@ fn normalize_search_backend_choice(choice: &str) -> Option<&'static str> {
 ///
 /// Priority:
 /// 1. Explicit `HERMES_WEB_EXTRACT_BACKEND` override, then legacy `HERMES_WEB_BACKEND`
-///    (`parallel`, `firecrawl`, `tavily`, `simple`; search-only backends return a clear error)
+///    (`exa`, `parallel`, `firecrawl`, `tavily`, `simple`; search-only backends return a clear error)
 /// 2. Firecrawl direct/self-hosted/managed when configured
-/// 3. Tavily when configured
-/// 4. Parallel REST when `PARALLEL_API_KEY` is configured
-/// 5. Simple local extractor fallback
+/// 3. Exa when configured
+/// 4. Tavily when configured
+/// 5. Parallel REST when `PARALLEL_API_KEY` is configured
+/// 6. Simple local extractor fallback
 pub fn extract_backend_from_env_or_fallback() -> Box<dyn WebExtractBackend> {
     match extract_backend_choice_from_env() {
+        "exa" => ExaExtractBackend::from_env()
+            .map(|b| Box::new(b) as Box<dyn WebExtractBackend>)
+            .unwrap_or_else(|_| Box::new(SimpleExtractBackend::new())),
         "parallel" => Box::new(ParallelWebBackend::from_env()),
         "firecrawl" => FirecrawlExtractBackend::from_env_or_managed()
             .map(|b| Box::new(b) as Box<dyn WebExtractBackend>)
@@ -413,6 +417,7 @@ pub fn extract_backend_from_env_or_fallback() -> Box<dyn WebExtractBackend> {
 fn extract_backend_choice_from_env() -> &'static str {
     if let Ok(choice) = std::env::var("HERMES_WEB_EXTRACT_BACKEND") {
         match choice.trim().to_ascii_lowercase().as_str() {
+            "exa" => return "exa",
             "parallel" => return "parallel",
             "firecrawl" => return "firecrawl",
             "tavily" => return "tavily",
@@ -424,13 +429,13 @@ fn extract_backend_choice_from_env() -> &'static str {
         .and_then(|choice| normalize_search_backend_choice(&choice).map(str::to_string))
     {
         match choice.as_str() {
+            "exa" => return "exa",
             "parallel" => return "parallel",
             "firecrawl" => return "firecrawl",
             "tavily" => return "tavily",
             "brave-free" => return "search-only:brave-free",
             "ddgs" => return "search-only:ddgs",
             "searxng" => return "search-only:searxng",
-            "exa" => return "search-only:exa",
             "xai" => return "search-only:xai",
             _ => {}
         }
@@ -438,6 +443,8 @@ fn extract_backend_choice_from_env() -> &'static str {
 
     if firecrawl_direct_config_present() || firecrawl_managed_config_present() {
         "firecrawl"
+    } else if env_present_nonempty("EXA_API_KEY") {
+        "exa"
     } else if env_present_nonempty("TAVILY_API_KEY") {
         "tavily"
     } else if env_present_nonempty("PARALLEL_API_KEY") {

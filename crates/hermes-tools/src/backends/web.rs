@@ -108,6 +108,7 @@ impl WebCrawlBackend for FallbackCrawlBackend {
 // ---------------------------------------------------------------------------
 
 const MAX_EXTRACT_BYTES: usize = 512_000; // 500 KB
+const EXA_BASE_URL_DEFAULT: &str = "https://api.exa.ai";
 const TAVILY_BASE_URL_DEFAULT: &str = "https://api.tavily.com";
 const SEARXNG_SEARCH_PATH: &str = "/search";
 const BRAVE_SEARCH_URL_DEFAULT: &str = "https://api.search.brave.com/res/v1/web/search";
@@ -565,13 +566,25 @@ fn strip_html_tags(html: &str) -> String {
 pub struct ExaSearchBackend {
     client: Client,
     api_key: String,
+    base_url: String,
 }
 
 impl ExaSearchBackend {
     pub fn new(api_key: String) -> Self {
+        Self::with_base_url(api_key, EXA_BASE_URL_DEFAULT.to_string())
+    }
+
+    pub fn with_base_url(api_key: String, base_url: String) -> Self {
+        let normalized_base = base_url.trim().trim_end_matches('/').to_string();
+        let base_url = if normalized_base.is_empty() {
+            EXA_BASE_URL_DEFAULT.to_string()
+        } else {
+            normalized_base
+        };
         Self {
             client: Client::new(),
             api_key,
+            base_url,
         }
     }
 
@@ -586,7 +599,13 @@ impl ExaSearchBackend {
                 "EXA_API_KEY environment variable is empty".into(),
             ));
         }
-        Ok(Self::new(api_key.to_string()))
+        let base_url =
+            std::env::var("EXA_BASE_URL").unwrap_or_else(|_| EXA_BASE_URL_DEFAULT.to_string());
+        Ok(Self::with_base_url(api_key.to_string(), base_url))
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 }
 
@@ -613,7 +632,7 @@ impl WebSearchBackend for ExaSearchBackend {
 
         let resp = self
             .client
-            .post("https://api.exa.ai/search")
+            .post(format!("{}/search", self.base_url))
             .header("x-api-key", &self.api_key)
             .header("Content-Type", "application/json")
             .json(&body)
@@ -665,6 +684,168 @@ impl WebSearchBackend for ExaSearchBackend {
         }))
         .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
     }
+}
+
+/// Real Exa API content extraction backend.
+pub struct ExaExtractBackend {
+    client: Client,
+    api_key: String,
+    base_url: String,
+}
+
+impl ExaExtractBackend {
+    pub fn new(api_key: String) -> Self {
+        Self::with_base_url(api_key, EXA_BASE_URL_DEFAULT.to_string())
+    }
+
+    pub fn with_base_url(api_key: String, base_url: String) -> Self {
+        let normalized_base = base_url.trim().trim_end_matches('/').to_string();
+        let base_url = if normalized_base.is_empty() {
+            EXA_BASE_URL_DEFAULT.to_string()
+        } else {
+            normalized_base
+        };
+        Self {
+            client: Client::new(),
+            api_key,
+            base_url,
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ToolError> {
+        let api_key = std::env::var("EXA_API_KEY").map_err(|_| {
+            ToolError::ExecutionFailed("EXA_API_KEY environment variable not set".into())
+        })?;
+        let api_key = api_key.trim();
+        if api_key.is_empty() {
+            return Err(ToolError::ExecutionFailed(
+                "EXA_API_KEY environment variable is empty".into(),
+            ));
+        }
+        let base_url =
+            std::env::var("EXA_BASE_URL").unwrap_or_else(|_| EXA_BASE_URL_DEFAULT.to_string());
+        Ok(Self::with_base_url(api_key.to_string(), base_url))
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+}
+
+#[async_trait]
+impl WebExtractBackend for ExaExtractBackend {
+    async fn extract(&self, url: &str, _include_links: bool) -> Result<String, ToolError> {
+        validate_url_does_not_exfiltrate_secret(url)?;
+        let body = json!({
+            "ids": [url],
+            "text": true,
+        });
+
+        let resp = self
+            .client
+            .post(format!("{}/contents", self.base_url))
+            .header("x-api-key", &self.api_key)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("Exa extract request failed: {e}")))?;
+
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Exa extract response: {e}"))
+        })?;
+
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Exa extract API error ({status}): {text}"
+            )));
+        }
+
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse Exa extract response: {e}"))
+        })?;
+        let documents = normalize_exa_documents(&data, &[url]);
+        let first_content = documents
+            .first()
+            .and_then(|d| d.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let source_summary = source_quality_summary(&documents);
+        serde_json::to_string_pretty(&json!({
+            "url": url,
+            "content": first_content,
+            "results": documents,
+            "provider": "exa",
+            "source_quality_summary": source_summary,
+        }))
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize result: {e}")))
+    }
+}
+
+fn normalize_exa_documents(response: &Value, requested_urls: &[&str]) -> Vec<Value> {
+    let mut documents = Vec::new();
+    if let Some(results) = response.get("results").and_then(Value::as_array) {
+        for result in results {
+            let url = result.get("url").and_then(Value::as_str).unwrap_or("");
+            let title = result.get("title").and_then(Value::as_str).unwrap_or("");
+            let content = result
+                .get("text")
+                .or_else(|| result.get("content"))
+                .or_else(|| result.get("raw_content"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let quality = source_quality_for_url(url);
+            documents.push(json!({
+                "url": url,
+                "title": title,
+                "content": content,
+                "raw_content": content,
+                "source_quality": quality.label,
+                "source_quality_score": quality.score,
+                "source_quality_reason": quality.reason,
+                "metadata": {"sourceURL": url, "title": title},
+            }));
+        }
+    }
+    if let Some(errors) = response.get("errors").and_then(Value::as_array) {
+        for error in errors {
+            let url = error.get("url").and_then(Value::as_str).unwrap_or("");
+            let message = error
+                .get("message")
+                .or_else(|| error.get("error"))
+                .and_then(Value::as_str)
+                .unwrap_or("extraction failed");
+            let quality = source_quality_for_url(url);
+            documents.push(json!({
+                "url": url,
+                "title": "",
+                "content": "",
+                "error": message,
+                "source_quality": quality.label,
+                "source_quality_score": quality.score,
+                "source_quality_reason": quality.reason,
+                "metadata": {"sourceURL": url},
+            }));
+        }
+    }
+    if documents.is_empty() {
+        for url in requested_urls {
+            let quality = source_quality_for_url(url);
+            documents.push(json!({
+                "url": url,
+                "title": "",
+                "content": "",
+                "error": "extraction failed (no content returned)",
+                "source_quality": quality.label,
+                "source_quality_score": quality.score,
+                "source_quality_reason": quality.reason,
+                "metadata": {"sourceURL": url},
+            }));
+        }
+    }
+    documents
 }
 
 // ---------------------------------------------------------------------------

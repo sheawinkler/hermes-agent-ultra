@@ -2,7 +2,7 @@
   "generated_at_utc": "2026-07-02T18:14:12Z",
   "source_backlog": "docs/parity/shared-diff-backlog.json",
   "summary": {
-    "covered_paths": 214,
+    "covered_paths": 219,
     "required_backlog_classification_paths": [
       "tests",
       "tests/agent",
@@ -210,6 +210,38 @@
           "name": "test_openrouter_parse_response_with_reasoning"
         }
       ]
+    },
+    {
+      "path": "tests/agent/test_credential_pool_routing.py",
+      "classification_path": "tests/agent",
+      "coverage_tags": [
+        "credential_pool",
+        "rate_limit_recovery",
+        "python_test_suite",
+        "rust_contracts",
+        "tests_agent"
+      ],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "non_cloudcode_multi_key_pool_retries_primary_before_fallback"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "single_entry_pool_rate_limit_uses_fallback_without_retry"
+        },
+        {
+          "file": "crates/hermes-agent/src/agent_loop.rs",
+          "name": "cloudcode_rate_limit_uses_fallback_without_pool_retry"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/credential_pool.rs",
+          "name": "test_exhaustion_and_rotation"
+        }
+      ],
+      "status": "covered_by_rust_test_suite_contracts",
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime."
     },
     {
       "path": "tests/agent/test_crossloop_client_cache.py",
@@ -4200,6 +4232,38 @@
       ]
     },
     {
+      "path": "tests/integration/test_batch_runner.py",
+      "classification_path": "tests/integration",
+      "coverage_tags": [
+        "batch_runner",
+        "checkpoint",
+        "python_test_suite",
+        "rust_contracts",
+        "tests_integration"
+      ],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-intelligence/src/rl.rs",
+          "name": "batch_runner_generates_style_tagged_baseline_responses"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/rl.rs",
+          "name": "batch_dataset_runner_updates_checkpoint_and_resumes_by_index_and_prompt"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/rl.rs",
+          "name": "batch_dataset_runner_persists_atomic_checkpoint_per_batch_and_resumes_from_file"
+        },
+        {
+          "file": "crates/hermes-intelligence/src/rl.rs",
+          "name": "batch_dataset_runner_checkpoint_path_starts_fresh_on_corrupt_or_mismatched_checkpoint"
+        }
+      ],
+      "status": "covered_by_rust_test_suite_contracts",
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime."
+    },
+    {
       "path": "tests/integration/test_checkpoint_resumption.py",
       "classification_path": "tests/integration",
       "status": "covered_by_rust_test_suite_contracts",
@@ -4324,6 +4388,34 @@
           "name": "contract_reconnect_watcher_restarts_offline_primary_adapter"
         }
       ]
+    },
+    {
+      "path": "tests/integration/test_modal_terminal.py",
+      "classification_path": "tests/integration",
+      "coverage_tags": [
+        "terminal",
+        "modal",
+        "python_test_suite",
+        "rust_contracts",
+        "tests_integration"
+      ],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-tools/src/terminal_requirements.rs",
+          "name": "modal_managed_mode_requires_managed_gateway"
+        },
+        {
+          "file": "crates/hermes-tools/src/terminal_requirements.rs",
+          "name": "modal_direct_mode_requires_direct_credentials"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "builtin_registry_registers_terminal_tools_for_managed_modal_surface"
+        }
+      ],
+      "status": "covered_by_rust_test_suite_contracts",
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime."
     },
     {
       "path": "tests/integration/test_voice_channel_flow.py",
@@ -6340,6 +6432,39 @@
           "name": "gateway_emits_agent_start_and_end_hooks"
         }
       ]
+    },
+    {
+      "path": "tests/stress/test_concurrency_reclaim_race.py",
+      "classification_path": "tests/stress",
+      "coverage_tags": [
+        "kanban",
+        "concurrency",
+        "claim_replay",
+        "python_test_suite",
+        "rust_contracts",
+        "tests_stress"
+      ],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "add_move_and_archive_flow_works"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "kanban_claim_completion_archive_is_idempotent_under_reclaim_like_replay"
+        },
+        {
+          "file": "crates/hermes-agent/src/sub_agent_orchestrator.rs",
+          "name": "background_request_dispatches_handle_and_emits_completion_callback"
+        },
+        {
+          "file": "crates/hermes-agent/src/sub_agent_orchestrator.rs",
+          "name": "cancel_path_reports_cancelled"
+        }
+      ],
+      "status": "covered_by_rust_test_suite_contracts",
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime."
     },
     {
       "path": "tests/stress/test_property_fuzzing.py",
@@ -11126,6 +11251,39 @@
           "name": "registry_contract_lists_dispatches_and_wraps_errors_as_json"
         }
       ]
+    },
+    {
+      "path": "tests/tools/test_mcp_dynamic_discovery.py",
+      "classification_path": "tests/tools",
+      "coverage_tags": [
+        "mcp",
+        "dynamic_discovery",
+        "tool_registry",
+        "python_test_suite",
+        "rust_contracts",
+        "tests_tools"
+      ],
+      "rust_tests": [
+        {
+          "file": "crates/hermes-mcp/src/client/tests.rs",
+          "name": "manager_registers_discovered_mcp_tools_as_callable_registry_tools"
+        },
+        {
+          "file": "crates/hermes-tools/src/registry.rs",
+          "name": "test_register_and_dispatch"
+        },
+        {
+          "file": "crates/hermes-tools/src/toolset.rs",
+          "name": "test_default_toolsets_registered"
+        },
+        {
+          "file": "crates/hermes-tools/tests/upstream_core_tool_contracts.rs",
+          "name": "registry_contract_lists_dispatches_and_wraps_errors_as_json"
+        }
+      ],
+      "status": "covered_by_rust_test_suite_contracts",
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "rationale": "Upstream Python test intent is covered by the listed Rust unit, integration, or contract tests for the equivalent Rust-first runtime surface; the Python file remains reference-only and is not vendored into runtime."
     },
     {
       "path": "tests/tools/test_mcp_empty_error_message.py",

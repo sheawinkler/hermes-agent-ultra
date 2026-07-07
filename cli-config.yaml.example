@@ -1,0 +1,65 @@
+# Hermes Ultra CLI configuration example
+# Copy to ~/.hermes-agent-ultra/config.yaml or ~/.hermes/config.yaml and edit.
+# Environment variables and managed profile overlays can still override these values.
+
+# Keep the default model dynamic; provider routing resolves the concrete model at runtime.
+model: "openai-codex:dynamic"
+max_turns: 250
+
+model_switch:
+  persist_switch_by_default: true
+
+llm_providers:
+  openai-codex:
+    api_mode: "codex_responses"
+    model: "dynamic"
+    oauth_token_url: "${HERMES_OPENAI_CODEX_OAUTH_TOKEN_URL}"
+    oauth_client_id: "${HERMES_OPENAI_CODEX_OAUTH_CLIENT_ID}"
+    request_timeout_seconds: 900
+    model_context_windows:
+      dynamic: 272000
+      gpt-5: 272000
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
+    model: "anthropic/claude-opus-4.6"
+  local-openai:
+    base_url: "http://127.0.0.1:1234/v1"
+    api_key_env: "LMSTUDIO_API_KEY"
+    model: "local-model"
+    discover_models: true
+
+fallback_models:
+  - "openrouter:anthropic/claude-sonnet-4.6"
+
+smart_model_routing:
+  enabled: true
+  max_simple_chars: 160
+  max_simple_words: 28
+  cheap_model:
+    provider: "openrouter"
+    model: "openai/gpt-5-mini"
+
+terminal:
+  backend: "local"
+  cwd: "."
+  timeout: 180
+  lifetime_seconds: 300
+  home_mode: "auto"
+  docker_mount_cwd_to_workspace: false
+
+web:
+  search_backend: "auto"
+  extract_backend: "auto"
+  crawl_backend: "auto"
+
+sessions:
+  auto_prune: true
+  retention_days: 90
+  vacuum_after_prune: true
+
+kanban:
+  dispatch_in_gateway: true
+
+agent:
+  preflight_context_compress: true

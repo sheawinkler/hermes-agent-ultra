@@ -58,7 +58,7 @@ refresh_upstream() {
   fi
   run git -C "${REPO_ROOT}" fetch --no-tags --depth=1 \
     "${UPSTREAM_REMOTE}" \
-    "refs/heads/main:refs/remotes/${UPSTREAM_REMOTE}/main"
+    "+refs/heads/main:refs/remotes/${UPSTREAM_REMOTE}/main"
 }
 
 cd "${REPO_ROOT}"
