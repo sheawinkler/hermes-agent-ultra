@@ -113,7 +113,7 @@ fn clarify_button_labels_fit_discord_cap_and_cut_at_boundaries() {
     let label = discord_clarify_button_label(0, wordy);
     assert!(label.starts_with("1. "));
     assert!(label.ends_with('…'));
-    assert!(label.chars().count() <= 80);
+    assert!(discord_utf16_len(&label) <= 80);
     assert!(!label.trim_end_matches('…').ends_with('('));
 
     let no_space = format!(
@@ -125,7 +125,7 @@ fn clarify_button_labels_fit_discord_cap_and_cut_at_boundaries() {
     );
     let label = discord_clarify_button_label(0, &no_space);
     assert!(label.ends_with('…'));
-    assert!(label.chars().count() <= 80);
+    assert!(discord_utf16_len(&label) <= 80);
     let body = label
         .strip_prefix("1. ")
         .expect("prefix")
@@ -134,6 +134,15 @@ fn clarify_button_labels_fit_discord_cap_and_cut_at_boundaries() {
         body.chars().last(),
         Some('-' | ',' | '.' | ')' | ' ')
     ));
+}
+
+#[test]
+fn clarify_button_labels_fit_discord_utf16_cap_for_emoji() {
+    let label = discord_clarify_button_label(0, &"😀".repeat(80));
+
+    assert!(label.starts_with("1. "));
+    assert!(label.ends_with('…'));
+    assert!(discord_utf16_len(&label) <= 80);
 }
 
 #[test]
@@ -232,6 +241,7 @@ fn forum_parent_and_payload_contract_matches_python_send_path() {
     );
     assert_eq!(forum_thread_name(Some(""), Some("voice.ogg")), "voice.ogg");
     assert_eq!(forum_thread_name(None, None), "Hermes");
+    assert!(discord_utf16_len(&forum_thread_name(Some(&"😀".repeat(90)), None)) <= 100);
 
     let payload = forum_thread_payload("Hello forum!", None, Some(60));
     assert_eq!(payload["name"], "Hello forum!");

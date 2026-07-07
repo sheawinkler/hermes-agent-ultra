@@ -2,7 +2,7 @@
   "commits": [
     {
       "classification_rule": "sha_override",
-      "disposition": "superseded",
+      "disposition": "ported",
       "files_sample": [
         ".dockerignore",
         ".env.example",
@@ -25,8 +25,8 @@
         ".github/pr-screenshots/45449/billing-overview.png",
         ".github/pr-screenshots/telegram-overflow/topic-final-response-clipped.jpg"
       ],
-      "files_touched": 6057,
-      "notes": "Upstream PR #57969 / head 4bf749fd changed only Electron desktop copy-button tooltip and scrollbar-offset UI in apps/desktop/src/components/assistant-ui/tool/fallback.tsx and apps/desktop/src/components/ui/copy-button.tsx. Hermes Agent Ultra does not ship the Electron desktop app; Rust CLI/TUI/gateway/tool surfaces own copy/display behavior, so there is no Rust runtime port target.",
+      "files_touched": 6159,
+      "notes": "Ported in Rust Mem0 setup: hermes memory setup mem0 accepts --mode selfhosted --host ... [--api-key ...] [--dry-run], interactive prompts expose platform/selfhosted/oss, self-hosted hosts are persisted to mem0.json, optional secrets route to $HERMES_HOME/.env, reachability checks are non-fatal, and focused Rust tests plus a CLI dry-run prove the surface.",
       "owner": "rust-runtime",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -34,15 +34,15 @@
         "rust_primary_surface_only_commit": false,
         "superseded_by_guard": false
       },
-      "sha": "5445e42b87b9918d5b1bfa9f4eadd8e4bb10ff37",
-      "subject": "Merge pull request #57969 from alelpoan/fix/copy-button-tooltip",
+      "sha": "5e51b123f32b7f6a51fbd5759e89ba5146ce4003",
+      "subject": "feat(mem0): add self-hosted mode to the setup wizard",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-07-04T06:47:45.845372+00:00",
+  "generated_at_utc": "2026-07-07T21:51:26.151224+00:00",
   "refs": {
-    "baseline_start_sha": "19d4174454624a1ca91bc47b8f2a7ae8c3b4b5d3",
+    "baseline_start_sha": "5445e42b87b9918d5b1bfa9f4eadd8e4bb10ff37",
     "local_ref": "HEAD",
     "prior_ref": "HEAD",
     "prior_source": "HEAD",
@@ -52,7 +52,7 @@
   },
   "summary": {
     "by_disposition": {
-      "superseded": 1
+      "ported": 1
     },
     "by_target_ticket": {
       "20": 1

@@ -1112,6 +1112,45 @@ mod tests {
     }
 
     #[test]
+    fn kanban_claim_completion_archive_is_idempotent_under_reclaim_like_replay() {
+        with_temp_home(|home| {
+            let path = kanban_store_path_in(home);
+            let mut store = load_store_from_path(&path).expect("load");
+            let board = ensure_board(&mut store, None);
+            let task = add_task(
+                board,
+                NewKanbanTaskInput {
+                    title: "Race-safe task".to_string(),
+                    lane: KanbanLane::Todo,
+                    priority: 1,
+                    assignee: None,
+                    description: None,
+                    depends_on: vec![],
+                    goal_mode: false,
+                    goal_max_turns: None,
+                },
+            );
+            assert_eq!(task.id, "K-0001");
+
+            let task = find_task_mut(board, "K-0001").expect("task");
+            claim_task(task, Some("worker-a".to_string()));
+            claim_task(task, Some("worker-a".to_string()));
+            move_task(task, KanbanLane::Done, Some("finished once".to_string()));
+
+            assert_eq!(archive_done(board), 1);
+            assert_eq!(archive_done(board), 0);
+            assert!(find_task_mut(board, "K-0001").is_none());
+            assert_eq!(board.archived.len(), 1);
+            assert_eq!(board.archived[0].id, "K-0001");
+            assert_eq!(
+                board.archived[0].run_summary.as_deref(),
+                Some("finished once")
+            );
+            save_store_to_path(&store, &path).expect("save");
+        });
+    }
+
+    #[test]
     fn contextlattice_checkpoint_disabled_path() {
         with_temp_home(|_home| {
             std::env::set_var("HERMES_KANBAN_CONTEXTLATTICE_SYNC", "0");

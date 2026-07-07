@@ -31,6 +31,35 @@ impl Gateway {
         }
     }
 
+    async fn mirror_session_title_to_platform_thread(
+        &self,
+        incoming: &IncomingMessage,
+        title: &str,
+    ) -> Option<String> {
+        if !incoming.platform.eq_ignore_ascii_case("discord") {
+            return None;
+        }
+        let thread_id = incoming
+            .thread_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        let adapter = self.get_adapter(&incoming.platform).await?;
+        match adapter.rename_thread(thread_id, title).await {
+            Ok(_) => None,
+            Err(err) => {
+                warn!(
+                    platform = incoming.platform,
+                    chat_id = incoming.chat_id,
+                    thread_id,
+                    error = %err,
+                    "failed to mirror session title to platform thread"
+                );
+                Some(format!("⚠️ Discord thread title mirror failed: {err}"))
+            }
+        }
+    }
+
     fn format_session_list(&self, heading: &str, sessions: &[Session]) -> String {
         if sessions.is_empty() {
             return format!("📚 No {} found for your user.", heading.to_ascii_lowercase());
@@ -631,11 +660,20 @@ impl Gateway {
             }
             GatewayCommandResult::SetTitle { title, reply } => {
                 let stored = self.session_manager.set_title(session_key, &title).await;
-                let response = match &stored {
+                let mut response = match &stored {
                     Some(stored_title) if stored_title.as_str() == title => reply,
                     Some(stored_title) => format!("🏷 Session title set to: {}", stored_title),
                     None => "🏷 Session title cleared.".to_string(),
                 };
+                if let Some(stored_title) = stored.as_deref() {
+                    if let Some(warning) = self
+                        .mirror_session_title_to_platform_thread(incoming, stored_title)
+                        .await
+                    {
+                        response.push('\n');
+                        response.push_str(&warning);
+                    }
+                }
                 self.emit_hook_event(
                     "session:title",
                     serde_json::json!({

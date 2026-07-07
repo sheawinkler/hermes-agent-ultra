@@ -670,11 +670,23 @@ pub enum CliCommand {
     Memory {
         /// Action: setup/status/off/reset
         action: Option<String>,
-        /// Reset target (all|memory|user) for `memory reset`.
+        /// Provider for `memory setup` (e.g. mem0) or reset target (all|memory|user).
         target: Option<String>,
         /// Skip reset confirmation prompt.
         #[arg(short = 'y', long)]
         yes: bool,
+        /// Memory provider setup mode, currently used by Mem0: platform|selfhosted|oss.
+        #[arg(long)]
+        mode: Option<String>,
+        /// Self-hosted memory provider host, currently used by Mem0.
+        #[arg(long)]
+        host: Option<String>,
+        /// Memory provider API key, currently written to `$HERMES_HOME/.env` for Mem0.
+        #[arg(long = "api-key")]
+        api_key: Option<String>,
+        /// Show the provider setup plan without writing config or env files.
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// MCP server management.
@@ -701,12 +713,38 @@ pub enum CliCommand {
     Sessions {
         /// Action: list/export/delete/prune/optimize/repair/stats/rename/browse
         action: Option<String>,
+        /// Session ID/prefix for export/delete/rename, export output path, or day count for prune.
+        session: Option<String>,
         /// Session ID.
         #[arg(long)]
         id: Option<String>,
+        /// Session ID/prefix for export, matching upstream `sessions export --session-id`.
+        #[arg(long = "session-id")]
+        session_id: Option<String>,
         /// New name (for rename).
         #[arg(long)]
         name: Option<String>,
+        /// Export format: json, jsonl, md, markdown, or html.
+        #[arg(long)]
+        format: Option<String>,
+        /// Export a filtered view, currently `user-prompts`.
+        #[arg(long)]
+        only: Option<String>,
+        /// Export output path. Use `-` for stdout where supported.
+        #[arg(long)]
+        output: Option<String>,
+        /// Redact common secret fields and token-like strings in exported content.
+        #[arg(long)]
+        redact: bool,
+        /// Confirm destructive actions without prompting.
+        #[arg(long)]
+        yes: bool,
+        /// Restrict prune to sessions with this source marker.
+        #[arg(long)]
+        source: Option<String>,
+        /// Prune sessions older than N days.
+        #[arg(long = "older-than")]
+        older_than: Option<u64>,
     },
 
     /// Resume an interactive session from saved session state.

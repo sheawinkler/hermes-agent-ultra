@@ -1,11 +1,11 @@
 # Test Intent Mapping
 
-Generated: `2026-07-04T06:47:42.617538+00:00`
+Generated: `2026-07-07T21:51:22.927789+00:00`
 
 | Intent | Mapped | Evidence Count |
 | --- | --- | ---: |
 | `gateway-platform-behavior` | yes | 25 |
-| `tool-runtime-behavior` | yes | 120 |
+| `tool-runtime-behavior` | yes | 122 |
 | `cli-command-surface` | yes | 178 |
 | `agent-loop-and-runtime` | yes | 106 |
 | `acp-protocol-and-transport` | yes | 21 |

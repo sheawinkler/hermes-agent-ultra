@@ -597,7 +597,7 @@ include!("command_cli_plugins_memory_mcp/memory_setup.rs");
 pub async fn handle_cli_memory(
     action: Option<String>,
     target: Option<String>,
-    yes: bool,
+    options: MemorySetupCliOptions,
 ) -> Result<(), hermes_core::AgentError> {
     let hermes_home = hermes_config::hermes_home();
     let memories_dir = hermes_home.join("memories");
@@ -611,17 +611,27 @@ pub async fn handle_cli_memory(
             println!("{}", render_memory_backend_status(&hermes_home));
         }
         "setup" => {
-            if let Some(provider) = target
+            let provider = target
                 .as_deref()
                 .map(str::trim)
                 .filter(|provider| !provider.is_empty())
+                .or_else(|| options.has_mem0_specific_options().then_some("mem0"));
+            if let Some(provider) = provider
             {
-                let path = setup_memory_provider_target(provider, yes)?;
-                println!("Configured memory provider '{}'.", provider);
-                println!("  Config: {}", path.display());
-                println!(
-                    "Memory provider config is owner-only and activates on subsequent sessions."
-                );
+                let result = setup_memory_provider_target(provider, &options)?;
+                if result.dry_run {
+                    println!("Dry run complete; memory provider '{}' was not written.", provider);
+                    println!("  Config: {}", result.config_path.display());
+                } else {
+                    println!("Configured memory provider '{}'.", provider);
+                    println!("  Config: {}", result.config_path.display());
+                    if let Some(env_path) = result.env_path {
+                        println!("  Secret env: {}", env_path.display());
+                    }
+                    println!(
+                        "Memory provider config is owner-only and activates on subsequent sessions."
+                    );
+                }
                 return Ok(());
             }
             println!("Memory Provider Setup");
@@ -666,7 +676,7 @@ pub async fn handle_cli_memory(
             println!("Run `hermes memory setup` to re-enable.");
         }
         "reset" => {
-            if !yes {
+            if !options.yes {
                 return Err(hermes_core::AgentError::Config(
                     "memory reset requires confirmation flag: use `hermes memory reset [all|memory|user] -y`"
                         .into(),

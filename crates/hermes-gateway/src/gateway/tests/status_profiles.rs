@@ -1,3 +1,66 @@
+struct ThreadRenameAdapter {
+    messages: Arc<Mutex<Vec<(String, String)>>>,
+    renames: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+#[async_trait::async_trait]
+impl PlatformAdapter for ThreadRenameAdapter {
+    async fn start(&self) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    async fn stop(&self) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
+        self.messages
+            .lock()
+            .unwrap()
+            .push((chat_id.to_string(), text.to_string()));
+        Ok(())
+    }
+
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    async fn send_file(
+        &self,
+        _chat_id: &str,
+        _file_path: &str,
+        _caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    async fn rename_thread(&self, thread_id: &str, title: &str) -> Result<bool, GatewayError> {
+        self.renames
+            .lock()
+            .unwrap()
+            .push((thread_id.to_string(), title.to_string()));
+        Ok(true)
+    }
+
+    fn is_running(&self) -> bool {
+        true
+    }
+
+    fn platform_name(&self) -> &str {
+        "discord"
+    }
+}
+
 #[tokio::test]
 async fn gateway_status_updates_use_platform_status_api() {
     let updates = Arc::new(Mutex::new(Vec::new()));
@@ -1074,6 +1137,49 @@ async fn gateway_title_command_persists_and_surfaces_session_title() {
         title_event.1["title"],
         serde_json::json!("Release readiness")
     );
+}
+
+#[tokio::test]
+async fn gateway_title_command_mirrors_discord_thread_title() {
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let renames = Arc::new(Mutex::new(Vec::new()));
+    let adapter = Arc::new(ThreadRenameAdapter {
+        messages: sent.clone(),
+        renames: renames.clone(),
+    });
+
+    let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+    let mut dm_manager = DmManager::with_pair_behavior();
+    dm_manager.authorize_user("user1");
+    let gw = Gateway::new(session_mgr.clone(), dm_manager, GatewayConfig::default());
+    gw.register_adapter("discord", adapter).await;
+
+    let title = IncomingMessage {
+        platform: "discord".into(),
+        chat_id: "parent-channel".into(),
+        user_id: "user1".into(),
+        text: "/title Release readiness".into(),
+        message_id: Some("msg-1".into()),
+        thread_id: Some("thread-42".into()),
+        is_dm: false,
+    };
+
+    assert!(gw.route_message(&title).await.is_ok());
+
+    let session_key = session_mgr.compose_session_key("discord", "parent-channel", "user1");
+    assert_eq!(
+        session_mgr.get_title(&session_key).await.as_deref(),
+        Some("Release readiness")
+    );
+    assert_eq!(
+        *renames.lock().unwrap(),
+        vec![("thread-42".to_string(), "Release readiness".to_string())]
+    );
+    assert!(sent
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(_, text)| text == "🏷 Session title set to: Release readiness"));
 }
 
 #[tokio::test]

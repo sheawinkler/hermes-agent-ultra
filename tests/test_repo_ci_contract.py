@@ -11,7 +11,7 @@ def test_repo_ci_runner_exists_and_declares_authority() -> None:
     assert SCRIPT.exists()
     assert "repository-local CI contract" in text
     assert "hosted GitHub Actions are a convenience mirror" in text
-    assert "refs/heads/main:refs/remotes/${UPSTREAM_REMOTE}/main" in text
+    assert "+refs/heads/main:refs/remotes/${UPSTREAM_REMOTE}/main" in text
     assert "[repo-ci] PASS" in text
 
 

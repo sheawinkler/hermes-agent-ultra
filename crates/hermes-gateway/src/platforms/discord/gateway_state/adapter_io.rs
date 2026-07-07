@@ -1,3 +1,6 @@
+const DISCORD_REST_JSON_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+const DISCORD_REST_ERROR_BODY_LIMIT_BYTES: usize = 8 * 1024;
+
 impl DiscordAdapter {
     /// Create a new Discord adapter with the given configuration.
     pub fn new(config: DiscordConfig) -> Result<Self, GatewayError> {
@@ -215,7 +218,7 @@ impl DiscordAdapter {
                 .map_err(|e| GatewayError::SendFailed(format!("Discord send failed: {}", e)))?;
 
             if !resp.status().is_success() {
-                let text = resp.text().await.unwrap_or_default();
+                let text = discord_response_text_limited(resp).await;
                 if include_reply_reference && discord_reply_reference_error_allows_retry(&text) {
                     suppress_reply_references = true;
                     let retry_body =
@@ -233,16 +236,14 @@ impl DiscordAdapter {
                         })?;
 
                     if !retry_resp.status().is_success() {
-                        let retry_text = retry_resp.text().await.unwrap_or_default();
+                        let retry_text = discord_response_text_limited(retry_resp).await;
                         return Err(GatewayError::SendFailed(format!(
                             "Discord API error: {}",
                             retry_text
                         )));
                     }
 
-                    let msg: DiscordMessage = retry_resp.json().await.map_err(|e| {
-                        GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e))
-                    })?;
+                    let msg: DiscordMessage = discord_response_json_limited(retry_resp).await?;
 
                     message_ids.push(msg.id);
                     continue;
@@ -254,9 +255,7 @@ impl DiscordAdapter {
                 )));
             }
 
-            let msg: DiscordMessage = resp.json().await.map_err(|e| {
-                GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e))
-            })?;
+            let msg: DiscordMessage = discord_response_json_limited(resp).await?;
 
             message_ids.push(msg.id);
         }
@@ -301,16 +300,14 @@ impl DiscordAdapter {
             .map_err(|e| GatewayError::SendFailed(format!("Discord forum post failed: {}", e)))?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord forum post API error: {}",
                 text
             )));
         }
 
-        let thread: DiscordForumThread = resp.json().await.map_err(|e| {
-            GatewayError::SendFailed(format!("Failed to parse forum thread response: {}", e))
-        })?;
+        let thread: DiscordForumThread = discord_response_json_limited(resp).await?;
         let message_id = thread
             .message
             .as_ref()
@@ -361,7 +358,7 @@ impl DiscordAdapter {
             .map_err(|e| GatewayError::SendFailed(format!("Discord edit failed: {}", e)))?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord edit API error: {}",
                 text
@@ -414,16 +411,14 @@ impl DiscordAdapter {
             .map_err(|e| GatewayError::SendFailed(format!("Discord embed send failed: {}", e)))?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord embed API error: {}",
                 text
             )));
         }
 
-        let msg: DiscordMessage = resp.json().await.map_err(|e| {
-            GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e))
-        })?;
+        let msg: DiscordMessage = discord_response_json_limited(resp).await?;
 
         if metadata_marks_non_conversational(metadata) {
             self.mark_non_conversational_messages([msg.id.as_str()]);
@@ -489,16 +484,14 @@ impl DiscordAdapter {
             .map_err(|e| GatewayError::SendFailed(format!("Discord file upload failed: {}", e)))?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord file upload API error: {}",
                 text
             )));
         }
 
-        let msg: DiscordMessage = resp.json().await.map_err(|e| {
-            GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e))
-        })?;
+        let msg: DiscordMessage = discord_response_json_limited(resp).await?;
 
         if metadata_marks_non_conversational(metadata) {
             self.mark_non_conversational_messages([msg.id.as_str()]);
@@ -589,7 +582,7 @@ impl DiscordAdapter {
             .map_err(|e| GatewayError::SendFailed(format!("Discord add_reaction failed: {}", e)))?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord add_reaction API error: {}",
                 text
@@ -623,7 +616,7 @@ impl DiscordAdapter {
             })?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord remove_reaction API error: {}",
                 text
@@ -669,18 +662,58 @@ impl DiscordAdapter {
             })?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord create_thread API error: {}",
                 text
             )));
         }
 
-        let thread: DiscordThread = resp.json().await.map_err(|e| {
-            GatewayError::SendFailed(format!("Failed to parse thread response: {}", e))
-        })?;
+        let thread: DiscordThread = discord_response_json_limited(resp).await?;
 
         Ok(thread)
+    }
+
+    /// Rename an existing Discord thread/channel.
+    pub async fn rename_thread_channel(
+        &self,
+        thread_id: &str,
+        title: &str,
+    ) -> Result<(), GatewayError> {
+        self.ensure_liveness_healthy()?;
+        let thread_id = thread_id.trim();
+        if thread_id.is_empty() {
+            return Err(GatewayError::SendFailed(
+                "Discord thread rename requires a thread id".into(),
+            ));
+        }
+        let title = title.trim();
+        let title = if title.is_empty() { "Hermes" } else { title };
+        let name = truncate_discord_utf16_with_suffix(title, 100, "...");
+        let url = self.api_url(&format!("channels/{thread_id}"));
+        let body = serde_json::json!({ "name": name });
+
+        let resp = self
+            .client
+            .patch(&url)
+            .header("Authorization", self.auth_header())
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("Discord rename_thread failed: {}", e))
+            })?;
+
+        if !resp.status().is_success() {
+            let text = discord_response_text_limited(resp).await;
+            return Err(GatewayError::SendFailed(format!(
+                "Discord rename_thread API error: {}",
+                text
+            )));
+        }
+
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -715,7 +748,7 @@ impl DiscordAdapter {
             })?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord register_commands API error: {}",
                 text
@@ -756,7 +789,7 @@ impl DiscordAdapter {
             })?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord register_guild_commands API error: {}",
                 text
@@ -806,7 +839,7 @@ impl DiscordAdapter {
             })?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord interaction response API error: {}",
                 text
@@ -845,7 +878,7 @@ impl DiscordAdapter {
             })?;
 
         if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
+            let text = discord_response_text_limited(resp).await;
             return Err(GatewayError::SendFailed(format!(
                 "Discord defer interaction API error: {}",
                 text
@@ -944,6 +977,55 @@ async fn run_discord_liveness_probe_loop(
     }
 }
 
+async fn discord_response_bytes_limited(
+    mut resp: reqwest::Response,
+    limit_bytes: usize,
+) -> Result<(Vec<u8>, bool), GatewayError> {
+    let mut body = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|err| GatewayError::SendFailed(format!("Discord response read failed: {err}")))?
+    {
+        if body.len() + chunk.len() > limit_bytes {
+            let remaining = limit_bytes.saturating_sub(body.len());
+            body.extend_from_slice(&chunk[..remaining]);
+            return Ok((body, true));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok((body, false))
+}
+
+async fn discord_response_text_limited(resp: reqwest::Response) -> String {
+    let Ok((body, truncated)) =
+        discord_response_bytes_limited(resp, DISCORD_REST_ERROR_BODY_LIMIT_BYTES).await
+    else {
+        return String::new();
+    };
+    let mut text = String::from_utf8_lossy(&body).to_string();
+    if truncated {
+        text.push_str("... [truncated]");
+    }
+    text
+}
+
+async fn discord_response_json_limited<T>(resp: reqwest::Response) -> Result<T, GatewayError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let (body, truncated) =
+        discord_response_bytes_limited(resp, DISCORD_REST_JSON_BODY_LIMIT_BYTES).await?;
+    if truncated {
+        return Err(GatewayError::SendFailed(format!(
+            "Discord API JSON response exceeds {} bytes",
+            DISCORD_REST_JSON_BODY_LIMIT_BYTES
+        )));
+    }
+    serde_json::from_slice(&body)
+        .map_err(|err| GatewayError::SendFailed(format!("Failed to parse Discord response: {err}")))
+}
+
 async fn probe_discord_rest_liveness(
     client: &Client,
     token: &str,
@@ -962,7 +1044,7 @@ async fn probe_discord_rest_liveness(
         return Ok(());
     }
     let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
+    let text = discord_response_text_limited(resp).await;
     Err(GatewayError::ConnectionFailed(format!(
         "Discord liveness REST status {status}: {text}"
     )))

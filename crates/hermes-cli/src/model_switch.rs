@@ -246,7 +246,7 @@ pub fn provider_curated_models(provider: &str) -> &'static [&'static str] {
     &[]
 }
 
-fn configured_llm_provider<'a>(
+pub(crate) fn configured_llm_provider<'a>(
     config: &'a GatewayConfig,
     provider: &str,
 ) -> Option<(&'a String, &'a LlmProviderConfig)> {

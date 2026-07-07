@@ -2222,6 +2222,29 @@
     {
       "coverage_kind": "rust_contract_or_documented_divergence",
       "coverage_tags": [
+        "model/provider/context_display"
+      ],
+      "path": "tests/hermes_cli/test_model_switch_context_display.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/commands/command_tests.rs",
+          "name": "resolve_model_capabilities_uses_codex_oauth_display_context_cap"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands/command_tests.rs",
+          "name": "resolve_model_capabilities_uses_custom_provider_context_override"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands/command_tests.rs",
+          "name": "model_meets_requirements_checks_tools_vision_reasoning_and_context"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
         "model/provider/models_dev"
       ],
       "path": "tests/hermes_cli/test_model_switch_custom_providers.py",
@@ -3040,6 +3063,33 @@
         {
           "file": "crates/hermes-cli/src/app.rs",
           "name": "test_persist_session_snapshot_prunes_old_files_by_count_limit"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "session/delete/prune"
+      ],
+      "path": "tests/hermes_cli/test_sessions_delete.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/commands/command_tests.rs",
+          "name": "cli_sessions_delete_resolves_unique_prefix_and_removes_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands/command_tests.rs",
+          "name": "cli_sessions_prune_uses_90_day_default_and_source_all_ages"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands/command_tests.rs",
+          "name": "cli_sessions_prune_filters_source_and_renders_preview_bounds"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands/command_tests.rs",
+          "name": "cli_sessions_confirmation_treats_eof_or_empty_input_as_cancelled"
         }
       ],
       "status": "covered_by_rust_contracts"
@@ -4436,7 +4486,7 @@
   "schema_version": 1,
   "source_backlog": "docs/parity/shared-diff-backlog.json",
   "summary": {
-    "covered_paths": 124,
+    "covered_paths": 126,
     "guard_test": "crates/hermes-source-parity-tests/tests/hermes_cli_test_coverage_contract.rs",
     "provider_api_mode_bridge_added": true,
     "required_backlog_classification_path": "tests/hermes_cli"

@@ -11,6 +11,7 @@ use chrono::{DateTime, Duration, Utc};
 use hermes_core::AgentError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 use url::{form_urlencoded, Url};
 
@@ -245,14 +246,41 @@ async fn write_file_private(path: &Path, content: &[u8]) -> Result<(), AgentErro
             .map_err(|e| AgentError::Io(e.to_string()))?;
     }
     let tmp_path = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
-    tokio::fs::write(&tmp_path, content)
-        .await
-        .map_err(|e| AgentError::Io(e.to_string()))?;
-    set_private_permissions(&tmp_path).await?;
-    tokio::fs::rename(&tmp_path, path)
-        .await
-        .map_err(|e| AgentError::Io(e.to_string()))?;
-    set_private_permissions(path).await
+
+    let result = async {
+        let mut file = private_create_new_options()
+            .open(&tmp_path)
+            .await
+            .map_err(|e| AgentError::Io(e.to_string()))?;
+        file.write_all(content)
+            .await
+            .map_err(|e| AgentError::Io(e.to_string()))?;
+        file.sync_all()
+            .await
+            .map_err(|e| AgentError::Io(e.to_string()))?;
+        drop(file);
+        set_private_permissions(&tmp_path).await?;
+        tokio::fs::rename(&tmp_path, path)
+            .await
+            .map_err(|e| AgentError::Io(e.to_string()))?;
+        set_private_permissions(path).await
+    }
+    .await;
+
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+    }
+    result
+}
+
+fn private_create_new_options() -> tokio::fs::OpenOptions {
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        options.mode(0o600);
+    }
+    options
 }
 
 async fn set_private_permissions(path: &Path) -> Result<(), AgentError> {
@@ -594,6 +622,25 @@ mod tests {
         let reopened = FileTokenStore::new(&path).await.unwrap();
         let got = reopened.get("openai").await.unwrap();
         assert_eq!(got.access_token, "super-secret-token");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn private_create_new_options_creates_owner_only_temp_before_write() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json.tmp");
+
+        let mut file = private_create_new_options().open(&path).await.unwrap();
+        let mode = tokio::fs::metadata(&path)
+            .await
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+        file.write_all(b"secret").await.unwrap();
     }
 
     #[tokio::test]

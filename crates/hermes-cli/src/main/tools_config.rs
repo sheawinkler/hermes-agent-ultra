@@ -568,8 +568,12 @@ async fn run_optional_setup_sections(
             }
             2 => {
                 println!("\nOpening memory setup...");
-                hermes_cli::commands::handle_cli_memory(Some("setup".to_string()), None, false)
-                    .await?;
+                hermes_cli::commands::handle_cli_memory(
+                    Some("setup".to_string()),
+                    None,
+                    hermes_cli::commands::MemorySetupCliOptions::yes_only(false),
+                )
+                .await?;
             }
             3 => {
                 println!("\nOpening sentrux MCP setup...");

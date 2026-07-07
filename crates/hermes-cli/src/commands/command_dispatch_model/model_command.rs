@@ -46,7 +46,7 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
                 let (provider, model_id) = split_provider_model(&guarded);
                 let client = default_client();
                 client.fetch(false).await;
-                let caps = resolve_model_capabilities(provider, model_id, client);
+                let caps = resolve_model_capabilities(provider, model_id, client, Some(&app.config));
                 if !model_meets_requirements(caps, requirements) {
                     return Err(AgentError::Config(format!(
                         "Requested model '{}' does not satisfy required capabilities: {}.",
@@ -108,4 +108,3 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
     }
     Ok(CommandResult::Handled)
 }
-

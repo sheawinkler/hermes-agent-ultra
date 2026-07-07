@@ -133,14 +133,7 @@ pub fn discord_auto_thread_name(content: &str) -> String {
         candidate
     };
 
-    let mut name = candidate.chars().take(80).collect::<String>();
-    if candidate.chars().count() > 80 {
-        while name.chars().count() > 77 {
-            name.pop();
-        }
-        name.push_str("...");
-    }
-    name
+    truncate_discord_utf16_with_suffix(candidate, 80, "...")
 }
 
 pub fn discord_thread_create_success_message(thread_id: &str) -> String {
@@ -445,4 +438,3 @@ fn resolve_channel_skills_from_bindings(
         })
         .map(|binding| binding.skills.clone())
 }
-

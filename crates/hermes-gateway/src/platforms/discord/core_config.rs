@@ -433,6 +433,40 @@ fn truncate_discord_content(content: &str, max_chars: usize) -> String {
     content.chars().take(max_chars).collect()
 }
 
+fn discord_utf16_len(content: &str) -> usize {
+    content.encode_utf16().count()
+}
+
+fn truncate_discord_utf16_units(content: &str, max_units: usize) -> String {
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in content.chars() {
+        let width = ch.len_utf16();
+        if used + width > max_units {
+            break;
+        }
+        out.push(ch);
+        used += width;
+    }
+    out
+}
+
+fn truncate_discord_utf16_with_suffix(content: &str, max_units: usize, suffix: &str) -> String {
+    if discord_utf16_len(content) <= max_units {
+        return content.to_string();
+    }
+    let suffix_units = discord_utf16_len(suffix);
+    if suffix_units >= max_units {
+        return truncate_discord_utf16_units(suffix, max_units);
+    }
+    let mut out = truncate_discord_utf16_units(content, max_units - suffix_units);
+    while out.ends_with(char::is_whitespace) {
+        out.pop();
+    }
+    out.push_str(suffix);
+    out
+}
+
 fn discord_reply_reference_error_allows_retry(raw_error: &str) -> bool {
     let normalized = raw_error.to_ascii_lowercase();
     normalized.contains("cannot reply to a system message")
@@ -446,7 +480,7 @@ fn forum_thread_name(content: Option<&str>, file_name: Option<&str>) -> String {
         .or_else(|| file_name.map(str::trim).filter(|name| !name.is_empty()))
         .unwrap_or("Hermes");
 
-    candidate.chars().take(100).collect()
+    truncate_discord_utf16_units(candidate, 100)
 }
 
 fn forum_thread_message_body(content: &str) -> serde_json::Value {

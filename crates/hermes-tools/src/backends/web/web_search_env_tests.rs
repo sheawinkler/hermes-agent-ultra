@@ -13,6 +13,7 @@ mod web_search_env_tests {
             let g = test_lock::lock();
             let keys = [
                 "EXA_API_KEY",
+                "EXA_BASE_URL",
                 "TAVILY_API_KEY",
                 "TAVILY_BASE_URL",
                 "FIRECRAWL_API_KEY",
@@ -122,6 +123,17 @@ mod web_search_env_tests {
         std::env::set_var("EXA_API_KEY", "exa-key");
         std::env::set_var("TAVILY_API_KEY", "tavily-key");
         assert_eq!(search_backend_choice_from_env(), "exa");
+    }
+
+    #[test]
+    fn exa_from_env_honors_base_url_for_search_and_extract() {
+        let _scope = EnvScope::new();
+        std::env::set_var("EXA_API_KEY", "exa-key");
+        std::env::set_var("EXA_BASE_URL", "https://proxy.example.com/exa/");
+        let search = ExaSearchBackend::from_env().expect("exa search backend");
+        let extract = ExaExtractBackend::from_env().expect("exa extract backend");
+        assert_eq!(search.base_url(), "https://proxy.example.com/exa");
+        assert_eq!(extract.base_url(), "https://proxy.example.com/exa");
     }
 
     #[test]
@@ -356,6 +368,13 @@ mod web_search_env_tests {
     }
 
     #[test]
+    fn extract_backend_choice_uses_exa_key_when_present() {
+        let _scope = EnvScope::new();
+        std::env::set_var("EXA_API_KEY", "exa-key");
+        assert_eq!(extract_backend_choice_from_env(), "exa");
+    }
+
+    #[test]
     fn extract_backend_choice_uses_parallel_key_when_present() {
         let _scope = EnvScope::new();
         std::env::set_var("PARALLEL_API_KEY", "parallel-key");
@@ -363,12 +382,14 @@ mod web_search_env_tests {
     }
 
     #[test]
-    fn extract_backend_choice_accepts_explicit_simple_and_parallel() {
+    fn extract_backend_choice_accepts_explicit_simple_parallel_and_exa() {
         let _scope = EnvScope::new();
         std::env::set_var("HERMES_WEB_EXTRACT_BACKEND", "simple");
         assert_eq!(extract_backend_choice_from_env(), "simple");
         std::env::set_var("HERMES_WEB_EXTRACT_BACKEND", "parallel");
         assert_eq!(extract_backend_choice_from_env(), "parallel");
+        std::env::set_var("HERMES_WEB_EXTRACT_BACKEND", "exa");
+        assert_eq!(extract_backend_choice_from_env(), "exa");
     }
 
     #[test]
@@ -376,6 +397,13 @@ mod web_search_env_tests {
         let _scope = EnvScope::new();
         std::env::set_var("HERMES_WEB_BACKEND", "ddgs");
         assert_eq!(extract_backend_choice_from_env(), "search-only:ddgs");
+    }
+
+    #[test]
+    fn extract_backend_choice_honors_generic_exa_backend() {
+        let _scope = EnvScope::new();
+        std::env::set_var("HERMES_WEB_BACKEND", "exa");
+        assert_eq!(extract_backend_choice_from_env(), "exa");
     }
 
     #[test]
@@ -520,6 +548,63 @@ mod web_search_env_tests {
         assert_eq!(docs.len(), 2);
         assert_eq!(docs[0]["content"], "body");
         assert_eq!(docs[1]["error"], "blocked");
+    }
+
+    #[test]
+    fn normalize_exa_documents_maps_results_errors_and_empty_fallback() {
+        let docs = normalize_exa_documents(
+            &json!({
+                "results": [{"url": "https://docs.example.com/page", "title": "Docs", "text": "body"}],
+                "errors": [{"url": "https://bad.example", "message": "blocked"}]
+            }),
+            &["https://docs.example.com/page"],
+        );
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs[0]["content"], "body");
+        assert_eq!(docs[0]["raw_content"], "body");
+        assert_eq!(docs[1]["error"], "blocked");
+
+        let fallback = normalize_exa_documents(&json!({}), &["https://missing.example"]);
+        assert_eq!(fallback.len(), 1);
+        assert_eq!(
+            fallback[0]["error"],
+            "extraction failed (no content returned)"
+        );
+    }
+
+    #[tokio::test]
+    async fn exa_keyed_extract_posts_contents_payload() {
+        use wiremock::matchers::{body_partial_json, header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/contents"))
+            .and(header("x-api-key", "exa-key"))
+            .and(body_partial_json(json!({
+                "ids": ["https://docs.example.com/page"],
+                "text": true,
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "results": [{
+                    "url": "https://docs.example.com/page",
+                    "title": "Docs",
+                    "text": "official content"
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let backend = ExaExtractBackend::with_base_url("exa-key".to_string(), server.uri());
+        let out = backend
+            .extract("https://docs.example.com/page", false)
+            .await
+            .expect("exa extract");
+        let json: Value = serde_json::from_str(&out).expect("json output");
+        assert_eq!(json["provider"], "exa");
+        assert_eq!(json["content"], "official content");
+        assert_eq!(json["results"][0]["title"], "Docs");
     }
 
     #[tokio::test]
