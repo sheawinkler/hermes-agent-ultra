@@ -26,6 +26,7 @@ impl Gateway {
             mcp_reload_generation: RwLock::new(0),
             hook_registry: RwLock::new(None),
             platform_access_policies: RwLock::new(HashMap::new()),
+            fail_closed_default_warnings: RwLock::new(HashSet::new()),
             message_deduplicator: RwLock::new(MessageDeduplicator::default()),
             busy_sessions: Arc::new(RwLock::new(BusySessionCoordinator::default())),
         }

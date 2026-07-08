@@ -1825,6 +1825,11 @@
       "disposition": "ported",
       "notes": "Rust port implements upstream coding-context posture through crates/hermes-agent/src/coding_context.rs, AgentConfig/GatewayConfig agent.coding_context, prompt injection with workspace/verify facts, model-family edit-format guidance, prompt-only non-coding skill pruning, a lean coding toolset, ACP default toolset registration, and focus-mode platform tool collapse with live MCP inclusion. Tests cover detection, prompt gating, skill pruning, coding/hermes-acp toolsets, and platform focus behavior."
     },
+    "3e7ade418d030d241bda4c6352ff52409f4582ec": {
+      "disposition": "ported",
+      "notes": "Ported in Rust gateway policy: Discord Allowlist mode with no access configuration now has a deterministic fail-closed diagnostic through PlatformAccessPolicy::fail_closed_default_warning and one-shot gateway warning emission; regression coverage validates the message and scoping.",
+      "owner": "rust-runtime"
+    },
     "3e7ed0c53b59174c86cd7ff945c745a35e8c4e51": {
       "disposition": "superseded",
       "notes": "Upstream Electron/React/Tauri desktop delta is superseded by Hermes Ultra Rust-first CLI/TUI/gateway/dashboard surfaces; this repo intentionally does not ship apps/desktop or the bootstrap installer as runtime products.",
@@ -2158,6 +2163,11 @@
       "disposition": "ported",
       "notes": "Rust Nous provider request shaping now centralizes Portal attribution tags as product=hermes-agent plus client=hermes-client-v<workspace version>, and request-body tests prove the versioned tag is applied to actual Nous chat completion payloads."
     },
+    "48788032da2e88f0a010791a61667539272df65b": {
+      "disposition": "superseded",
+      "notes": "Upstream Python tui_gateway source-enum derivation is superseded by the Rust runtime surface: platform session ownership lives in typed Rust gateway/platform code rather than Python TUI hardcoded source lists.",
+      "owner": "rust-runtime"
+    },
     "488ae376dbef8e411f30e844e8b40ba55fc97e19": {
       "disposition": "superseded",
       "notes": "Upstream Electron desktop/bootstrap-only delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: the local repo does not ship apps/desktop or apps/bootstrap-installer as runtime products, while Rust CLI/TUI/gateway/provider surfaces own operator UX, model/tool visibility, update/status behavior, preview rendering, pet UX, project/coding panes, and platform integration. Mixed commits touching gateway/provider/install/runtime files remain pending for separate Rust evidence.",
@@ -2346,6 +2356,11 @@
       "notes": "Upstream Python/Electron CI or Docker-test orchestration delta is superseded by Hermes Agent Ultra's Rust-first CI surface: the local workflows build/test the Rust workspace, run parity gates, and use the distinct Rust Docker image/entrypoint contracts rather than upstream uv/s6/Electron docker jobs.",
       "owner": "rust-runtime"
     },
+    "4d7f8ade3e586d83003d61be76e909f364040fba": {
+      "disposition": "superseded",
+      "notes": "Upstream unsupported pip/Homebrew warning is intentionally not ported: Hermes Agent Ultra supports its own Rust installer/release artifact path, installs hermes-agent-ultra/hermes-ultra without clobbering upstream Nous hermes, and documents that coexistence in README/install contracts.",
+      "owner": "rust-runtime"
+    },
     "4da744ef9b6182982684c6b46bd5f41569e907ee": {
       "disposition": "superseded",
       "notes": "Upstream Electron/React desktop-web delta is superseded by Hermes Agent Ultra's Rust-first shipped surfaces: this repo has no apps/desktop, apps/shared, or web runtime tree, while Rust CLI/TUI/gateway/tool surfaces own operator UX, session, terminal, voice, status, and gateway behavior. Mixed commits touching Rust/runtime/provider/platform files remain pending for separate evidence.",
@@ -2389,6 +2404,11 @@
     "4ed2f3399418": {
       "disposition": "superseded",
       "notes": "Long user-message scrolling is a desktop React thread presentation fix. Ultra uses Rust terminal/TUI history rendering instead of apps/desktop thread components.",
+      "owner": "rust-runtime"
+    },
+    "4f620a0bbc11f41f241145a8dad3f70989507559": {
+      "disposition": "superseded",
+      "notes": "Upstream WhatsApp dashboard QR onboarding is Python/web/Baileys dashboard surface. Hermes Agent Ultra ships the Rust WhatsApp Cloud API adapter plus Rust DM pairing/allowlist policy and does not port Python dashboard onboarding flows into the Rust runtime.",
       "owner": "rust-runtime"
     },
     "4ffdedd369c1": {
@@ -4655,6 +4675,11 @@
       "disposition": "superseded",
       "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
     },
+    "9de9c25f620ff7f1ce0fd5457d596052d5159596": {
+      "disposition": "superseded",
+      "notes": "Upstream Python package release v0.18.2 metadata is superseded by the local Rust release train, currently beyond that version with Rust workspace/Cargo release artifacts and repo-local release gates.",
+      "owner": "rust-runtime"
+    },
     "9e02b18828a2": {
       "disposition": "superseded",
       "notes": "Upstream desktop/Electron/bootstrap-installer GUI delta is superseded by the approved rust-cli-tui-primary-ux-surface divergence: this Rust repo has no apps/desktop or apps/bootstrap-installer tree, and Rust CLI/TUI/gateway/install paths own runtime UX instead."
@@ -5847,6 +5872,11 @@
       "notes": "Rust already provides Home Assistant as first-class native runtime surface: REST backend, ha_list_entities/ha_get_state/ha_list_services/ha_call_service handlers, homeassistant toolset and aliases, send-message platform routing, and gateway adapter coverage. The upstream Python bundled-plugin migration is represented by Rust-native built-in registration and platform contract tests rather than a Python plugin package.",
       "owner": "rust-runtime"
     },
+    "c3808cfc1409e20e2ee0422f1428436465bbda6d": {
+      "disposition": "ported",
+      "notes": "Ported in Rust gateway auth: route_message now treats DmManager-authorized platform sources as approved pairing/source grants for Discord group and slash user-allowlist checks while preserving channel/ignored-channel gates. Regression coverage includes gateway_discord_group_allowlist_honors_authorized_source_pairing and gateway_discord_slash_requires_allowlist.",
+      "owner": "rust-runtime"
+    },
     "c38dac742b22": {
       "disposition": "ported",
       "notes": "Rust Hindsight flushes buffered turns before adopting a new session_id, clears stale prefetch context, resets counters, and has regression coverage for session switch behavior."
@@ -6891,6 +6921,11 @@
       "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
       "owner": "rust-runtime"
     },
+    "e5ac169c2877966689288f067b49c111d5b96380": {
+      "disposition": "ported",
+      "notes": "Ported/superseded by the Rust terminal/process surface: terminal exposes pty/background/stdin_data, process exposes list/poll/log/wait/kill/write/submit/close, and process_registry records durable metadata. This covers the drain/attach/detach/EOF lifecycle intent without depending on the upstream Python dashboard WebSocket PTY session.",
+      "owner": "rust-runtime"
+    },
     "e5d22ab80d979d38d8062e666af418ed847618a9": {
       "disposition": "superseded",
       "notes": "Upstream Daytona fix quotes a Python SDK shell mkdir in the single-upload path. Hermes Agent Ultra's Rust DaytonaBackend does not run mkdir for writes; it sends PUT /workspace/{id}/file with the remote path URL-encoded, so the shell-metacharacter injection class is absent.",
@@ -7403,9 +7438,19 @@
       "notes": "Upstream Python gateway/platform/TUI delta is superseded by Hermes Ultra Rust gateway adapters, async reqwest/Tokio runtime, typed media/cache/auth paths, and focused Rust gateway tests; Python-specific GIL/aiohttp/discord.py failure modes are absent.",
       "owner": "rust-runtime"
     },
+    "f5ef7ee9da66cff764296ed9da9c69b70105a90f": {
+      "disposition": "superseded",
+      "notes": "Upstream Python tui_gateway ws_orphan_reap fix is superseded by the Rust CLI/TUI/gateway runtime boundary: Ultra does not rely on the Python TUI gateway reaper to own platform session lifecycle, and Rust gateway/session routing owns platform-originated sessions directly.",
+      "owner": "rust-runtime"
+    },
     "f6275a59e790477092e6c70b06ba4a5d1d882615": {
       "disposition": "superseded",
       "notes": "Documentation-only upstream delta is superseded by local Rust-first docs/parity/release surfaces; it does not add or change a shipped Rust runtime behavior. Skills/docs/config-mixed items remain pending for separate evidence.",
+      "owner": "rust-runtime"
+    },
+    "f64e4f4f5768c18a53f44890747653bafcab2796": {
+      "disposition": "ported",
+      "notes": "Ported as Rust relay identity-token contract coverage: hermes_gateway::relay now models generic OIDC client_credentials relay provisioning with env/config precedence, Nous-Portal default mode selection, client_credentials form shape, fail-closed missing client credentials, async access_token fetch, and focused relay tests. The experimental relay adapter remains inactive by default in Ultra.",
       "owner": "rust-runtime"
     },
     "f6574978de39": {
@@ -7505,6 +7550,11 @@
     "f9c6c5ab8472": {
       "disposition": "ported",
       "notes": "Rust Hindsight now creates a per-initialization document_id and includes it in auto-retain batch bodies, with tests proving resumed sessions get distinct document IDs."
+    },
+    "f9eca7e15f1c2bfe5194aae5aa489af53c0a1a23": {
+      "disposition": "superseded",
+      "notes": "Upstream Python package release v0.18.1 metadata is superseded by the local Rust release train, currently beyond that version with Rust workspace/Cargo release artifacts and repo-local release gates.",
+      "owner": "rust-runtime"
     },
     "f9ffe0bc3f61": {
       "disposition": "superseded",

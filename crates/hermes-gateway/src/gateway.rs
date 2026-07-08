@@ -421,6 +421,8 @@ pub struct Gateway {
     hook_registry: RwLock<Option<Arc<HookRegistry>>>,
     /// Per-platform allowlist policy for group and slash-command traffic.
     platform_access_policies: RwLock<HashMap<String, PlatformAccessPolicy>>,
+    /// One-shot warnings for platform policies that fail closed by default.
+    fail_closed_default_warnings: RwLock<HashSet<String>>,
     /// Bounded duplicate guard for platform redeliveries/restarts.
     message_deduplicator: RwLock<MessageDeduplicator>,
     /// Active gateway sessions plus queued/steered busy follow-ups.

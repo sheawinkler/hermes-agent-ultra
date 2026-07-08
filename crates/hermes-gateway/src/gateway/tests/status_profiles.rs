@@ -200,6 +200,39 @@ async fn gateway_group_allowlist_denies_unauthorized_user() {
 }
 
 #[tokio::test]
+async fn gateway_discord_group_allowlist_honors_authorized_source_pairing() {
+    let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+    let mut dm_manager = DmManager::with_ignore_behavior();
+    dm_manager.authorize_user_for_platform("discord", "paired_user");
+    let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+    let mut policies = HashMap::new();
+    let mut policy = PlatformAccessPolicy {
+        group_mode: GroupAccessMode::Allowlist,
+        ..PlatformAccessPolicy::default()
+    };
+    policy.allowed_users.insert("allowed_user".to_string());
+    policies.insert("discord".to_string(), policy);
+    gw.set_platform_access_policies(policies).await;
+
+    let incoming = IncomingMessage {
+        platform: "discord".into(),
+        chat_id: "guild:42".into(),
+        user_id: "paired_user".into(),
+        text: "hello group".into(),
+        message_id: Some("m1".into()),
+        thread_id: None,
+        is_dm: false,
+    };
+
+    assert!(gw.route_message(&incoming).await.is_err());
+    assert_eq!(
+        gw.session_transcript_len("discord", "guild:42", "paired_user")
+            .await,
+        1
+    );
+}
+
+#[tokio::test]
 async fn gateway_group_allowlist_star_authorizes_any_sender() {
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
     let dm_manager = DmManager::with_ignore_behavior();
@@ -230,6 +263,33 @@ async fn gateway_group_allowlist_star_authorizes_any_sender() {
             .await,
         1
     );
+}
+
+#[test]
+fn discord_fail_closed_default_warning_is_precise() {
+    let fail_closed = PlatformAccessPolicy {
+        group_mode: GroupAccessMode::Allowlist,
+        ..PlatformAccessPolicy::default()
+    };
+    let message = fail_closed
+        .fail_closed_default_warning("discord")
+        .expect("discord allowlist mode without grants should warn");
+    assert!(message.contains("Discord messages are being denied"));
+    assert!(message.contains("DISCORD_ALLOW_ALL_USERS=true"));
+
+    let with_user = PlatformAccessPolicy {
+        group_mode: GroupAccessMode::Allowlist,
+        allowed_users: ["allowed_user"].into_iter().map(String::from).collect(),
+        ..PlatformAccessPolicy::default()
+    };
+    assert!(with_user.fail_closed_default_warning("discord").is_none());
+
+    let open_mode = PlatformAccessPolicy {
+        group_mode: GroupAccessMode::Open,
+        ..PlatformAccessPolicy::default()
+    };
+    assert!(open_mode.fail_closed_default_warning("discord").is_none());
+    assert!(fail_closed.fail_closed_default_warning("telegram").is_none());
 }
 
 #[tokio::test]
@@ -492,7 +552,8 @@ async fn gateway_discord_slash_requires_allowlist() {
         messages: sent.clone(),
     });
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
-    let dm_manager = DmManager::with_ignore_behavior();
+    let mut dm_manager = DmManager::with_ignore_behavior();
+    dm_manager.authorize_user_for_platform("discord", "paired_user");
     let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
     gw.register_adapter("discord", adapter).await;
 
@@ -536,6 +597,22 @@ async fn gateway_discord_slash_requires_allowlist() {
     assert_eq!(sent_msgs.len(), 1);
     assert_eq!(sent_msgs[0].0, "guild:1");
     assert!(!sent_msgs[0].1.trim().is_empty());
+    drop(sent_msgs);
+
+    let paired = IncomingMessage {
+        platform: "discord".into(),
+        chat_id: "guild:1".into(),
+        user_id: "paired_user".into(),
+        text: "/status".into(),
+        message_id: Some("m3".into()),
+        thread_id: None,
+        is_dm: false,
+    };
+    assert!(gw.route_message(&paired).await.is_ok());
+    let sent_msgs = sent.lock().unwrap();
+    assert_eq!(sent_msgs.len(), 2);
+    assert_eq!(sent_msgs[1].0, "guild:1");
+    assert!(!sent_msgs[1].1.trim().is_empty());
 }
 
 #[tokio::test]

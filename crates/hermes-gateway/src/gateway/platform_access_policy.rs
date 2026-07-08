@@ -3,6 +3,28 @@ impl PlatformAccessPolicy {
         !self.allowed_users.is_empty() || !self.admin_users.is_empty()
     }
 
+    fn has_any_access_configuration(&self) -> bool {
+        self.has_allowlist()
+            || !self.allowed_channels.is_empty()
+            || !self.authorized_group_chats.is_empty()
+            || !self.ignored_channels.is_empty()
+    }
+
+    fn fail_closed_default_warning(&self, platform: &str) -> Option<&'static str> {
+        if !platform.eq_ignore_ascii_case("discord")
+            || self.group_mode != GroupAccessMode::Allowlist
+            || self.has_any_access_configuration()
+        {
+            return None;
+        }
+
+        Some(
+            "Discord messages are being denied because no allowlist is configured. Set \
+             DISCORD_ALLOWED_USERS, DISCORD_ALLOWED_ROLES, or DISCORD_ALLOWED_CHANNELS, \
+             or set DISCORD_ALLOW_ALL_USERS=true for open access.",
+        )
+    }
+
     fn user_matches_any(user_id: &str, set: &HashSet<String>) -> bool {
         let candidate = user_id.trim();
         if candidate.is_empty() {

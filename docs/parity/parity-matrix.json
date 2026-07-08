@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-07-07T21:51:21.663142+00:00",
+  "generated_at_utc": "2026-07-08T09:23:39.924163+00:00",
   "refs": {
     "local_ref": "HEAD",
-    "local_sha": "8c58db72e5e53c349a77cd59efe3e5b86b001adf",
+    "local_sha": "4f83eedf9cfafa82d81b3f2ea8ada0027536c99a",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "5e51b123f32b7f6a51fbd5759e89ba5146ce4003",
+    "upstream_sha": "f64e4f4f5768c18a53f44890747653bafcab2796",
     "merge_base": null
   },
   "summary": {
     "commits_behind": 1,
-    "commits_ahead": 1334,
+    "commits_ahead": 1337,
     "upstream_patch_missing": 1,
     "upstream_patch_represented": 0,
-    "local_patch_unique": 1068,
-    "files_only_upstream": 3422,
-    "files_only_local": 1335,
+    "local_patch_unique": 1071,
+    "files_only_upstream": 3439,
+    "files_only_local": 1336,
     "files_shared_identical": 1458,
-    "files_shared_different": 1279,
-    "tree_files_changed": 5934,
-    "tree_insertions": 1360345,
-    "tree_deletions": 602812
+    "files_shared_different": 1280,
+    "tree_files_changed": 5953,
+    "tree_insertions": 1369575,
+    "tree_deletions": 606983
   },
   "top_upstream_only": [
     {
@@ -32,15 +32,15 @@
     },
     {
       "path": "tests/hermes_cli",
-      "count": 227
+      "count": 229
     },
     {
       "path": "tests/gateway",
-      "count": 221
+      "count": 226
     },
     {
       "path": "tests/agent",
-      "count": 152
+      "count": 153
     },
     {
       "path": "web/src",
@@ -48,7 +48,7 @@
     },
     {
       "path": "tests/tools",
-      "count": 101
+      "count": 104
     },
     {
       "path": "optional-skills/creative",
@@ -100,14 +100,14 @@
     },
     {
       "path": "tests/tui_gateway",
-      "count": 18
-    },
-    {
-      "path": ".github/workflows",
-      "count": 14
+      "count": 19
     },
     {
       "path": "tests/cron",
+      "count": 15
+    },
+    {
+      "path": ".github/workflows",
       "count": 14
     },
     {
@@ -395,11 +395,11 @@
       "count": 18
     },
     {
-      "path": "crates/hermes-eval",
-      "count": 16
+      "path": "docs/releases",
+      "count": 17
     },
     {
-      "path": "docs/releases",
+      "path": "crates/hermes-eval",
       "count": 16
     },
     {
@@ -518,15 +518,15 @@
     },
     {
       "path": "tests/hermes_cli",
-      "count": 227
+      "count": 229
     },
     {
       "path": "tests/gateway",
-      "count": 221
+      "count": 226
     },
     {
       "path": "tests/agent",
-      "count": 152
+      "count": 153
     },
     {
       "path": "web/src",
@@ -534,7 +534,7 @@
     },
     {
       "path": "tests/tools",
-      "count": 101
+      "count": 104
     },
     {
       "path": "optional-skills/creative",
@@ -586,14 +586,14 @@
     },
     {
       "path": "tests/tui_gateway",
-      "count": 18
-    },
-    {
-      "path": ".github/workflows",
-      "count": 14
+      "count": 19
     },
     {
       "path": "tests/cron",
+      "count": 15
+    },
+    {
+      "path": ".github/workflows",
       "count": 14
     },
     {
@@ -719,11 +719,11 @@
       "count": 18
     },
     {
-      "path": "crates/hermes-eval",
-      "count": 16
+      "path": "docs/releases",
+      "count": 17
     },
     {
-      "path": "docs/releases",
+      "path": "crates/hermes-eval",
       "count": 16
     },
     {
@@ -836,7 +836,7 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 1004,
+      "upstream_only": 1019,
       "shared_different": 798,
       "local_only": 43,
       "risk": "critical",
@@ -846,8 +846,8 @@
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 1421,
-      "shared_different": 12,
+      "upstream_only": 1422,
+      "shared_different": 13,
       "local_only": 454,
       "risk": "critical",
       "effort": "XL"
@@ -858,7 +858,7 @@
       "name": "UX parity",
       "upstream_only": 587,
       "shared_different": 328,
-      "local_only": 137,
+      "local_only": 138,
       "risk": "high",
       "effort": "XL"
     },
@@ -866,7 +866,7 @@
       "workstream": "WS3",
       "issue": 7,
       "name": "Tools and adapters parity",
-      "upstream_only": 180,
+      "upstream_only": 181,
       "shared_different": 102,
       "local_only": 161,
       "risk": "high",
@@ -906,10 +906,10 @@
   "commit_mapping": {
     "upstream_patch_missing": 1,
     "upstream_patch_represented": 0,
-    "local_patch_unique": 1068,
+    "local_patch_unique": 1071,
     "local_patch_equivalent_to_upstream": 0,
     "upstream_patch_missing_sample": [
-      "5e51b123f32b7f6a51fbd5759e89ba5146ce4003"
+      "f64e4f4f5768c18a53f44890747653bafcab2796"
     ],
     "upstream_patch_represented_sample": [],
     "local_patch_unique_sample": [

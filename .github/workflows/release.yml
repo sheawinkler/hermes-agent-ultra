@@ -190,4 +190,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Smoke published release artifact
-        run: bash scripts/smoke-release-artifact.sh --version "${GITHUB_REF_NAME}"
+        run: |
+          mkdir -p .sync-reports
+          bash scripts/smoke-release-artifact.sh \
+            --version "${GITHUB_REF_NAME}" \
+            --output-json .sync-reports/release-artifact-smoke.json
+      - name: Upload release smoke report
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifact-smoke
+          path: .sync-reports/release-artifact-smoke.json

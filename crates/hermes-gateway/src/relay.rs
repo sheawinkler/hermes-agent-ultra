@@ -10,12 +10,78 @@ use serde_json::{json, Value};
 use url::Url;
 
 pub const RELAY_UNAUTHORIZED_CLOSE_CODE: u16 = 4401;
+const RELAY_CLIENT_CREDENTIALS_TIMEOUT_SECS: u64 = 15;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelayCloseDisposition {
     Retryable,
     Disabled,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayIdentityTokenMode {
+    NousPortal,
+    GenericOidcClientCredentials,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct RelayIdentityProviderConfig {
+    pub token_url: String,
+    pub client_id: String,
+    pub client_secret: String,
+    pub scope: String,
+}
+
+impl RelayIdentityProviderConfig {
+    pub fn new(
+        token_url: impl Into<String>,
+        client_id: impl Into<String>,
+        client_secret: impl Into<String>,
+        scope: impl Into<String>,
+    ) -> Self {
+        Self {
+            token_url: token_url.into(),
+            client_id: client_id.into(),
+            client_secret: client_secret.into(),
+            scope: scope.into(),
+        }
+        .normalized()
+    }
+
+    pub fn normalized(mut self) -> Self {
+        self.token_url = self.token_url.trim().to_string();
+        self.client_id = self.client_id.trim().to_string();
+        self.client_secret = self.client_secret.trim().to_string();
+        self.scope = self.scope.trim().to_string();
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelayIdentityTokenError {
+    MissingClientCredentials,
+    Request(String),
+    MissingAccessToken,
+}
+
+impl std::fmt::Display for RelayIdentityTokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingClientCredentials => {
+                write!(
+                    f,
+                    "gateway.idp.token_url configured but client_id/client_secret missing"
+                )
+            }
+            Self::Request(err) => write!(f, "IdP client_credentials request failed: {err}"),
+            Self::MissingAccessToken => {
+                write!(f, "IdP client_credentials response had no access_token")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RelayIdentityTokenError {}
 
 /// Connector-forwarded passthrough-plane request (`passthrough_forward`).
 ///
@@ -114,6 +180,86 @@ pub fn relay_inbound_ack_frame(buffer_id: &str) -> Option<Value> {
     (!buffer_id.is_empty()).then(|| json!({"type": "inbound_ack", "bufferId": buffer_id}))
 }
 
+pub fn relay_identity_provider_config_from_sources(
+    env: RelayIdentityProviderConfig,
+    config: RelayIdentityProviderConfig,
+) -> RelayIdentityProviderConfig {
+    let env = env.normalized();
+    if !env.token_url.is_empty() {
+        return env;
+    }
+    let config = config.normalized();
+    RelayIdentityProviderConfig {
+        token_url: config.token_url,
+        client_id: first_nonempty(env.client_id, config.client_id),
+        client_secret: first_nonempty(env.client_secret, config.client_secret),
+        scope: first_nonempty(env.scope, config.scope),
+    }
+}
+
+pub fn relay_identity_token_mode(config: &RelayIdentityProviderConfig) -> RelayIdentityTokenMode {
+    if config.token_url.trim().is_empty() {
+        RelayIdentityTokenMode::NousPortal
+    } else {
+        RelayIdentityTokenMode::GenericOidcClientCredentials
+    }
+}
+
+pub fn relay_client_credentials_form(
+    config: &RelayIdentityProviderConfig,
+) -> Result<Vec<(String, String)>, RelayIdentityTokenError> {
+    let config = config.clone().normalized();
+    if config.client_id.is_empty() || config.client_secret.is_empty() {
+        return Err(RelayIdentityTokenError::MissingClientCredentials);
+    }
+    let mut form = vec![
+        ("grant_type".to_string(), "client_credentials".to_string()),
+        ("client_id".to_string(), config.client_id),
+        ("client_secret".to_string(), config.client_secret),
+    ];
+    if !config.scope.is_empty() {
+        form.push(("scope".to_string(), config.scope));
+    }
+    Ok(form)
+}
+
+pub async fn relay_fetch_client_credentials_identity_token(
+    config: &RelayIdentityProviderConfig,
+) -> Result<String, RelayIdentityTokenError> {
+    let config = config.clone().normalized();
+    let form = relay_client_credentials_form(&config)?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            RELAY_CLIENT_CREDENTIALS_TIMEOUT_SECS,
+        ))
+        .build()
+        .map_err(|err| RelayIdentityTokenError::Request(err.to_string()))?;
+    let response = client
+        .post(&config.token_url)
+        .form(&form)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .map_err(|err| RelayIdentityTokenError::Request(err.to_string()))?;
+    if !response.status().is_success() {
+        return Err(RelayIdentityTokenError::Request(format!(
+            "token endpoint returned {}",
+            response.status()
+        )));
+    }
+    let payload = response
+        .json::<Value>()
+        .await
+        .map_err(|err| RelayIdentityTokenError::Request(err.to_string()))?;
+    payload
+        .get("access_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or(RelayIdentityTokenError::MissingAccessToken)
+}
+
 /// Resolve the platform-neutral relay scope discriminator.
 ///
 /// `scope_id` is canonical; `guild_id` is a deprecated compatibility alias
@@ -197,6 +343,14 @@ fn normalize_relay_urlish(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
+fn first_nonempty(primary: String, fallback: String) -> String {
+    if primary.trim().is_empty() {
+        fallback
+    } else {
+        primary
+    }
+}
+
 /// Connector-side relevance policy projected from platform mention controls.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -250,6 +404,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{body_string_contains, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn passthrough_forward_decodes_exact_body_and_headers() {
@@ -299,6 +455,148 @@ mod tests {
             json!({"type": "inbound_ack", "bufferId": "buf-9"})
         );
         assert!(relay_inbound_ack_frame("   ").is_none());
+    }
+
+    #[test]
+    fn relay_identity_token_mode_defaults_to_nous_portal() {
+        let cfg = RelayIdentityProviderConfig::default();
+        assert_eq!(
+            relay_identity_token_mode(&cfg),
+            RelayIdentityTokenMode::NousPortal
+        );
+    }
+
+    #[test]
+    fn relay_identity_provider_env_token_url_wins_over_config() {
+        let env = RelayIdentityProviderConfig::new(
+            " https://env-idp.example/token ",
+            "env-client",
+            "env-secret",
+            "env.scope",
+        );
+        let config = RelayIdentityProviderConfig::new(
+            "https://cfg-idp.example/token",
+            "cfg-client",
+            "cfg-secret",
+            "cfg.scope",
+        );
+
+        let resolved = relay_identity_provider_config_from_sources(env, config);
+
+        assert_eq!(resolved.token_url, "https://env-idp.example/token");
+        assert_eq!(resolved.client_id, "env-client");
+        assert_eq!(resolved.client_secret, "env-secret");
+        assert_eq!(resolved.scope, "env.scope");
+        assert_eq!(
+            relay_identity_token_mode(&resolved),
+            RelayIdentityTokenMode::GenericOidcClientCredentials
+        );
+    }
+
+    #[test]
+    fn relay_identity_provider_config_fills_from_config_and_env_overrides_creds() {
+        let env = RelayIdentityProviderConfig::new("", "env-client", "", "env.scope");
+        let config = RelayIdentityProviderConfig::new(
+            "https://cfg-idp.example/token",
+            "cfg-client",
+            "cfg-secret",
+            "cfg.scope",
+        );
+
+        let resolved = relay_identity_provider_config_from_sources(env, config);
+
+        assert_eq!(resolved.token_url, "https://cfg-idp.example/token");
+        assert_eq!(resolved.client_id, "env-client");
+        assert_eq!(resolved.client_secret, "cfg-secret");
+        assert_eq!(resolved.scope, "env.scope");
+    }
+
+    #[test]
+    fn relay_client_credentials_form_matches_oidc_contract() {
+        let form = relay_client_credentials_form(&RelayIdentityProviderConfig::new(
+            "https://idp.example/token",
+            "agent-client",
+            "shh",
+            "connector.provision",
+        ))
+        .expect("form");
+
+        assert_eq!(
+            form,
+            vec![
+                ("grant_type".to_string(), "client_credentials".to_string()),
+                ("client_id".to_string(), "agent-client".to_string()),
+                ("client_secret".to_string(), "shh".to_string()),
+                ("scope".to_string(), "connector.provision".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn relay_client_credentials_form_fails_closed_without_secret() {
+        let err = relay_client_credentials_form(&RelayIdentityProviderConfig::new(
+            "https://idp.example/token",
+            "agent-client",
+            "",
+            "",
+        ))
+        .expect_err("missing secret");
+
+        assert_eq!(err, RelayIdentityTokenError::MissingClientCredentials);
+        assert!(err.to_string().contains("client_id/client_secret missing"));
+    }
+
+    #[tokio::test]
+    async fn relay_client_credentials_fetch_posts_form_and_returns_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(header("accept", "application/json"))
+            .and(body_string_contains("grant_type=client_credentials"))
+            .and(body_string_contains("client_id=agent-client"))
+            .and(body_string_contains("client_secret=shh"))
+            .and(body_string_contains("scope=connector.provision"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "idp-workload-token",
+                "token_type": "Bearer",
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let token =
+            relay_fetch_client_credentials_identity_token(&RelayIdentityProviderConfig::new(
+                format!("{}/token", server.uri()),
+                "agent-client",
+                "shh",
+                "connector.provision",
+            ))
+            .await
+            .expect("token");
+
+        assert_eq!(token, "idp-workload-token");
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn relay_client_credentials_fetch_requires_access_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"token_type":"Bearer"})))
+            .mount(&server)
+            .await;
+
+        let err = relay_fetch_client_credentials_identity_token(&RelayIdentityProviderConfig::new(
+            format!("{}/token", server.uri()),
+            "c",
+            "s",
+            "",
+        ))
+        .await
+        .expect_err("missing token");
+
+        assert_eq!(err, RelayIdentityTokenError::MissingAccessToken);
     }
 
     #[test]

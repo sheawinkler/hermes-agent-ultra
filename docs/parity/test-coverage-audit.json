@@ -16,7 +16,7 @@
       "kind": "nonzero_tree_drift",
       "message": "max_files_only_upstream remains nonzero in parity matrix",
       "metric": "max_files_only_upstream",
-      "value": 3422.0
+      "value": 3439.0
     }
   ],
   "audit_gate": {
@@ -90,7 +90,7 @@
     }
   ],
   "critical_gaps": [],
-  "generated_at_utc": "2026-07-07T21:51:23.613081+00:00",
+  "generated_at_utc": "2026-07-08T09:23:41.617774+00:00",
   "intent_domains": [
     {
       "classification": "direct_rust_test",
@@ -156,7 +156,7 @@
     },
     {
       "classification": "direct_rust_test",
-      "direct_test_evidence_count": 100,
+      "direct_test_evidence_count": 101,
       "direct_test_evidence_sample": [
         "crates/hermes-tools/src/approval.rs",
         "crates/hermes-tools/src/approval/tests.rs",
@@ -184,7 +184,7 @@
         "crates/hermes-tools/src/backends/vision.rs",
         "crates/hermes-tools/src/backends/web.rs"
       ],
-      "evidence_count": 122,
+      "evidence_count": 123,
       "evidence_sample": [
         "crates/hermes-tools/src/approval.rs",
         "crates/hermes-tools/src/approval/patterns.rs",
@@ -632,9 +632,9 @@
     "divergence_unowned": 0,
     "missing_rust_test_refs": 0,
     "queue_pending": 0,
-    "queue_total": 1,
-    "rust_test_files": 422,
-    "rust_test_functions": 7391,
+    "queue_total": 51,
+    "rust_test_files": 423,
+    "rust_test_functions": 7412,
     "test_intent_mapping_ratio": 1.0,
     "test_intents_mapped": 10,
     "test_intents_total": 10,

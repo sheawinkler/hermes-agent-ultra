@@ -38,6 +38,59 @@ def as_bool(value: Any) -> bool:
     return bool(value)
 
 
+def build_upstream_delta_watch(
+    proof: dict[str, Any],
+    thresholds: dict[str, Any],
+    queue_pending: int,
+    release_gate_pass: bool,
+) -> dict[str, Any]:
+    metrics = proof.get("metrics", {}) if isinstance(proof.get("metrics"), dict) else {}
+    ci_gate = proof.get("ci_gate", {}) if isinstance(proof.get("ci_gate"), dict) else {}
+    drift_thresholds = (
+        thresholds.get("drift_alert_thresholds", {})
+        if isinstance(thresholds.get("drift_alert_thresholds"), dict)
+        else {}
+    )
+    alerts: list[dict[str, Any]] = []
+    for metric_name, threshold_key in [
+        ("max_commits_behind", "warn_commits_behind"),
+        ("max_upstream_patch_missing", "warn_upstream_patch_missing"),
+        ("max_files_only_upstream", "warn_files_only_upstream"),
+    ]:
+        actual = as_int(metrics.get(metric_name))
+        limit = as_int(drift_thresholds.get(threshold_key))
+        if limit > 0 and actual > limit:
+            alerts.append(
+                {
+                    "metric": metric_name,
+                    "actual": actual,
+                    "warn_threshold": limit,
+                    "status": "watch",
+                }
+            )
+
+    ci_gate_pass = bool(ci_gate.get("pass", False))
+    pass_gate = queue_pending == 0 and release_gate_pass
+    return {
+        "schema_version": 1,
+        "pass": pass_gate,
+        "status": (
+            "PASS"
+            if pass_gate and ci_gate_pass and not alerts
+            else ("WATCH" if pass_gate else "FAIL")
+        ),
+        "queue_pending": queue_pending,
+        "release_gate_pass": release_gate_pass,
+        "ci_gate_pass": ci_gate_pass,
+        "alerts": alerts,
+        "source_artifacts": [
+            "docs/parity/global-parity-proof.json",
+            "docs/parity/upstream-missing-queue.json",
+            "docs/parity/global-parity-thresholds.json",
+        ],
+    }
+
+
 def workspace_version(repo_root: Path) -> str:
     cargo = repo_root / "Cargo.toml"
     text = cargo.read_text(encoding="utf-8") if cargo.exists() else ""
@@ -62,6 +115,7 @@ def build_summary(repo_root: Path) -> dict[str, Any]:
     shared = load_json(repo_root / "docs/parity/shared-diff-backlog.json")
     coverage = load_json(repo_root / "docs/parity/test-coverage-audit.json")
     sota = load_json(repo_root / "docs/parity/sota-harness-matrix.json")
+    thresholds = load_json(repo_root / "docs/parity/global-parity-thresholds.json")
 
     queue_pending = as_int(metric(queue, "summary", "by_disposition", "pending", default=0))
     shared_pending_classification = as_int(metric(shared, "summary", "pending_classification", default=0))
@@ -71,6 +125,9 @@ def build_summary(repo_root: Path) -> dict[str, Any]:
     sota_critical = as_int(metric(sota, "gate", "critical_gaps", default=0))
     sota_missing_refs = as_int(metric(sota, "gate", "missing_rust_test_refs", default=0))
     release_gate_pass = as_bool(metric(proof, "release_gate", "pass", default=False))
+    upstream_delta_watch = build_upstream_delta_watch(
+        proof, thresholds, queue_pending, release_gate_pass
+    )
 
     checks = [
         {
@@ -128,6 +185,13 @@ def build_summary(repo_root: Path) -> dict[str, Any]:
             "limit": 0,
             "pass": sota_missing_refs == 0,
         },
+        {
+            "id": "upstream_delta_watch",
+            "label": "Upstream delta watch",
+            "actual": upstream_delta_watch["status"],
+            "limit": "PASS|WATCH",
+            "pass": bool(upstream_delta_watch["pass"]),
+        },
     ]
 
     return {
@@ -143,6 +207,7 @@ def build_summary(repo_root: Path) -> dict[str, Any]:
             "shared_diff_backlog": "docs/parity/shared-diff-backlog.json",
             "test_coverage_audit": "docs/parity/test-coverage-audit.json",
             "sota_harness_matrix": "docs/parity/sota-harness-matrix.json",
+            "global_parity_thresholds": "docs/parity/global-parity-thresholds.json",
         },
         "summary": {
             "queue_pending": queue_pending,
@@ -153,7 +218,11 @@ def build_summary(repo_root: Path) -> dict[str, Any]:
             "sota_critical_gaps": sota_critical,
             "sota_missing_rust_refs": sota_missing_refs,
             "release_gate_pass": release_gate_pass,
+            "upstream_delta_watch_pass": bool(upstream_delta_watch["pass"]),
+            "upstream_delta_watch_status": upstream_delta_watch["status"],
+            "upstream_delta_watch_alerts": len(upstream_delta_watch["alerts"]),
         },
+        "upstream_delta_watch": upstream_delta_watch,
     }
 
 
@@ -188,6 +257,17 @@ def render_markdown(summary: dict[str, Any]) -> str:
     ])
     for label, path in summary["source_artifacts"].items():
         lines.append(f"- `{label}`: `{path}`")
+    watch = summary.get("upstream_delta_watch", {})
+    lines.extend([
+        "",
+        "## Upstream Delta Watch",
+        "",
+        f"- Status: `{watch.get('status', 'unknown')}`",
+        f"- Queue pending: `{watch.get('queue_pending', 0)}`",
+        f"- CI gate pass: `{watch.get('ci_gate_pass', False)}`",
+        f"- Release gate pass: `{watch.get('release_gate_pass', False)}`",
+        f"- Drift alerts: `{len(watch.get('alerts', []))}`",
+    ])
     lines.append("")
     return "\n".join(lines)
 

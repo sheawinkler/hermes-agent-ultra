@@ -1,11 +1,11 @@
 # Parity Matrix
 
-Generated: `2026-07-07T21:51:21.663142+00:00`
+Generated: `2026-07-08T09:23:39.924163+00:00`
 
 ## Scope
 
-- Local ref: `HEAD` (`8c58db72e5e53c349a77cd59efe3e5b86b001adf`)
-- Upstream ref: `upstream/main` (`5e51b123f32b7f6a51fbd5759e89ba5146ce4003`)
+- Local ref: `HEAD` (`4f83eedf9cfafa82d81b3f2ea8ada0027536c99a`)
+- Upstream ref: `upstream/main` (`f64e4f4f5768c18a53f44890747653bafcab2796`)
 - Merge base: `none (history divergence)`
 
 ## Summary
@@ -13,17 +13,17 @@ Generated: `2026-07-07T21:51:21.663142+00:00`
 | Metric | Value |
 | --- | ---: |
 | Commits behind local (`upstream` ancestry only) | 1 |
-| Commits ahead local (`local` ancestry only) | 1334 |
+| Commits ahead local (`local` ancestry only) | 1337 |
 | Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 1 |
 | Upstream commits represented by patch-id (`git cherry local upstream`, `-`) | 0 |
-| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 1068 |
-| Files only in upstream tree | 3422 |
-| Files only in local tree | 1335 |
+| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 1071 |
+| Files only in upstream tree | 3439 |
+| Files only in local tree | 1336 |
 | Shared files identical content | 1458 |
-| Shared files different content | 1279 |
-| Total files changed (`local` vs `upstream`) | 5934 |
-| Insertions (`local` vs `upstream`) | 1360345 |
-| Deletions (`local` vs `upstream`) | 602812 |
+| Shared files different content | 1280 |
+| Total files changed (`local` vs `upstream`) | 5953 |
+| Insertions (`local` vs `upstream`) | 1369575 |
+| Deletions (`local` vs `upstream`) | 606983 |
 
 ## Top 40 upstream-only buckets
 
@@ -31,11 +31,11 @@ Generated: `2026-07-07T21:51:21.663142+00:00`
 | --- | ---: |
 | `apps/desktop` | 833 |
 | `website/i18n` | 313 |
-| `tests/hermes_cli` | 227 |
-| `tests/gateway` | 221 |
-| `tests/agent` | 152 |
+| `tests/hermes_cli` | 229 |
+| `tests/gateway` | 226 |
+| `tests/agent` | 153 |
 | `web/src` | 110 |
-| `tests/tools` | 101 |
+| `tests/tools` | 104 |
 | `optional-skills/creative` | 70 |
 | `optional-skills/security` | 65 |
 | `website/docs` | 61 |
@@ -48,9 +48,9 @@ Generated: `2026-07-07T21:51:21.663142+00:00`
 | `tests/cli` | 33 |
 | `gateway/platforms` | 27 |
 | `tests/docker` | 26 |
-| `tests/tui_gateway` | 18 |
+| `tests/tui_gateway` | 19 |
+| `tests/cron` | 15 |
 | `.github/workflows` | 14 |
-| `tests/cron` | 14 |
 | `website/static` | 13 |
 | `hermes_cli/dashboard_auth` | 12 |
 | `scripts/whatsapp-bridge` | 12 |
@@ -131,8 +131,8 @@ Generated: `2026-07-07T21:51:21.663142+00:00`
 | `website/docs` | 26 |
 | `crates/hermes-acp` | 22 |
 | `crates/hermes-core` | 18 |
+| `docs/releases` | 17 |
 | `crates/hermes-eval` | 16 |
-| `docs/releases` | 16 |
 | `crates/hermes-environments` | 15 |
 | `crates/hermes-parity-tests` | 13 |
 | `crates/hermes-source-parity-tests` | 13 |
@@ -164,10 +164,10 @@ Generated: `2026-07-07T21:51:21.663142+00:00`
 
 | Workstream | Issue | Name | Upstream-only | Shared-different | Risk | Effort |
 | --- | ---: | --- | ---: | ---: | --- | --- |
-| `WS6` | #10 | Tests and CI parity | 1004 | 798 | critical | XL |
-| `WS8` | #12 | Compatibility and divergence policy | 1421 | 12 | critical | XL |
+| `WS6` | #10 | Tests and CI parity | 1019 | 798 | critical | XL |
+| `WS8` | #12 | Compatibility and divergence policy | 1422 | 13 | critical | XL |
 | `WS5` | #9 | UX parity | 587 | 328 | high | XL |
-| `WS3` | #7 | Tools and adapters parity | 180 | 102 | high | L |
+| `WS3` | #7 | Tools and adapters parity | 181 | 102 | high | L |
 | `WS4` | #8 | Skills parity | 157 | 39 | medium | L |
 | `WS2` | #6 | Core runtime parity | 73 | 0 | critical | M |
 | `WS7` | #11 | Security/secrets/store/webhook parity | 0 | 0 | critical | S |
@@ -176,7 +176,7 @@ Generated: `2026-07-07T21:51:21.663142+00:00`
 
 - Upstream missing by patch-id: `1`
 - Upstream represented by patch-id: `0`
-- Local unique by patch-id: `1068`
+- Local unique by patch-id: `1071`
 - Intentional divergence tracked items: `13` (covered files: `1344`)
 - Merge base is absent; patch-id mapping is used as primary commit equivalence signal.
 

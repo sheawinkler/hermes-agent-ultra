@@ -41,8 +41,17 @@ impl Gateway {
         let access_policy = self.platform_access_policy(&incoming.platform).await;
         let is_slash_command = incoming.text.trim_start().starts_with('/');
         if let Some(policy) = access_policy.as_ref() {
+            let source_authorized = {
+                let dm_manager = self.dm_manager.read().await;
+                dm_manager.is_authorized_source(
+                    &incoming.platform,
+                    &incoming.user_id,
+                    &incoming.chat_id,
+                    incoming.is_dm,
+                )
+            };
             let bypasses_user_allowlist =
-                policy.allows_sender_without_user_allowlist(incoming, sender);
+                source_authorized || policy.allows_sender_without_user_allowlist(incoming, sender);
             if !incoming.is_dm {
                 if policy.is_channel_ignored(&incoming.chat_id) {
                     debug!(
@@ -74,6 +83,8 @@ impl Gateway {
                             && !policy.is_user_allowed(&incoming.user_id)
                             && !policy.is_group_chat_authorized(&incoming.chat_id)
                         {
+                            self.warn_fail_closed_default_once(&incoming.platform, policy)
+                                .await;
                             debug!(
                                 platform = incoming.platform,
                                 user_id = incoming.user_id,
@@ -91,6 +102,8 @@ impl Gateway {
                 && !bypasses_user_allowlist
                 && !policy.is_user_allowed(&incoming.user_id)
             {
+                self.warn_fail_closed_default_once(&incoming.platform, policy)
+                    .await;
                 debug!(
                     platform = incoming.platform,
                     user_id = incoming.user_id,
@@ -317,6 +330,17 @@ impl Gateway {
         }
         processing_result?;
         Ok(pending)
+    }
+
+    async fn warn_fail_closed_default_once(&self, platform: &str, policy: &PlatformAccessPolicy) {
+        let Some(message) = policy.fail_closed_default_warning(platform) else {
+            return;
+        };
+        let key = format!("{}:{message}", platform.trim().to_ascii_lowercase());
+        let mut warned = self.fail_closed_default_warnings.write().await;
+        if warned.insert(key) {
+            warn!(platform = %platform, "{}", message);
+        }
     }
 
     async fn send_processing_error_notification(
