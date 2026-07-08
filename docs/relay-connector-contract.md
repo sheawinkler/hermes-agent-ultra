@@ -17,6 +17,10 @@ upstream invariants:
 
 - The gateway dials out; hosted gateways do not need a public inbound port.
 - The connector returns a capability descriptor before events flow.
+- Relay identity-token provisioning supports generic OIDC
+  `client_credentials` request contracts for self-hosted IdPs, while preserving
+  Nous Portal as the default identity mode when no IdP token endpoint is
+  configured.
 - Inbound events use the same session-key discriminators as native platform
   adapters.
 - Relay source metadata uses `scope_id` as the canonical platform-neutral
@@ -28,5 +32,7 @@ upstream invariants:
   session.
 - Unknown additive descriptor fields are ignored for forward compatibility.
 
-Until a Rust relay adapter is scoped, this document is a parity reference rather
-than an active runtime API.
+Until a Rust relay adapter is scoped, the transport itself remains a parity
+reference rather than an active runtime API. The Rust gateway crate does own the
+stable relay protocol and identity-token request contracts used to evaluate
+future activation safely.

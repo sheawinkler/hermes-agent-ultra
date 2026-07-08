@@ -1896,10 +1896,12 @@ name = "hermes-provider-runtime"
 version = "0.22.0"
 dependencies = [
  "async-trait",
+ "base64",
  "futures",
  "hermes-agent",
  "hermes-config",
  "hermes-core",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

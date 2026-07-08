@@ -302,6 +302,119 @@ mod tests {
         assert!(moa.local_no_key_allowed);
     }
 
+    fn provider_smoke_env_vars() -> &'static [&'static str] {
+        &[
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+            "HERMES_OPENAI_CODEX_API_KEY",
+            "NOUS_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "HERMES_GEMINI_OAUTH_API_KEY",
+            "GOOGLE_API_KEY",
+            "GEMINI_API_KEY",
+            "HERMES_QWEN_OAUTH_API_KEY",
+            "DASHSCOPE_API_KEY",
+            "OPENROUTER_API_KEY",
+            "OLLAMA_API_KEY",
+            "OLLAMA_LOCAL_API_KEY",
+            "LLAMA_CPP_API_KEY",
+        ]
+    }
+
+    #[test]
+    fn provider_auth_smoke_matrix_covers_requested_runtime_families() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(provider_smoke_env_vars());
+        for key in provider_smoke_env_vars() {
+            std::env::remove_var(key);
+        }
+
+        let matrix = deterministic_provider_auth_smoke_matrix();
+
+        assert!(matrix.pass, "{matrix:#?}");
+        assert_eq!(matrix.summary.failed, 0);
+        assert_eq!(matrix.summary.total, 9);
+        for provider in [
+            "anthropic",
+            "google-gemini-cli",
+            "llama-cpp",
+            "moa",
+            "nous",
+            "openai",
+            "openai-codex",
+            "openrouter",
+            "qwen-oauth",
+        ] {
+            assert!(
+                matrix
+                    .summary
+                    .covered_runtime_providers
+                    .contains(&provider.to_string()),
+                "missing provider {provider}: {matrix:#?}"
+            );
+        }
+        let openai = matrix
+            .results
+            .iter()
+            .find(|result| result.id == "openai_dynamic_chatgpt_oauth")
+            .expect("openai dynamic case");
+        assert_eq!(openai.model, "openai:dynamic");
+        assert_eq!(openai.api_key_source.as_deref(), Some("config.api_key"));
+        assert!(openai.uses_openai_pro_backend);
+
+        let qwen = matrix
+            .results
+            .iter()
+            .find(|result| result.id == "qwen_oauth_resolver")
+            .expect("qwen oauth case");
+        assert_eq!(qwen.runtime_provider, "qwen-oauth");
+        assert_eq!(
+            qwen.api_key_source.as_deref(),
+            Some("oauth_resolver:qwen-cli")
+        );
+
+        let local = matrix
+            .results
+            .iter()
+            .find(|result| result.id == "local_no_key_llamafile")
+            .expect("local no-key case");
+        assert!(!local.api_key_present);
+        assert!(local.local_no_key_allowed);
+    }
+
+    #[test]
+    fn provider_auth_smoke_matrix_reports_actionable_failures() {
+        let _guard = env_test_lock();
+        let _env = EnvSnapshot::capture(provider_smoke_env_vars());
+        for key in provider_smoke_env_vars() {
+            std::env::remove_var(key);
+        }
+
+        let cfg = GatewayConfig::default();
+        let matrix = provider_auth_smoke_matrix_with_auth_resolver(
+            &cfg,
+            &[provider_auth_smoke_case(
+                "openrouter_missing_key",
+                "openrouter:anthropic/claude-sonnet-4.6",
+                "openrouter",
+                true,
+                Some("config.api_key"),
+                false,
+                false,
+            )],
+            None,
+        );
+
+        assert!(!matrix.pass);
+        assert_eq!(matrix.summary.failed, 1);
+        assert!(matrix.results[0]
+            .failures
+            .iter()
+            .any(|failure| failure.contains("api_key_present")));
+    }
+
     #[test]
     fn resolve_provider_and_model_uses_single_provider_fallback() {
         let mut cfg = GatewayConfig::default();

@@ -49,6 +49,17 @@ def test_release_smoke_bounds_each_runtime_probe() -> None:
     assert "Command timed out after ${HERMES_SMOKE_COMMAND_TIMEOUT_SECONDS}s: $*" in text
 
 
+def test_release_smoke_can_emit_machine_readable_report() -> None:
+    text = SCRIPT.read_text()
+    assert 'OUTPUT_JSON="${OUTPUT_JSON:-}"' in text
+    assert "--output-json PATH" in text
+    assert '"schema_version": 1' in text
+    assert '"status": "PASS"' in text
+    assert '"installer_sha256": "${INSTALL_SHA}"' in text
+    assert '"binary_sha256": "${BIN_SHA}"' in text
+    assert "report_json=${OUTPUT_JSON:-none}" in text
+
+
 def test_release_smoke_covers_public_runtime_surfaces() -> None:
     text = SCRIPT.read_text()
     for surface in [
@@ -76,3 +87,10 @@ def test_release_workflow_packages_canonical_binary_not_legacy_wrapper() -> None
     assert "release/hermes-agent-ultra dist/hermes" in text
     assert "binary: hermes\n" not in text
     assert "release/hermes dist/" not in text
+
+
+def test_release_workflow_uploads_published_artifact_smoke_report() -> None:
+    text = RELEASE_WORKFLOW.read_text()
+    assert "--output-json .sync-reports/release-artifact-smoke.json" in text
+    assert "name: release-artifact-smoke" in text
+    assert "path: .sync-reports/release-artifact-smoke.json" in text

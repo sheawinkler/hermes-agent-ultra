@@ -6,6 +6,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "generate-release-readiness-summary.py"
 PARITY_AUDIT = REPO_ROOT / ".github" / "workflows" / "parity-audit.yml"
+RUN_REPO_CI = REPO_ROOT / "scripts" / "run-repo-ci.sh"
 
 
 def test_release_readiness_summary_reports_zero_backlog(tmp_path: Path) -> None:
@@ -35,9 +36,13 @@ def test_release_readiness_summary_reports_zero_backlog(tmp_path: Path) -> None:
     assert payload["summary"]["shared_pending_review"] == 0
     assert payload["summary"]["coverage_critical_gaps"] == 0
     assert payload["summary"]["sota_critical_gaps"] == 0
+    assert payload["summary"]["upstream_delta_watch_pass"] is True
+    assert payload["upstream_delta_watch"]["queue_pending"] == 0
+    assert payload["upstream_delta_watch"]["status"] in {"PASS", "WATCH"}
     text = out_md.read_text()
     assert "Status: **PASS**" in text
     assert "Upstream queue pending" in text
+    assert "Upstream Delta Watch" in text
 
 
 def test_release_readiness_summary_uses_public_artifacts_only() -> None:
@@ -47,7 +52,17 @@ def test_release_readiness_summary_uses_public_artifacts_only() -> None:
     assert "docs/parity/shared-diff-backlog.json" in text
     assert "docs/parity/test-coverage-audit.json" in text
     assert "docs/parity/sota-harness-matrix.json" in text
+    assert "docs/parity/global-parity-thresholds.json" in text
     assert "contextlattice" not in text.lower()
+
+
+def test_repo_ci_runs_readiness_summary_after_global_parity_proof() -> None:
+    text = RUN_REPO_CI.read_text()
+    assert "python3 scripts/generate-global-parity-proof.py" in text
+    assert "python3 scripts/generate-release-readiness-summary.py --check" in text
+    assert text.index("python3 scripts/generate-global-parity-proof.py") < text.index(
+        "python3 scripts/generate-release-readiness-summary.py --check"
+    )
 
 
 def test_parity_audit_emits_readiness_summary_before_enforcing_ci_gate() -> None:

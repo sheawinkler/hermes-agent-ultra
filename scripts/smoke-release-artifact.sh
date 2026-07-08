@@ -2,14 +2,15 @@
 set -euo pipefail
 
 REPO="${REPO:-sheawinkler/hermes-agent-ultra}"
-VERSION="${VERSION:-v0.21.3}"
+VERSION="${VERSION:-v0.22.0}"
 KEEP_TMP="${KEEP_TMP:-false}"
 RUN_SETUP_HELP="${RUN_SETUP_HELP:-true}"
 HERMES_SMOKE_COMMAND_TIMEOUT_SECONDS="${HERMES_SMOKE_COMMAND_TIMEOUT_SECONDS:-30}"
+OUTPUT_JSON="${OUTPUT_JSON:-}"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/smoke-release-artifact.sh [--version TAG] [--repo OWNER/REPO] [--keep-tmp]
+Usage: scripts/smoke-release-artifact.sh [--version TAG] [--repo OWNER/REPO] [--output-json PATH] [--keep-tmp]
 
 Install Hermes Agent Ultra from published GitHub release artifacts into a
 throwaway directory, then verify the released binary surfaces without touching
@@ -27,6 +28,7 @@ Environment:
   HERMES_SMOKE_COMMAND_TIMEOUT_SECONDS
                          Per-command probe timeout in seconds (default: 30;
                          0 disables)
+  OUTPUT_JSON            Optional path for a machine-readable PASS report.
 USAGE
 }
 
@@ -38,6 +40,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --repo)
       REPO="${2:?--repo requires owner/repo}"
+      shift 2
+      ;;
+    --output-json)
+      OUTPUT_JSON="${2:?--output-json requires a path}"
       shift 2
       ;;
     --keep-tmp)
@@ -226,6 +232,22 @@ done
 
 INSTALL_SHA="$(sha256_file "${INSTALLER}")"
 BIN_SHA="$(sha256_file "${BIN_DIR}/hermes-agent-ultra")"
+if [[ -n "${OUTPUT_JSON}" ]]; then
+  mkdir -p "$(dirname "${OUTPUT_JSON}")"
+  cat >"${OUTPUT_JSON}" <<JSON
+{
+  "schema_version": 1,
+  "status": "PASS",
+  "version": "${VERSION}",
+  "repo": "${REPO}",
+  "installer_sha256": "${INSTALL_SHA}",
+  "binary_sha256": "${BIN_SHA}",
+  "canonical_bin": "${BIN_DIR}/hermes-agent-ultra",
+  "primary_bin": "${BIN_DIR}/hermes-ultra",
+  "legacy_hermes": "$(${BIN_DIR}/hermes)"
+}
+JSON
+fi
 cat <<REPORT
 [release-smoke] PASS
 version=${VERSION}
@@ -236,4 +258,5 @@ binary_sha256=${BIN_SHA}
 canonical_bin=${BIN_DIR}/hermes-agent-ultra
 primary_bin=${BIN_DIR}/hermes-ultra
 legacy_hermes=$(${BIN_DIR}/hermes)
+report_json=${OUTPUT_JSON:-none}
 REPORT

@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use base64::Engine as _;
 use futures::StreamExt;
 use hermes_agent::bedrock::{
     bedrock_runtime_base_url, resolve_bedrock_region, BedrockProvider, BEDROCK_AUTH_MARKER,
@@ -22,6 +23,7 @@ use hermes_agent::providers_extra::{
 use hermes_agent::CodexProvider;
 use hermes_config::{GatewayConfig, LlmProviderConfig};
 use hermes_core::{AgentError, LlmProvider};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use hermes_agent::local_backends::LocalBackendSpec;
@@ -78,6 +80,45 @@ pub struct ProviderRuntimeDiagnostic {
     pub api_key_source: Option<String>,
     pub local_no_key_allowed: bool,
     pub uses_openai_pro_backend: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderAuthSmokeCase {
+    pub id: String,
+    pub model: String,
+    pub expected_runtime_provider: String,
+    pub expected_api_key_present: bool,
+    pub expected_api_key_source: Option<String>,
+    pub expected_local_no_key_allowed: bool,
+    pub expected_openai_pro_backend: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderAuthSmokeResult {
+    pub id: String,
+    pub model: String,
+    pub runtime_provider: String,
+    pub api_key_present: bool,
+    pub api_key_source: Option<String>,
+    pub local_no_key_allowed: bool,
+    pub uses_openai_pro_backend: bool,
+    pub pass: bool,
+    pub failures: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderAuthSmokeSummary {
+    pub total: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub covered_runtime_providers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderAuthSmokeMatrix {
+    pub pass: bool,
+    pub summary: ProviderAuthSmokeSummary,
+    pub results: Vec<ProviderAuthSmokeResult>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,6 +223,235 @@ pub fn provider_runtime_diagnostic_with_auth_resolver(
         local_no_key_allowed,
         uses_openai_pro_backend,
     }
+}
+
+pub fn provider_auth_smoke_matrix_with_auth_resolver(
+    config: &GatewayConfig,
+    cases: &[ProviderAuthSmokeCase],
+    oauth_token_resolver: Option<&OAuthTokenResolver<'_>>,
+) -> ProviderAuthSmokeMatrix {
+    let mut results = Vec::with_capacity(cases.len());
+    for case in cases {
+        let diagnostic = provider_runtime_diagnostic_with_auth_resolver(
+            config,
+            case.model.as_str(),
+            oauth_token_resolver,
+        );
+        let mut failures = Vec::new();
+        if diagnostic.runtime_provider != case.expected_runtime_provider {
+            failures.push(format!(
+                "runtime_provider expected={} actual={}",
+                case.expected_runtime_provider, diagnostic.runtime_provider
+            ));
+        }
+        if diagnostic.api_key_present != case.expected_api_key_present {
+            failures.push(format!(
+                "api_key_present expected={} actual={}",
+                case.expected_api_key_present, diagnostic.api_key_present
+            ));
+        }
+        if diagnostic.api_key_source != case.expected_api_key_source {
+            failures.push(format!(
+                "api_key_source expected={:?} actual={:?}",
+                case.expected_api_key_source, diagnostic.api_key_source
+            ));
+        }
+        if diagnostic.local_no_key_allowed != case.expected_local_no_key_allowed {
+            failures.push(format!(
+                "local_no_key_allowed expected={} actual={}",
+                case.expected_local_no_key_allowed, diagnostic.local_no_key_allowed
+            ));
+        }
+        if diagnostic.uses_openai_pro_backend != case.expected_openai_pro_backend {
+            failures.push(format!(
+                "uses_openai_pro_backend expected={} actual={}",
+                case.expected_openai_pro_backend, diagnostic.uses_openai_pro_backend
+            ));
+        }
+
+        results.push(ProviderAuthSmokeResult {
+            id: case.id.clone(),
+            model: case.model.clone(),
+            runtime_provider: diagnostic.runtime_provider,
+            api_key_present: diagnostic.api_key_present,
+            api_key_source: diagnostic.api_key_source,
+            local_no_key_allowed: diagnostic.local_no_key_allowed,
+            uses_openai_pro_backend: diagnostic.uses_openai_pro_backend,
+            pass: failures.is_empty(),
+            failures,
+        });
+    }
+
+    let passed = results.iter().filter(|result| result.pass).count();
+    let mut covered_runtime_providers = results
+        .iter()
+        .map(|result| result.runtime_provider.clone())
+        .collect::<Vec<_>>();
+    covered_runtime_providers.sort();
+    covered_runtime_providers.dedup();
+    ProviderAuthSmokeMatrix {
+        pass: passed == results.len(),
+        summary: ProviderAuthSmokeSummary {
+            total: results.len(),
+            passed,
+            failed: results.len().saturating_sub(passed),
+            covered_runtime_providers,
+        },
+        results,
+    }
+}
+
+pub fn default_provider_auth_smoke_cases() -> Vec<ProviderAuthSmokeCase> {
+    vec![
+        provider_auth_smoke_case(
+            "openai_dynamic_chatgpt_oauth",
+            "openai:dynamic",
+            "openai",
+            true,
+            Some("config.api_key"),
+            false,
+            true,
+        ),
+        provider_auth_smoke_case(
+            "codex_oauth_resolver",
+            "codex:gpt-5.5",
+            "openai-codex",
+            true,
+            Some("oauth_resolver:codex"),
+            false,
+            true,
+        ),
+        provider_auth_smoke_case(
+            "nous_key",
+            "nous:Hermes-4",
+            "nous",
+            true,
+            Some("config.api_key"),
+            false,
+            false,
+        ),
+        provider_auth_smoke_case(
+            "anthropic_key",
+            "anthropic:claude-sonnet-4-6",
+            "anthropic",
+            true,
+            Some("config.api_key"),
+            false,
+            false,
+        ),
+        provider_auth_smoke_case(
+            "gemini_oauth_resolver",
+            "gemini-cli:gemini-2.5-pro",
+            "google-gemini-cli",
+            true,
+            Some("oauth_resolver:gemini-cli"),
+            false,
+            false,
+        ),
+        provider_auth_smoke_case(
+            "qwen_oauth_resolver",
+            "qwen-cli:qwen3-coder",
+            "qwen-oauth",
+            true,
+            Some("oauth_resolver:qwen-cli"),
+            false,
+            false,
+        ),
+        provider_auth_smoke_case(
+            "openrouter_key",
+            "openrouter:anthropic/claude-sonnet-4.6",
+            "openrouter",
+            true,
+            Some("config.api_key"),
+            false,
+            false,
+        ),
+        provider_auth_smoke_case(
+            "local_no_key_llamafile",
+            "llamafile:local-gguf",
+            "llama-cpp",
+            false,
+            None,
+            true,
+            false,
+        ),
+        provider_auth_smoke_case(
+            "moa_virtual_no_key",
+            "moa:default",
+            "moa",
+            false,
+            None,
+            true,
+            false,
+        ),
+    ]
+}
+
+pub fn deterministic_provider_auth_smoke_matrix() -> ProviderAuthSmokeMatrix {
+    let mut config = GatewayConfig::default();
+    config.llm_providers.insert(
+        "openai".to_string(),
+        LlmProviderConfig {
+            api_key: Some(chatgpt_oauth_fixture_token("matrix-openai-dynamic")),
+            ..LlmProviderConfig::default()
+        },
+    );
+    for (provider, key) in [
+        ("nous", "nous-smoke-key"),
+        ("anthropic", "anthropic-smoke-key"),
+        ("openrouter", "openrouter-smoke-key"),
+    ] {
+        config.llm_providers.insert(
+            provider.to_string(),
+            LlmProviderConfig {
+                api_key: Some(key.to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+    }
+    let resolver = |provider: &str| match provider {
+        "codex" | "openai-codex" => Some("codex-oauth-smoke-token".to_string()),
+        "gemini-cli" | "google-gemini-cli" => Some("gemini-oauth-smoke-token".to_string()),
+        "qwen-cli" | "qwen-oauth" => Some("qwen-oauth-smoke-token".to_string()),
+        _ => None,
+    };
+    provider_auth_smoke_matrix_with_auth_resolver(
+        &config,
+        &default_provider_auth_smoke_cases(),
+        Some(&resolver),
+    )
+}
+
+fn provider_auth_smoke_case(
+    id: &str,
+    model: &str,
+    expected_runtime_provider: &str,
+    expected_api_key_present: bool,
+    expected_api_key_source: Option<&str>,
+    expected_local_no_key_allowed: bool,
+    expected_openai_pro_backend: bool,
+) -> ProviderAuthSmokeCase {
+    ProviderAuthSmokeCase {
+        id: id.to_string(),
+        model: model.to_string(),
+        expected_runtime_provider: expected_runtime_provider.to_string(),
+        expected_api_key_present,
+        expected_api_key_source: expected_api_key_source.map(ToString::to_string),
+        expected_local_no_key_allowed,
+        expected_openai_pro_backend,
+    }
+}
+
+fn chatgpt_oauth_fixture_token(account_id: &str) -> String {
+    let payload = base64_url_no_pad(format!(
+        r#"{{"sub":"user-smoke","https://api.openai.com/auth":{{"chatgpt_account_id":"{account_id}","chatgpt_plan_type":"plus"}}}}"#
+    )
+    .as_bytes());
+    format!("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.{payload}.sig")
+}
+
+fn base64_url_no_pad(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
 fn provider_runtime_api_key_source(

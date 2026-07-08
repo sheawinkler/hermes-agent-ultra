@@ -46,6 +46,7 @@ pub mod transcription;
 pub mod tts;
 pub mod tts_premium;
 pub mod ultra_autonomy;
+pub mod ultra_autonomy_evals;
 pub mod ultra_features;
 pub mod url_safety;
 pub mod video;

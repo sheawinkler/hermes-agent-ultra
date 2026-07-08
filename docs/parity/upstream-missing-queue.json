@@ -25,8 +25,8 @@
         ".github/pr-screenshots/45449/billing-overview.png",
         ".github/pr-screenshots/telegram-overflow/topic-final-response-clipped.jpg"
       ],
-      "files_touched": 6159,
-      "notes": "Ported in Rust Mem0 setup: hermes memory setup mem0 accepts --mode selfhosted --host ... [--api-key ...] [--dry-run], interactive prompts expose platform/selfhosted/oss, self-hosted hosts are persisted to mem0.json, optional secrets route to $HERMES_HOME/.env, reachability checks are non-fatal, and focused Rust tests plus a CLI dry-run prove the surface.",
+      "files_touched": 6177,
+      "notes": "Ported as Rust relay identity-token contract coverage: hermes_gateway::relay now models generic OIDC client_credentials relay provisioning with env/config precedence, Nous-Portal default mode selection, client_credentials form shape, fail-closed missing client credentials, async access_token fetch, and focused relay tests. The experimental relay adapter remains inactive by default in Ultra.",
       "owner": "rust-runtime",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -34,15 +34,15 @@
         "rust_primary_surface_only_commit": false,
         "superseded_by_guard": false
       },
-      "sha": "5e51b123f32b7f6a51fbd5759e89ba5146ce4003",
-      "subject": "feat(mem0): add self-hosted mode to the setup wizard",
+      "sha": "f64e4f4f5768c18a53f44890747653bafcab2796",
+      "subject": "feat(gateway): generic OIDC client-credentials relay provisioning (NAS-free) (#60730)",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-07-07T21:51:26.151224+00:00",
+  "generated_at_utc": "2026-07-08T09:23:44.151496+00:00",
   "refs": {
-    "baseline_start_sha": "5445e42b87b9918d5b1bfa9f4eadd8e4bb10ff37",
+    "baseline_start_sha": "5e51b123f32b7f6a51fbd5759e89ba5146ce4003",
     "local_ref": "HEAD",
     "prior_ref": "HEAD",
     "prior_source": "HEAD",

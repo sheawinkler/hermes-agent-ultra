@@ -74,6 +74,7 @@ run python3 scripts/validate-intentional-divergence.py --check --allow-warnings
 run python3 scripts/generate-shared-diff-backlog.py --local-ref HEAD --no-fetch
 run python3 scripts/generate-upstream-patch-queue.py --local-ref HEAD --max-commits 0
 run python3 scripts/generate-global-parity-proof.py
+run python3 scripts/generate-release-readiness-summary.py --check
 
 run cargo fmt --all --check
 run bash scripts/clippy-warning-gate.sh --check

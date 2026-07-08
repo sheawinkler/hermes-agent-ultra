@@ -18,6 +18,8 @@ ContextLattice, approval, and tool registry paths remain authoritative.
 | 8 | `hermes-ultra up` | One-command always-on service contract using existing gateway service management. |
 | 9 | `ultra_autonomy action=channel_surface` | CLI/dashboard/gateway/Telegram skill, status, and permission surface map. |
 | 10 | `ultra_autonomy action=objective_bridge` | Materialize durable objectives into dependency-tracked board cards with verification gates. |
+| 11 | `ultra_autonomy action=outcome_rehearsal` | Deterministically score plan, tool use, verification, checkpoint, and recovery evidence before promotion. |
+| 12 | `ultra_autonomy action=recall_quality` | Score ContextLattice/synthesis recall against implementation and verification outcomes, not just retrieval availability. |
 
 ## Dashboard Contract
 
@@ -43,6 +45,7 @@ Targeted checks:
 
 ```bash
 CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-tools ultra_autonomy --lib
+CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-tools ultra_autonomy_evals --lib
 CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-tools test_shell_substitution_and_chain_laundering_are_guarded --lib
 CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-tools harness_cockpit --lib
 CARGO_TARGET_DIR=/Volumes/wd_black/hermes-agent-ultra/target CARGO_INCREMENTAL=0 cargo test -p hermes-tools builtin_registry_registers_core_tool_surfaces_for_parity --lib

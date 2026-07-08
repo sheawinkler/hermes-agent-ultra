@@ -18,6 +18,11 @@ use serde_json::{json, Value};
 
 use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
+use crate::tools::ultra_autonomy_evals::{
+    evaluate_outcome_loop_rehearsal, evaluate_recall_quality, OutcomeLoopRehearsalInput,
+    RecallQualityInput,
+};
+
 const TOOL_NAME: &str = "ultra_autonomy";
 const LOOP_IDENTICAL_THRESHOLD: usize = 4;
 const LOOP_SIMILAR_FAILURE_THRESHOLD: usize = 6;
@@ -98,6 +103,8 @@ impl ToolHandler for UltraAutonomyHandler {
             "resource_plan" => resource_plan_action(&params),
             "memory_lifecycle" => memory_lifecycle_action(&params),
             "memory_resolve" => memory_resolve_action(&params)?,
+            "outcome_rehearsal" => outcome_rehearsal_action(&params)?,
+            "recall_quality" => recall_quality_action(&params)?,
             "service_plan" => service_plan_action(),
             "channel_surface" => channel_surface_action(),
             "events" => event_catalog_action(),
@@ -121,7 +128,8 @@ impl ToolHandler for UltraAutonomyHandler {
                 "enum": [
                     "status", "loop_record", "loop_evaluate", "board_create",
                     "board_add_card", "board_update", "board_plan", "objective_bridge",
-                    "resource_plan", "memory_lifecycle", "memory_resolve", "service_plan",
+                    "resource_plan", "memory_lifecycle", "memory_resolve",
+                    "outcome_rehearsal", "recall_quality", "service_plan",
                     "channel_surface", "events", "help"
                 ],
                 "description": "Autonomy cockpit action. Defaults to status."
@@ -144,6 +152,30 @@ impl ToolHandler for UltraAutonomyHandler {
         props.insert(
             "providers".into(),
             json!({"type":"array", "description":"Memory provider signals for memory_lifecycle."}),
+        );
+        props.insert(
+            "plan_steps".into(),
+            json!({"type":"array", "description":"Outcome rehearsal plan steps."}),
+        );
+        props.insert(
+            "tool_calls".into(),
+            json!({"type":"array", "description":"Outcome rehearsal tool-call evidence."}),
+        );
+        props.insert(
+            "verification".into(),
+            json!({"type":"array", "description":"Deterministic verification evidence."}),
+        );
+        props.insert(
+            "checkpoints".into(),
+            json!({"type":"array", "description":"Durable checkpoint, PR, commit, release, or ContextLattice evidence."}),
+        );
+        props.insert(
+            "recall_items".into(),
+            json!({"type":"array", "description":"Recall/synthesis pack items for recall_quality."}),
+        );
+        props.insert(
+            "outcome".into(),
+            json!({"type":"object", "description":"Task outcome evidence for recall_quality."}),
         );
         props.insert("cpu_cores".into(), int_schema("Available CPU cores."));
         props.insert("free_ram_mb".into(), int_schema("Free RAM in MB."));
@@ -770,6 +802,8 @@ fn autonomy_status_snapshot(state: &UltraAutonomyState) -> Value {
             "approval_laundering_regression_tests",
             "contextlattice_first_memory_lifecycle",
             "memory_conflict_reinforcement_resolution",
+            "deterministic_outcome_loop_rehearsal",
+            "contextlattice_recall_quality_outcome_eval",
             "one_command_service_plan",
             "channel_skill_permission_status_surface",
             "objective_to_board_bridge"
@@ -1053,6 +1087,18 @@ fn memory_resolve_action(params: &Value) -> Result<Value, ToolError> {
     Ok(json!({"resolution": resolve_memory_candidate(existing, candidate, overlap, conflict)}))
 }
 
+fn outcome_rehearsal_action(params: &Value) -> Result<Value, ToolError> {
+    let input = serde_json::from_value::<OutcomeLoopRehearsalInput>(params.clone())
+        .map_err(|err| ToolError::InvalidParams(format!("outcome_rehearsal: {err}")))?;
+    Ok(json!({"report": evaluate_outcome_loop_rehearsal(input)}))
+}
+
+fn recall_quality_action(params: &Value) -> Result<Value, ToolError> {
+    let input = serde_json::from_value::<RecallQualityInput>(params.clone())
+        .map_err(|err| ToolError::InvalidParams(format!("recall_quality: {err}")))?;
+    Ok(json!({"report": evaluate_recall_quality(input)}))
+}
+
 fn service_plan_action() -> Value {
     json!({
         "status": "ok",
@@ -1095,8 +1141,8 @@ fn help_action() -> Value {
         "actions": [
             "status", "loop_record", "loop_evaluate", "board_create", "board_add_card",
             "board_update", "board_plan", "objective_bridge", "resource_plan",
-            "memory_lifecycle", "memory_resolve", "service_plan", "channel_surface",
-            "events", "help"
+            "memory_lifecycle", "memory_resolve", "outcome_rehearsal", "recall_quality",
+            "service_plan", "channel_surface", "events", "help"
         ]
     })
 }
@@ -1109,6 +1155,8 @@ fn event_catalog() -> Vec<Value> {
         json!({"event":"board.plan.updated", "consumer":"dashboard SSE", "purpose":"ready/blocked execution plan changed"}),
         json!({"event":"objective.board.created", "consumer":"ContextLattice checkpoint", "purpose":"objective materialized into durable cards"}),
         json!({"event":"memory.lifecycle.updated", "consumer":"harness cockpit", "purpose":"hot/warm/archive memory projection changed"}),
+        json!({"event":"eval.outcome_rehearsal.scored", "consumer":"harness cockpit", "purpose":"plan/tool/verification/checkpoint/recovery gates scored"}),
+        json!({"event":"eval.recall_quality.scored", "consumer":"ContextLattice synthesis pack", "purpose":"recall tied to implementation and verification outcomes"}),
         json!({"event":"subagent.resource.plan", "consumer":"delegate_task", "purpose":"admission control changed"}),
     ]
 }
