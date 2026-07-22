@@ -417,7 +417,10 @@ async fn mock_refresh(idp: Arc<MockIdp>, form: HashMap<String, String>) -> Respo
         }
         RefreshMode::Malformed => return (StatusCode::OK, "not-json").into_response(),
         RefreshMode::Delayed => tokio::time::sleep(Duration::from_millis(200)).await,
-        RefreshMode::RsaB | RefreshMode::Expired => {}
+        RefreshMode::RsaB
+        | RefreshMode::Expired
+        | RefreshMode::CrossSubject
+        | RefreshMode::CrossIssuer => {}
     }
     let token = signed_refresh_id_token(mode, &idp.issuer);
     Json(json!({

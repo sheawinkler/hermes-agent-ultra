@@ -66,6 +66,7 @@ bytes = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+hermes-skills = { workspace = true }
 wiremock = "0.6"
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }

@@ -159,10 +159,6 @@ fn source_snapshot_from_verified_plan(
 
     let boundary = plan.boundary();
     let source_head = plan.source_head();
-    let source_next_event_sequence = source_head
-        .sequence()
-        .checked_add(1)
-        .ok_or(LedgerError::NumericOverflow)?;
     BranchReplaySourceSnapshot::new(
         plan.source_run_id(),
         source_plan.session_id().clone(),
@@ -175,7 +171,6 @@ fn source_snapshot_from_verified_plan(
         source_head.event_id(),
         source_head.sequence(),
         Sha256Digest::new(source_head.event_hash().to_string())?,
-        source_next_event_sequence,
         source_status.exact_replay.state,
         source_status.exact_replay.transition_sequence,
         artifacts,
@@ -225,6 +220,10 @@ fn branch_replay_start_payload(
     source: &BranchReplaySourceSnapshot,
     runtime_start: Value,
 ) -> BranchReplayLifecycleResult<CanonicalJson> {
+    let source_next_event_sequence = source
+        .source_head_sequence()
+        .checked_add(1)
+        .ok_or(LedgerError::NumericOverflow)?;
     CanonicalJson::from_value(&json!({
         "branch_replay": {
             "boundary_event_hash": source.boundary_event_hash().as_str(),
@@ -233,12 +232,12 @@ fn branch_replay_start_payload(
             "source_branch_id": source.source_branch_id().as_str(),
             "source_export_digest": source.source_export_digest().as_str(),
             "source_head_event_id": source.source_head_event_id().to_string(),
-            "source_head_event_sequence": source.source_head_event_sequence(),
+            "source_head_event_sequence": source.source_head_sequence(),
             "source_head_hash": source.source_head_hash().as_str(),
             "source_run_id": source.source_run_id().to_string(),
             "source_session_id": source.source_session_id().as_str(),
             "source_tenant_id": source.source_tenant_id().as_str(),
-            "source_next_event_sequence": source.source_next_event_sequence(),
+            "source_next_event_sequence": source_next_event_sequence,
         },
         "runtime_start": runtime_start,
         "schema": BRANCH_REPLAY_START_SCHEMA,
@@ -286,7 +285,6 @@ mod tests {
             EventId::new(),
             7,
             digest(3),
-            8,
             ExactReplayState::Available,
             0,
             Vec::new(),
@@ -466,10 +464,10 @@ mod tests {
             .is_empty());
         let payload = events[0].public_payload.as_value().expect("child payload json");
         assert_eq!(
-            payload["branch_replay"]["source_run_id"],
+            payload["payload"]["branch_replay"]["source_run_id"],
             source_run_id.to_string()
         );
-        assert_eq!(payload["runtime_start"]["runtime"], "fresh");
+        assert_eq!(payload["payload"]["runtime_start"]["runtime"], "fresh");
     }
 
     #[test]
@@ -500,6 +498,8 @@ mod tests {
             payload["branch_replay"]["boundary_event_sequence"],
             source.boundary_event_sequence()
         );
+        assert_eq!(payload["branch_replay"]["source_head_event_sequence"], 7);
+        assert_eq!(payload["branch_replay"]["source_next_event_sequence"], 8);
         assert_eq!(payload["runtime_start"]["runtime"], "fresh");
         assert!(payload.get("outbox").is_none());
         assert!(payload.get("idempotency_key").is_none());
@@ -629,7 +629,6 @@ mod tests {
             EventId::new(),
             7,
             digest(3),
-            8,
             ExactReplayState::Available,
             0,
             Vec::new(),

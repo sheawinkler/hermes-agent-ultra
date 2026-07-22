@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use hermes_skills::{
-    SkillAdmission, SkillLockEntryV2, SkillPackageManifestV2, SkillPackageProof,
-    SkillPackageSource, SkillPermission, SkillTrustLoad, SkillTrustPolicy, SkillTrustRead,
-    SkillTrustStore, SkillTrustVerifier,
+    load_local_owner_keyring_file, SkillAdmission, SkillLockEntryV2, SkillPackageManifestV2,
+    SkillPackageProof, SkillPackageSource, SkillPermission, SkillTrustLoad, SkillTrustPolicy,
+    SkillTrustRead, SkillTrustStore, SkillTrustVerifier,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -219,8 +219,8 @@ impl SkillTrustRuntime {
         }
     }
 
-    /// Default production behavior: load a strict verifier from every actual
-    /// skill root's owner-only keyring. Missing keys admit no remote package.
+    /// Unprovisioned fallback with no external authority material. It admits
+    /// no local-owner or remote package.
     pub fn fail_closed() -> Result<Self, String> {
         Ok(Self {
             source: SkillTrustRuntimeSource::RootConfigured {
@@ -228,6 +228,75 @@ impl SkillTrustRuntime {
                 embedded_manifest_digests: BTreeMap::new(),
             },
         })
+    }
+}
+
+/// Build a verifier from the sole canonical authority layout for an installed
+/// skill root. The root must be exactly `<resolved home>/skills`; authority
+/// files are always read from the sibling external trust directory.
+///
+/// A complete remote authority (root, audit, and local-owner keyring) enables
+/// remote and local packages. A local-owner keyring on its own enables only
+/// local owner-attested packages. Any partial authority is a provisioning
+/// error, while an entirely absent authority remains fail-closed.
+pub fn skill_trust_runtime_for_skills_root(
+    skills_root: &Path,
+) -> Result<SkillTrustRuntime, String> {
+    let home = skills_root
+        .parent()
+        .ok_or_else(|| "skill root has no parent home for its authority layout".to_string())?;
+    let layout = hermes_config::SkillTrustAuthorityLayout::from_resolved_home(home)
+        .map_err(|error| format!("invalid skill trust authority layout: {error}"))?;
+    if layout.skills_root() != skills_root {
+        return Err(
+            "skill root does not match the canonical authority layout derived from its home"
+                .to_string(),
+        );
+    }
+
+    let remote_root = authority_file_present(layout.remote_root_file(), "remote trust root")?;
+    let remote_audit = authority_file_present(layout.remote_audit_file(), "remote trust audit")?;
+    let local_owner_keyring =
+        authority_file_present(layout.local_owner_keyring_file(), "local owner keyring")?;
+
+    match (remote_root, remote_audit, local_owner_keyring) {
+        (true, true, true) => {
+            let authority = layout
+                .build_skill_trust_authority_paths()
+                .map_err(|error| format!("invalid skill trust authority paths: {error}"))?;
+            let verifier = authority
+                .build_verifier(SkillTrustPolicy::default(), BTreeMap::new())
+                .map_err(|error| format!("invalid configured skill trust authority: {error}"))?;
+            Ok(SkillTrustRuntime::new(verifier))
+        }
+        (false, false, true) => {
+            let keyring = load_local_owner_keyring_file(
+                layout.skills_root(),
+                layout.local_owner_keyring_file(),
+            )
+            .map_err(|error| format!("invalid local-owner skill authority: {error}"))?;
+            let verifier = SkillTrustVerifier::for_skill_root_with_local_owner_keys(
+                layout.skills_root(),
+                SkillTrustPolicy::default(),
+                BTreeMap::new(),
+                keyring.keys,
+            )
+            .map_err(|error| format!("invalid local-owner skill verifier: {error}"))?;
+            Ok(SkillTrustRuntime::new(verifier))
+        }
+        (false, false, false) => SkillTrustRuntime::fail_closed()
+            .map_err(|error| format!("failed to construct fail-closed skill verifier: {error}")),
+        (remote_root, remote_audit, local_owner_keyring) => Err(format!(
+            "incomplete skill trust authority provisioning (remote_root={remote_root}, remote_audit={remote_audit}, local_owner_keyring={local_owner_keyring})"
+        )),
+    }
+}
+
+fn authority_file_present(path: &Path, label: &str) -> Result<bool, String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("could not inspect {label}: {error}")),
     }
 }
 

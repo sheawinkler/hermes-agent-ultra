@@ -61,4 +61,5 @@ keyring = { version = "3.6.3", default-features = false, features = ["sync-secre
 libc = "0.2"
 
 [dev-dependencies]
+hermes-config = { workspace = true }
 tempfile = "3"

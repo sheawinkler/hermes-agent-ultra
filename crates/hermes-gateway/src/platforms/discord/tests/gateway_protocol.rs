@@ -941,7 +941,11 @@ async fn gateway_threaded_status_posts_to_discord_thread_not_parent_channel() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/channels/thread-status/messages"))
-        .and(body_json(serde_json::json!({ "content": "working" })))
+        .and(body_json(discord_message_body(
+            "working",
+            None,
+            default_discord_allowed_mentions(),
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": "status-message",
             "channel_id": "thread-status"
@@ -951,7 +955,11 @@ async fn gateway_threaded_status_posts_to_discord_thread_not_parent_channel() {
         .await;
     Mock::given(method("POST"))
         .and(path("/channels/thread-status/messages"))
-        .and(body_json(serde_json::json!({ "content": "final" })))
+        .and(body_json(discord_message_body(
+            "final",
+            None,
+            default_discord_allowed_mentions(),
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": "final-message",
             "channel_id": "thread-status"
@@ -1222,7 +1230,13 @@ async fn oversized_upload_is_rejected_before_a_request_or_full_file_read() {
         .upload_file("media-large", file_path.to_str().unwrap(), None)
         .await
         .expect_err("oversized metadata must fail before multipart construction");
-    assert!(error.to_string().contains("exceeds"));
+    assert!(matches!(
+        error,
+        GatewayError::MediaPreflightFailed {
+            file_name,
+            code: MediaPreflightFailure::TooLarge,
+        } if file_name == "too-large.bin"
+    ));
     server.verify().await;
 }
 

@@ -14,7 +14,7 @@ use tokio::sync::watch;
 
 use crate::commands::should_bypass_active_session;
 
-use crate::gateway::{IncomingMessage, IncomingSender};
+use crate::gateway::{IncomingMessage, IncomingSender, RouteCompletion};
 
 const MAX_ACTIVE_SESSION_LANES: usize = 64;
 const MAX_PENDING_PER_SESSION: usize = 256;
@@ -291,7 +291,7 @@ pub(crate) struct QueuedIncoming {
     turn_kind: QueuedTurnKind,
     completion_tx: Option<
         tokio::sync::oneshot::Sender<
-            Result<GatewayRouteOutcome, hermes_core::errors::GatewayError>,
+            Result<RouteCompletion, hermes_core::errors::GatewayError>,
         >,
     >,
 }
@@ -330,7 +330,7 @@ impl QueuedIncoming {
     pub(crate) fn with_completion_sender(
         mut self,
         completion_tx: tokio::sync::oneshot::Sender<
-            Result<GatewayRouteOutcome, hermes_core::errors::GatewayError>,
+            Result<RouteCompletion, hermes_core::errors::GatewayError>,
         >,
     ) -> Self {
         self.completion_tx = Some(completion_tx);
@@ -345,7 +345,7 @@ impl QueuedIncoming {
         &mut self,
     ) -> Option<
         tokio::sync::oneshot::Sender<
-            Result<GatewayRouteOutcome, hermes_core::errors::GatewayError>,
+            Result<RouteCompletion, hermes_core::errors::GatewayError>,
         >,
     > {
         self.completion_tx.take()
@@ -548,6 +548,16 @@ pub struct BusySessionCoordinator {
     busy_ack_ts: HashMap<String, Instant>,
     ack_cooldown: Duration,
     resource_limits_enabled: bool,
+}
+
+/// Dedup disposition for lanes discarded during shutdown.
+///
+/// Active lanes have crossed admission and may have invoked arbitrary handler,
+/// model, or tool code, so their inbound claims must remain terminal. Queued
+/// entries never started and can safely be released for later redelivery.
+pub(crate) struct ShutdownDedupDisposition {
+    pub(crate) completed: Vec<String>,
+    pub(crate) released: Vec<String>,
 }
 
 impl Default for BusySessionCoordinator {
@@ -953,23 +963,28 @@ impl BusySessionCoordinator {
             .collect()
     }
 
-    /// Cancel every lane and discard queued ingress after runtime workers stop.
-    pub(crate) fn abort_all_for_shutdown(&mut self) -> Vec<String> {
-        let mut released_dedup_keys = Vec::new();
+    /// Discard every lane after workers stop, retaining dedup ownership for
+    /// active turns whose side-effect boundary is uncertain.
+    pub(crate) fn abort_all_for_shutdown(&mut self) -> ShutdownDedupDisposition {
+        let mut completed = Vec::new();
+        let mut released = Vec::new();
         for (_, active) in self.active.drain() {
             if let Some(key) = active.dedup_key {
-                released_dedup_keys.push(key);
+                completed.push(key);
             }
         }
         for (_, pending) in self.pending.drain() {
-            released_dedup_keys.extend(
+            released.extend(
                 pending
                     .into_iter()
                     .filter_map(|entry| entry.dedup_key().map(str::to_string)),
             );
         }
         self.busy_ack_ts.clear();
-        released_dedup_keys
+        ShutdownDedupDisposition {
+            completed,
+            released,
+        }
     }
 }
 

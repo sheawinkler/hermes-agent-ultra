@@ -943,8 +943,8 @@ fn telegram_response_error_uses_typed_retry_after() {
     assert!(matches!(
         err,
         GatewayError::RateLimited {
-            retry_after: Some(std::time::Duration::from_secs(37))
-        }
+            retry_after: Some(retry_after)
+        } if retry_after == std::time::Duration::from_secs(37)
     ));
 }
 

@@ -922,6 +922,11 @@ mod tests {
         ));
         let other_manager =
             MemoryManager::new(other_subject, home.path()).expect("other subject manager");
+        assert_ne!(
+            actor,
+            *other_manager.audit_actor(),
+            "audit actors must be bound to the complete export subject"
+        );
         assert!(matches!(
             manager.open_export_subject(&subject, other_manager.audit_actor(), &artifact),
             Err(MemoryManagerError::AuditActorMismatch)

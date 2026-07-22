@@ -3326,14 +3326,12 @@ impl DiscordGatewayWorker {
         }
         let channel = tokio::select! {
             result = discord_response_json_limited::<serde_json::Value>(response) => {
-                result.map_err(|error| DiscordThreadLookupError::Retry {
-                    retry_after: None,
+                result.map_err(|error| DiscordThreadLookupError::PreserveAndStop {
                     message: format!("Discord channel lookup response was incomplete: {error}"),
                 })?
             }
             _ = tokio::time::sleep_until(deadline) => {
-                return Err(DiscordThreadLookupError::Retry {
-                    retry_after: None,
+                return Err(DiscordThreadLookupError::PreserveAndStop {
                     message: "Discord channel lookup response body exceeded its deadline".to_string(),
                 });
             }
@@ -4463,7 +4461,7 @@ mod gateway_driver_tests {
     }
 
     #[tokio::test]
-    async fn stalled_channel_get_body_retries_in_fifo_and_routes_following_ingress() {
+    async fn stalled_channel_get_body_preserves_fifo_for_recovery() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -4481,23 +4479,9 @@ mod gateway_driver_tests {
                 .await
                 .expect("write incomplete lookup headers");
 
-            let (mut recovered, _) = listener.accept().await.expect("accept retry lookup");
-            let _ = recovered
-                .read(&mut request)
-                .await
-                .expect("read retry lookup");
-            let body =
-                r#"{"id":"thread-stalled","guild_id":"guild-1","type":11,"parent_id":"parent-1"}"#;
-            recovered
-                .write_all(
-                    format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                        body.len()
-                    )
-                    .as_bytes(),
-                )
-                .await
-                .expect("write retry lookup response");
+            // The lookup deadline must abandon this incomplete successful
+            // response instead of retrying around its durable FIFO head.
+            let _ = timeout(Duration::from_secs(7), stalled.read(&mut request)).await;
         });
 
         let config = driver_test_config(
@@ -4530,23 +4514,28 @@ mod gateway_driver_tests {
                 .await
                 .expect("queue ordered ingress");
         }
-
-        let first = timeout(Duration::from_secs(7), inbound_rx.recv())
-            .await
-            .expect("stalled GET retries without external restart")
-            .expect("first inbound remains live");
-        let second = timeout(Duration::from_secs(1), inbound_rx.recv())
-            .await
-            .expect("following FIFO ingress progresses")
-            .expect("second inbound remains live");
-        assert_eq!(first.message().message_id, "stalled-head");
-        assert_eq!(second.message().message_id, "after-stalled");
-
         drop(ordered_tx);
-        timeout(Duration::from_secs(1), stage)
+
+        timeout(Duration::from_secs(7), stage)
             .await
-            .expect("ordered stage stops")
+            .expect("incomplete successful lookup stops the ordered stage")
             .expect("ordered stage succeeds");
+        assert!(
+            matches!(
+                inbound_rx.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            ),
+            "the stalled head must not route and later ingress must not advance around it"
+        );
+        assert_eq!(
+            runtime
+                .snapshot_recovered_ingress_for_cli()
+                .iter()
+                .map(|entry| entry.message().message_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["stalled-head", "after-stalled"],
+            "the incomplete 2xx head and its FIFO backlog must remain recoverable"
+        );
         server.await.expect("lookup fixture succeeds");
     }
 
@@ -4566,11 +4555,23 @@ mod gateway_driver_tests {
             let _ = lookup_started_tx.send(());
             std::future::pending::<()>().await;
         });
+        let gateway_listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind authenticated gateway fixture");
+        let gateway_url = format!("ws://{}", gateway_listener.local_addr().unwrap());
+        let gateway_resume_url = gateway_url.clone();
+        let gateway_server = tokio::spawn(async move {
+            let mut socket = accept(&gateway_listener).await;
+            send_payload(&mut socket, hello(60_000)).await;
+            receive_opcode(&mut socket, opcodes::IDENTIFY).await;
+            send_payload(&mut socket, ready(1, &gateway_resume_url)).await;
+            timeout(Duration::from_secs(1), socket.next())
+                .await
+                .expect("runtime abort closes the authenticated gateway socket");
+        });
 
-        let config = driver_test_config(
-            "ws://127.0.0.1:9".to_string(),
-            DiscordBotMessagePolicy::None,
-        );
+
+        let config = driver_test_config(gateway_url, DiscordBotMessagePolicy::None);
         let runtime =
             test_runtime_from_config_and_api(config, Client::new(), api_base_url);
         let worker = runtime.worker();
@@ -4612,6 +4613,10 @@ mod gateway_driver_tests {
             ["abort-current", "abort-backlog"],
             "awaited runtime abort must join the child before recovery is snapshotted"
         );
+
+        gateway_server
+            .await
+            .expect("authenticated gateway fixture stops after runtime abort");
 
         server.abort();
         let _ = server.await;
@@ -5516,6 +5521,7 @@ mod gateway_driver_tests {
         let mut data = serde_json::json!({
             "id": id,
             "channel_id": "channel-1",
+            "channel_type": if guild_id.is_some() { 0 } else { 1 },
             "content": "hello",
             "author": { "id": author_id, "username": "sender", "bot": is_bot }
         });
@@ -6083,7 +6089,7 @@ mod gateway_driver_tests {
     async fn mock_ws_repeated_heartbeat_requests_cannot_extend_an_unacked_deadline() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("ws://{}", listener.local_addr().unwrap());
-        let runtime = test_runtime(url, DiscordBotMessagePolicy::None);
+        let runtime = test_runtime(url.clone(), DiscordBotMessagePolicy::None);
         let (inbound_tx, _inbound_rx) = mpsc::channel(1);
         let journal = attach_test_durable_inbound(&runtime, inbound_tx).await;
 
@@ -6091,6 +6097,7 @@ mod gateway_driver_tests {
             let mut first = accept(&listener).await;
             send_payload(&mut first, hello(100)).await;
             receive_opcode(&mut first, opcodes::IDENTIFY).await;
+            send_payload(&mut first, ready(1, &url)).await;
 
             // Discord can request an immediate heartbeat repeatedly. Keep
             // asking without ACKing: a healthy client must reconnect at its
@@ -6120,9 +6127,11 @@ mod gateway_driver_tests {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
 
-            let _second = timeout(Duration::from_secs(1), accept(&listener))
+            let mut second = timeout(Duration::from_secs(1), accept(&listener))
                 .await
                 .expect("unacknowledged heartbeat reconnects despite repeated OP 1");
+            send_payload(&mut second, hello(60_000)).await;
+            receive_opcode(&mut second, opcodes::RESUME).await;
         });
 
         runtime.start().await.expect("runtime starts");
@@ -6357,6 +6366,55 @@ mod gateway_driver_tests {
         timeout(Duration::from_secs(1), runtime.stop())
             .await
             .expect("stop cancels the runtime");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mock_ws_stop_during_heartbeat_loop_cancels_immediately() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let runtime = test_runtime(url, DiscordBotMessagePolicy::None);
+        let (inbound_tx, _inbound_rx) = mpsc::channel(1);
+        let _journal = attach_test_durable_inbound(&runtime, inbound_tx).await;
+        let (stopped_tx, stopped_rx) = tokio::sync::oneshot::channel::<()>();
+        let (heartbeat_tx, heartbeat_rx) = tokio::sync::oneshot::channel::<()>();
+
+        let server = tokio::spawn(async move {
+            let mut socket = accept(&listener).await;
+            send_payload(&mut socket, hello(100)).await;
+            receive_opcode(&mut socket, opcodes::IDENTIFY).await;
+            send_payload(&mut socket, ready(2, "ws://127.0.0.1/unused")).await;
+            receive_opcode(&mut socket, opcodes::HEARTBEAT).await;
+            send_payload(
+                &mut socket,
+                GatewayPayload {
+                    op: opcodes::HEARTBEAT_ACK,
+                    d: None,
+                    s: None,
+                    t: None,
+                },
+            )
+            .await;
+            let _ = heartbeat_tx.send(());
+            stopped_rx.await.expect("runtime stop completes");
+            let terminal = timeout(Duration::from_millis(200), socket.next())
+                .await
+                .expect("stopped runtime closes socket");
+            match terminal {
+                None | Some(Ok(Message::Close(_))) | Some(Err(_)) => {}
+                Some(Ok(frame)) => panic!("stopped runtime emitted another frame: {frame:?}"),
+            }
+        });
+
+        runtime.start().await.unwrap();
+        timeout(Duration::from_secs(1), heartbeat_rx)
+            .await
+            .expect("heartbeat loop starts")
+            .expect("server observes heartbeat");
+        timeout(Duration::from_secs(1), runtime.stop())
+            .await
+            .expect("stop cancels the runtime");
+        let _ = stopped_tx.send(());
         server.await.unwrap();
     }
 }

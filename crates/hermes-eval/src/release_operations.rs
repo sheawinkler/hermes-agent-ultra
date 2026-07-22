@@ -1849,6 +1849,7 @@ impl RollbackManifest {
     pub fn artifact_set_digest(&self) -> &ReleaseDigest {
         &self.artifact_set_digest
     }
+}
 
 /// Typed signed rollback-manifest envelope.
 #[derive(Debug, Clone, PartialEq)]
@@ -3180,12 +3181,61 @@ impl<'de> Deserialize<'de> for SoakReceipt {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RuntimeBuildBindingWire {
+    revision_algorithm: String,
+    full_git_sha1: String,
+    source_clean: bool,
+    build_recipe_digest: String,
+    artifact_sha256: String,
+}
+
+impl From<&RuntimeBuildBinding> for RuntimeBuildBindingWire {
+    fn from(binding: &RuntimeBuildBinding) -> Self {
+        let revision_algorithm = match binding.revision_algorithm() {
+            ReleaseRevisionAlgorithm::GitSha1 => "git_sha1",
+        };
+        Self {
+            revision_algorithm: revision_algorithm.to_string(),
+            full_git_sha1: binding.full_git_sha1().to_string(),
+            source_clean: binding.source_clean(),
+            build_recipe_digest: binding.build_recipe_digest().to_string(),
+            artifact_sha256: binding.artifact_sha256().to_string(),
+        }
+    }
+}
+
+impl TryFrom<RuntimeBuildBindingWire> for RuntimeBuildBinding {
+    type Error = ReleaseOperationsError;
+
+    fn try_from(wire: RuntimeBuildBindingWire) -> Result<Self, Self::Error> {
+        let revision_algorithm = match wire.revision_algorithm.as_str() {
+            "git_sha1" => ReleaseRevisionAlgorithm::GitSha1,
+            _ => {
+                return Err(ReleaseOperationsError::InvalidEvidence(
+                    "runtime revision algorithm",
+                ));
+            }
+        };
+        Self::new(
+            revision_algorithm,
+            wire.full_git_sha1,
+            wire.source_clean,
+            parse_release_digest(wire.build_recipe_digest, "runtime build-recipe digest")?,
+            parse_release_digest(wire.artifact_sha256, "runtime artifact digest")?,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RollbackManifestWire {
     release_receipt_digest: String,
     scope: ScopeWire,
     policy: PolicyWire,
     artifacts: BTreeMap<String, String>,
     artifact_set_digest: String,
+    runtime_entrypoint: String,
+    runtime_build: RuntimeBuildBindingWire,
 }
 
 impl From<&RollbackManifest> for RollbackManifestWire {
@@ -3195,6 +3245,8 @@ impl From<&RollbackManifest> for RollbackManifestWire {
             scope: ScopeWire::from(&manifest.scope),
             policy: PolicyWire::from(&manifest.policy),
             artifacts: artifact_map_wire(&manifest.artifacts),
+            runtime_entrypoint: manifest.runtime_entrypoint.as_str().to_string(),
+            runtime_build: RuntimeBuildBindingWire::from(&manifest.runtime_build),
             artifact_set_digest: manifest.artifact_set_digest.to_string(),
         }
     }
@@ -3219,6 +3271,8 @@ impl TryFrom<RollbackManifestWire> for RollbackManifest {
             ReleaseReceiptScope::try_from(wire.scope)?,
             ReleasePromotionPolicy::try_from(wire.policy)?,
             artifacts,
+            RollbackArtifactPath::new(wire.runtime_entrypoint)?,
+            RuntimeBuildBinding::try_from(wire.runtime_build)?,
         )?)?;
         if manifest.artifact_set_digest.to_string() != wire.artifact_set_digest {
             return Err(ReleaseOperationsError::InconsistentBinding(
@@ -3887,7 +3941,7 @@ mod tests {
     }
 
     #[test]
-    fn signed_24h_soak_verifies_but_short_and_unhealthy_evidence_fail_closed() {
+    fn signed_soak_attestations_verify_but_bad_evidence_fails_promotion_conditions() {
         let (input, scope, policy) =
             soak_input(MINIMUM_SOAK_DURATION_MS, 0, 0, CanaryHealth::Healthy);
         let trusted_policy = trust(scope.clone(), policy);
@@ -3920,7 +3974,9 @@ mod tests {
                 ReleaseSigningKeyId::new("release-key-a").expect("key"),
             )
             .expect("sign");
-            assert!(verify_signed_soak_receipt(&envelope, &scope, &trusted_policy).is_err());
+            let verified = verify_signed_soak_receipt(&envelope, &scope, &trusted_policy)
+                .expect("signature-tier verification");
+            assert!(verified.receipt().validate_promotion_conditions().is_err());
         }
     }
 

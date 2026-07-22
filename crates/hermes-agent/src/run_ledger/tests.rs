@@ -816,7 +816,7 @@ fn meta_value<'a>(rows: &'a [(String, String)], key: &str) -> Option<&'a str> {
         .map(|(_, value)| value.as_str())
 }
 
-fn assert_complete_v4_recovery(
+fn assert_complete_v6_recovery(
     factory: &LedgerConnectionFactory,
     before: &V1MigrationSnapshot,
 ) {
@@ -831,7 +831,7 @@ fn assert_complete_v4_recovery(
         meta_value(&after_meta, "retained-v1-marker"),
         meta_value(&before.meta, "retained-v1-marker")
     );
-    assert_eq!(meta_value(&after_meta, "run_ledger_schema_version"), Some("4"));
+    assert_eq!(meta_value(&after_meta, "run_ledger_schema_version"), Some("6"));
     assert_eq!(meta_value(&after_meta, "ledger_primary"), Some("1"));
     let expected_fingerprint = super::connection::expected_schema_fingerprint();
     assert_eq!(
@@ -845,9 +845,9 @@ fn assert_complete_v4_recovery(
 }
 
 #[test]
-fn fresh_v4_schema_validates_exactly() {
+fn fresh_v6_schema_validates_exactly() {
     let directory = tempfile::tempdir().unwrap();
-    let factory = LedgerConnectionFactory::new(directory.path().join("fresh-v4.db"));
+    let factory = LedgerConnectionFactory::new(directory.path().join("fresh-v6.db"));
 
     factory.migrate_and_cut_over_v0_to_v1().unwrap();
     factory.validate_cutover().unwrap();
@@ -867,9 +867,9 @@ fn fresh_v4_schema_validates_exactly() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "4");
+    assert_eq!(version, "6");
     assert_eq!(fingerprint, super::connection::expected_schema_fingerprint());
-    assert_eq!(super::LEDGER_SCHEMA_VERSION, 4);
+    assert_eq!(super::LEDGER_SCHEMA_VERSION, 6);
 }
 
 #[test]
@@ -984,7 +984,7 @@ fn populated_v5_replay_obligations_upgrade_and_reopen() {
 }
 
 #[test]
-fn v1_to_v4_migration_preserves_populated_rows_hashes_and_settings() {
+fn v1_to_v6_migration_preserves_populated_rows_hashes_and_settings() {
     let directory = tempfile::tempdir().unwrap();
     let factory = LedgerConnectionFactory::new(directory.path().join("populated-v1.db"));
     seed_populated_v1(&factory);
@@ -1023,7 +1023,7 @@ fn v1_to_v4_migration_preserves_populated_rows_hashes_and_settings() {
                 |row| row.get::<_, String>(0),
             )
             .unwrap(),
-        "4"
+        "6"
     );
     let retained_ack: (String, i64, i64, Option<String>, Option<String>, Option<i64>) = after
         .query_row(
@@ -1162,7 +1162,7 @@ fn v4_reference_and_replay_state_sql_reject_unknown_literals() {
 }
 
 #[test]
-fn v2_to_v4_migration_preserves_rows_and_marks_historical_artifacts_unverified() {
+fn v2_to_v6_migration_preserves_rows_and_marks_historical_artifacts_unverified() {
     let directory = tempfile::tempdir().unwrap();
     let factory = LedgerConnectionFactory::new(directory.path().join("populated-v2.db"));
     seed_populated_v2(&factory);
@@ -1186,7 +1186,7 @@ fn v2_to_v4_migration_preserves_rows_and_marks_historical_artifacts_unverified()
                 |row| row.get::<_, String>(0),
             )
             .unwrap(),
-        "4"
+        "6"
     );
     assert_eq!(
         after
@@ -1271,7 +1271,7 @@ fn every_v2_migration_checkpoint_rolls_back_exactly_and_retries() {
         drop(after_abort);
 
         factory.migrate_and_cut_over_v0_to_v1().unwrap();
-        assert_complete_v4_recovery(&factory, &before);
+        assert_complete_v6_recovery(&factory, &before);
     }
 }
 
@@ -1325,12 +1325,12 @@ fn every_v2_migration_crash_boundary_recovers_exactly_and_converges() {
         let recovered_v2 = v1_migration_snapshot(&recovered_connection) == before;
         drop(recovered_connection);
         if !recovered_v2 {
-            assert_complete_v4_recovery(&factory, &before);
+            assert_complete_v6_recovery(&factory, &before);
         }
 
         factory.migrate_and_cut_over_v0_to_v1().unwrap();
         factory.migrate_and_cut_over_v0_to_v1().unwrap();
-        assert_complete_v4_recovery(&factory, &before);
+        assert_complete_v6_recovery(&factory, &before);
     }
 }
 
@@ -1435,7 +1435,7 @@ fn every_v1_migration_checkpoint_rolls_back_exactly_and_retries() {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "4", "checkpoint {checkpoint_index} retry");
+        assert_eq!(version, "6", "checkpoint {checkpoint_index} retry");
     }
 }
 
@@ -1490,12 +1490,12 @@ fn every_v1_migration_crash_boundary_recovers_exactly_and_converges() {
         let recovered_v1 = v1_migration_snapshot(&recovered_connection) == before;
         drop(recovered_connection);
         if !recovered_v1 {
-            assert_complete_v4_recovery(&factory, &before);
+            assert_complete_v6_recovery(&factory, &before);
         }
 
         factory.migrate_and_cut_over_v0_to_v1().unwrap();
         factory.migrate_and_cut_over_v0_to_v1().unwrap();
-        assert_complete_v4_recovery(&factory, &before);
+        assert_complete_v6_recovery(&factory, &before);
     }
 }
 

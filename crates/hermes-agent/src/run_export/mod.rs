@@ -23,19 +23,19 @@ use crate::deterministic_replay::{
 };
 
 use crate::run_ledger::{
-    delivery_result_evidence_identity_for, genesis_hash, recompute_event_hash,
-    verify_event_delivery_projection, verify_event_nonresumable_projection, AppendKey,
-    ArtifactDegradationReason, ArtifactReferenceState, ArtifactStateReason, CanonicalJson,
-    DeliveryFailureReason, Destination, DownstreamIdempotencyKey, DurableDeliveryReceipt,
-    EffectIntent, EventId, ExactReplayState, ExactReplayStatus, LedgerError,
-    NonResumableEffectRecord, NonResumableEffectSnapshot, NonResumableEffectState,
-    NonResumableIdempotencyKey, OutboxRecord, OutboxRowId, OutboxState, PrivateFingerprint,
-    ReplayObligationFidelity, ReplayObligationSnapshot, ReplayOperationKind,
-    ReplayOperationOutcome, ReplayOperationPhase, RunHeader, RunId, RunLedger, RunOutcome,
-    RunOwnerId, RunStatus, SealedArtifactRef, SessionId, SessionRunEvent, SessionRunEventKind,
-    Sha256Digest, TenantId, TerminalReason, BranchId,
-    DELIVERY_RESULT_BINDING_SCHEMA, LEGACY_DELIVERY_RESULT_BINDING_SCHEMA,
-    CANONICALIZATION_ALGORITHM, CANONICALIZATION_VERSION, RUN_EVENT_BINDING_SCHEMA_VERSION,
+    delivery_result_evidence_identity_for, delivery_result_exact_evidence_identity_for,
+    genesis_hash, recompute_event_hash, verify_event_delivery_projection,
+    verify_event_nonresumable_projection, AppendKey, ArtifactDegradationReason,
+    ArtifactReferenceState, ArtifactStateReason, BranchId, CanonicalJson, DeliveryFailureReason,
+    Destination, DownstreamIdempotencyKey, DurableDeliveryReceipt, EffectIntent, EventId,
+    ExactReplayState, ExactReplayStatus, LedgerError, NonResumableEffectRecord,
+    NonResumableEffectSnapshot, NonResumableEffectState, NonResumableIdempotencyKey, OutboxRecord,
+    OutboxRowId, OutboxState, PrivateFingerprint, ReplayObligationFidelity,
+    ReplayObligationSnapshot, ReplayOperationKind, ReplayOperationOutcome, ReplayOperationPhase,
+    RunHeader, RunId, RunLedger, RunOutcome, RunOwnerId, RunStatus, SealedArtifactRef, SessionId,
+    SessionRunEvent, SessionRunEventKind, Sha256Digest, TenantId, TerminalReason,
+    CANONICALIZATION_ALGORITHM, CANONICALIZATION_VERSION, DELIVERY_RESULT_BINDING_SCHEMA,
+    LEGACY_DELIVERY_RESULT_BINDING_SCHEMA, RUN_EVENT_BINDING_SCHEMA_VERSION,
     RUN_EXIT_BINDING_SCHEMA, RUN_START_BINDING_SCHEMA,
 };
 
@@ -732,9 +732,9 @@ fn validate_status(
             "status run_id does not match header".to_string(),
         ));
     }
-    if schema_version == RUN_EXPORT_SCHEMA_VERSION && status.exact_replay.is_none() {
+    if schema_version != LEGACY_RUN_EXPORT_SCHEMA_VERSION && status.exact_replay.is_none() {
         return Err(RunExportError::InvalidExport(
-            "v2 run status lacks durable exact replay state".to_string(),
+            "v2+ run status lacks durable exact replay state".to_string(),
         ));
     }
     parse_event_id(&status.exit_event_id, "status exit_event_id")?;
@@ -945,7 +945,9 @@ fn validate_exact_replay_proof(
     }
 
     let exact = envelope.status.exact_replay.as_ref().ok_or_else(|| {
-        RunExportError::InvalidExport("v2 run status lacks durable exact replay state".to_string())
+        RunExportError::InvalidExport(
+            "exact replay-aware run status lacks durable exact replay state".to_string(),
+        )
     })?;
     let expected_state = ExactReplayState::from_db(&exact.state)?;
     let expected_reason = exact
@@ -1574,11 +1576,17 @@ fn validate_replay_operation_instance_binding(
                         .to_string(),
                 ));
             }
-            let (payload_outbox_id, _, _, _) =
+            let (payload_outbox_id, _, _, _, evidence_fidelity) =
                 validate_delivery_result_payload(source, outbox_by_id, event_sequence_by_id)?;
             if payload_outbox_id != outbox_id {
                 return Err(RunExportError::InvalidExport(
                     "delivery result replay obligation instance does not match its payload"
+                        .to_string(),
+                ));
+            }
+            if obligation.fidelity != evidence_fidelity {
+                return Err(RunExportError::IncompleteReplayEvidence(
+                    "delivery result replay fidelity does not match its sealed evidence"
                         .to_string(),
                 ));
             }
@@ -1701,7 +1709,7 @@ fn replay_projection_gaps(
     {
         // Re-parse through the same strict projection decoder used for terminal
         // verification; never infer an outbox attempt from human-readable text.
-        let (outbox_id, _, _, _) =
+        let (outbox_id, _, _, _, _) =
             validate_delivery_result_payload(event, &outbox_by_id, &event_sequence_by_id)?;
         let instance = outbox_id.to_string();
         append_projection_gap_if_unmapped(
@@ -1808,7 +1816,7 @@ fn validate_terminal_projection(
         .iter()
         .filter(|event| event.kind == SessionRunEventKind::DeliveryResult)
     {
-        let (outbox_id, state, attempt_count, legacy) =
+        let (outbox_id, state, attempt_count, legacy, _) =
             validate_delivery_result_payload(event, &outbox_by_id, &event_sequence_by_id)?;
         if legacy {
             legacy_delivery_result_count =
@@ -1885,7 +1893,7 @@ fn validate_delivery_result_payload(
     event: &SessionRunEvent,
     outbox_by_id: &BTreeMap<OutboxRowId, &ParsedOutbox>,
     event_sequence_by_id: &BTreeMap<EventId, u64>,
-) -> RunExportResult<(OutboxRowId, OutboxState, u32, bool)> {
+) -> RunExportResult<(OutboxRowId, OutboxState, u32, bool, ReplayObligationFidelity)> {
     let value = serde_json::from_str::<Value>(event.public_payload.as_str())
         .map_err(|error| RunExportError::InvalidExport(error.to_string()))?;
     ensure_object_keys(
@@ -1929,17 +1937,17 @@ fn validate_delivery_result_payload(
     let has_delivery_evidence = event.public_identity.is_some()
         && event.private_fingerprint.is_some()
         && event.sealed_artifact_ref.is_some();
-    let legacy = match payload.schema.as_str() {
+    let (legacy, replay_fidelity) = match payload.schema.as_str() {
         LEGACY_DELIVERY_RESULT_BINDING_SCHEMA => {
             if has_delivery_evidence {
                 return Err(RunExportError::InvalidExport(
                     "legacy v1 delivery-result must not carry sealed result evidence".to_string(),
                 ));
             }
-            true
+            (true, ReplayObligationFidelity::Unavailable)
         }
         DELIVERY_RESULT_BINDING_SCHEMA => {
-            if has_delivery_evidence {
+            let replay_fidelity = if has_delivery_evidence {
                 let outcome = match state {
                     OutboxState::Acknowledged => "returned",
                     OutboxState::Ready | OutboxState::DeadLettered => "handler_error",
@@ -1959,24 +1967,35 @@ fn validate_delivery_result_payload(
                     })?
                     .as_value()
                     .map_err(RunExportError::Ledger)?;
-                let expected_identity = delivery_result_evidence_identity_for(
+                let metadata_identity = delivery_result_evidence_identity_for(
                     &outbox_id,
                     outbox.record.destination,
                     &outbox.record.idempotency_key,
                     outcome,
                 );
-                if actual_identity != expected_identity {
+                let exact_identity = delivery_result_exact_evidence_identity_for(
+                    &outbox_id,
+                    outbox.record.destination,
+                    &outbox.record.idempotency_key,
+                    outcome,
+                );
+                let replay_fidelity = if actual_identity == exact_identity {
+                    ReplayObligationFidelity::ExactPrivate
+                } else if actual_identity == metadata_identity {
+                    ReplayObligationFidelity::Unavailable
+                } else {
                     return Err(RunExportError::InvalidExport(
                         "delivery-result evidence identity does not bind its outbox completion"
                             .to_string(),
                     ));
-                }
+                };
                 if event.sealed_artifact_ref.as_ref() == Some(&outbox.record.sealed_artifact_ref) {
                     return Err(RunExportError::InvalidExport(
                         "delivery-result evidence reuses the source sealed artifact".to_string(),
                     ));
                 }
-            } else if !matches!(
+                replay_fidelity
+            } else if matches!(
                 error,
                 Some(
                     DeliveryFailureReason::MissingRoute
@@ -1984,11 +2003,13 @@ fn validate_delivery_result_payload(
                         | DeliveryFailureReason::AttemptsExhausted
                 )
             ) {
+                ReplayObligationFidelity::Unavailable
+            } else {
                 return Err(RunExportError::InvalidExport(
                     "v2 external delivery-result is missing sealed result evidence".to_string(),
                 ));
-            }
-            false
+            };
+            (false, replay_fidelity)
         }
         _ => {
             return Err(RunExportError::InvalidExport(
@@ -2040,7 +2061,13 @@ fn validate_delivery_result_payload(
             ));
         }
     }
-    Ok((outbox_id, state, payload.attempt_count, legacy))
+    Ok((
+        outbox_id,
+        state,
+        payload.attempt_count,
+        legacy,
+        replay_fidelity,
+    ))
 }
 
 fn parse_manifests(
@@ -2637,7 +2664,10 @@ fn validate_wire_document_layout(value: &Value) -> RunExportResult<()> {
     let status = object_field(root, "status", "envelope")?;
     let schema_version = root.get("schema_version").and_then(Value::as_u64);
     match schema_version {
-        Some(version) if version == u64::from(RUN_EXPORT_SCHEMA_VERSION) => {
+        Some(version)
+            if version == u64::from(PREVIOUS_RUN_EXPORT_SCHEMA_VERSION)
+                || version == u64::from(RUN_EXPORT_SCHEMA_VERSION) =>
+        {
             ensure_object_keys(
                 status,
                 [

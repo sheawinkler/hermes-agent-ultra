@@ -196,10 +196,16 @@ impl AgentLoop {
             .and_then(detect_api_mode_for_url)
             .unwrap_or(ApiMode::ChatCompletions);
 
-        let has_runtime_override = explicit_api_key
-            .as_ref()
-            .map(|s| !s.trim().is_empty())
-            .is_some()
+        let primary_provider = self
+            .primary_runtime_snapshot()
+            .provider
+            .unwrap_or_else(|| self.extract_provider_and_model(self.config.model.as_str()).0);
+        let provider_overrides_primary = !provider_lc.eq_ignore_ascii_case(&primary_provider);
+        let has_runtime_override = provider_overrides_primary
+            || explicit_api_key
+                .as_ref()
+                .map(|s| !s.trim().is_empty())
+                .is_some()
             || cheap
                 .base_url
                 .as_ref()
@@ -211,16 +217,11 @@ impl AgentLoop {
             self.primary_credential_pool.as_ref()
         };
 
-        self.build_runtime_provider(
-            &provider_lc,
-            model_name,
-            cheap.base_url.as_deref(),
-            cheap.api_key_env.as_deref(),
-            explicit_api_key.as_deref(),
-            Some(&api_mode),
-            pool_ref,
-        )
-        .map_err(|_| ())?;
+        // Credential resolution belongs after an ActiveRun exists: an expired
+        // provider override must refresh its own vault through the durable
+        // one-shot gate, rather than make smart routing silently select the
+        // primary model's provider. Execution still fails closed when the
+        // selected runtime cannot be constructed after that gate.
 
         let (command, args) = self.resolve_runtime_command_args(Some(&provider_lc));
         if provider_lc == "copilot-acp"

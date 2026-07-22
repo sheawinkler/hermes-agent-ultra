@@ -674,12 +674,13 @@ impl Gateway {
         }
         let cancelled_background = self.background_tasks.cancel_all().await;
         let cancelled_runtime = self.shutdown_runtime_workers().await;
-        let released_dedup_keys = self
+        let shutdown_dedup = self
             .busy_sessions
             .write()
             .await
             .abort_all_for_shutdown();
-        self.release_dedup_keys(&released_dedup_keys).await;
+        self.complete_dedup_keys(&shutdown_dedup.completed).await;
+        self.release_dedup_keys(&shutdown_dedup.released).await;
         let cleared_streams = self.stream_manager.clear_active_streams().await;
         if cleared_streams > 0 {
             info!(

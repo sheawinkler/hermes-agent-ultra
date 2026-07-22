@@ -73,7 +73,7 @@ mod tests {
         )
     }
 
-    async fn spawn_nous_live_probe_server(status: &str, body: &'static str) -> String {
+    async fn spawn_nous_live_probe_server(status: &str, body: &str) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -81,6 +81,7 @@ mod tests {
             .expect("bind probe server");
         let addr = listener.local_addr().expect("probe server addr");
         let status = status.to_string();
+        let body = body.to_string();
         tokio::spawn(async move {
             if let Ok((mut stream, _peer)) = listener.accept().await {
                 let mut buf = [0_u8; 2048];

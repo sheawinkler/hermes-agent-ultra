@@ -471,12 +471,14 @@ mod tests {
             Ok(SourceState::Unavailable)
         );
         assert_eq!(
-            load_identity_for_source_state(SourceState::Dirty, Some(SHA_A)),
-            Err(BuildIdentityError::SourceDirty)
+            load_identity_for_source_state(SourceState::Dirty, Some(SHA_A))
+                .expect_err("dirty source must not produce build identity"),
+            BuildIdentityError::SourceDirty
         );
         assert_eq!(
-            load_identity_for_source_state(SourceState::Unavailable, None),
-            Err(BuildIdentityError::SourceUnavailable)
+            load_identity_for_source_state(SourceState::Unavailable, None)
+                .expect_err("unavailable source must not produce build identity"),
+            BuildIdentityError::SourceUnavailable
         );
     }
 
@@ -500,8 +502,9 @@ mod tests {
     #[test]
     fn malformed_embedded_values_are_not_authority() {
         assert_eq!(
-            clean_identity("0123456789ABCDEF0123456789abcdef01234567", TARGET_A),
-            Err(BuildIdentityError::MalformedEmbeddedIdentity)
+            clean_identity("0123456789ABCDEF0123456789abcdef01234567", TARGET_A)
+                .expect_err("uppercase revision must not produce build identity"),
+            BuildIdentityError::MalformedEmbeddedIdentity
         );
         assert_eq!(
             embedded_source_state_from_value(Some("unknown")),

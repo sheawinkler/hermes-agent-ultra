@@ -1344,7 +1344,7 @@ impl LedgerConnectionFactory {
         Ok(connection)
     }
 
-    /// Atomically create or upgrade to the only supported v4 ledger schema.
+    /// Atomically create or upgrade to the only supported v6 ledger schema.
     pub fn migrate_and_cut_over_v0_to_v1(&self) -> LedgerResult<()> {
         self.migrate_inner(MigrationAbort::Never)
     }

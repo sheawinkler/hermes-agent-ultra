@@ -308,10 +308,16 @@ impl MemorySubjectDerivationKey {
     }
 
     pub fn actor_for_subject(&self, subject: &MemorySubject) -> MemoryAuditActor {
-        let mut bytes = Vec::with_capacity(subject.principal_id.as_str().len() + 32);
+        let subject_identity = subject.canonical_bytes();
+        let mut bytes = Vec::with_capacity(
+            b"hermes-memory-actor".len()
+                + 1
+                + std::mem::size_of::<u32>()
+                + subject_identity.len(),
+        );
         bytes.extend_from_slice(b"hermes-memory-actor");
         bytes.push(MEMORY_SUBJECT_KEY_VERSION);
-        append_canonical_field(&mut bytes, subject.principal_id.as_str().as_bytes());
+        append_canonical_field(&mut bytes, &subject_identity);
         MemoryAuditActor(MemorySubjectStorageKey::from_digest(
             ACTOR_KEY_PREFIX,
             self.derive(b"actor", &bytes),
@@ -1005,6 +1011,23 @@ mod tests {
         assert!(serde_json::from_str::<MemoryAuditActor>(&actor_encoded).is_ok());
         assert!(serde_json::from_str::<MemorySubjectStorageKey>(&actor_encoded).is_err());
         assert!(serde_json::from_str::<MemoryAuditActor>(&encoded).is_err());
+    }
+
+    #[test]
+    fn audit_actors_are_stable_and_bound_to_full_subject_identity() {
+        let derivation = MemorySubjectDerivationKey::from_bytes([11; 32]);
+        let alice_session_a = subject("alice", None, "session-a");
+        let alice_session_a_repeat = subject("alice", None, "session-a");
+        let alice_session_b = subject("alice", None, "session-b");
+
+        assert_eq!(
+            derivation.actor_for_subject(&alice_session_a),
+            derivation.actor_for_subject(&alice_session_a_repeat)
+        );
+        assert_ne!(
+            derivation.actor_for_subject(&alice_session_a),
+            derivation.actor_for_subject(&alice_session_b)
+        );
     }
 
     #[test]

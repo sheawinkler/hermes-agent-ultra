@@ -1,21 +1,20 @@
 {
   "behavioral_diff_summary": {
     "gate": {
-      "failures": 2,
+      "failures": 0,
       "max_gaps": 0,
       "max_missing_rust_test_refs": 0,
       "max_regressions": 0,
       "max_unverified_cases": 0,
       "min_similarity_ratio": 1.0,
       "min_superiority_cases": 5,
-      "pass": false
+      "pass": true
     },
     "summary": {
       "behavioral_similarity_ratio": 1.0,
       "classification_counts": {
         "equivalent": 5,
-        "intentional_divergence": 1,
-        "superior": 7
+        "superior": 8
       },
       "domain_counts": {
         "agent-loop-and-runtime": 1,
@@ -34,12 +33,12 @@
       "equal_or_better_cases": 13,
       "equivalent_cases": 5,
       "gaps": 0,
-      "intentional_divergence_cases": 1,
+      "intentional_divergence_cases": 0,
       "min_superiority_cases": 5,
-      "missing_rust_test_refs": 24,
-      "missing_source_artifacts": 1,
+      "missing_rust_test_refs": 0,
+      "missing_source_artifacts": 0,
       "regressions": 0,
-      "superior_cases": 7,
+      "superior_cases": 8,
       "total_cases": 13,
       "unverified_cases": 0
     }
@@ -91,19 +90,19 @@
       {
         "actual": 1.0,
         "limit": 1.0,
-        "metric": "min_fixture_reference_category_coverage_ratio",
+        "metric": "min_sota_harness_domain_coverage_ratio",
         "status": "pass"
       },
       {
         "actual": 0.0,
         "limit": 0,
-        "metric": "max_fixture_reference_critical_gaps",
+        "metric": "max_sota_harness_critical_gaps",
         "status": "pass"
       },
       {
         "actual": 0.0,
         "limit": 0,
-        "metric": "max_fixture_reference_missing_rust_refs",
+        "metric": "max_sota_harness_missing_rust_refs",
         "status": "pass"
       },
       {
@@ -113,7 +112,7 @@
         "status": "pass"
       },
       {
-        "actual": 7.0,
+        "actual": 8.0,
         "limit": 5,
         "metric": "min_behavioral_superiority_cases",
         "status": "pass"
@@ -137,10 +136,10 @@
         "status": "pass"
       },
       {
-        "actual": 24.0,
+        "actual": 0.0,
         "limit": 0,
         "metric": "max_behavioral_missing_rust_refs",
-        "status": "fail"
+        "status": "pass"
       },
       {
         "actual": 1.0,
@@ -185,7 +184,7 @@
         "status": "pass"
       },
       {
-        "actual": 1315.0,
+        "actual": 1343.0,
         "limit": 100,
         "metric": "max_queue_pending_commits",
         "status": "fail"
@@ -194,9 +193,6 @@
         "actual": [
           "source ledger is not valid",
           "source ledger reports source or classification errors",
-          "source ledger local_source is dirty or unavailable and cannot authorize release",
-          "current local-source record does not match the canonical source ledger",
-          "current local tree-state digest does not match the source ledger",
           "patch queue truth status is not PASS",
           "parity matrix local SHA is stale relative to the canonical source ledger",
           "parity matrix upstream SHA is stale relative to the canonical source ledger"
@@ -256,43 +252,7 @@
     "commits_behind": 1.0,
     "upstream_patch_missing": 1.0
   },
-  "fixture_reference_coverage": {
-    "authority": {
-      "capability_promotion_authoritative": false,
-      "production_complete": false
-    },
-    "gate": {
-      "critical_gaps": 0,
-      "missing_rust_test_refs": 0,
-      "pass": true,
-      "scope": "fixture_reference_regression"
-    },
-    "scope": {
-      "authoritative_for": [
-        "fixture/reference regression coverage",
-        "referenced Rust test existence"
-      ],
-      "coverage_kind": "fixture_reference_regression",
-      "not_evidence_of": [
-        "implemented production capability",
-        "executable protocol behavior",
-        "executable client behavior",
-        "executable chaos behavior"
-      ]
-    },
-    "summary": {
-      "covered_fault_classes": 7,
-      "direct_rust_tests": 12,
-      "domain_coverage_ratio": 1.0,
-      "domains_passing": 3,
-      "domains_total": 3,
-      "fault_scenarios": 6,
-      "protocol_cases": 7,
-      "required_fault_classes": 7,
-      "workflow_replay_steps": 9
-    }
-  },
-  "generated_at_utc": "2026-07-19T00:57:22.542035+00:00",
+  "generated_at_utc": "2026-07-21T22:47:25.092180+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -303,12 +263,12 @@
     "GPAR-07": false,
     "GPAR-08": true,
     "GPAR-09": true,
-    "GPAR-10": false,
+    "GPAR-10": true,
     "GPAR-11": true
   },
   "metrics": {
     "max_behavioral_gaps": 0.0,
-    "max_behavioral_missing_rust_refs": 24.0,
+    "max_behavioral_missing_rust_refs": 0.0,
     "max_behavioral_regressions": 0.0,
     "max_behavioral_unverified_cases": 0.0,
     "max_deep_problem_solving_gaps": 0.0,
@@ -317,18 +277,18 @@
     "max_deep_problem_solving_unverified_cases": 0.0,
     "max_divergence_review_overdue": 0.0,
     "max_files_only_upstream": 3439.0,
-    "max_fixture_reference_critical_gaps": 0.0,
-    "max_fixture_reference_missing_rust_refs": 0.0,
-    "max_queue_pending_commits": 1315.0,
+    "max_queue_pending_commits": 1343.0,
+    "max_sota_harness_critical_gaps": 0.0,
+    "max_sota_harness_missing_rust_refs": 0.0,
     "max_test_coverage_audit_critical_gaps": 0.0,
     "max_test_coverage_missing_rust_refs": 0.0,
     "max_unowned_divergences": 0.0,
     "min_behavioral_similarity_ratio": 1.0,
-    "min_behavioral_superiority_cases": 7.0,
+    "min_behavioral_superiority_cases": 8.0,
     "min_deep_problem_solving_ratio": 1.0,
     "min_deep_problem_solving_superiority_cases": 10.0,
     "min_deep_problem_solving_total_cases": 10.0,
-    "min_fixture_reference_category_coverage_ratio": 1.0,
+    "min_sota_harness_domain_coverage_ratio": 1.0,
     "min_test_coverage_tracked_behavior_ratio": 1.0,
     "min_test_intent_mapping_ratio": 1.0
   },
@@ -340,21 +300,22 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "pending": 1315
+      "pending": 1343,
+      "superseded": 496
     },
     "by_target_ticket": {
-      "20": 670,
-      "21": 13,
-      "22": 66,
-      "23": 55,
+      "20": 898,
+      "21": 15,
+      "22": 93,
+      "23": 69,
       "24": 2,
-      "25": 20,
-      "26": 489
+      "25": 32,
+      "26": 730
     },
-    "complete_range_commit_count": 1315,
+    "complete_range_commit_count": 1839,
     "overrides_path": "docs/parity/queue-overrides.json",
-    "total_commits": 1315,
-    "unowned_divergence_count": 1315
+    "total_commits": 1839,
+    "unowned_divergence_count": 1343
   },
   "release_gate": {
     "checks": [
@@ -397,19 +358,19 @@
       {
         "actual": 1.0,
         "limit": 1.0,
-        "metric": "min_fixture_reference_category_coverage_ratio",
+        "metric": "min_sota_harness_domain_coverage_ratio",
         "status": "pass"
       },
       {
         "actual": 0.0,
         "limit": 0,
-        "metric": "max_fixture_reference_critical_gaps",
+        "metric": "max_sota_harness_critical_gaps",
         "status": "pass"
       },
       {
         "actual": 0.0,
         "limit": 0,
-        "metric": "max_fixture_reference_missing_rust_refs",
+        "metric": "max_sota_harness_missing_rust_refs",
         "status": "pass"
       },
       {
@@ -419,7 +380,7 @@
         "status": "pass"
       },
       {
-        "actual": 7.0,
+        "actual": 8.0,
         "limit": 5,
         "metric": "min_behavioral_superiority_cases",
         "status": "pass"
@@ -443,10 +404,10 @@
         "status": "pass"
       },
       {
-        "actual": 24.0,
+        "actual": 0.0,
         "limit": 0,
         "metric": "max_behavioral_missing_rust_refs",
-        "status": "fail"
+        "status": "pass"
       },
       {
         "actual": 1.0,
@@ -491,7 +452,7 @@
         "status": "pass"
       },
       {
-        "actual": 1315.0,
+        "actual": 1343.0,
         "limit": 0,
         "metric": "max_queue_pending_commits",
         "status": "fail"
@@ -507,7 +468,7 @@
           "GPAR-07": false,
           "GPAR-08": true,
           "GPAR-09": true,
-          "GPAR-10": false,
+          "GPAR-10": true,
           "GPAR-11": true
         },
         "limit": "all true",
@@ -518,9 +479,6 @@
         "actual": [
           "source ledger is not valid",
           "source ledger reports source or classification errors",
-          "source ledger local_source is dirty or unavailable and cannot authorize release",
-          "current local-source record does not match the canonical source ledger",
-          "current local tree-state digest does not match the source ledger",
           "patch queue truth status is not PASS",
           "parity matrix local SHA is stale relative to the canonical source ledger",
           "parity matrix upstream SHA is stale relative to the canonical source ledger"
@@ -533,16 +491,34 @@
     "mode": "functional",
     "pass": false
   },
+  "sota_harness_summary": {
+    "gate": {
+      "critical_gaps": 0,
+      "missing_rust_test_refs": 0,
+      "pass": true
+    },
+    "summary": {
+      "covered_fault_classes": 7,
+      "direct_rust_tests": 12,
+      "domain_coverage_ratio": 1.0,
+      "domains_passing": 3,
+      "domains_total": 3,
+      "fault_scenarios": 6,
+      "protocol_cases": 7,
+      "required_fault_classes": 7,
+      "workflow_replay_steps": 9
+    }
+  },
   "sources": {
     "adapter_matrix": "docs/parity/adapter-feature-matrix.json",
     "behavioral_diff": "docs/parity/behavioral-similarity-diff.json",
     "deep_problem_solving_diff": "docs/parity/deep-problem-solving-diff.json",
     "divergence_validation": "docs/parity/divergence-validation.json",
-    "fixture_reference_matrix": "docs/parity/sota-harness-matrix.json",
     "intent_mapping": "docs/parity/test-intent-mapping.json",
     "parity_matrix": "docs/parity/parity-matrix.json",
     "patch_queue": "docs/parity/upstream-missing-queue.json",
     "shared_diff_classification": "docs/parity/shared-different-classification.json",
+    "sota_harness_matrix": "docs/parity/sota-harness-matrix.json",
     "source_ledger": "docs/parity/upstream-source-ledger.json",
     "test_coverage_audit": "docs/parity/test-coverage-audit.json",
     "thresholds": "docs/parity/global-parity-thresholds.json",
@@ -577,9 +553,6 @@
     "errors": [
       "source ledger is not valid",
       "source ledger reports source or classification errors",
-      "source ledger local_source is dirty or unavailable and cannot authorize release",
-      "current local-source record does not match the canonical source ledger",
-      "current local tree-state digest does not match the source ledger",
       "patch queue truth status is not PASS",
       "parity matrix local SHA is stale relative to the canonical source ledger",
       "parity matrix upstream SHA is stale relative to the canonical source ledger"
@@ -590,18 +563,13 @@
       "errors": [
         "source ledger is not valid",
         "source ledger reports source or classification errors",
-        "source ledger local_source is dirty or unavailable and cannot authorize release",
-        "current local-source record does not match the canonical source ledger",
-        "current local tree-state digest does not match the source ledger",
         "patch queue truth status is not PASS"
       ],
       "fork_sha": "c002f8c4efe475c89c9f14d3995d44e6a5df5b27",
       "ledger_path": "docs/parity/upstream-source-ledger.json",
-      "ledger_sha256": "da00446670077773cb7bd6d96a138a5099612e23387e4ffa387f2c23e1d18a08",
-      "local_source_sha256": "e73460e386d7d021c923746eb43006d185ce7664b906fe28504d9b664b5f3d0e",
-      "local_tree_state_digest": "1c8e773b2c12bee97bad850d563560ab4dd48da507dcc6b0d6a2b119a98eb7a6",
+      "ledger_sha256": "0a35c83f7dfad4fbad5624bb82d75581f19b6f437aef52c4d4fb09f43de4828f",
       "pass": false,
-      "upstream_sha": "614dc194ea7d853d39f9e84582ec62156f41a475"
+      "upstream_sha": "146f4ed07d1c10031c86a5e7f2ac78d11b253dd9"
     },
     "stale_source_count": 2
   },

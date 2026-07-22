@@ -1,7 +1,7 @@
 use super::*;
 use futures::stream::BoxStream;
 use hermes_core::JsonSchema;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 
 fn observer_callbacks() -> (AgentCallbacks, AgentObserverReceiver) {
     let (observer_sink, receiver) = AgentObserverSink::channel(32);
@@ -32,10 +32,10 @@ fn attach_test_run_runtime(agent: AgentLoop) -> (AgentLoop, tempfile::TempDir) {
 }
 
 fn env_test_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+    static LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    LOCK
         .lock()
-        .expect("env test lock poisoned")
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 struct EnvVarGuard {

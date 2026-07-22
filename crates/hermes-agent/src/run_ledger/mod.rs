@@ -8,11 +8,11 @@ pub use connection::{LedgerConnectionFactory, DEFAULT_BUSY_TIMEOUT, LEDGER_SCHEM
 pub use error::{LedgerError, LedgerResult};
 pub(crate) use ledger::{
     delivery_result_evidence_identity, delivery_result_evidence_identity_for,
-    delivery_result_exact_evidence_identity, genesis_hash, recompute_event_hash,
-    verify_event_delivery_projection, verify_event_nonresumable_projection,
-    DELIVERY_RESULT_BINDING_SCHEMA, DELIVERY_RESULT_EVIDENCE_IDENTITY_SCHEMA,
-    LEGACY_DELIVERY_RESULT_BINDING_SCHEMA, RUN_EVENT_BINDING_SCHEMA_VERSION,
-    RUN_EXIT_BINDING_SCHEMA, RUN_START_BINDING_SCHEMA,
+    delivery_result_exact_evidence_identity, delivery_result_exact_evidence_identity_for,
+    genesis_hash, recompute_event_hash, verify_event_delivery_projection,
+    verify_event_nonresumable_projection, DELIVERY_RESULT_BINDING_SCHEMA,
+    DELIVERY_RESULT_EVIDENCE_IDENTITY_SCHEMA, LEGACY_DELIVERY_RESULT_BINDING_SCHEMA,
+    RUN_EVENT_BINDING_SCHEMA_VERSION, RUN_EXIT_BINDING_SCHEMA, RUN_START_BINDING_SCHEMA,
 };
 pub use ledger::{LedgerClock, RunLedger, RunLedgerConfig, SystemLedgerClock};
 pub use policy::{

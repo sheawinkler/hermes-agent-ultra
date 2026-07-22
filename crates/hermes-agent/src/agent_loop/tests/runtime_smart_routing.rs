@@ -715,8 +715,12 @@
             .expect("routed provider reached refresh endpoint")
             .expect("refresh fixture task");
 
+        // Refresh uses a separate governed writable handle; reopen the
+        // encrypted vault to assert the durable provider-specific result.
+        let refreshed_store =
+            FileTokenStore::open_read_only(&token_path).expect("reopen refreshed OAuth vault");
         assert_eq!(
-            store
+            refreshed_store
                 .get("qwen-oauth")
                 .await
                 .expect("routed credential")
@@ -724,7 +728,7 @@
             "qwen-refreshed-token"
         );
         assert_eq!(
-            store
+            refreshed_store
                 .get("openai")
                 .await
                 .expect("model-prefix credential")

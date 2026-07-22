@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use hermes_tools::skill_utils::{
-    discover_verified_skills, reload_verified_skill, render_skill_provenance_tag, SkillInfo,
-    SkillTrustIdentity, SkillTrustRuntime,
+    discover_verified_skills, reload_verified_skill, render_skill_provenance_tag,
+    skill_trust_runtime_for_skills_root, SkillInfo, SkillTrustIdentity, SkillTrustRuntime,
 };
 use regex::Regex;
 
@@ -178,6 +178,9 @@ pub struct SkillOrchestrator {
     skills_dir: PathBuf,
     /// Core verifier context; absent context fails closed.
     trust_runtime: Option<SkillTrustRuntime>,
+    /// Provisioning failure retained so catalog scans explain their fail-closed
+    /// result without accepting an alternate trust source.
+    trust_runtime_error: Option<String>,
     /// Explicit allow-list of skill identifiers (`name` and `/command` forms).
     enabled: HashSet<String>,
     /// Explicit deny-list of skill identifiers (`name` and `/command` forms).
@@ -229,12 +232,20 @@ fn emit_security_skip_summary(skips: &HashMap<String, Vec<String>>) {
 }
 
 impl SkillOrchestrator {
-    /// Create an orchestrator with a fail-closed verifier context.
+    /// Create an orchestrator bound to the canonical external trust authority
+    /// layout for its supplied skill root.
     pub fn new(skills_dir: impl Into<PathBuf>) -> Self {
+        let skills_dir = skills_dir.into();
+        let (trust_runtime, trust_runtime_error) =
+            match skill_trust_runtime_for_skills_root(&skills_dir) {
+                Ok(runtime) => (Some(runtime), None),
+                Err(error) => (None, Some(error)),
+            };
         Self {
             commands: HashMap::new(),
-            skills_dir: skills_dir.into(),
-            trust_runtime: SkillTrustRuntime::fail_closed().ok(),
+            skills_dir,
+            trust_runtime,
+            trust_runtime_error,
             enabled: HashSet::new(),
             disabled: HashSet::new(),
         }
@@ -247,9 +258,14 @@ impl SkillOrchestrator {
         skills_dir: impl Into<PathBuf>,
         trust_runtime: SkillTrustRuntime,
     ) -> Self {
-        let mut orchestrator = Self::new(skills_dir);
-        orchestrator.trust_runtime = Some(trust_runtime);
-        orchestrator
+        Self {
+            commands: HashMap::new(),
+            skills_dir: skills_dir.into(),
+            trust_runtime: Some(trust_runtime),
+            trust_runtime_error: None,
+            enabled: HashSet::new(),
+            disabled: HashSet::new(),
+        }
     }
 
 
@@ -264,7 +280,9 @@ impl SkillOrchestrator {
             record_security_skip(
                 &mut security_skips,
                 "<skill-store>",
-                "no core skill trust verifier is configured",
+                self.trust_runtime_error.as_deref().unwrap_or(
+                    "no core skill trust verifier is configured",
+                ),
             );
             emit_security_skip_summary(&security_skips);
             return &self.commands;
@@ -382,9 +400,17 @@ impl SkillOrchestrator {
         &self.commands
     }
 
-    /// Return the verifier-derived category display metadata for a skill.
+    /// Return verified frontmatter category metadata, falling back to the
+    /// immutable install path for legacy packages.
     pub fn skill_category(&self, info: &SkillCommandInfo) -> Option<String> {
-        info.verified_skill.category().map(str::to_string)
+        info.verified_skill
+            .frontmatter
+            .get("category")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|category| !category.is_empty())
+            .map(str::to_string)
+            .or_else(|| info.verified_skill.category().map(str::to_string))
     }
 
     /// Resolve a user-typed `/command` to its canonical key.
@@ -518,36 +544,80 @@ mod tests {
     use super::*;
     use hermes_core::Skill;
     use hermes_skills::{
-        canonical_bundle_digest, full_skill_scan, store_lock, store_revocations, FileSkillStore,
-        LocalOwnerAttestation, SignedSkillRevocationList, SkillCompatibility, SkillLockEntryV2,
-        SkillLockV2, SkillPackageIdentityV2, SkillPackageManifestV2, SkillPackageProof,
-        SkillPackageSource, SkillPermissions, SkillRevocation, SkillSignature, SkillSigningKey,
-        SkillStore, SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier,
-        SKILL_LOCK_SCHEMA_VERSION, SKILL_REVOCATION_SCHEMA_VERSION,
+        canonical_bundle_digest, full_skill_scan, load_lock, store_local_owner_keyring_file,
+        store_lock, store_revocations, FileSkillStore, LocalOwnerKeyring, LocalOwnerSigningKey,
+        SignedSkillRevocationList, SkillCompatibility, SkillLockEntryV2, SkillLockV2,
+        SkillPackageIdentityV2, SkillPackageManifestV2, SkillPackageProof, SkillPackageSource,
+        SkillPermissions, SkillRevocation, SkillSignature, SkillSigningKey, SkillStore,
+        SkillTrustKeyring, SkillTrustPolicy, SkillTrustVerifier, SKILL_LOCK_SCHEMA_VERSION,
+        SKILL_REVOCATION_SCHEMA_VERSION,
     };
     use std::collections::BTreeMap;
 
-    fn install_attested_local_skill(root: &std::path::Path, name: &str, body: &str, description: &str) {
-        let store = FileSkillStore::new(root.to_path_buf());
+    fn install_attested_local_skill(
+        root: &std::path::Path,
+        name: &str,
+        body: &str,
+        description: &str,
+    ) {
+        install_attested_local_skill_with_category(root, name, body, description, None);
+    }
+
+    fn install_attested_local_skill_with_category(
+        root: &std::path::Path,
+        name: &str,
+        body: &str,
+        description: &str,
+        category: Option<&str>,
+    ) {
+        std::fs::create_dir_all(root).expect("create skill root");
+        let home = root.parent().expect("skills root has a home");
+        let layout = hermes_config::SkillTrustAuthorityLayout::from_resolved_home(home)
+            .expect("derive skill trust authority layout");
+        assert_eq!(layout.skills_root(), root);
+        std::fs::create_dir_all(layout.authority_root()).expect("create skill authority root");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                layout.authority_root(),
+                std::fs::Permissions::from_mode(0o700),
+            )
+            .expect("restrict skill authority root");
+        }
+
+        let signer = LocalOwnerSigningKey::from_seed([29; 32]);
+        let local_owner_keys = vec![signer.trusted_key("test-owner", "test-owner-key", true)];
+        let keyring =
+            LocalOwnerKeyring::new(local_owner_keys.clone()).expect("create local owner keyring");
+        store_local_owner_keyring_file(root, layout.local_owner_keyring_file(), &keyring)
+            .expect("store local owner keyring");
+
+        let store =
+            FileSkillStore::new(root.to_path_buf()).with_trusted_local_owner_keys(local_owner_keys);
         futures::executor::block_on(store.save(&Skill {
             name: name.to_string(),
             content: body.to_string(),
-            category: None,
+            category: category.map(str::to_string),
             description: Some(description.to_string()),
         }))
-        .unwrap();
-        let digest = canonical_bundle_digest(&root.join(name)).unwrap();
-        store
-            .attest_local_skill(
-                name,
-                LocalOwnerAttestation::new(
-                    "test-owner",
-                    format!("test-attestation-{name}"),
-                    digest,
-                    "2026-07-20T00:00:00Z",
-                ),
+        .expect("stage local skill");
+        let mut manifest = store
+            .pending_local_manifest(name)
+            .expect("load staged local skill")
+            .expect("staged local skill manifest");
+        let attestation = signer
+            .sign_local_manifest(
+                &mut manifest,
+                "test-owner",
+                "test-owner-key",
+                format!("test-attestation-{name}"),
+                "2026-07-20T00:00:00Z",
             )
-            .unwrap();
+            .expect("sign local skill attestation");
+        store
+            .attest_local_skill(name, attestation)
+            .expect("attest local skill");
     }
 
     fn install_signed_remote_skill(root: &std::path::Path) -> (SkillTrustRuntime, SkillSigningKey) {
@@ -647,13 +717,14 @@ mod tests {
     #[test]
     fn test_resolve_skill_command_key() {
         let tmp = tempfile::tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
         install_attested_local_skill(
-            tmp.path(),
+            skills_root.as_path(),
             "my-skill",
             "# My skill\n\n1. Follow the skill",
             "test",
         );
-        let mut orch = SkillOrchestrator::new(tmp.path());
+        let mut orch = SkillOrchestrator::new(skills_root);
         orch.scan_skill_commands();
 
         assert_eq!(
@@ -675,14 +746,15 @@ mod tests {
     #[test]
     fn test_scan_skill_commands() {
         let tmp = tempfile::tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
         install_attested_local_skill(
-            tmp.path(),
+            skills_root.as_path(),
             "test-skill",
             "# Test\n\n1. Do the thing",
             "A test",
         );
 
-        let mut orch = SkillOrchestrator::new(tmp.path());
+        let mut orch = SkillOrchestrator::new(skills_root);
         orch.scan_skill_commands();
 
         assert!(orch.commands.contains_key("/test-skill"));
@@ -696,14 +768,15 @@ mod tests {
     #[test]
     fn test_build_skill_invocation_message() {
         let tmp = tempfile::tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
         install_attested_local_skill(
-            tmp.path(),
+            skills_root.as_path(),
             "greet",
             "# Greet\n\n1. Say hello to the user.",
             "Greeting skill",
         );
 
-        let mut orch = SkillOrchestrator::new(tmp.path());
+        let mut orch = SkillOrchestrator::new(skills_root);
         orch.scan_skill_commands();
 
         let msg = orch
@@ -718,17 +791,26 @@ mod tests {
     #[test]
     fn test_tampered_skill_is_denied_after_catalog_before_invocation() {
         let tmp = tempfile::tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
         install_attested_local_skill(
-            tmp.path(),
+            skills_root.as_path(),
             "greet",
             "# Greet\n\n1. Say hello to the user.",
             "Greeting skill",
         );
 
-        let mut orch = SkillOrchestrator::new(tmp.path());
+        let mut orch = SkillOrchestrator::new(skills_root.clone());
         orch.scan_skill_commands();
+        let lock = load_lock(&skills_root).expect("load skill lock");
+        let install_path = lock
+            .packages
+            .iter()
+            .find(|entry| entry.manifest.identity.name == "greet")
+            .expect("greet lock entry")
+            .install_path
+            .clone();
         std::fs::write(
-            tmp.path().join("greet").join("SKILL.md"),
+            skills_root.join(install_path).join("SKILL.md"),
             "# Greet\n\n1. Inject tampered body",
         )
         .unwrap();
@@ -846,14 +928,15 @@ mod tests {
     #[test]
     fn test_build_preloaded_skills_prompt() {
         let tmp = tempfile::tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
         install_attested_local_skill(
-            tmp.path(),
+            skills_root.as_path(),
             "coder",
             "# Coder\n\n1. Write clean code.",
             "Coding assistant",
         );
 
-        let mut orch = SkillOrchestrator::new(tmp.path());
+        let mut orch = SkillOrchestrator::new(skills_root);
         orch.scan_skill_commands();
 
         let (prompt, loaded, missing) =
@@ -869,10 +952,11 @@ mod tests {
     #[test]
     fn test_scan_skill_commands_respects_disabled_filters() {
         let tmp = tempfile::tempdir().unwrap();
-        install_attested_local_skill(tmp.path(), "alpha", "# Alpha\n\n1. Alpha", "Alpha skill");
-        install_attested_local_skill(tmp.path(), "beta", "# Beta\n\n1. Beta", "Beta skill");
+        let skills_root = tmp.path().join("skills");
+        install_attested_local_skill(&skills_root, "alpha", "# Alpha\n\n1. Alpha", "Alpha skill");
+        install_attested_local_skill(&skills_root, "beta", "# Beta\n\n1. Beta", "Beta skill");
 
-        let mut orch = SkillOrchestrator::new(tmp.path());
+        let mut orch = SkillOrchestrator::new(skills_root);
         orch.set_enabled_disabled(&[], &["alpha".to_string()]);
         orch.scan_skill_commands();
         assert!(!orch.commands.contains_key("/alpha"));
@@ -882,14 +966,36 @@ mod tests {
     #[test]
     fn test_scan_skill_commands_respects_enabled_filters() {
         let tmp = tempfile::tempdir().unwrap();
-        install_attested_local_skill(tmp.path(), "alpha", "# Alpha\n\n1. Alpha", "Alpha skill");
-        install_attested_local_skill(tmp.path(), "beta", "# Beta\n\n1. Beta", "Beta skill");
+        let skills_root = tmp.path().join("skills");
+        install_attested_local_skill(&skills_root, "alpha", "# Alpha\n\n1. Alpha", "Alpha skill");
+        install_attested_local_skill(&skills_root, "beta", "# Beta\n\n1. Beta", "Beta skill");
 
-        let mut orch = SkillOrchestrator::new(tmp.path());
+        let mut orch = SkillOrchestrator::new(skills_root);
         orch.set_enabled_disabled(&["beta".to_string()], &[]);
         orch.scan_skill_commands();
         assert!(!orch.commands.contains_key("/alpha"));
         assert!(orch.commands.contains_key("/beta"));
+    }
+
+    #[test]
+    fn test_skill_category_uses_verified_frontmatter_for_local_packages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
+        install_attested_local_skill_with_category(
+            &skills_root,
+            "categorized",
+            "# Categorized\n\n1. Keep category metadata",
+            "Category fixture",
+            Some("coding"),
+        );
+
+        let mut orch = SkillOrchestrator::new(skills_root);
+        orch.scan_skill_commands();
+        let info = orch
+            .get_commands()
+            .get("/categorized")
+            .expect("verified categorized skill");
+        assert_eq!(orch.skill_category(info).as_deref(), Some("coding"));
     }
 
     #[test]

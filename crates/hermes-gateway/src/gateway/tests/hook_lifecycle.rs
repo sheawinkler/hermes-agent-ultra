@@ -799,8 +799,9 @@ async fn cancelled_yolo_ack_does_not_reapply_the_committed_toggle() {
 #[tokio::test]
 async fn gateway_failed_delivery_releases_dedup_claim_for_redelivery() {
     let sent = Arc::new(Mutex::new(Vec::new()));
-    let adapter = Arc::new(TestAdapter {
+    let adapter = Arc::new(FailingSendAdapter {
         messages: sent.clone(),
+        error: "forbidden",
     });
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
     let mut dm_manager = DmManager::with_pair_behavior();
@@ -829,13 +830,23 @@ async fn gateway_failed_delivery_releases_dedup_claim_for_redelivery() {
         thread_id: None,
         is_dm: true,
     };
-    assert!(gw.route_message(&incoming).await.is_err());
+    let outcome = gw
+        .route_message_from_sender_outcome(&incoming, IncomingSender::human())
+        .await
+        .expect("reliably rejected notification should produce a route outcome");
+    assert!(matches!(
+        outcome,
+        GatewayRouteOutcome::Retryable {
+            error: GatewayError::Platform(error),
+            retry_after: None,
+        } if error == "deterministic handler failure"
+    ));
     assert!(gw.route_message(&incoming).await.is_err());
     assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
-async fn gateway_inflight_redelivery_retries_after_owner_failure() {
+async fn gateway_inflight_redelivery_is_suppressed_after_owner_error_notification() {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let adapter = Arc::new(TestAdapter {
         messages: sent.clone(),
@@ -901,19 +912,19 @@ async fn gateway_inflight_redelivery_retries_after_owner_failure() {
     assert!(first.await.expect("first route should join").is_err());
     tokio::time::timeout(std::time::Duration::from_secs(2), second)
         .await
-        .expect("waiting redelivery should retry")
+        .expect("waiting duplicate should resolve after owner completion")
         .expect("second route should join")
-        .expect("second route should succeed");
-    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+        .expect("accepted error notification should suppress same-ID redelivery");
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert!(sent
         .lock()
         .unwrap()
         .iter()
-        .any(|(_, text)| text == "retry succeeded"));
+        .any(|(_, text)| text.contains("first owner failed")));
 }
 
 #[tokio::test]
-async fn gateway_turn_timeout_releases_lane_and_dedup_for_retry() {
+async fn gateway_turn_timeout_releases_lane_and_quarantines_dedup_after_notification() {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let adapter = Arc::new(TestAdapter {
         messages: sent.clone(),
@@ -966,13 +977,13 @@ async fn gateway_turn_timeout_releases_lane_and_dedup_for_retry() {
     assert_eq!(control.interrupts.lock().unwrap().len(), 1);
     gw.route_message(&incoming)
         .await
-        .expect("redelivery should retry after timeout");
-    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+        .expect("accepted timeout notification should suppress same-ID redelivery");
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert!(sent
         .lock()
         .unwrap()
         .iter()
-        .any(|(_, text)| text == "retry after timeout"));
+        .any(|(_, text)| text.contains("gateway turn timed out")));
 }
 
 #[tokio::test]
@@ -1044,7 +1055,7 @@ async fn gateway_background_without_handler_does_not_consume_capacity() {
     assert!(gw.background_tasks.list_tasks().is_empty());
 }
 #[tokio::test]
-async fn gateway_handler_panic_releases_lane_and_allows_same_id_redelivery() {
+async fn gateway_handler_panic_releases_lane_and_quarantines_same_id() {
     let sent = Arc::new(Mutex::new(Vec::new()));
     let adapter = Arc::new(TestAdapter {
         messages: sent.clone(),
@@ -1057,12 +1068,12 @@ async fn gateway_handler_panic_releases_lane_and_allows_same_id_redelivery() {
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let handler_attempts = attempts.clone();
     gw.set_message_handler(Arc::new(move |_messages| {
-        let attempt = handler_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let attempts = handler_attempts.clone();
         Box::pin(async move {
-            if attempt == 0 {
-                panic!("deterministic message handler panic");
-            }
-            Ok("recovered".to_string())
+            attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            panic!("deterministic message handler panic");
+            #[allow(unreachable_code)]
+            Ok(String::new())
         })
     }))
     .await;
@@ -1081,17 +1092,20 @@ async fn gateway_handler_panic_releases_lane_and_allows_same_id_redelivery() {
         .session_manager
         .compose_session_key("test", "panic-retry", "user1");
     assert!(!gw.busy_sessions.read().await.is_active(&session_key));
-    assert!(gw.route_message(&incoming).await.is_ok());
-    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert!(
+        gw.route_message(&incoming).await.is_ok(),
+        "accepted panic notification should suppress same-ID redelivery"
+    );
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert!(sent
         .lock()
         .unwrap()
         .iter()
-        .any(|(_, text)| text == "recovered"));
+        .any(|(_, text)| text.contains("gateway turn handler panicked")));
 }
 
 #[tokio::test]
-async fn gateway_error_notification_panic_cannot_wedge_lane_or_dedup() {
+async fn gateway_error_notification_panic_cannot_wedge_lane_and_quarantines_dedup() {
     let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
     let mut dm_manager = DmManager::with_pair_behavior();
     dm_manager.authorize_user("user1");
@@ -1135,9 +1149,12 @@ async fn gateway_error_notification_panic_cannot_wedge_lane_or_dedup() {
         gw.route_message(&incoming),
     )
     .await
-    .expect("notification panic must not wedge redelivery");
-    assert!(second.is_err());
-    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    .expect("notification panic must not wedge the duplicate caller");
+    assert!(
+        second.is_ok(),
+        "an ambiguous notification must retain terminal dedup ownership"
+    );
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

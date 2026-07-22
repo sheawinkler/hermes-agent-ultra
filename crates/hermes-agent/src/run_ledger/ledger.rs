@@ -1132,7 +1132,6 @@ impl RunLedger {
             &transaction,
             reservation.run_id,
             next_exact_state,
-            now,
             committed.event_id,
         )?;
         let changed = transaction.execute(
@@ -3153,7 +3152,7 @@ fn transition_artifact_reference_tx(
             created_at_ms: now,
         },
     )?;
-    update_exact_replay_latch_tx(transaction, run_id, next_exact, now, audit_event_id)?;
+    update_exact_replay_latch_tx(transaction, run_id, next_exact, audit_event_id)?;
     transaction.execute(
         "INSERT INTO session_run_artifact_transitions (
             event_id, envelope_digest, run_id, transition_sequence, from_state, to_state,
@@ -3425,19 +3424,30 @@ fn load_exact_replay_status_tx(
                 value: "zero transition sequence has latch fields".to_string(),
             });
         }
-        (_, Some(_), Some(event_id)) => {
-            let event_run_id: Option<String> = transaction
+        (_, Some(latched_at_ms), Some(event_id)) => {
+            let latch_event: Option<(String, i64)> = transaction
                 .query_row(
-                    "SELECT run_id FROM session_run_events WHERE event_id = ?1",
+                    "SELECT run_id, created_at_ms FROM session_run_events WHERE event_id = ?1",
                     [event_id.to_string()],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()?;
-            let expected_run_id = run_id.to_string();
-            if event_run_id.as_deref() != Some(expected_run_id.as_str()) {
+            let Some((event_run_id, event_created_at_ms)) = latch_event else {
                 return Err(LedgerError::InvalidStoredState {
                     kind: "exact replay latch",
                     value: "latched event belongs to another run or is absent".to_string(),
+                });
+            };
+            if event_run_id != run_id.to_string() {
+                return Err(LedgerError::InvalidStoredState {
+                    kind: "exact replay latch",
+                    value: "latched event belongs to another run or is absent".to_string(),
+                });
+            }
+            if event_created_at_ms != latched_at_ms {
+                return Err(LedgerError::InvalidStoredState {
+                    kind: "exact replay latch",
+                    value: "latched timestamp does not match its event".to_string(),
                 });
             }
         }
@@ -3520,7 +3530,6 @@ fn update_exact_replay_latch_tx(
     transaction: &Transaction<'_>,
     run_id: RunId,
     to_state: ExactReplayState,
-    now: i64,
     audit_event_id: EventId,
 ) -> LedgerResult<ExactReplayStatus> {
     let current = load_exact_replay_status_tx(transaction, run_id)?;
@@ -3535,6 +3544,19 @@ fn update_exact_replay_latch_tx(
             to: to_state.as_str().to_string(),
         });
     }
+    let latched_at_ms = transaction
+        .query_row(
+            "SELECT created_at_ms FROM session_run_events
+             WHERE event_id = ?1 AND run_id = ?2",
+            params![audit_event_id.to_string(), run_id.to_string()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .ok_or_else(|| {
+            LedgerError::IntegrityViolation(
+                "exact replay latch event must belong to the run".to_string(),
+            )
+        })?;
     let next_sequence = current
         .transition_sequence
         .checked_add(1)
@@ -3550,7 +3572,7 @@ fn update_exact_replay_latch_tx(
             to_state.as_str(),
             reason.map(ArtifactStateReason::as_str),
             i64::try_from(next_sequence).map_err(|_| LedgerError::NumericOverflow)?,
-            now,
+            latched_at_ms,
             audit_event_id.to_string(),
             run_id.to_string(),
             current.state.as_str(),
@@ -3570,7 +3592,7 @@ fn update_exact_replay_latch_tx(
         reason,
         exact_replay: to_state.exact_replay(),
         transition_sequence: next_sequence,
-        latched_at_ms: Some(now),
+        latched_at_ms: Some(latched_at_ms),
         latched_by_event_id: Some(audit_event_id),
     })
 }
@@ -4382,8 +4404,8 @@ fn ensure_branch_replay_source_snapshot_tx(
             "source lineage no longer matches the verified export",
         ));
     }
-    if parse_nonnegative_u64("branch replay source next-event sequence", next_event_sequence)?
-        != source.source_next_event_sequence()
+    if parse_nonnegative_u64("branch replay source head sequence", next_event_sequence)?
+        != source.source_head_sequence()
         || head_hash != source.source_head_hash().as_str()
         || exact_replay_state != source.source_exact_replay_state().as_str()
         || parse_nonnegative_u64(
@@ -4403,7 +4425,7 @@ fn ensure_branch_replay_source_snapshot_tx(
         branch_replay_source_mismatch(source, "source run has no committed events")
     })?;
     if head.event_id != source.source_head_event_id()
-        || head.sequence != source.source_head_event_sequence()
+        || head.sequence != source.source_head_sequence()
         || head.event_hash != source.source_head_hash().as_str()
     {
         return Err(branch_replay_source_mismatch(
@@ -5324,7 +5346,7 @@ fn append_delivery_result_event(
         ],
     )?;
     let next_state = derive_next_exact_replay_state_tx(transaction, fence.run_id)?;
-    update_exact_replay_latch_tx(transaction, fence.run_id, next_state, now, committed.event_id)?;
+    update_exact_replay_latch_tx(transaction, fence.run_id, next_state, committed.event_id)?;
     Ok(())
 }
 
@@ -5668,7 +5690,7 @@ fn resolve_replay_append_contract_tx(
         }
     }
     let next_state = derive_next_exact_replay_state_tx(transaction, reservation.run_id)?;
-    update_exact_replay_latch_tx(transaction, reservation.run_id, next_state, now, committed_event_id)?;
+    update_exact_replay_latch_tx(transaction, reservation.run_id, next_state, committed_event_id)?;
     Ok(())
 }
 
@@ -5711,7 +5733,7 @@ fn resolve_pending_replay_obligations_at_exit_tx(
         return Ok(());
     }
     let next_state = derive_next_exact_replay_state_tx(transaction, run_id)?;
-    update_exact_replay_latch_tx(transaction, run_id, next_state, now, exit_event_id)?;
+    update_exact_replay_latch_tx(transaction, run_id, next_state, exit_event_id)?;
     Ok(())
 }
 
@@ -5809,7 +5831,6 @@ fn resolve_degraded_replay_append_contract_tx(
         transaction,
         reservation.run_id,
         ExactReplayState::UnavailableSanitized,
-        now,
         audit_event_id,
     )?;
     Ok(())

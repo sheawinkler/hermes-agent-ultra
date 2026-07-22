@@ -2715,6 +2715,14 @@ impl DiscordAdapter {
             );
             return Ok(None);
         };
+        if self.liveness_failed.load(Ordering::SeqCst) {
+            return Err(crate::gateway::AcceptedIngressPreparationError::retryable(
+                GatewayError::ConnectionFailed(
+                    "Discord REST liveness probe is unhealthy; delaying auto-thread creation"
+                        .to_string(),
+                ),
+            ));
+        }
         let accepted_state_permit = self
             .admit_accepted_state_commit()
             .map_err(crate::gateway::AcceptedIngressPreparationError::retryable)?;

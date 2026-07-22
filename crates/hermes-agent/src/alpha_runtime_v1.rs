@@ -523,7 +523,7 @@ pub(crate) fn enqueue(
         ProvenanceDigest::absent(DigestAbsence::Unavailable),
         ProvenanceDigest::absent(DigestAbsence::Unavailable),
         ProvenanceDigest::absent(DigestAbsence::Unavailable),
-        ProvenanceDigest::absent(DigestAbsence::Unavailable),
+        ProvenanceDigest::absent(DigestAbsence::NotApplicable),
     );
     let owner_id = RunOwnerId::new(format!("alpha-runtime-v1-{}", uuid::Uuid::new_v4()))?;
     let created = ledger.create_run_and_start(
@@ -1521,6 +1521,15 @@ mod tests {
         let receipt = runtime
             .enqueue_alpha_runtime_v1(mode(), request(task))
             .unwrap();
+        assert_eq!(
+            runtime
+                .inspect_run(receipt.run_id)
+                .unwrap()
+                .header
+                .provenance
+                .sandbox_digest(),
+            &ProvenanceDigest::absent(DigestAbsence::NotApplicable)
+        );
 
         let before = runtime.ledger().outbox_for_run(receipt.run_id).unwrap();
         assert_eq!(before.len(), 1);

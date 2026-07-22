@@ -1684,7 +1684,7 @@ impl Gateway {
                         }
                         entry.clear_completion_sender();
                         drop(turn_completion_rx);
-                        self.start_turn_chain(lease, entry).await?;
+                        self.start_turn_chain(lease, entry).await?.into_result()?;
                     }
                     BusyAdmission::Queued(decision) => {
                         if decision.queued {
@@ -1713,13 +1713,14 @@ impl Gateway {
                             }
                         }
                         if decision.queued {
-                            turn_completion_rx
+                            let completion = turn_completion_rx
                                 .await
                                 .map_err(|_| {
                                     GatewayError::Platform(
                                         "queued retry ended before reporting completion".into(),
                                     )
                                 })??;
+                            completion.into_result()?;
                         }
                     }
                     BusyAdmission::AtCapacity => {

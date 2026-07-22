@@ -822,6 +822,17 @@ mod tests {
             Ok(self.result.clone())
         }
     }
+    fn minimal_ogg_opus_stream() -> Vec<u8> {
+        let mut ogg = vec![0_u8; 28];
+        ogg[..4].copy_from_slice(b"OggS");
+        ogg[5] = 2; // beginning-of-stream
+        ogg[26] = 1;
+        ogg[27] = 19;
+        ogg.extend_from_slice(b"OpusHead");
+        ogg.extend_from_slice(&[1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        ogg
+    }
+
 
     #[test]
     fn test_split_long_message_short() {
@@ -1078,13 +1089,17 @@ mod tests {
         use hermes_tools::tools::tts::TextToSpeechHandler;
 
         let tmp = tempfile::tempdir().unwrap();
+        let fixture = tmp.path().join("gateway-voice-source.ogg");
+        let ogg_opus = minimal_ogg_opus_stream();
+        std::fs::write(&fixture, &ogg_opus).unwrap();
         let output = tmp.path().join("gateway-voice.ogg");
         let backend = MultiTtsBackend::with_tts_config(serde_json::json!({
             "provider": "copy-tts",
             "providers": {
                 "copy-tts": {
                     "type": "command",
-                    "command": "cp {input_path} {output_path}",
+                    "command": "cp {model} {output_path}",
+                    "model": fixture,
                     "output_format": "ogg",
                     "voice_compatible": true
                 }
@@ -1116,7 +1131,7 @@ mod tests {
                 as_voice: true,
             }]
         );
-        assert_eq!(std::fs::read_to_string(output).unwrap(), "gateway audio");
+        assert_eq!(std::fs::read(output).unwrap(), ogg_opus);
     }
 
     #[tokio::test]

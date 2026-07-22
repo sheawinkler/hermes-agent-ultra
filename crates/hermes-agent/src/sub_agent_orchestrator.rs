@@ -411,11 +411,13 @@ impl SubAgentOrchestrator {
                 "sub-agent execution requires parent run lineage".to_string(),
             ))
         })?;
-        let inherited_tools = if req.toolset.is_none() && !req.inherited_tool_schemas.is_empty() {
-            Some(req.inherited_tool_schemas.clone())
-        } else {
-            None
-        };
+        // `None` means no child override: preserve the parent's exact advertised
+        // set, including an intentionally empty set. Passing `None` to
+        // `AgentLoop::run` would instead re-advertise the whole child registry.
+        let inherited_tools = req
+            .toolset
+            .is_none()
+            .then(|| req.inherited_tool_schemas.clone());
         let initial = initial_messages(&req.task, req.context.as_deref());
 
         let child_interrupt = InterruptController::new();
@@ -710,6 +712,46 @@ mod tests {
             futures::stream::empty().boxed()
         }
     }
+    struct RecordingProvider {
+        seen_tools: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for RecordingProvider {
+        async fn chat_completion(
+            &self,
+            _messages: &[Message],
+            tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            _model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> Result<LlmResponse, AgentError> {
+            self.seen_tools
+                .lock()
+                .expect("seen tools lock")
+                .push(tools.iter().map(|tool| tool.name.clone()).collect());
+            Ok(LlmResponse {
+                message: Message::assistant("done"),
+                usage: None,
+                model: "recording".into(),
+                finish_reason: Some("stop".into()),
+            })
+        }
+
+        fn chat_completion_stream(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            _model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+            futures::stream::empty().boxed()
+        }
+    }
+
 
     struct TestOrchestrator {
         inner: Arc<SubAgentOrchestrator>,
@@ -740,12 +782,19 @@ mod tests {
     }
 
     fn test_orchestrator(cfg: SubAgentOrchestratorConfig) -> TestOrchestrator {
+        let parent_tools = cfg.tool_registry.schemas();
+        test_orchestrator_with_parent_tools(cfg, parent_tools)
+    }
+
+    fn test_orchestrator_with_parent_tools(
+        cfg: SubAgentOrchestratorConfig,
+        parent_tools: Vec<ToolSchema>,
+    ) -> TestOrchestrator {
         let runtime = Arc::new(
             RunRuntime::open_for_ephemeral_testing(cfg.hermes_home.join("run-runtime"))
                 .expect("ephemeral run runtime"),
         );
         let parent_messages = vec![Message::user("parent")];
-        let parent_tools = cfg.tool_registry.schemas();
         let parent_start_evidence =
             crate::run_runtime::PreparedRunStartEvidence::new(
                 &parent_messages,
@@ -780,45 +829,18 @@ mod tests {
 
     #[tokio::test]
     async fn omitted_toolset_inherits_parent_advertised_tools() {
-        struct RecordingProvider {
-            seen_tools: Arc<Mutex<Vec<Vec<String>>>>,
-        }
-
-        #[async_trait::async_trait]
-        impl LlmProvider for RecordingProvider {
-            async fn chat_completion(
-                &self,
-                _messages: &[Message],
-                tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> Result<LlmResponse, AgentError> {
-                self.seen_tools
-                    .lock()
-                    .expect("seen tools lock")
-                    .push(tools.iter().map(|tool| tool.name.clone()).collect());
-                Ok(LlmResponse {
-                    message: Message::assistant("done"),
-                    usage: None,
-                    model: "recording".into(),
-                    finish_reason: Some("stop".into()),
-                })
-            }
-
-            fn chat_completion_stream(
-                &self,
-                _messages: &[Message],
-                _tools: &[ToolSchema],
-                _max_tokens: Option<u32>,
-                _temperature: Option<f64>,
-                _model: Option<&str>,
-                _extra_body: Option<&serde_json::Value>,
-            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                futures::stream::empty().boxed()
-            }
-        }
+        let terminal = ToolSchema::new(
+            "terminal",
+            "Terminal tool",
+            JsonSchema::new("object"),
+        );
+        let mut registry = ToolRegistry::new();
+        registry.register_test_observation(
+            "terminal",
+            terminal.clone(),
+            Arc::new(|_| Ok("unused".to_string())),
+        );
+        let registry = Arc::new(registry);
 
         let seen_tools = Arc::new(Mutex::new(Vec::<Vec<String>>::new()));
         let tmp = tempfile::tempdir().unwrap();
@@ -827,7 +849,7 @@ mod tests {
                 max_turns: 2,
                 ..AgentConfig::default()
             },
-            tool_registry: Arc::new(ToolRegistry::new()),
+            tool_registry: registry,
             llm_provider: Arc::new(RecordingProvider {
                 seen_tools: seen_tools.clone(),
             }),
@@ -844,11 +866,7 @@ mod tests {
                 child_depth: 1,
                 max_depth: 4,
                 parent_run_id: Some(orch.parent_run_id),
-                inherited_tool_schemas: vec![ToolSchema::new(
-                    "terminal",
-                    "Terminal tool",
-                    JsonSchema::new("object"),
-                )],
+                inherited_tool_schemas: vec![terminal],
                 ..Default::default()
             })
             .await;
@@ -857,6 +875,56 @@ mod tests {
         assert_eq!(parsed["status"], "completed");
         let seen = seen_tools.lock().expect("seen tools lock");
         assert_eq!(seen.as_slice(), &[vec!["terminal".to_string()]]);
+    }
+
+    #[tokio::test]
+    async fn omitted_toolset_preserves_an_empty_parent_advertisement() {
+        let seen_tools = Arc::new(Mutex::new(Vec::<Vec<String>>::new()));
+        let mut registry = ToolRegistry::new();
+        registry.register_test_observation(
+            "registry_only",
+            ToolSchema::new(
+                "registry_only",
+                "A registered tool the parent did not advertise",
+                JsonSchema::new("object"),
+            ),
+            Arc::new(|_| Ok("unused".to_string())),
+        );
+        let registry = Arc::new(registry);
+        let tmp = tempfile::tempdir().unwrap();
+        let orch = Arc::new(test_orchestrator_with_parent_tools(
+            SubAgentOrchestratorConfig {
+                parent_config: AgentConfig {
+                    max_turns: 2,
+                    ..AgentConfig::default()
+                },
+                tool_registry: registry,
+                llm_provider: Arc::new(RecordingProvider {
+                    seen_tools: seen_tools.clone(),
+                }),
+                parent_credential_pool: None,
+                parent_interrupt: InterruptController::new(),
+                hermes_home: tmp.path().to_path_buf(),
+                parent_session_id: Some("parent".into()),
+                timeout: Duration::from_secs(2),
+            },
+            Vec::new(),
+        ));
+
+        let out = orch
+            .execute(SubAgentRequest {
+                task: "child task".into(),
+                child_depth: 1,
+                max_depth: 4,
+                parent_run_id: Some(orch.parent_run_id),
+                ..Default::default()
+            })
+            .await;
+
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["status"], "completed");
+        let seen = seen_tools.lock().expect("seen tools lock");
+        assert_eq!(seen.as_slice(), &[Vec::<String>::new()]);
     }
 
     #[tokio::test]

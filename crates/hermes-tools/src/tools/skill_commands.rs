@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use super::skill_utils::{
     discover_verified_skills, load_verified_skill_by_selector, match_platform,
-    reload_verified_skill, render_skill_provenance_tag, BlockedSkill, SkillInfo,
-    SkillTrustIdentity, SkillTrustRuntime,
+    reload_verified_skill, render_skill_provenance_tag, skill_trust_runtime_for_skills_root,
+    BlockedSkill, SkillInfo, SkillTrustIdentity, SkillTrustRuntime,
 };
 // ---------------------------------------------------------------------------
 // SkillCommand
@@ -54,19 +54,47 @@ pub struct SkillCommandResolverConfig {
     pub platform: Option<String>,
     /// Core verifier context. A missing context fails closed.
     pub trust_runtime: Option<SkillTrustRuntime>,
+    /// Configuration failure that prevented a verifier from being constructed.
+    ///
+    /// Callers must surface this rather than treating a malformed or partially
+    /// provisioned authority as an empty skill catalog.
+    pub trust_runtime_error: Option<String>,
 }
 
 impl Default for SkillCommandResolverConfig {
     fn default() -> Self {
+        let roots = default_skill_roots();
+        let (trust_runtime, trust_runtime_error) = match roots.as_slice() {
+            [root] => match skill_trust_runtime_for_skills_root(root) {
+                Ok(runtime) => (Some(runtime), None),
+                Err(error) => (None, Some(error)),
+            },
+            _ => (
+                None,
+                Some("default skill resolution requires exactly one canonical root".to_string()),
+            ),
+        };
         Self {
-            roots: default_skill_roots(),
+            roots,
             enabled: Vec::new(),
             disabled: Vec::new(),
             platform: Some(std::env::consts::OS.to_string()),
-            trust_runtime: SkillTrustRuntime::fail_closed().ok(),
+            trust_runtime,
+            trust_runtime_error,
         }
     }
 }
+
+impl SkillCommandResolverConfig {
+    fn verified_trust_runtime(&self) -> Result<&SkillTrustRuntime, String> {
+        self.trust_runtime.as_ref().ok_or_else(|| {
+            self.trust_runtime_error
+                .clone()
+                .unwrap_or_else(|| "no core skill trust verifier is configured".to_string())
+        })
+    }
+}
+
 
 /// Resolved installed-skill slash invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -284,21 +312,24 @@ pub fn installed_skill_slash_command_snapshot(
     let mut skipped = 0usize;
     let mut seen_slugs = HashSet::new();
 
-    let Some(trust) = config.trust_runtime.as_ref() else {
-        for root in &config.roots {
-            if let Some(entry) = blocked_skill_command_entry(&BlockedSkill {
-                name: root.display().to_string(),
-                reason: "no core skill trust verifier is configured".to_string(),
-            }) {
-                blocked.push(entry);
+    let trust = match config.verified_trust_runtime() {
+        Ok(trust) => trust,
+        Err(reason) => {
+            for root in &config.roots {
+                if let Some(entry) = blocked_skill_command_entry(&BlockedSkill {
+                    name: root.display().to_string(),
+                    reason: reason.clone(),
+                }) {
+                    blocked.push(entry);
+                }
             }
+            return SkillSlashCommandSnapshot {
+                roots: config.roots.clone(),
+                available,
+                blocked,
+                skipped,
+            };
         }
-        return SkillSlashCommandSnapshot {
-            roots: config.roots.clone(),
-            available,
-            blocked,
-            skipped,
-        };
     };
     let catalog = discover_verified_skills(&config.roots, trust);
     for skill in catalog.available {
@@ -439,10 +470,7 @@ pub fn resolve_installed_skill_slash_command(
     if requested.is_empty() {
         return Ok(None);
     }
-    let trust = config
-        .trust_runtime
-        .as_ref()
-        .ok_or_else(|| "no core skill trust verifier is configured".to_string())?;
+    let trust = config.verified_trust_runtime()?;
     let Some(skill) = load_verified_skill_by_selector(&config.roots, &requested, trust)? else {
         return Ok(None);
     };

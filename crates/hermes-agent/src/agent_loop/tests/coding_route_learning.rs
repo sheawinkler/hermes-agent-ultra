@@ -1,7 +1,11 @@
 #[test]
 fn coding_context_prunes_non_coding_skill_categories_in_prompt_only() {
     use futures::stream::BoxStream;
-    use hermes_core::JsonSchema;
+    use hermes_core::{JsonSchema, Skill};
+    use hermes_skills::{
+        store_local_owner_keyring_file, FileSkillStore, LocalOwnerKeyring,
+        LocalOwnerSigningKey, SkillStore,
+    };
 
     let _lock = env_test_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -11,20 +15,61 @@ fn coding_context_prunes_non_coding_skill_categories_in_prompt_only() {
     )
     .expect("write manifest");
     let home = tmp.path().join("home");
-    let social = home.join("skills").join("social-media").join("tweet-stuff");
-    let github = home.join("skills").join("github").join("pr-review");
-    std::fs::create_dir_all(&social).expect("social skill dir");
-    std::fs::create_dir_all(&github).expect("github skill dir");
-    std::fs::write(
-        social.join("SKILL.md"),
-        "---\nname: tweet-stuff\ndescription: Draft social posts\n---\nBody",
-    )
-    .expect("write social skill");
-    std::fs::write(
-        github.join("SKILL.md"),
-        "---\nname: pr-review\ndescription: Review pull requests\n---\nBody",
-    )
-    .expect("write github skill");
+    let skills_root = home.join("skills");
+    std::fs::create_dir_all(&skills_root).expect("create skill root");
+    let layout = hermes_config::SkillTrustAuthorityLayout::from_resolved_home(&home)
+        .expect("derive skill trust authority layout");
+    assert_eq!(layout.skills_root(), skills_root);
+    std::fs::create_dir_all(layout.authority_root()).expect("create skill authority root");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            layout.authority_root(),
+            std::fs::Permissions::from_mode(0o700),
+        )
+        .expect("restrict skill authority root");
+    }
+    let signer = LocalOwnerSigningKey::from_seed([42; 32]);
+    let local_owner_keys = vec![signer.trusted_key(
+        "coding-prune-owner",
+        "coding-prune-key",
+        true,
+    )];
+    let keyring =
+        LocalOwnerKeyring::new(local_owner_keys.clone()).expect("create local owner keyring");
+    store_local_owner_keyring_file(&skills_root, layout.local_owner_keyring_file(), &keyring)
+        .expect("store local owner keyring");
+    let store =
+        FileSkillStore::new(skills_root).with_trusted_local_owner_keys(local_owner_keys);
+    for (name, category, description) in [
+        ("tweet-stuff", "social-media", "Draft social posts"),
+        ("pr-review", "github", "Review pull requests"),
+    ] {
+        futures::executor::block_on(store.save(&Skill {
+            name: name.to_string(),
+            content: "Body".to_string(),
+            category: Some(category.to_string()),
+            description: Some(description.to_string()),
+        }))
+        .expect("stage local skill");
+        let mut manifest = store
+            .pending_local_manifest(name)
+            .expect("load staged local skill")
+            .expect("staged local skill manifest");
+        let attestation = signer
+            .sign_local_manifest(
+                &mut manifest,
+                "coding-prune-owner",
+                "coding-prune-key",
+                format!("coding-prune-{name}"),
+                "2026-07-20T00:00:00Z",
+            )
+            .expect("sign local skill attestation");
+        store
+            .attest_local_skill(name, attestation)
+            .expect("attest local skill");
+    }
     let _cwd = EnvVarGuard::set("TERMINAL_CWD", tmp.path().to_str().unwrap());
 
     struct DummyProvider;

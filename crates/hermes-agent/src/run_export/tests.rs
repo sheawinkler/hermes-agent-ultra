@@ -31,6 +31,7 @@ use super::{
     export_run_interrupting_before_rename, sha256_hex, verify_run_export,
     verify_run_export_bytes, verify_run_export_replay_plan, verify_run_export_replay_plan_bytes,
     RunExportClassification, RunExportError, RUN_EXPORT_DIGEST_ALGORITHM,
+    RUN_EXPORT_SCHEMA_VERSION,
 };
 
 #[derive(Debug)]
@@ -391,10 +392,25 @@ fn exports_terminal_non_tool_run_with_exact_start_identity() {
 }
 
 #[test]
-fn v2_export_binds_exact_replay_status_and_keeps_v1_readable() {
-    let (_directory, _ledger, _run_id, _path, bytes) = export_completed_run();
+fn v3_export_binds_exact_replay_status_and_keeps_v2_v1_readable() {
+    let (directory, ledger) = fixture();
+    let (run_id, owner_lease) = create_exact_start_run(&ledger);
+    ledger
+        .finalize_run_exit(
+            mode(),
+            &owner_lease,
+            RunExit::new(TerminalReason::Completed, object(json!({"exit":"exact"}))),
+        )
+        .expect("finalize exact replay fixture");
+    let receipt = export_run(&ledger, directory.path().join("exact-replay-export"), run_id)
+        .expect("export exact replay fixture");
+    let bytes = std::fs::read(receipt.path).expect("read exact replay export");
     let document = parsed_export(&bytes);
-    assert_eq!(document["schema_version"], Value::from(2));
+    assert_eq!(
+        document["schema_version"],
+        Value::from(RUN_EXPORT_SCHEMA_VERSION)
+    );
+    assert!(document["replay_obligations"].is_array());
     assert_eq!(document["status"]["exact_replay"]["state"], "available");
     assert_eq!(document["status"]["exact_replay"]["reason"], Value::Null);
     assert_eq!(
@@ -409,14 +425,30 @@ fn v2_export_binds_exact_replay_status_and_keeps_v1_readable() {
     recanonicalize_with_digest(&mut tampered);
     assert!(verify_run_export_bytes(&canonical_document(&tampered)).is_err());
 
-    let mut legacy = document;
-    legacy["schema_version"] = Value::from(1);
-    legacy["status"]
+    let mut v2 = document.clone();
+    v2["schema_version"] = Value::from(2);
+    v2.as_object_mut()
+        .expect("v2 envelope object")
+        .remove("replay_obligations");
+    recanonicalize_with_digest(&mut v2);
+    verify_run_export_bytes(&canonical_document(&v2)).expect("v2 export remains readable");
+    assert!(matches!(
+        verify_run_export_replay_plan_bytes(&canonical_document(&v2)),
+        Err(RunExportError::IncompleteReplayEvidence(_))
+    ));
+
+    let mut v1 = v2;
+    v1["schema_version"] = Value::from(1);
+    v1["status"]
         .as_object_mut()
-        .expect("status object")
+        .expect("v1 status object")
         .remove("exact_replay");
-    recanonicalize_with_digest(&mut legacy);
-    verify_run_export_bytes(&canonical_document(&legacy)).expect("v1 export remains readable");
+    recanonicalize_with_digest(&mut v1);
+    verify_run_export_bytes(&canonical_document(&v1)).expect("v1 export remains readable");
+    assert!(matches!(
+        verify_run_export_replay_plan_bytes(&canonical_document(&v1)),
+        Err(RunExportError::IncompleteReplayEvidence(_))
+    ));
 }
 
 #[test]
@@ -578,7 +610,7 @@ fn rejects_unknown_schema_and_canonicalization_versions() {
     let (_directory, _ledger, _run_id, _path, bytes) = export_completed_run();
 
     let mut unknown_schema = parsed_export(&bytes);
-    unknown_schema["schema_version"] = Value::from(3);
+    unknown_schema["schema_version"] = Value::from(RUN_EXPORT_SCHEMA_VERSION + 1);
     recanonicalize_with_digest(&mut unknown_schema);
     assert!(matches!(
         verify_run_export_bytes(&canonical_document(&unknown_schema)),

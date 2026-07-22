@@ -3,8 +3,13 @@ use crate::hooks::{HookEvent, HookHandler, HookRegistry};
 use crate::session::SessionManager;
 use async_trait::async_trait;
 use hermes_config::session::SessionConfig;
+use hermes_core::Skill;
 use hermes_core::errors::PartialDelivery;
 use hermes_core::traits::NativeMediaFailureClass;
+use hermes_skills::{
+    store_local_owner_keyring_file, FileSkillStore, LocalOwnerKeyring, LocalOwnerSigningKey,
+    SkillStore,
+};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -125,7 +130,7 @@ impl HermesHomeEnvGuard {
         let guard = ENV_LOCK
             .get_or_init(|| Mutex::new(()))
             .lock()
-            .expect("env lock poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let prev_home = std::env::var("HERMES_HOME").ok();
         let prev_ultra_home = std::env::var("HERMES_AGENT_ULTRA_HOME").ok();
         std::env::set_var("HERMES_HOME", path);
@@ -151,6 +156,68 @@ impl Drop for HermesHomeEnvGuard {
     }
 }
 
+async fn install_attested_local_skill(
+    root: &Path,
+    name: &str,
+    content: &str,
+    description: &str,
+) {
+    std::fs::create_dir_all(root).expect("create skill root");
+    let home = root.parent().expect("skills root has a home");
+    let layout = hermes_config::SkillTrustAuthorityLayout::from_resolved_home(home)
+        .expect("derive skill trust authority layout");
+    assert_eq!(layout.skills_root(), root);
+    std::fs::create_dir_all(layout.authority_root()).expect("create skill authority root");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            layout.authority_root(),
+            std::fs::Permissions::from_mode(0o700),
+        )
+        .expect("restrict skill authority root");
+    }
+
+    let signer = LocalOwnerSigningKey::from_seed([7; 32]);
+    let local_owner_keys = vec![signer.trusted_key(
+        "gateway-test-owner",
+        "gateway-test-key",
+        true,
+    )];
+    let keyring =
+        LocalOwnerKeyring::new(local_owner_keys.clone()).expect("create local owner keyring");
+    store_local_owner_keyring_file(root, layout.local_owner_keyring_file(), &keyring)
+        .expect("store local owner keyring");
+
+    let store = FileSkillStore::new(root.to_path_buf())
+        .with_trusted_local_owner_keys(local_owner_keys);
+    store
+        .save(&Skill {
+            name: name.to_string(),
+            content: content.to_string(),
+            category: None,
+            description: Some(description.to_string()),
+        })
+        .await
+        .expect("stage local skill");
+    let mut manifest = store
+        .pending_local_manifest(name)
+        .expect("load staged local skill")
+        .expect("staged local skill manifest");
+    let attestation = signer
+        .sign_local_manifest(
+            &mut manifest,
+            "gateway-test-owner",
+            "gateway-test-key",
+            format!("gateway-test-attestation-{name}"),
+            "2026-07-21T00:00:00Z",
+        )
+        .expect("sign local skill attestation");
+    store
+        .attest_local_skill(name, attestation)
+        .expect("attest local skill");
+}
+
 struct EnvVarsGuard {
     previous: Vec<(String, Option<String>)>,
     _guard: MutexGuard<'static, ()>,
@@ -161,7 +228,7 @@ impl EnvVarsGuard {
         let guard = ENV_LOCK
             .get_or_init(|| Mutex::new(()))
             .lock()
-            .expect("env lock poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let previous = vars
             .iter()
             .map(|(key, _)| ((*key).to_string(), std::env::var(key).ok()))
@@ -1165,13 +1232,14 @@ fn split_slash_command_normalizes_ios_dashes_in_args_only() {
 async fn gateway_unknown_slash_invokes_installed_skill_command() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let _home_guard = HermesHomeEnvGuard::set(tmp.path());
-    let skill_dir = tmp.path().join("skills").join("release-captain");
-    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
-    std::fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: Release Captain\ndescription: Release workflow\n---\n# Release Captain\n1. Inspect changed files\n2. Run deterministic gates\n",
-        )
-        .expect("write skill");
+    let skill_root = tmp.path().join("skills");
+    install_attested_local_skill(
+        &skill_root,
+        "release-captain",
+        "# Release Captain\n1. Inspect changed files\n2. Run deterministic gates\n",
+        "Release workflow",
+    )
+    .await;
 
     let sent = Arc::new(Mutex::new(Vec::new()));
     let seen_user_messages = Arc::new(Mutex::new(Vec::new()));
@@ -1226,13 +1294,14 @@ async fn gateway_unknown_slash_invokes_installed_skill_command() {
 async fn gateway_reload_skills_replies_and_injects_one_shot_note() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let _home_guard = HermesHomeEnvGuard::set(tmp.path());
-    let skill_dir = tmp.path().join("skills").join("release-captain");
-    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
-    std::fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: Release Captain\ndescription: Release workflow\n---\n# Release Captain\n1. Inspect changed files\n",
-        )
-        .expect("write skill");
+    let skill_root = tmp.path().join("skills");
+    install_attested_local_skill(
+        &skill_root,
+        "release-captain",
+        "# Release Captain\n1. Inspect changed files\n",
+        "Release workflow",
+    )
+    .await;
 
     let sent = Arc::new(Mutex::new(Vec::new()));
     let seen_messages = Arc::new(Mutex::new(Vec::new()));

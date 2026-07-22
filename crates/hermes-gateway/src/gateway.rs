@@ -794,6 +794,45 @@ enum DedupIngressClaim {
     Completed,
     Owner { key: String, guard: DedupClaimGuard },
 }
+/// Internal completion record for one route caller.
+///
+/// Durable ingress consumers only need the externally durable disposition,
+/// while direct callers must still observe a handler failure even after a
+/// successfully delivered error notice commits the inbound message.
+#[derive(Debug)]
+pub(crate) enum RouteCompletion {
+    Outcome(GatewayRouteOutcome),
+    CommittedFailure(GatewayError),
+}
+
+impl RouteCompletion {
+    pub(crate) fn into_outcome(self) -> GatewayRouteOutcome {
+        match self {
+            Self::Outcome(outcome) => outcome,
+            Self::CommittedFailure(_) => GatewayRouteOutcome::Committed,
+        }
+    }
+
+    pub(crate) fn into_result(self) -> Result<(), GatewayError> {
+        match self {
+            Self::Outcome(outcome) => outcome.into_result(),
+            Self::CommittedFailure(error) => Err(error),
+        }
+    }
+}
+
+impl From<GatewayRouteOutcome> for RouteCompletion {
+    fn from(outcome: GatewayRouteOutcome) -> Self {
+        Self::Outcome(outcome)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ErrorNotificationOutcome {
+    Accepted,
+    Rejected,
+    Uncertain,
+}
 
 include!("gateway/profile_overlay.rs");
 

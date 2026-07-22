@@ -8,13 +8,14 @@ impl Gateway {
             .await
     }
 
-    /// Route an incoming message with platform-verified sender metadata.
+    /// Route a message with platform-verified sender metadata and surface the
+    /// route caller's handler or delivery error even after durable completion.
     pub async fn route_message_from_sender(
         &self,
         incoming: &IncomingMessage,
         sender: IncomingSender,
     ) -> Result<(), GatewayError> {
-        self.route_message_from_sender_outcome(incoming, sender)
+        self.route_message_from_sender_completion(incoming, sender)
             .await?
             .into_result()
     }
@@ -29,6 +30,19 @@ impl Gateway {
         incoming: &IncomingMessage,
         sender: IncomingSender,
     ) -> Result<GatewayRouteOutcome, GatewayError> {
+        Ok(self
+            .route_message_from_sender_completion(incoming, sender)
+            .await?
+            .into_outcome())
+    }
+
+    /// Execute one ingress route and retain the direct caller result alongside
+    /// its durable ingress outcome.
+    async fn route_message_from_sender_completion(
+        &self,
+        incoming: &IncomingMessage,
+        sender: IncomingSender,
+    ) -> Result<RouteCompletion, GatewayError> {
         if self.shutting_down.load(Ordering::Acquire) {
             return Err(GatewayError::Platform(
                 "gateway is shutting down".to_string(),
@@ -61,7 +75,8 @@ impl Gateway {
             // durable quarantine.
             return Ok(GatewayRouteOutcome::Backpressured {
                 retry_after: INGRESS_BACKPRESSURE_RETRY_AFTER,
-            });
+            }
+            .into());
         }
         self.active_ingress_workers.fetch_add(1, Ordering::AcqRel);
         let ingress_guard = IngressWorkerGuard {
@@ -69,20 +84,14 @@ impl Gateway {
         };
         let handle = tokio::spawn(async move {
             let _ingress_guard = ingress_guard;
-            let result = tokio::select! {
-                biased;
-                _ = gateway.wait_for_shutdown() => Err(GatewayError::Platform(
-                    "gateway is shutting down".to_string(),
-                )),
-                result = AssertUnwindSafe(
-                    gateway.route_validated_ingress(incoming, sender),
-                ).catch_unwind() => match result {
-                    Ok(result) => result,
-                    Err(_) => Err(GatewayError::Platform(
+            let result = AssertUnwindSafe(gateway.route_validated_ingress(incoming, sender))
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|_| {
+                    Err(GatewayError::Platform(
                         "gateway ingress worker panicked".to_string(),
-                    )),
-                },
-            };
+                    ))
+                });
             let _ = completion_tx.send(result);
             workers.lock().unwrap().remove(&worker_id);
         });
@@ -132,7 +141,7 @@ impl Gateway {
         &self,
         mut incoming: IncomingMessage,
         sender: IncomingSender,
-    ) -> Result<GatewayRouteOutcome, GatewayError> {
+    ) -> Result<RouteCompletion, GatewayError> {
         let access_policy = self.platform_access_policy(&incoming.platform).await;
         let is_slash_command = incoming.text.trim_start().starts_with('/');
         if let Some(policy) = access_policy.as_ref() {
@@ -149,7 +158,7 @@ impl Gateway {
                         chat_id = incoming.chat_id,
                         "Group message denied: channel is ignored by platform policy"
                     );
-                    return Ok(GatewayRouteOutcome::Committed);
+                    return Ok(GatewayRouteOutcome::Committed.into());
                 }
                 if !policy.is_channel_allowed(&incoming.chat_id) {
                     debug!(
@@ -157,7 +166,7 @@ impl Gateway {
                         chat_id = incoming.chat_id,
                         "Group message denied: channel not in platform allowlist"
                     );
-                    return Ok(GatewayRouteOutcome::Committed);
+                    return Ok(GatewayRouteOutcome::Committed.into());
                 }
                 match policy.group_mode {
                     GroupAccessMode::Disabled => {
@@ -166,7 +175,7 @@ impl Gateway {
                             user_id = incoming.user_id,
                             "Group traffic denied by platform policy"
                         );
-                        return Ok(GatewayRouteOutcome::Committed);
+                        return Ok(GatewayRouteOutcome::Committed.into());
                     }
                     GroupAccessMode::Allowlist => {
                         if !bypasses_user_allowlist
@@ -180,7 +189,7 @@ impl Gateway {
                                 user_id = incoming.user_id,
                                 "Group message denied: user not in allowlist"
                             );
-                            return Ok(GatewayRouteOutcome::Committed);
+                            return Ok(GatewayRouteOutcome::Committed.into());
                         }
                     }
                     GroupAccessMode::Open => {}
@@ -199,7 +208,7 @@ impl Gateway {
                     user_id = incoming.user_id,
                     "Slash command denied: user not in platform allowlist"
                 );
-                return Ok(GatewayRouteOutcome::Committed);
+                return Ok(GatewayRouteOutcome::Committed.into());
             }
         }
 
@@ -215,7 +224,7 @@ impl Gateway {
                     message_id = incoming.message_id.as_deref().unwrap_or_default(),
                     "Completed platform message redelivery suppressed"
                 );
-                return Ok(GatewayRouteOutcome::Committed);
+                return Ok(GatewayRouteOutcome::Committed.into());
             }
             DedupIngressClaim::Owner { key, guard } => (Some(key), Some(guard)),
         };
@@ -243,7 +252,7 @@ impl Gateway {
                         self.complete_dedup_key(dedup_key.as_deref()).await;
                         claim.disarm();
                     }
-                    return Ok(GatewayRouteOutcome::Committed);
+                    return Ok(GatewayRouteOutcome::Committed.into());
                 }
                 DmDecision::Deny => {
                     debug!(
@@ -255,7 +264,7 @@ impl Gateway {
                         self.complete_dedup_key(dedup_key.as_deref()).await;
                         claim.disarm();
                     }
-                    return Ok(GatewayRouteOutcome::Committed);
+                    return Ok(GatewayRouteOutcome::Committed.into());
                 }
             }
         }
@@ -272,7 +281,7 @@ impl Gateway {
                         self.release_dedup_key(dedup_key.as_deref()).await;
                         claim.disarm();
                     }
-                    return Ok(GatewayRouteOutcome::Retryable { error, retry_after });
+                    return Ok(GatewayRouteOutcome::Retryable { error, retry_after }.into());
                 }
                 Err(AcceptedIngressPreparationError::Rejected(error))
                 | Err(AcceptedIngressPreparationError::Ambiguous(error)) => return Err(error),
@@ -402,7 +411,7 @@ impl Gateway {
                 Self::reply_thread_id(&incoming),
             )
             .await?;
-            return Ok(GatewayRouteOutcome::Committed);
+            return Ok(GatewayRouteOutcome::Committed.into());
         }
 
         let agent_text_override = if is_slash_command {
@@ -431,7 +440,7 @@ impl Gateway {
                         self.complete_dedup_key(dedup_key.as_deref()).await;
                         claim.disarm();
                     }
-                    return Ok(GatewayRouteOutcome::Committed);
+                    return Ok(GatewayRouteOutcome::Committed.into());
                 }
                 SlashCommandOutcome::ForwardToAgent { message } => Some(message),
             }
@@ -504,7 +513,7 @@ impl Gateway {
                         )
                     })?
                 } else {
-                    Ok(GatewayRouteOutcome::Committed)
+                    Ok(GatewayRouteOutcome::Committed.into())
                 }
             }
             BusyAdmission::AtCapacity => {
@@ -520,7 +529,7 @@ impl Gateway {
                     Self::reply_thread_id(&reply_target),
                 )
                 .await?;
-                Ok(GatewayRouteOutcome::Committed)
+                Ok(GatewayRouteOutcome::Committed.into())
             }
         }
     }
@@ -529,7 +538,7 @@ impl Gateway {
         &self,
         lease: TurnLease,
         entry: QueuedIncoming,
-    ) -> Result<GatewayRouteOutcome, GatewayError> {
+    ) -> Result<RouteCompletion, GatewayError> {
         let completion_rx = self.spawn_turn_chain_worker(lease, entry);
         completion_rx.await.map_err(|_| {
             GatewayError::Platform("gateway turn worker ended before reporting completion".into())
@@ -544,7 +553,7 @@ impl Gateway {
         &self,
         lease: TurnLease,
         entry: QueuedIncoming,
-    ) -> tokio::sync::oneshot::Receiver<Result<GatewayRouteOutcome, GatewayError>> {
+    ) -> tokio::sync::oneshot::Receiver<Result<RouteCompletion, GatewayError>> {
         let worker_id = self.next_turn_worker_id.fetch_add(1, Ordering::Relaxed);
         let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
         let (start_tx, start_rx) = tokio::sync::oneshot::channel();
@@ -588,7 +597,7 @@ impl Gateway {
         self,
         mut lease: TurnLease,
         mut entry: QueuedIncoming,
-        completion_tx: tokio::sync::oneshot::Sender<Result<GatewayRouteOutcome, GatewayError>>,
+        completion_tx: tokio::sync::oneshot::Sender<Result<RouteCompletion, GatewayError>>,
     ) {
         let mut completion_tx = Some(completion_tx);
         let mut staged_execution_guard = Some(lease.execution_guard());
@@ -734,7 +743,7 @@ impl Gateway {
                     )
                     .await;
             }
-            let notification_sent = if outcome == ProcessingOutcome::Failure
+            let notification_outcome = if outcome == ProcessingOutcome::Failure
                 && !matches!(
                     &processing_result,
                     Err(
@@ -744,18 +753,20 @@ impl Gateway {
                 )
             {
                 if let Err(error) = &processing_result {
-                    self.send_processing_error_notification(
-                        entry.incoming(),
-                        &lease,
-                        error,
-                        &delivery_started,
+                    Some(
+                        self.send_processing_error_notification(
+                            entry.incoming(),
+                            &lease,
+                            error,
+                            &delivery_started,
+                        )
+                        .await,
                     )
-                    .await
                 } else {
-                    false
+                    None
                 }
             } else {
-                false
+                None
             };
             let completion = loop {
                 let mut busy = self.busy_sessions.write().await;
@@ -864,11 +875,17 @@ impl Gateway {
             let next_execution_guard = next
                 .as_ref()
                 .map(|(next_lease, _)| next_lease.execution_guard());
+            let release_dedup = owned
+                && outcome == ProcessingOutcome::Failure
+                && notification_outcome == Some(ErrorNotificationOutcome::Rejected);
             if owned {
-                // This route has progressed past admission. Even when local
-                // state rolls back, handler/model/tool work may already have
-                // crossed an external boundary, so retain terminal dedup.
-                self.complete_dedup_key(entry.dedup_key()).await;
+                if release_dedup {
+                    self.release_dedup_key(entry.dedup_key()).await;
+                } else {
+                    // An admitted turn either completed, reached an uncertain
+                    // delivery boundary, or delivered its user-facing error.
+                    self.complete_dedup_key(entry.dedup_key()).await;
+                }
             }
             // `entry` is mutably consumed below for its completion sender.
             // Snapshot only the eventual partial-record identity first so no
@@ -883,10 +900,10 @@ impl Gateway {
                 .take_completion_sender()
                 .or_else(|| completion_tx.take())
             {
-                let caller_result = if !owned {
+                let completion = if !owned {
                     // Preserve the stale/reset non-owner behavior: a newer
                     // owner is responsible for the same lane's completion.
-                    Ok(GatewayRouteOutcome::Committed)
+                    GatewayRouteOutcome::Committed.into()
                 } else if outcome == ProcessingOutcome::Cancelled {
                     // This worker was admitted and may have invoked arbitrary
                     // handler/model/tool code. Cancellation is therefore
@@ -897,50 +914,63 @@ impl Gateway {
                             "gateway shut down with an uncertain turn boundary".to_string(),
                         ),
                     };
-                    Ok(GatewayRouteOutcome::Uncertain(error))
+                    GatewayRouteOutcome::Uncertain(error).into()
                 } else {
                     match processing_result {
-                        Ok(()) => Ok(GatewayRouteOutcome::Committed),
+                        Ok(()) => GatewayRouteOutcome::Committed.into(),
                         Err(GatewayError::PartialDelivery(partial)) => {
-                            Ok(GatewayRouteOutcome::Partial(partial))
+                            GatewayRouteOutcome::Partial(partial).into()
                         }
                         Err(GatewayError::AcceptedStateUndurable {
                             accepted_message_ids,
                             repair,
                         }) => {
                             let accepted_chunks = accepted_message_ids.len().max(1);
-                            Ok(GatewayRouteOutcome::Partial(
-                                hermes_core::errors::PartialDelivery {
-                                    platform: incoming_platform,
-                                    chat_id: incoming_chat_id,
-                                    thread_id: incoming_thread_id,
-                                    reply_to_message_id: None,
-                                    reply_to_mode: "none".to_string(),
-                                    non_conversational: false,
-                                    next_chunk_index: 0,
-                                    remaining_text: String::new(),
-                                    accepted_message_ids,
-                                    accepted_chunks,
-                                    retryable: false,
-                                    retry_after: None,
-                                    failure: repair.clone(),
-                                    repair_required: Some(repair),
-                                },
-                            ))
+                            GatewayRouteOutcome::Partial(hermes_core::errors::PartialDelivery {
+                                platform: incoming_platform,
+                                chat_id: incoming_chat_id,
+                                thread_id: incoming_thread_id,
+                                reply_to_message_id: None,
+                                reply_to_mode: "none".to_string(),
+                                non_conversational: false,
+                                next_chunk_index: 0,
+                                remaining_text: String::new(),
+                                accepted_message_ids,
+                                accepted_chunks,
+                                retryable: false,
+                                retry_after: None,
+                                failure: repair.clone(),
+                                repair_required: Some(repair),
+                            })
+                            .into()
                         }
-                        // A fully accepted error notification conclusively
-                        // handles this inbound turn. Its original failure is
-                        // still logged above; retaining it in the Discord
-                        // ingress spool would otherwise fill capacity with
-                        // ordinary, already-notified model/tool failures.
-                        Err(_) if notification_sent => Ok(GatewayRouteOutcome::Committed),
-                        // Any rejected, timed-out, panicked, or ambiguous
-                        // notification is not safe to replay as raw ingress:
-                        // hooks/tools may already have side effected.
-                        Err(error) => Ok(GatewayRouteOutcome::Uncertain(error)),
+                        // An accepted notification commits durable ingress,
+                        // but the caller must still receive the original
+                        // handler/model/tool failure.
+                        Err(error)
+                            if notification_outcome
+                                == Some(ErrorNotificationOutcome::Accepted) =>
+                        {
+                            RouteCompletion::CommittedFailure(error)
+                        }
+                        // A proven rejection crossed no notification boundary,
+                        // so release the raw ingress for a safe retry.
+                        Err(error)
+                            if notification_outcome
+                                == Some(ErrorNotificationOutcome::Rejected) =>
+                        {
+                            GatewayRouteOutcome::Retryable {
+                                error,
+                                retry_after: None,
+                            }
+                            .into()
+                        }
+                        // A timed-out, panicked, or otherwise ambiguous
+                        // notification is not safe to replay as raw ingress.
+                        Err(error) => GatewayRouteOutcome::Uncertain(error).into(),
                     }
                 };
-                let _ = completion_tx.send(caller_result);
+                let _ = completion_tx.send(Ok(completion));
             }
 
             let Some((next_lease, next_entry)) = next else {
@@ -1274,7 +1304,7 @@ impl Gateway {
         lease: &TurnLease,
         original_error: &GatewayError,
         delivery_started: &AtomicBool,
-    ) -> bool {
+    ) -> ErrorNotificationOutcome {
         let mut detail: String = original_error.to_string().chars().take(300).collect();
         if detail.trim().is_empty() {
             detail = "no details available".to_string();
@@ -1289,7 +1319,7 @@ impl Gateway {
         let _commit_guard = turn_lock.lock().await;
         let busy = self.busy_sessions.read().await;
         if !busy.is_current(lease) {
-            return false;
+            return ErrorNotificationOutcome::Uncertain;
         }
         drop(busy);
         // The adapter may accept this notification even if the await later
@@ -1309,7 +1339,7 @@ impl Gateway {
         )
         .await
         {
-            Ok(Ok(Ok(()))) => true,
+            Ok(Ok(Ok(()))) => ErrorNotificationOutcome::Accepted,
             Ok(Ok(Err(notify_error))) => {
                 error!(
                     platform = %incoming.platform,
@@ -1318,7 +1348,11 @@ impl Gateway {
                     notify_error = %notify_error,
                     "failed to send gateway error notification"
                 );
-                false
+                if Self::is_reliably_rejected_notification_delivery(&notify_error) {
+                    ErrorNotificationOutcome::Rejected
+                } else {
+                    ErrorNotificationOutcome::Uncertain
+                }
             }
             Ok(Err(_)) => {
                 error!(
@@ -1327,7 +1361,7 @@ impl Gateway {
                     original_error = %original_error,
                     "gateway error notification panicked"
                 );
-                false
+                ErrorNotificationOutcome::Uncertain
             }
             Err(_) => {
                 error!(
@@ -1336,9 +1370,20 @@ impl Gateway {
                     original_error = %original_error,
                     "timed out sending gateway error notification"
                 );
-                false
+                ErrorNotificationOutcome::Uncertain
             }
         }
+    }
+
+    fn is_reliably_rejected_notification_delivery(error: &GatewayError) -> bool {
+        matches!(
+            error.send_error_kind(),
+            hermes_core::errors::SendErrorKind::TooLong
+                | hermes_core::errors::SendErrorKind::BadFormat
+                | hermes_core::errors::SendErrorKind::Forbidden
+                | hermes_core::errors::SendErrorKind::NotFound
+                | hermes_core::errors::SendErrorKind::RateLimited
+        )
     }
 
     fn gateway_error_variant_name(error: &GatewayError) -> &'static str {
