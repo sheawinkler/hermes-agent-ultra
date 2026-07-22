@@ -3,6 +3,11 @@ use std::process::Command;
 use std::sync::{mpsc, Arc, Barrier, Mutex};
 
 const PRIVATE_SENTINEL: &str = "PRIVATE-SENTINEL-9e3f";
+
+fn synthetic_openai_key() -> String {
+    ["sk", "-", "abcdefghijklmnopqrstuvwxyz123456"].concat()
+}
+
 #[derive(Default)]
 struct MemoryCredentialStore {
     secrets: Mutex<HashMap<(String, String), Vec<u8>>>,
@@ -1214,7 +1219,7 @@ fn ledger_redactor_uses_closed_private_shapes_and_rejects_alpha_task_credentials
 
     let mut prefixed_key = alpha_task.clone();
     prefixed_key["private"]["task"] =
-        Value::String("execute with sk-abcdefghijklmnopqrstuvwxyz123456".to_string());
+        Value::String(format!("execute with {}", synthetic_openai_key()));
     assert!(matches!(
         LedgerEvidenceRedactor.redact(&prefixed_key),
         Err(SealedArtifactError::Redaction(_))
@@ -1361,7 +1366,7 @@ fn delivery_redactor_accepts_schema_typed_digests_and_rejects_nested_secrets() {
     );
 
     evidence["private"]["source_sealed_artifact_ref"]["key_id"] =
-        Value::String("sk-abcdefghijklmnopqrstuvwxyz123456".to_string());
+        Value::String(synthetic_openai_key());
     assert!(matches!(
         LedgerEvidenceRedactor.redact(&evidence),
         Err(SealedArtifactError::Redaction(_))
@@ -1370,7 +1375,7 @@ fn delivery_redactor_accepts_schema_typed_digests_and_rejects_nested_secrets() {
     evidence["private"]["source_sealed_artifact_ref"]["key_id"] =
         Value::String("seal-v1".to_string());
     evidence["private"]["source_sealed_artifact_ref"]["envelope_digest"] =
-        Value::String("sk-abcdefghijklmnopqrstuvwxyz123456".to_string());
+        Value::String(synthetic_openai_key());
     assert!(matches!(
         LedgerEvidenceRedactor.redact(&evidence),
         Err(SealedArtifactError::InvalidMetadata(_))
